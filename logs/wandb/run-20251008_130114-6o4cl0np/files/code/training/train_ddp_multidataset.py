@@ -49,9 +49,10 @@ class LinearWarmupCosineAnnealingLR(torch.optim.lr_scheduler._LRScheduler):
                 return [self.eta_min + (base_lr - self.eta_min) *
                         (1 + math.cos(math.pi * (self.last_epoch - self.warmup_epochs) / (self.max_epochs - self.warmup_epochs))) / 2
                         for base_lr in self.base_lrs]
+
 from torch.utils.data import Dataset, DataLoader, Sampler
 from torch.utils.data.distributed import DistributedSampler
-from DataYatesV1.models.losses import MaskedLoss, PoissonBPSAggregator
+from models.losses import MaskedLoss, PoissonBPSAggregator
 
 # Import regularization functions (will be used in MultiDatasetModel)
 try:
@@ -288,8 +289,8 @@ class ContrastWeightedSampler(Sampler):
         if step >= self.warmup_steps:
             return torch.ones_like(self.sample_contrasts)  # Uniform after warmup
         else:
-            α = 0.5 + 0.5 * (step / self.warmup_steps)
-            return torch.clamp(α * self.sample_contrasts, max=1.0)  # Vectorized!
+            alpha = 0.5 + 0.5 * (step / self.warmup_steps)
+            return torch.clamp(alpha * self.sample_contrasts, max=1.0)  # Vectorized!
 
     def set_epoch(self, epoch):
         """Set epoch for distributed training"""
@@ -660,37 +661,6 @@ class MultiDatasetModel(pl.LightningModule):
         else:
             y = self.model(stim, ds_idx, beh)
         return torch.clamp(y, min=-20 if self.log_input else 1e-8)
-
-    # Step
-    # def _step(self, batch_list, tag: str):
-    #     import time
-    #     step_start = time.time()
-        
-    #     losses = []
-    #     for i, b in enumerate(batch_list):
-    #         batch_start = time.time()
-    #         b = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v for k, v in b.items()}
-    #         data_move_time = time.time() - batch_start
-            
-    #         forward_start = time.time()
-    #         batch_loss = {'rhat': self(b["stim"], b["dataset_idx"][0], b.get("behavior")),
-    #                     'robs': b["robs"].float(), 'dfs': b.get("dfs")}
-    #         forward_time = time.time() - forward_start
-            
-    #         loss_start = time.time()
-    #         loss = self.loss_fn(batch_loss)
-    #         loss_time = time.time() - loss_start
-            
-    #         if self.global_rank == 0 and i == 0:  # Only log first batch
-    #             print(f"Batch {i}: data_move={data_move_time:.3f}s, forward={forward_time:.3f}s, loss={loss_time:.3f}s")
-
-    #         losses.append(loss)
-        
-    #     step_time = time.time() - step_start
-    #     if self.global_rank == 0:
-    #         print(f"Total step time: {step_time:.3f}s")
-        
-    #     return torch.stack(losses).mean()
     
     def _step(self, batch_list, tag: str):
         losses = []

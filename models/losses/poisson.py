@@ -139,9 +139,10 @@ class PoissonBPSAggregator(nn.Module):
                         cell_bps = calc_poisson_bits_per_spike(cell_robs, cell_rhat)
                         bps_list.append(cell_bps)
                     else:
-                        # No valid samples for this cell - return 0 or NaN
-                        raise ValueError(f"No valid samples for cell {cell_idx}")
-                        bps_list.append(torch.tensor([0.0]))
+                        # No valid samples for this cell in this batch/rank
+                        # Return NaN so it gets filtered out in distributed reduction
+                        # (The other rank may have valid samples for this cell)
+                        bps_list.append(torch.tensor([float('nan')]))
         
                 # Return per-cell BPS with shape [num_cells]
                 return torch.cat(bps_list)

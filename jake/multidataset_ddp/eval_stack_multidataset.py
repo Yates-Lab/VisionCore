@@ -28,7 +28,7 @@ from tqdm import tqdm
 # DataYatesV1 package imports
 from DataYatesV1.utils.data import prepare_data
 from DataYatesV1 import get_session
-from DataYatesV1.models.losses import PoissonBPSAggregator
+from models.losses import PoissonBPSAggregator
 
 # Import the training module to access the model class
 import sys
