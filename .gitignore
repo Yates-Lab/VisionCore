@@ -1,0 +1,12 @@
+*.png
+*.pdf
+*.pkl
+*.mp4
+*.ckpt
+*.log
+*.wandb
+*.json
+*.yaml
+*.txt
+jake/multidataset_ddp/logs/*
+*.pyc
