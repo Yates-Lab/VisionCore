@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from DataYatesV1.utils.general import ensure_tensor
+from .general import ensure_tensor
 from DataYatesV1.utils.data.datasets import CombinedEmbeddedDataset
 
 import math

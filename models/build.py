@@ -5,7 +5,7 @@ Model factory for DataYatesV1.
 import torch
 import torch.nn as nn
 from typing import Dict, Any, List
-from DataYatesV1.utils.general import ensure_tensor
+from .utils.general import ensure_tensor
 
 from .factory import (
     create_frontend, create_convnet, create_recurrent,

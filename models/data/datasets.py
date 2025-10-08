@@ -1,8 +1,8 @@
 
 import torch
 import numpy as np
-from ..torch import get_memory_footprints_str, set_seeds
-from ..general import ensure_tensor
+from DataYatesV1.utils.torch import get_memory_footprints_str, set_seeds
+from ..utils.general import ensure_tensor
 from copy import deepcopy
 from typing import Dict, List, Union, Optional, Any, Tuple
 

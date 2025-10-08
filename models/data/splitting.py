@@ -8,7 +8,7 @@ and trial-based splitting.
 
 import torch
 import numpy as np
-from ..torch import set_seeds
+from DataYatesV1.utils.torch import set_seeds
 from .filtering import find_valid_blocks
 
 def get_blockwise_train_indices(dset, min_block_len=240, frame_rate=240, frac_train=0.8, seed=None):

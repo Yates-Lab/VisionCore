@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 
 
 from DataYatesV1.utils.modeling.bases import make_raised_cosine_basis
-from DataYatesV1.utils.general import ensure_tensor
+from ..utils.general import ensure_tensor
 from torch._dynamo import disable  # hack to avoid dynamo warning about the graph breaking
 
 __all__ = ['DAModel', 'TemporalBasis', 'AffineAdapter', 'LearnableTemporalConv']

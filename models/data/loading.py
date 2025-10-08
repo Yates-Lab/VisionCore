@@ -19,9 +19,9 @@ from .filtering import get_valid_dfs
 from .splitting import split_inds_by_trial
 from .transforms import make_pipeline
 from .datafilters import make_datafilter_pipeline
-from ..general import ensure_tensor
-from ..io import get_session
-from ..rf import calc_sta
+from ..utils.general import ensure_tensor
+from DataYatesV1.utils.io import get_session
+from DataYatesV1.utils.rf import calc_sta
 from typing import Dict, Any, List, Tuple
 import yaml
 import copy
