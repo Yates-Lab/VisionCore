@@ -8,5 +8,6 @@
 *.json
 *.yaml
 *.txt
-jake/multidataset_ddp/logs/*
+jake/*
 *.pyc
+logs/*
