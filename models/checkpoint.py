@@ -15,7 +15,7 @@ from typing import Dict, Any, Optional, Union, List, Tuple
 
 from .config_loader import load_config, save_config
 from .build import build_model
-from .lightning import PLCoreVisionModel
+from .lightning_deprecated import PLCoreVisionModel
 
 # Type aliases
 ConfigDict = Dict[str, Any]

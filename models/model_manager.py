@@ -18,7 +18,7 @@ from datetime import datetime
 
 from .config_loader import load_config
 from .checkpoint import load_model_from_checkpoint, find_best_checkpoint
-from .lightning import PLCoreVisionModel
+from .lightning_deprecated import PLCoreVisionModel
 
 # Type aliases
 ConfigDict = Dict[str, Any]
