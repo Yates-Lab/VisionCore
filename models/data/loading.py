@@ -20,7 +20,6 @@ from .splitting import split_inds_by_trial
 from .transforms import make_pipeline
 from .datafilters import make_datafilter_pipeline
 from ..utils.general import ensure_tensor
-from DataYatesV1.utils.io import get_session
 from DataYatesV1.utils.rf import calc_sta
 from typing import Dict, Any, List, Tuple
 import yaml
@@ -389,12 +388,14 @@ def prepare_data(dataset_config: Dict[str, Any], strict: bool = True):
 
     # Handle different session naming conventions
     if lab == "yates":
+        from DataYatesV1.utils.io import get_session
         # Yates lab: Subject_YYYY-MM-DD
-        sess = get_session(*sess_name.split("_"), lab="yates")
+        sess = get_session(*sess_name.split("_"))
     elif lab == "rowley":
+        from DataRowleyV1V2.utils.io import get_session
         # Rowley lab: YYYY-MM-DD_Subject
         date, subject = sess_name.split("_", 1)
-        sess = get_session(subject, date, lab="rowley")
+        sess = get_session(subject, date)
     else:
         raise ValueError(f"Unknown lab: {lab}")
 
