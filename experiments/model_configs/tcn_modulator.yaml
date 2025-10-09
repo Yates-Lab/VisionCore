@@ -1,0 +1,75 @@
+# V1 multidataset model configuration with ResNet convnet and eye position modulation
+# This model has shared components (frontend, ResNet, modulator)
+# and experiment specific componenets (adapter, readout)
+# the MLP behavior modulator is applied to the output of the convnet through a film layer
+model_type: v1multi
+
+# Model dimensions
+sampling_rate: 240
+initial_input_channels: 1 # number of channels in the input data
+
+# Frontend configuration
+adapter:
+  type: adapter
+  params: {grid_size: 51, init_sigma: 2.5, transform: scale}
+
+frontend:
+  type: none
+  params: {}
+
+# Convnet configuration - ShiftTCN
+convnet:
+  type: shifttcn
+  params:
+    base_channels: 128
+    num_tsm_blocks: 4
+    add_long_kernel: false     # Disable long-kernel to avoid temporal complications
+    seq_len: 32
+    shift_frac: 0.25
+    dilations: [1, 2, 4, 8]
+    # Spatial filtering configuration
+    stem_spatial_kernel: 5      # Stem spatial kernel size (was hardcoded 7)
+    stem_spatial_stride: 2      # Stem spatial stride (was hardcoded 2)
+    stem_temporal_kernel: 3     # Stem temporal kernel size (was hardcoded 3)
+    tsm_spatial_kernel: 3       # TSM block spatial kernel size (was hardcoded 3)
+    # Regularization for multidataset training
+    dropout: 0.15               # Higher dropout for complex multidataset scenario
+    stochastic_depth: 0.1       # Stochastic depth to prevent overfitting
+
+# Modulator configuration
+modulator:
+  type: film
+  params:
+    behavior_dim: 40
+    feature_dim: 128  # Number of convnet output channels (matches final ResNet stage)
+    encoder_params:
+      type: mlp
+      dims: [128, 128]  # Hidden layers + output size
+      activation: gelu
+      bias: true
+      residual: true
+      dropout: 0.1
+      last_layer_activation: true
+
+# Recurrent configuration
+recurrent:
+  type: none
+  params: {}
+
+# Readout configuration
+readout:
+  type: gaussianei
+  params:
+    n_units: 8
+    bias: true
+    initial_std_ex: 3.0
+    initial_std_inh: 9.0
+    weight_constraint_fn: softplus
+    frac_inhib: 0.25
+
+output_activation: softplus
+
+baseline:
+  enabled: true
+  activation: 'relu'
+  init_value: 0.01

@@ -1,0 +1,58 @@
+types: [gaborium, backimage]
+sampling:
+  source_rate: 240
+  target_rate: 120
+keys_lags:
+  robs: 0
+  stim: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  behavior: 0 # will match the `expose_as` in `transforms`
+  dfs: 0
+
+transforms:
+  stim:
+    source: stim
+    ops:
+      - pixelnorm: {}
+      - temporal_basis:  {num_delta_funcs: 0, num_cosine_funcs: 6,
+          history_bins: 32, causal: true, log_spacing: true, peak_range_ms: [5, 60],
+          normalize: true, batch_norm: true}
+    expose_as: stim
+
+  eye_vel:
+    source: eyepos          # raw key in DictDataset
+    ops:                    # ordered transform list
+      - diff: {axis: 0} # finite-difference velocity
+      # - mul: 240            # Hz → deg s⁻¹
+      - maxnorm: {}
+      - symlog: {}
+      - temporal_basis:     # acausal raised-cosine embedding
+          num_delta_funcs: 0
+          num_cosine_funcs: 10
+          history_bins: 50
+          causal: false
+          log_spacing: false
+          peak_range_ms: [30, 200]
+          normalize: true
+      - splitrelu:
+          split_dim: 1
+          trainable_gain: false
+    expose_as: behavior     # place in batch["behavior"]
+    concatenate: true 
+  
+  eye_pos:
+    source: eyepos
+    ops: []  # No processing, just pass through
+    expose_as: behavior
+    concatenate: true
+
+datafilters:
+  dfs:
+    ops:
+      - valid_nlags: {n_lags: 32}
+    expose_as: dfs
+    
+train_val_split: 0.8
+seed: 1002
+
+
+

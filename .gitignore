@@ -6,7 +6,6 @@
 *.log
 *.wandb
 *.json
-*.yaml
 *.txt
 jake/*
 *.pyc

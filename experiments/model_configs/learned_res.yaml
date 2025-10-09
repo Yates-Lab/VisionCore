@@ -1,0 +1,96 @@
+# V1 multidataset model configuration with ResNet convnet and eye position modulation
+# This model has shared components (frontend, ResNet, modulator)
+# and experiment specific componenets (adapter, readout)
+# the MLP behavior modulator is applied to the output of the convnet through a film layer
+model_type: v1multi
+
+# Model dimensions
+sampling_rate: 240
+initial_input_channels: 1 # number of channels in the input data
+
+# Frontend configuration
+adapter:
+  type: adapter
+  params: {grid_size: 51, init_sigma: 2.5, transform: scale}
+
+frontend:
+  type: learnable_temporal
+  params: {kernel_size: 16, num_channels: 4, init_type: gaussian_derivatives,
+          causal: true, bias: false}
+
+# Convnet configuration - ResNet with per-layer block configs
+convnet:
+  type: resnet
+  params:
+    final_activation: softplus
+    channels: [64, 128, 256]
+    dim: 3
+    checkpointing: false
+    block_configs:
+
+      # Stage 0: keep full res, no pooling
+      - conv_params:
+          type: standard
+          kernel_size: [3, 5, 5]
+          padding:    [1, 2, 2]
+        norm_type: rms
+        act_type: silu
+        dropout: 0.0              # <-- leave off
+        pool_params: null
+
+      # Stage 1: first downsample
+      - conv_params:
+          type: standard
+          kernel_size: [3, 3, 3]
+          padding:    [1, 1, 1]
+        norm_type: rms
+        act_type: silu
+        dropout: 0.0
+        pool_params:
+          type: aablur
+          stride: 2
+          r: 8
+          use_soft: true
+
+      # Stage 2: second (final) downsample, then dilation
+      - conv_params:
+          type: depthwise
+          kernel_size: [3, 3, 3]
+          padding:    [1, 1, 1]
+          dilation:   2           # enlarge RF, keep 13×13 map
+        norm_type: rms
+        act_type: silu
+        dropout: 0.0
+        pool_params:
+          type: aablur
+          stride: 2
+          r: 16
+          use_soft: true
+          
+
+# Modulator configuration
+modulator:
+  type: none
+  params: {}
+
+# Recurrent configuration
+recurrent:
+  type: none
+  params: {}
+
+# Readout configuration
+readout:
+  type: gaussianei
+  params:
+    n_units: 8
+    bias: true
+    initial_std_ex: 1.0
+    initial_std_inh: 1.0
+    weight_constraint_fn: relu
+
+output_activation: none
+
+# baseline:
+#   enabled: true
+#   activation: 'relu'
+#   init_value: 0.01
