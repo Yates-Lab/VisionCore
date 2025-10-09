@@ -19,13 +19,13 @@ from training.samplers import ContrastWeightedSampler
 class MultiDatasetDM(pl.LightningDataModule):
     """
     Lightning DataModule for loading and managing multiple neural datasets.
-    
+
     This DataModule:
     - Loads multiple datasets from YAML configuration files
     - Supports curriculum learning with contrast-weighted sampling
     - Handles distributed training with proper data sharding
     - Provides train and validation dataloaders
-    
+
     Parameters
     ----------
     cfg_dir : str
@@ -41,6 +41,11 @@ class MultiDatasetDM(pl.LightningDataModule):
     enable_curriculum : bool, optional
         Whether to enable curriculum learning with contrast-weighted sampling
         (default: False)
+    dset_dtype : str, optional
+        Dataset storage dtype in CPU RAM (default: 'uint8')
+        - 'uint8': Store as uint8, normalize on GPU (only supports pixelnorm)
+        - 'bfloat16': Apply all transforms, store as bfloat16 (2x memory)
+        - 'float32': Apply all transforms, store as float32 (4x memory)
         
     Example
     -------
@@ -72,7 +77,8 @@ class MultiDatasetDM(pl.LightningDataModule):
     """
     
     def __init__(self, cfg_dir: str, max_ds: int, batch: int,
-                 workers: int, steps_per_epoch: int, enable_curriculum: bool = False):
+                 workers: int, steps_per_epoch: int, enable_curriculum: bool = False,
+                 dset_dtype: str = 'uint8'):
         super().__init__()
         self.cfg_dir = cfg_dir
         self.max_ds = max_ds
@@ -80,13 +86,48 @@ class MultiDatasetDM(pl.LightningDataModule):
         self.workers = workers
         self.spe = steps_per_epoch
         self.enable_curriculum = enable_curriculum
+        self.dset_dtype = dset_dtype
         self.contrast_scores = None
         self.name2idx = None
+
+        # Validate dset_dtype
+        if dset_dtype not in ['uint8', 'bfloat16', 'float32']:
+            raise ValueError(f"dset_dtype must be 'uint8', 'bfloat16', or 'float32', got '{dset_dtype}'")
+
+    def _check_for_non_pixelnorm_transforms(self, cfg: Dict) -> bool:
+        """
+        Check if config has transforms other than pixelnorm.
+
+        Parameters
+        ----------
+        cfg : dict
+            Dataset configuration
+
+        Returns
+        -------
+        bool
+            True if there are transforms other than pixelnorm
+        """
+        if 'transforms' not in cfg:
+            return False
+
+        transforms = cfg['transforms']
+        for transform_key, transform_spec in transforms.items():
+            if 'ops' in transform_spec:
+                for op in transform_spec['ops']:
+                    if isinstance(op, dict):
+                        # Check if this op is NOT pixelnorm
+                        if 'pixelnorm' not in op:
+                            return True
+                    else:
+                        # Non-dict ops are not pixelnorm
+                        return True
+        return False
 
     def setup(self, stage: Optional[str] = None):
         """
         Load datasets and prepare for training/validation.
-        
+
         Parameters
         ----------
         stage : str, optional
@@ -101,7 +142,7 @@ class MultiDatasetDM(pl.LightningDataModule):
             f for f in os.listdir(self.cfg_dir)
             if f.endswith(".yaml") and "base" not in f
         ])[:self.max_ds]
-        
+
         self.names = [Path(f).stem for f in yaml_files]
         self.cfgs = load_dataset_configs(yaml_files, self.cfg_dir)
 
@@ -109,19 +150,57 @@ class MultiDatasetDM(pl.LightningDataModule):
         self.train_dsets, self.val_dsets, self.name2idx = {}, {}, {}
         for idx, (cfg, name) in enumerate(zip(self.cfgs, self.names)):
             cfg["_dataset_name"] = name
-            cfg, norm_removed = remove_pixel_norm(cfg)
-            
-            # Suppress output from prepare_data
-            with open(os.devnull, "w") as _null, \
-                 contextlib.redirect_stdout(_null), \
-                 contextlib.redirect_stderr(_null):
-                tr, va, _ = prepare_data(cfg, strict=False)
-            
-            self.train_dsets[name] = Float32View(tr, norm_removed, float16=False)
-            self.val_dsets[name] = Float32View(va, norm_removed, float16=False)
+
+            if self.dset_dtype == 'uint8':
+                # Path 1: uint8 storage (current behavior)
+                # Check for non-pixelnorm transforms
+                if self._check_for_non_pixelnorm_transforms(cfg):
+                    raise ValueError(
+                        f"Dataset '{name}' has transforms other than pixelnorm, "
+                        f"but dset_dtype='uint8' only supports pixelnorm. "
+                        f"Use dset_dtype='bfloat16' or 'float32' to enable other transforms."
+                    )
+
+                # Remove pixelnorm from config
+                cfg, norm_removed = remove_pixel_norm(cfg)
+
+                # Suppress output from prepare_data
+                with open(os.devnull, "w") as _null, \
+                     contextlib.redirect_stdout(_null), \
+                     contextlib.redirect_stderr(_null):
+                    tr, va, _ = prepare_data(cfg, strict=False)
+
+                # Wrap with Float32View for on-the-fly normalization
+                self.train_dsets[name] = Float32View(tr, norm_removed, float16=False)
+                self.val_dsets[name] = Float32View(va, norm_removed, float16=False)
+
+            else:
+                # Path 2: bfloat16 or float32 storage (new behavior)
+                # Keep all transforms including pixelnorm
+
+                # Suppress output from prepare_data
+                with open(os.devnull, "w") as _null, \
+                     contextlib.redirect_stdout(_null), \
+                     contextlib.redirect_stderr(_null):
+                    tr, va, _ = prepare_data(cfg, strict=False)
+
+                # Cast to requested dtype
+                dtype_map = {
+                    'bfloat16': torch.bfloat16,
+                    'float32': torch.float32
+                }
+                target_dtype = dtype_map[self.dset_dtype]
+
+                tr.cast(target_dtype, target_keys=['stim', 'robs', 'dfs'])
+                va.cast(target_dtype, target_keys=['stim', 'robs', 'dfs'])
+
+                # Store directly without Float32View wrapper
+                self.train_dsets[name] = tr
+                self.val_dsets[name] = va
+
             self.name2idx[name] = idx
-            
-        print(f"✓ loaded {len(self.train_dsets)} datasets")
+
+        print(f"✓ loaded {len(self.train_dsets)} datasets (dtype: {self.dset_dtype})")
 
         # Precompute contrast scores for curriculum learning
         if self.enable_curriculum:

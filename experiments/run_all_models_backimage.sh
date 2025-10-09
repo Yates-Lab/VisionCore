@@ -42,6 +42,7 @@ WARMUP_EPOCHS=5        # Number of warmup epochs
 WEIGHT_DECAY=1e-4
 MAX_EPOCHS=100        # Long training run with early stopping protection
 PRECISION="bf16-mixed"
+DSET_DTYPE="bfloat16"  # Dataset storage dtype: uint8 (1x), bfloat16 (2x), float32 (4x memory)
 NUM_GPUS=2             # Use both RTX 6000 Ada GPUs
 NUM_WORKERS=16         # Optimized for 64 CPU cores
 STEPS_PER_EPOCH=512    # Number of steps per epoch
@@ -84,6 +85,7 @@ run_training() {
     echo "Weight decay: $WEIGHT_DECAY"
     echo "Max epochs: $MAX_EPOCHS"
     echo "Precision: $PRECISION"
+    echo "Dataset dtype: $DSET_DTYPE"
     echo "GPUs: $NUM_GPUS"
     echo "Workers: $NUM_WORKERS"
     echo "Dataset configs: $DATASET_CONFIGS_PATH"
@@ -114,6 +116,7 @@ run_training() {
         --weight_decay $WEIGHT_DECAY \
         --max_epochs $MAX_EPOCHS \
         --precision $PRECISION \
+        --dset_dtype $DSET_DTYPE \
         --num_gpus $NUM_GPUS \
         --project_name "$PROJECT_NAME" \
         --experiment_name "$EXPERIMENT_NAME" \

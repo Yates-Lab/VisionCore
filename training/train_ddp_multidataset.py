@@ -113,6 +113,9 @@ def main():
     p.add_argument("--precision", type=str, default="bf16",
                    choices=["16", "bf16", "32", "16-mixed", "bf16-mixed"],
                    help="Training precision")
+    p.add_argument("--dset_dtype", type=str, default="uint8",
+                   choices=["uint8", "bfloat16", "float32"],
+                   help="Dataset storage dtype in CPU RAM (uint8=1x, bfloat16=2x, float32=4x memory)")
     p.add_argument("--num_gpus", type=int, default=2,
                    help="Number of GPUs to use")
     p.add_argument("--num_workers", type=int, default=16,
@@ -155,7 +158,8 @@ def main():
         batch=args.batch_size,
         workers=args.num_workers,
         steps_per_epoch=args.steps_per_epoch,
-        enable_curriculum=args.enable_curriculum
+        enable_curriculum=args.enable_curriculum,
+        dset_dtype=args.dset_dtype
     )
     
     model = MultiDatasetModel(
