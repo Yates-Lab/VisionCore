@@ -9,6 +9,7 @@ This script demonstrates:
 4. Tests the jacobian
 """
 #%%
+import sys
 import torch
 from torch.utils.data import DataLoader
 
@@ -18,21 +19,18 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 
-from DataYatesV1.models import build_model, initialize_model_components
-from DataYatesV1.models.config_loader import load_config
-from DataYatesV1.models.lightning import PLCoreVisionModel
-from DataYatesV1.models.checkpoint import load_model_from_checkpoint, test_model_consistency, find_best_checkpoint
-from DataYatesV1.models.model_manager import ModelRegistry
-from DataYatesV1.utils.data import prepare_data
-from DataYatesV1.utils.general import ensure_tensor
+sys.path.append('..')
+from models import build_model, initialize_model_components
+from models.config_loader import load_config
+from models.data import prepare_data
+from models.utils.general import ensure_tensor
 
 # Set random seed for reproducibility
 torch.manual_seed(42)
 np.random.seed(42)
 
-from DataYatesV1.utils.torch import get_free_device
 # Check if CUDA is available
-device = get_free_device()
+device = torch.device('cuda:1')
 # device = torch.device('cpu')
 print(f"Using device: {device}")
 
@@ -44,22 +42,12 @@ AMP_BF16 = lambda: torch.autocast(device_type="cuda", dtype=torch.bfloat16)
 
 
 #%%
-import yaml
+from models.config_loader import load_dataset_configs
 import os
-config_path = Path("/home/jake/repos/DataYatesV1/jake/multidataset_ddp/configs_multi/learned_res2d_small.yaml")
-# config_path = Path("/home/tejas/Documents/fixational-transients/DataYatesV1/jake/multidataset_ddp/configs_multi/learned_res2d_small.yaml")
-# Alternative config: Path("/home/tejas/Documents/fixational-transients/DataYatesV1/jake/multidataset_ddp/configs_multi/learned_dense_small_gru.yaml")
-# config_path = Path("/home/jake/repos/DataYatesV1/jake/multidataset_ddp/configs_multi/core_res_modulator.yaml")
-dataset_configs_path = "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset/dataset_basic_multi_120"
-# dataset_configs_path = "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset/dataset_cones_multi"
-# List full paths to *.yaml files that do not contain "base" in the name
-yaml_files = [
-    f for f in os.listdir(dataset_configs_path)
-    if f.endswith(".yaml") and "base" not in f
-]
+config_path = Path("/home/jake/repos/VisionCore/experiments/model_configs/res_small_gru.yaml")
 
-from DataYatesV1.models.config_loader import load_dataset_configs
-dataset_configs = load_dataset_configs(yaml_files, dataset_configs_path)
+dataset_configs_path = "/home/jake/repos/VisionCore/experiments/dataset_configs/multi_cones_120_backimage_all.yaml"
+dataset_configs = load_dataset_configs(dataset_configs_path)
 
 #%% Initialize model
 config = load_config(config_path)
@@ -78,7 +66,6 @@ model = build_model(config, dataset_configs).to(device)
 #     print(n, p.shape)
 
 #%% Load Data
-from DataYatesV1.utils.data.loading import remove_pixel_norm
 import contextlib
 
 train_datasets = {}
@@ -87,88 +74,23 @@ updated_configs = []
 
 for i, dataset_config in enumerate(dataset_configs):
     if i > 1: break
-    dataset_config, pixel_norm_removed = remove_pixel_norm(dataset_config)
 
     with open(os.devnull, "w") as devnull, contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):          # ← optional
         train_dset, val_dset, dataset_config = prepare_data(dataset_config)
 
+    # cast to bfloat16
+    train_dset.cast(torch.bfloat16, target_keys=['stim', 'robs', 'dfs'])
+    val_dset.cast(torch.bfloat16, target_keys=['stim', 'robs', 'dfs'])
     
-    # Ensure the model sees fp32
-    class Float32View(torch.utils.data.Dataset):
-        def __init__(self, base): self.base = base
-        def __len__(self): return len(self.base)
-        def __getitem__(self, idx):
-            item = self.base[idx]
-            item["stim"] = item["stim"].float()  # cast back to fp32
-            if pixel_norm_removed:
-                item["stim"] = (item["stim"] - 127) / 255
-            item["robs"] = item["robs"].float()
-            if "behavior" in item:
-                item["behavior"] = item["behavior"].float()
-            return item
-
-    train_dset = Float32View(train_dset)
-    val_dset   = Float32View(val_dset)
-
     dataset_name = f"dataset_{i}"
     train_datasets[dataset_name] = train_dset
     val_datasets[dataset_name] = val_dset
-    dataset_config["pixel_norm_removed"] = pixel_norm_removed
     updated_configs.append(dataset_config)
 
     print(f"Dataset {i}: {len(train_dset)} train, {len(val_dset)} val samples")
 
 #%%
-
-# train_dset, val_dset, dataset_config = prepare_data(dataset_config)
-
-plt.plot(train_datasets['dataset_0'].base.dsets[0]['stim'][:1000,0,25,25])
-
-#%%
-# #%% test cones
-# from DataYatesV1.models.modules import DAModel
-
-# cfg = {'alpha': 0.01,
-#       'beta': 0.00008,
-#       'gamma': 0.5,
-#       'tau_y_ms': 5.0,
-#       'tau_z_ms': 60.0,
-#       'n_y': 5.0,
-#       'n_z': 2.0,
-#       'filter_length': 32,
-#       'learnable_params': False}
-
-# cones = DAModel(**cfg)
-
-# x = train_datasets['dataset_0'].base.dsets[0]['stim'].clone()
-
-#         # permute (B,H,W) to (1, B, H, W) and squeeze back to (B,H,W)
-# dtype = x.dtype
-# print(dtype)
-
-# y = cones(x.unsqueeze(0).float()).squeeze(0).permute(1,0,2,3)
-# # rerun after pixelnorm on floats
-
-# def pixelnorm(x):
-#     return (x - 127) / 255.0
-
-# y1 = cones(pixelnorm(x.float()).unsqueeze(0).float()).squeeze(0).permute(1,0,2,3)
-# if dtype == torch.uint8:
-#     y /= 2.5 
-#     y *= 255
-#     y = y.clamp(0, 255).to(torch.uint8)
-#     # y = (y - y.mean())*
-#     # y = (y * 127).to(torch.uint8)
-
-
-# #%%
-# inds = np.arange(10,1000) #+ np.random.randint(0, len(x)-1000)
-
-# plt.plot(pixelnorm(y[inds,0,25,25].float()))
-# # plt.gca().twinx()
-# # plt.plot(y1[inds,0,25,25], 'r')
-
-#         # return cones(x.unsqueeze(0).float()).squeeze(0).permute(1,0,2,3).to(dtype)
+plt.plot(train_datasets['dataset_0'].dsets[0]['stim'][:1000,0,25,25].float().cpu().numpy())
 
 #%% prepare dataloaders
 # train_loader, val_loader = create_multidataset_loaders(train_datasets, val_datasets, batch_size=2, num_workers=os.cpu_count()//2)
@@ -183,7 +105,7 @@ inds = np.arange(1000, 1000+batch_size)
 batch = train_datasets[f'dataset_{dataset_id}'][inds]
 
 batch = {k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)}
-batch["stim"] = batch["stim"].to(torch.bfloat16)          # ! reduce mem
+# batch["stim"] = batch["stim"].to(torch.bfloat16)          # ! reduce mem
 
 #%%
                         # convert to rates
@@ -223,6 +145,7 @@ output = torch.exp(output)
 #%%
 _ = plt.plot(output.detach().cpu().numpy())
 # %% test all datasets
+import torch.nn as nn
 batch_size = 32
 
 for dataset_id in range(len(train_datasets)):
@@ -242,3 +165,4 @@ for dataset_id in range(len(train_datasets)):
         loss = nn.functional.poisson_nll_loss(output, batch['robs'], log_input=False, reduction='mean')
         print(f"Loss: {loss.item()}")
     
+# %%

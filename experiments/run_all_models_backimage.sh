@@ -50,7 +50,7 @@ STEPS_PER_EPOCH=512    # Number of steps per epoch
 # Project and data paths
 PROJECT_NAME="multidataset_backimage_120"
 
-DATASET_CONFIGS_PATH="/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset/dataset_backimageonly_multi_120"
+DATASET_CONFIGS_PATH="/home/jake/repos/VisionCore/experiments/dataset_configs/multi_basic_120_backimage_all.yaml"
 CHECKPOINT_DIR="/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage/checkpoints"
 
 # Create checkpoint directory

@@ -21,7 +21,7 @@ class MultiDatasetDM(pl.LightningDataModule):
     Lightning DataModule for loading and managing multiple neural datasets.
 
     This DataModule:
-    - Loads multiple datasets from YAML configuration files
+    - Loads multiple datasets from a parent config that specifies sessions
     - Supports curriculum learning with contrast-weighted sampling
     - Handles distributed training with proper data sharding
     - Provides train and validation dataloaders
@@ -29,9 +29,9 @@ class MultiDatasetDM(pl.LightningDataModule):
     Parameters
     ----------
     cfg_dir : str
-        Directory containing dataset YAML configuration files
+        Path to parent dataset configuration YAML file (specifies sessions to load)
     max_ds : int
-        Maximum number of datasets to load
+        Maximum number of datasets/sessions to load
     batch : int
         Batch size per GPU
     workers : int
@@ -46,11 +46,11 @@ class MultiDatasetDM(pl.LightningDataModule):
         - 'uint8': Store as uint8, normalize on GPU (only supports pixelnorm)
         - 'bfloat16': Apply all transforms, store as bfloat16 (2x memory)
         - 'float32': Apply all transforms, store as float32 (4x memory)
-        
+
     Example
     -------
     >>> dm = MultiDatasetDM(
-    ...     cfg_dir='configs/datasets',
+    ...     cfg_dir='experiments/dataset_configs/multi_basic_120_backimage_all.yaml',
     ...     max_ds=20,
     ...     batch=32,
     ...     workers=4,
@@ -59,13 +59,13 @@ class MultiDatasetDM(pl.LightningDataModule):
     ... )
     >>> trainer = pl.Trainer(...)
     >>> trainer.fit(model, datamodule=dm)
-    
+
     Attributes
     ----------
     names : list of str
-        Names of loaded datasets
+        Names of loaded datasets (session names)
     cfgs : list of dict
-        Dataset configurations
+        Dataset configurations (merged from parent + session configs)
     train_dsets : dict
         Training datasets keyed by name
     val_dsets : dict
@@ -137,14 +137,15 @@ class MultiDatasetDM(pl.LightningDataModule):
         from DataYatesV1.utils.data.loading import remove_pixel_norm
         from DataYatesV1.utils.data import prepare_data
 
-        # Load dataset configurations
-        yaml_files = sorted([
-            f for f in os.listdir(self.cfg_dir)
-            if f.endswith(".yaml") and "base" not in f
-        ])[:self.max_ds]
+        # Load dataset configurations from parent config
+        # cfg_dir should now point to a parent config file (e.g., multi_basic_120_backimage_all.yaml)
+        self.cfgs = load_dataset_configs(self.cfg_dir)
 
-        self.names = [Path(f).stem for f in yaml_files]
-        self.cfgs = load_dataset_configs(yaml_files, self.cfg_dir)
+        # Limit to max_ds datasets
+        self.cfgs = self.cfgs[:self.max_ds]
+
+        # Extract dataset names from session names
+        self.names = [cfg['session'] for cfg in self.cfgs]
 
         # Prepare datasets
         self.train_dsets, self.val_dsets, self.name2idx = {}, {}, {}

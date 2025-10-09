@@ -68,9 +68,9 @@ def main():
     p.add_argument("--model_config", type=str, required=True,
                    help="Path to model configuration YAML file")
     p.add_argument("--dataset_configs_path", type=str, required=True,
-                   help="Directory containing dataset configuration YAML files")
+                   help="Path to parent dataset configuration YAML file (specifies sessions)")
     p.add_argument("--max_datasets", type=int, default=30,
-                   help="Maximum number of datasets to load")
+                   help="Maximum number of datasets/sessions to load")
     
     # Training hyperparameters
     p.add_argument("--batch_size", type=int, default=64,

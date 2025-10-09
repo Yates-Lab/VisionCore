@@ -84,11 +84,15 @@ class MultiDatasetModel(pl.LightningModule):
         from models.config_loader import load_dataset_configs, load_config
         from models import build_model
 
-        # Load dataset configurations
-        yaml = sorted([f for f in os.listdir(cfg_dir)
-                       if f.endswith(".yaml") and "base" not in f])[:max_ds]
-        self.names = [Path(f).stem for f in yaml]
-        self.cfgs = load_dataset_configs(yaml, cfg_dir)
+        # Load dataset configurations from parent config
+        # cfg_dir should now point to a parent config file (e.g., multi_basic_120_backimage_all.yaml)
+        self.cfgs = load_dataset_configs(cfg_dir)
+
+        # Limit to max_ds datasets
+        self.cfgs = self.cfgs[:max_ds]
+
+        # Extract dataset names from session names
+        self.names = [cfg['session'] for cfg in self.cfgs]
         for c, n in zip(self.cfgs, self.names):
             c["_dataset_name"] = n
 

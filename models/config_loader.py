@@ -13,56 +13,136 @@ from pathlib import Path
 # Type aliases
 ConfigDict = Dict[str, Any]
 
-def load_dataset_configs(dataset_config_paths: List[Union[str, Path]], base_dir: Union[str, Path] = None) -> List[ConfigDict]:
+def load_dataset_configs(parent_config_path: Union[str, Path]) -> List[ConfigDict]:
     """
-    Load dataset configurations from a list of paths.
+    Load dataset configurations from a parent config that specifies sessions.
+
+    The parent config should contain:
+    - session_dir: Path to directory containing session-specific configs
+    - sessions: List of session names to load
+    - All other fields that should be inherited by session configs
+
+    Session configs only need to specify:
+    - cids: List of cell IDs for this session
+    - session: Session name (optional, will be inferred from filename if missing)
+    - lab: Lab name (optional, defaults to 'yates')
+
+    All other fields are inherited from the parent config, with session-specific
+    values taking precedence.
 
     Args:
-        dataset_config_paths: List of paths to dataset configuration files
-        base_dir: Base directory for relative paths
+        parent_config_path: Path to parent configuration file
 
     Returns:
-        List of dataset configurations
+        List of dataset configurations (one per session)
 
     Raises:
-        FileNotFoundError: If any config file doesn't exist
+        FileNotFoundError: If parent config or any session config doesn't exist
         ValueError: If any config is invalid
     """
+    # Load parent config
+    parent_config_path = Path(parent_config_path)
+    if not parent_config_path.exists():
+        raise FileNotFoundError(f"Parent config file not found: {parent_config_path}")
+
+    with open(parent_config_path, 'r') as f:
+        parent_config = yaml.safe_load(f)
+
+    # Validate parent config has required fields
+    if 'session_dir' not in parent_config:
+        raise ValueError("Parent config must include 'session_dir' field")
+    if 'sessions' not in parent_config:
+        raise ValueError("Parent config must include 'sessions' field")
+
+    # Resolve session directory path (relative to parent config location)
+    session_dir = Path(parent_config['session_dir'])
+    if not session_dir.is_absolute():
+        session_dir = parent_config_path.parent / session_dir
+
+    if not session_dir.exists():
+        raise FileNotFoundError(f"Session directory not found: {session_dir}")
+
+    # Extract sessions list
+    sessions = parent_config['sessions']
+    if not isinstance(sessions, list) or len(sessions) == 0:
+        raise ValueError("Parent config 'sessions' must be a non-empty list")
+
+    # Create base config by removing session-specific fields
+    base_config = {k: v for k, v in parent_config.items()
+                   if k not in ['session_dir', 'sessions']}
+
+    # Load and merge each session config
     dataset_configs = []
-    for dataset_info in dataset_config_paths:
-        if isinstance(dataset_info, str):
-            # Simple path string
-            dataset_path = dataset_info
-            weight = 1.0
-        elif isinstance(dataset_info, dict):
-            # Dict with path and optional weight
-            dataset_path = dataset_info['path']
-            weight = dataset_info.get('weight', 1.0)
-        else:
-            raise ValueError(f"Invalid dataset config format: {dataset_info}")
+    for session_name in sessions:
+        # Construct session config path
+        session_config_path = session_dir / f"{session_name}.yaml"
 
-        # Load dataset config
-        dataset_config_path = Path(dataset_path)
-        if not dataset_config_path.is_absolute():
-            # Make relative paths relative to the base directory
-            dataset_config_path = Path(base_dir) / dataset_config_path
+        if not session_config_path.exists():
+            raise FileNotFoundError(
+                f"Session config not found: {session_config_path}\n"
+                f"Expected for session '{session_name}' from parent config"
+            )
 
-        if not dataset_config_path.exists():
-            raise FileNotFoundError(f"Dataset config file not found: {dataset_config_path}")
+        # Load session config
+        with open(session_config_path, 'r') as f:
+            session_config = yaml.safe_load(f)
 
-        with open(dataset_config_path, 'r') as f:
-            dataset_config = yaml.safe_load(f)
+        # Validate session config has required fields
+        if 'cids' not in session_config:
+            raise ValueError(
+                f"Session config '{session_name}' must include 'cids' field"
+            )
 
-        # Add weight to dataset config
-        dataset_config['_weight'] = weight
-        dataset_config['_config_path'] = str(dataset_config_path)
+        # Merge configs: start with base, override with session-specific
+        merged_config = _deep_merge_configs(base_config, session_config)
 
-        # Validate dataset config for multidataset training
-        validate_dataset_config_for_multidataset(dataset_config)
+        # Ensure session name is set (use from config or infer from filename)
+        if 'session' not in merged_config:
+            merged_config['session'] = session_name
 
-        dataset_configs.append(dataset_config)
+        # Set default lab if not specified
+        if 'lab' not in merged_config:
+            merged_config['lab'] = 'yates'
+
+        # Add metadata
+        merged_config['_weight'] = 1.0  # Default weight
+        merged_config['_config_path'] = str(session_config_path)
+        merged_config['_parent_config_path'] = str(parent_config_path)
+
+        # Validate merged config for multidataset training
+        validate_dataset_config_for_multidataset(merged_config)
+
+        dataset_configs.append(merged_config)
 
     return dataset_configs
+
+
+def _deep_merge_configs(base: ConfigDict, override: ConfigDict) -> ConfigDict:
+    """
+    Deep merge two configuration dictionaries.
+
+    Values from 'override' take precedence over 'base'.
+    For nested dicts, merging is recursive.
+
+    Args:
+        base: Base configuration dictionary
+        override: Override configuration dictionary
+
+    Returns:
+        Merged configuration dictionary
+    """
+    import copy
+    merged = copy.deepcopy(base)
+
+    for key, value in override.items():
+        if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
+            # Recursively merge nested dicts
+            merged[key] = _deep_merge_configs(merged[key], value)
+        else:
+            # Override takes precedence
+            merged[key] = copy.deepcopy(value)
+
+    return merged
 
 def load_config(config_path: Union[str, Path]) -> ConfigDict:
     """
