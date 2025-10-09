@@ -3,6 +3,7 @@ Convolutional network modules for DataYatesV1.
 
 This module contains convolutional network components for feature extraction.
 """
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -10,7 +11,178 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import Union, Sequence, Tuple, Optional
 
-__all__ = ['ConvBase', 'StandardConv', 'StackedConv2d', 'WindowedConv2d', 'SeparableWindowedConv2D']
+__all__ = ['ConvBase', 'StandardConv', 'StackedConv2d', 'WindowedConv2d', 'SeparableWindowedConv2D', 'AntiAliasedConv1d']
+
+def _hann(L, device, dtype):
+    if L == 1:
+        return torch.ones(1, device=device, dtype=dtype)
+    n = torch.arange(L, device=device, dtype=dtype)
+    return 0.5 - 0.5 * torch.cos(2.0 * math.pi * n / (L - 1))
+
+def _kaiser(L, beta, device, dtype):
+    # torch doesn’t have i0; use torch.special.i0 (PyTorch >= 1.8)
+    n = torch.arange(L, device=device, dtype=dtype)
+    x = (2.0*n)/(L-1) - 1.0
+    denom = torch.special.i0(torch.tensor(beta, device=device, dtype=dtype))
+    return torch.special.i0(beta * torch.sqrt((1 - x**2).clamp(min=0))) / denom
+
+def _raised_cosine_lowpass(freqs, cutoff, transition):
+    """
+    freqs: [Nfft//2+1] normalized to Nyquist=0.5 (i.e., cycles/sample in [0, 0.5])
+    cutoff, transition in [0, 0.5]; passband=[0, cutoff], stopband >= cutoff+transition
+    """
+    h = torch.zeros_like(freqs)
+    passband = freqs <= cutoff
+    stopband  = freqs >= (cutoff + transition)
+    trans = (~passband) & (~stopband)
+
+    h[passband] = 1.0
+    if trans.any():
+        # cosine ramp from 1→0 across the transition bandwidth
+        x = (freqs[trans] - cutoff) / transition  # in (0,1)
+        h[trans] = 0.5 * (1 + torch.cos(math.pi * x))  # smooth taper
+    # stopband stays 0
+    return h
+
+class AntiAliasedConv1d(nn.Conv1d):
+    """
+    Drop-in replacement for nn.Conv1d that windows the learned kernel
+    in both time and frequency domains to reduce aliasing/ringing.
+
+    Same signature as nn.Conv1d plus optional anti-aliasing kwargs:
+      - aa_time_window:  'none' | 'hann' | 'kaiser' (default 'hann')
+      - aa_kaiser_beta:  float (only if aa_time_window='kaiser', default 8.6)
+      - aa_cutoff:       normalized cutoff (0..0.5, Nyquist=0.5). Default 0.45
+      - aa_transition:   transition width (0..0.5-cutoff). Default 0.05
+      - aa_fft_pad:      pad factor for FFT length (>=1). Default 2
+      - aa_enable:       bool to toggle. Default True
+    """
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        kernel_size,
+        stride=1,
+        padding=0,
+        dilation=1,
+        groups=1,
+        bias=True,
+        padding_mode='zeros',
+        device=None,
+        dtype=None,
+        *,
+        aa_time_window: str = 'hann',
+        aa_kaiser_beta: float = 8.6,
+        aa_cutoff: float = 0.45,
+        aa_transition: float = 0.05,
+        aa_fft_pad: int = 2,
+        aa_enable: bool = True,
+    ):
+        super().__init__(in_channels, out_channels, kernel_size, stride, padding,
+                         dilation, groups, bias, padding_mode, device=device, dtype=dtype)
+
+        # Store AA config
+        self.aa_enable = aa_enable
+        self.aa_time_window = aa_time_window.lower()
+        self.aa_kaiser_beta = float(aa_kaiser_beta)
+        self.aa_cutoff = float(aa_cutoff)
+        self.aa_transition = float(aa_transition)
+        self.aa_fft_pad = int(aa_fft_pad)
+
+        # Validate
+        k = self.kernel_size[0]
+        if self.aa_transition < 0 or self.aa_cutoff < 0 or self.aa_cutoff > 0.5:
+            raise ValueError("aa_cutoff must be in [0,0.5] and aa_transition >= 0")
+        if self.aa_cutoff + self.aa_transition > 0.5:
+            # clamp internally to avoid weirdness
+            self.aa_transition = max(0.0, 0.5 - self.aa_cutoff)
+
+        # Pre-build (lazy) buffers on first forward when device/dtype are known
+        self.register_buffer("_aa_time_win", None, persistent=False)
+        self.register_buffer("_aa_freq_mask", None, persistent=False)
+        self.register_buffer("_aa_freqs", None, persistent=False)
+        self.register_buffer("_aa_last_device", None, persistent=False)
+        self.register_buffer("_aa_last_dtype", None, persistent=False)
+
+    def _maybe_build_windows(self, device, dtype):
+        # Rebuild if device/dtype changed or not built yet
+        if (self._aa_time_win is not None and
+            self._aa_last_device == device and
+            self._aa_last_dtype == dtype):
+            return
+
+        k = self.kernel_size[0]
+
+        # Time window
+        if self.aa_time_window == 'hann':
+            w = _hann(k, device, dtype)
+        elif self.aa_time_window == 'kaiser':
+            w = _kaiser(k, self.aa_kaiser_beta, device, dtype)
+        elif self.aa_time_window in ('none', 'off', 'disable'):
+            w = torch.ones(k, device=device, dtype=dtype)
+        else:
+            raise ValueError(f"Unknown aa_time_window: {self.aa_time_window}")
+
+        # Frequency mask
+        Nfft = int(1 << (int(math.ceil(math.log2(max(1, k*self.aa_fft_pad))))))
+        freqs = torch.fft.rfftfreq(Nfft, d=1.0)  # cycles/sample, Nyquist=0.5
+        mask = _raised_cosine_lowpass(freqs.to(device=device, dtype=dtype),
+                                      cutoff=self.aa_cutoff,
+                                      transition=self.aa_transition)
+
+        self._aa_time_win = w  # [k]
+        self._aa_freqs = freqs.to(device=device, dtype=dtype)            # [Nfft//2+1]
+        self._aa_freq_mask = mask                                       # [Nfft//2+1]
+        self._aa_last_device = torch.tensor(0, device=device, dtype=torch.int8)
+        self._aa_last_dtype = torch.tensor(0, device=device, dtype=torch.int8)
+
+    def _window_weight(self):
+        """
+        Apply time window and frequency-domain lowpass to self.weight.
+        Returns weight_eff with same shape as self.weight.
+        """
+        if not self.aa_enable:
+            return self.weight
+
+        device = self.weight.device
+        dtype = self.weight.dtype
+        self._maybe_build_windows(device, dtype)
+
+        w_time = self._aa_time_win  # [k]
+        mask = self._aa_freq_mask   # [Nfft//2+1]
+        Nfft = (mask.numel() - 1) * 2
+
+        # Shapes:
+        # weight: [out_ch, in_ch/groups, k]
+        k = self.kernel_size[0]
+        w = self.weight
+
+        # Time-domain windowing (broadcast over out/in channels)
+        w_t = w * w_time.view(1, 1, k)
+
+        # FFT along kernel axis
+        Wf = torch.fft.rfft(w_t, n=Nfft, dim=2)  # [out, in, Nfft//2+1]
+
+        # Apply smooth low-pass mask in frequency domain
+        Wf_lp = Wf * mask.view(1, 1, -1)
+
+        # Back to time
+        w_lp = torch.fft.irfft(Wf_lp, n=Nfft, dim=2)[..., :k]  # trim to original length
+
+        # (Optional) a second gentle time-window to reduce edge ripple post-ifft
+        w_lp = w_lp * w_time.view(1, 1, k)
+
+        return w_lp
+
+    def forward(self, input):
+        # identical to nn.Conv1d.forward but with windowed weight
+        if self.padding_mode != 'zeros':
+            return F.conv1d(F.pad(input, self._reversed_padding_repeated_twice, mode=self.padding_mode),
+                            self._window_weight(), self.bias, self.stride,
+                            (0,), self.dilation, self.groups)
+        return F.conv1d(input, self._window_weight(), self.bias, self.stride,
+                        self.padding, self.dilation, self.groups)
+
 
 class ConvBase(nn.Module):
     """Base class for convolution modules with weight plotting."""

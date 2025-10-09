@@ -92,7 +92,7 @@ class MultiDatasetDM(pl.LightningDataModule):
         stage : str, optional
             Current stage ('fit', 'validate', 'test', or 'predict')
         """
-        from DataYatesV1.models.config_loader import load_dataset_configs
+        from models.config_loader import load_dataset_configs
         from DataYatesV1.utils.data.loading import remove_pixel_norm
         from DataYatesV1.utils.data import prepare_data
 

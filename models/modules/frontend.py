@@ -530,6 +530,7 @@ class LearnableTemporalConv(nn.Module):
                  num_channels=6,
                  init_type='gaussian_derivatives',
                  causal=True,
+                 anti_aliasing=True,
                  bias=False):
         super().__init__()
 
@@ -540,13 +541,24 @@ class LearnableTemporalConv(nn.Module):
 
         # Create the temporal convolution layer
         # This will be applied to each spatial location independently
-        self.temporal_conv = nn.Conv1d(
-            in_channels=1,  # Process each input channel separately
-            out_channels=num_channels,
-            kernel_size=self.kernel_size,
-            bias=bias,
-            padding=0  # Valid convolution for causal behavior
-        )
+        if anti_aliasing:
+            from .conv_layers import AntiAliasedConv1d
+            self.temporal_conv = AntiAliasedConv1d(
+                in_channels=1,  # Process each input channel separately
+                out_channels=num_channels,
+                kernel_size=self.kernel_size,
+                bias=bias,
+                padding=0  # Valid convolution for causal behavior
+            )
+        else:
+            # Standard causal convolution
+            self.temporal_conv = nn.Conv1d(
+                in_channels=1,  # Process each input channel separately
+                out_channels=num_channels,
+                kernel_size=self.kernel_size,
+                bias=bias,
+                padding=0  # Valid convolution for causal behavior
+            )
 
         # Initialize the temporal kernels
         self._initialize_kernels()

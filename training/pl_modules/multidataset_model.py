@@ -81,8 +81,8 @@ class MultiDatasetModel(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters()
 
-        from DataYatesV1.models.config_loader import load_dataset_configs, load_config
-        from DataYatesV1.models import build_model
+        from models.config_loader import load_dataset_configs, load_config
+        from models import build_model
 
         # Load dataset configurations
         yaml = sorted([f for f in os.listdir(cfg_dir)
