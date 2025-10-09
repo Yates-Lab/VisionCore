@@ -12,15 +12,14 @@ import torch._dynamo
 torch._dynamo.config.suppress_errors = True # suppress dynamo errors
 
 import sys
-sys.path.append('.')
+sys.path.append('..')
 
 import numpy as np
 from DataYatesV1 import enable_autoreload, get_free_device, prepare_data
 
 import matplotlib.pyplot as plt
-from eval_stack_utils import load_single_dataset, get_stim_inds, evaluate_dataset
-from eval_stack_multidataset import load_model, load_single_dataset
-from eval_stack_utils import argmin_subpixel, argmax_subpixel
+from eval.eval_stack_utils import load_single_dataset, get_stim_inds, evaluate_dataset, argmin_subpixel, argmax_subpixel
+from eval.eval_stack_multidataset import load_model, load_single_dataset, scan_checkpoints
 
 import matplotlib as mpl
 
@@ -37,8 +36,7 @@ enable_autoreload()
 device = get_free_device()
 
 #%% Discover Available Models
-print("🔍 Discovering available models...")
-from eval_stack_multidataset import scan_checkpoints
+print("Discovering available models...")
 checkpoint_dir = "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage/checkpoints"
 # checkpoint_dir = '/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120/checkpoints'
 models_by_type = scan_checkpoints(checkpoint_dir)
@@ -202,7 +200,7 @@ def model_pred(batch, model, dataset_idx, stage='pred', include_modulator=True, 
 #%% LOAD A MODEL
 
 
-model_type = 'learned_res_small_gru'
+model_type = 'res_small_gru'
 model, model_info = load_model(
         model_type=model_type,
         model_index=None, # none for best model
@@ -217,7 +215,7 @@ model.model.convnet.use_checkpointing = False
 
 model = model.to(device)
 
-plt.plot(model.model.frontend.temporal_conv.weight.squeeze().detach().cpu().T)
+# plt.plot(model.model.frontend.temporal_conv.weight.squeeze().detach().cpu().T)
 #%% Run bps analysis to find good cells / get STA
 dataset_idx = 8
 batch_size = 64 # keep small because things blow up fast!
@@ -395,6 +393,9 @@ from eval.eval_stack_utils import rescale_rhat, bits_per_spike
 gaborium_robs = gaborium_eval['robs']
 gaborium_rhat = gaborium_eval['rhat']
 gaborium_dfs = gaborium_eval['dfs']
+if gaborium_dfs.shape[1] == 1:
+    gaborium_dfs = gaborium_dfs.expand(-1, gaborium_robs.shape[1])
+
 gaborium_rhat_rescaled, _ = rescale_rhat(gaborium_robs, gaborium_rhat, gaborium_dfs, mode='affine')
 
 # recalculate bps
@@ -549,7 +550,7 @@ anim = animation.FuncAnimation(fig, animate, frames=n_frames,
 anim.save('conv_filters_animation.mp4', writer='ffmpeg', fps=10)
 
 #%% get STAs from first specific layer
-from mei import mei_synthesis, Jitter, LpNorm, TotalVariation, Combine, GaussianGradientBlur, ClipRange
+from eval.mei import mei_synthesis, Jitter, LpNorm, TotalVariation, Combine, GaussianGradientBlur, ClipRange
 
 batch_size = 1
 # randomly sample a batch

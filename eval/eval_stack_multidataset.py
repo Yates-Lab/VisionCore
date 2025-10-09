@@ -31,12 +31,10 @@ from DataYatesV1 import get_session
 from models.losses import PoissonBPSAggregator
 
 # Import the training module to access the model class
-import sys
-sys.path.insert(0, str(Path(__file__).parent / 'jake' / 'multidataset_ddp'))
-from train_ddp_multidataset import MultiDatasetModel
+from training import MultiDatasetModel
 
 # Import our utility functions
-from eval_stack_utils import (
+from .eval_stack_utils import (
     load_single_dataset, get_stim_inds, evaluate_dataset, load_qc_data,
     get_fixrsvp_trials, ccnorm_variable_trials, get_saccade_eval,
     detect_saccades_from_session, scan_checkpoints, extract_val_loss, extract_epoch
@@ -114,7 +112,7 @@ def load_model(model_type=None, model_index=None, checkpoint_path=None,
 
     try:
         # Change to the multidataset_ddp directory where configs are located
-        multidataset_dir = Path(__file__).parent #/ 'jake' / 'multidataset_ddp'
+        multidataset_dir = Path(__file__).parent.parent #/ 'jake' / 'multidataset_ddp'
         os.chdir(multidataset_dir)
 
         # Load model with proper checkpoint handling
@@ -658,7 +656,7 @@ def run_bps_analysis(model, train_data, val_data, dataset_idx, model_name, save_
 
             # Apply rescaling if requested
             if rescale:
-                from eval_stack_utils import rescale_rhat, bits_per_spike
+                from .eval_stack_utils import rescale_rhat, bits_per_spike
                 rhat_rescaled, _ = rescale_rhat(result['robs'], result['rhat'], result['dfs'], mode='affine')
                 bps_rescaled = bits_per_spike(rhat_rescaled, result['robs'], result['dfs'])
                 result['rhat'] = rhat_rescaled
@@ -1019,7 +1017,7 @@ def run_sta_analysis(model, train_data, val_data, dataset_idx, bps_results, mode
 
         # Load data with modified config
         from models.data import prepare_data
-        from eval_stack_utils import get_stim_inds
+        from .eval_stack_utils import get_stim_inds
 
         train_data_sta, val_data_sta, dataset_config = prepare_data(dataset_config, strict=False)
         stim_indices = get_stim_inds('gaborium', train_data_sta, val_data_sta)

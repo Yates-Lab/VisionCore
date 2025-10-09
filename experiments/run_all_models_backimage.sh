@@ -58,8 +58,8 @@ mkdir -p $CHECKPOINT_DIR
 
 # Array of model configurations to run
 MODEL_CONFIGS=(
-    # "configs_multi/learned_res_small_gru.yaml"
-    "experiments/configs/learned_res_small_none_gru.yaml"
+    "experiments/model_configs/learned_res_small_gru.yaml"
+    # "experiments/model_configs/res_small_gru.yaml"
     # "configs_multi/modulator_only_convgru.yaml"  # Test the new modulator-only model   
 )
 

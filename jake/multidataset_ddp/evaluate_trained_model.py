@@ -26,7 +26,7 @@ from jake.multidataset_ddp.train_ddp_multidataset import MultiDatasetDDPModule
 
 # Import data loading utilities
 from DataYatesV1.utils.data.loading import remove_pixel_norm
-from DataYatesV1.utils.data import prepare_data
+from models.data import prepare_data
 from DataYatesV1.models.losses import MaskedLoss, PoissonBPSAggregator
 
 

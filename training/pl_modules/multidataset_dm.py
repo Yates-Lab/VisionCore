@@ -135,7 +135,7 @@ class MultiDatasetDM(pl.LightningDataModule):
         """
         from models.config_loader import load_dataset_configs
         from DataYatesV1.utils.data.loading import remove_pixel_norm
-        from DataYatesV1.utils.data import prepare_data
+        from models.data import prepare_data
 
         # Load dataset configurations from parent config
         # cfg_dir should now point to a parent config file (e.g., multi_basic_120_backimage_all.yaml)
@@ -150,6 +150,7 @@ class MultiDatasetDM(pl.LightningDataModule):
         # Prepare datasets
         self.train_dsets, self.val_dsets, self.name2idx = {}, {}, {}
         for idx, (cfg, name) in enumerate(zip(self.cfgs, self.names)):
+            print(f"Processing dataset {idx+1}/{len(self.cfgs)}: {name}")
             cfg["_dataset_name"] = name
 
             if self.dset_dtype == 'uint8':
@@ -192,8 +193,8 @@ class MultiDatasetDM(pl.LightningDataModule):
                 }
                 target_dtype = dtype_map[self.dset_dtype]
 
-                tr.cast(target_dtype, target_keys=['stim', 'robs', 'dfs'])
-                va.cast(target_dtype, target_keys=['stim', 'robs', 'dfs'])
+                tr.cast(target_dtype, target_keys=['stim', 'robs', 'dfs', 'behavior'])
+                va.cast(target_dtype, target_keys=['stim', 'robs', 'dfs', 'behavior'])
 
                 # Store directly without Float32View wrapper
                 self.train_dsets[name] = tr

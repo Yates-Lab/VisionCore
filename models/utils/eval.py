@@ -199,6 +199,7 @@ class EvalModule:
         Logging function for the model.
         '''
         raise NotImplementedError
+    
 class FixRSVPPSTHEvalModule(EvalModule):
     """
     An evaluation module for FixRSVP datasets.

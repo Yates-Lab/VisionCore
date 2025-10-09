@@ -17,13 +17,13 @@ transforms:
       - pixelnorm: {}
       - unsqueeze: 0
     expose_as: stim
-  robs:
-    source: robs
-    ops:
-      - smooth: 
-         - type: gaussian
-         - params: 1.0
-    expose_as: robs
+  # robs:
+  #   source: robs
+  #   ops:
+  #     - smooth: 
+  #        - type: gaussian
+  #        - params: 1.0
+  #   expose_as: robs
   eye_vel:
     source: eyepos          # raw key in DictDataset
     ops:                    # ordered transform list
@@ -55,6 +55,7 @@ datafilters:
   dfs:
     ops:
       - valid_nlags: {n_lags: 32}
+      - missing_pct: {theshold: 45}
     expose_as: dfs
     
 train_val_split: 0.8
