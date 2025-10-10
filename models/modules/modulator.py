@@ -509,7 +509,8 @@ MODULATORS = {
     'film': FiLMModulator,
     'stn': SpatialTransformerModulator,
     'convgru': ConvGRUModulator,
-    'pc': PredictiveCodingModulator
+    'pc': PredictiveCodingModulator,
+    'polar': None  # Will be imported lazily
 }
 
 

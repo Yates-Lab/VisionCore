@@ -1,0 +1,22 @@
+# Polar-V1 Test Dataset Configuration
+# Simple configuration for testing Polar-V1 model
+
+# Data transforms
+transforms:
+  stim:
+    source: stim
+    ops:
+      - pixelnorm: {}
+    expose_as: stim
+  
+  eye_pos:
+    source: eyepos
+    ops: []
+    expose_as: behavior
+
+# Dataset-specific settings
+datasets:
+  - session: "test_session"
+    lab: "yates"
+    cids: [0, 1, 2, 3, 4, 5, 6, 7]  # 8 test neurons
+    n_neurons: 8
