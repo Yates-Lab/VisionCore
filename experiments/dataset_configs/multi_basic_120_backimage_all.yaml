@@ -15,7 +15,7 @@ transforms:
     source: stim
     ops:
       - pixelnorm: {}
-      - unsqueeze: 0
+      - unsqueeze: 1
     expose_as: stim
   # robs:
   #   source: robs
@@ -53,9 +53,7 @@ transforms:
 
 datafilters:
   dfs:
-    ops:
-      - valid_nlags: {n_lags: 32}
-      - missing_pct: {theshold: 45}
+    ops: [{valid_nlags: {n_lags: 32}}, {missing_pct: {theshold: 45}}]
     expose_as: dfs
     
 train_val_split: 0.8

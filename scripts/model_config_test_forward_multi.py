@@ -44,9 +44,9 @@ AMP_BF16 = lambda: torch.autocast(device_type="cuda", dtype=torch.bfloat16)
 #%%
 from models.config_loader import load_dataset_configs
 import os
-config_path = Path("/home/jake/repos/VisionCore/experiments/model_configs/res_small_gru.yaml")
+config_path = Path("/home/jake/repos/VisionCore/experiments/model_configs/learned_res_small_gru.yaml")
 
-dataset_configs_path = "/home/jake/repos/VisionCore/experiments/dataset_configs/multi_cones_120_backimage_all.yaml"
+dataset_configs_path = "/home/jake/repos/VisionCore/experiments/dataset_configs/multi_basic_120_backimage_all.yaml"
 dataset_configs = load_dataset_configs(dataset_configs_path)
 
 #%% Initialize model
@@ -62,6 +62,8 @@ model = build_model(config, dataset_configs).to(device)
 
 
 #%%
+dataset_config = dataset_configs[0]
+train_dset, val_dset, dataset_config = prepare_data(dataset_config)
 # for n, p in model.named_parameters():
 #     print(n, p.shape)
 
@@ -111,14 +113,14 @@ batch = {k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor
                         # convert to rates
 
 
-# dtype = torch.float32
-# batch = {k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)}
+dtype = torch.bfloat16
+batch = {k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)}
 
-# # Test forward pass
-# model.eval()
-# with torch.no_grad():
-#     output = model(batch['stim'], dataset_id)
-#     print(f"Output shape: {output.shape}")
+# Test forward pass
+model.eval()
+with AMP_BF16():
+    output = model(batch['stim'], dataset_id)
+    print(f"Output shape: {output.shape}")
 
 # import torch.nn as nn
 # loss = nn.functional.poisson_nll_loss(output, batch['robs'], log_input=False, reduction='mean')

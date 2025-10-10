@@ -13,8 +13,13 @@ Functions include:
 
 Author: Extracted from model_load_eval_stack_multidataset.py
 """
-
+import sys
 import os
+from pathlib import Path
+
+# Add VisionCore root to Python path (go up 2 levels from jake/multidataset_ddp/)
+_visioncore_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(_visioncore_root))
 import json
 import re
 import contextlib

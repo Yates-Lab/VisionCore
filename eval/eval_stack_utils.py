@@ -6,7 +6,7 @@ to support unified evaluation pipelines across different models and datasets.
 
 Functions include:
 - Dataset loading and preparation
-- Model evaluation and BPS calculation  
+- Model evaluation and BPS calculation
 - Stimulus-specific analyses (FixRSVP, saccades)
 - QC data loading and processing
 - Noise-corrected correlation calculations
@@ -14,7 +14,13 @@ Functions include:
 Author: Extracted from model_load_eval_stack_multidataset.py
 """
 
+import sys
 import os
+from pathlib import Path
+
+# Add VisionCore root to Python path (go up 1 level from eval/)
+_visioncore_root = Path(__file__).parent.parent
+sys.path.insert(0, str(_visioncore_root))
 import json
 import re
 import contextlib
@@ -28,9 +34,7 @@ import yaml
 from tqdm import tqdm
 
 from models.data import prepare_data
-from DataYatesV1.utils.data.loading import remove_pixel_norm
-from DataYatesV1.models.losses import PoissonBPSAggregator
-from DataYatesV1 import get_session
+from models.losses import PoissonBPSAggregator
 
 import torch
 from torch import nn

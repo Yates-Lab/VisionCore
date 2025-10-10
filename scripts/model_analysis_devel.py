@@ -217,7 +217,7 @@ model = model.to(device)
 
 # plt.plot(model.model.frontend.temporal_conv.weight.squeeze().detach().cpu().T)
 #%% Run bps analysis to find good cells / get STA
-dataset_idx = 8
+dataset_idx = 0
 batch_size = 64 # keep small because things blow up fast!
 
 train_data, val_data, dataset_config = load_single_dataset(model, dataset_idx)
@@ -448,6 +448,30 @@ plot_stas(sta_dict, lag=None, normalize=True, sort_by='modulation_index_rhat')
 
 #%%
 
+dt = 1/120
+lags = np.array([0, 15])*dt
+
+N = np.minimum(sta_dict['Z_STA_robs'].shape[-1], 100)
+fig, axs = plt.subplots(N, 1, figsize=(8, N), sharex=True, sharey=True)
+
+for i in range(N):
+    cc = i
+    sta_robs_plotting = sta_dict['Z_STA_robs'].reshape(16*51, 51, -1)[:,:,cc].T
+    sta_rhat0_plotting = sta_dict['Z_STA_rhat'].reshape(16*51, 51, -1)[:,:,cc].T
+
+    def minmax(x):
+        # return x
+        return (x - x.min()) / (x.max() - x.min())
+
+    sta_robs_plotting = minmax(sta_robs_plotting)
+    sta_rhat0_plotting = minmax(sta_rhat0_plotting)
+
+    # concatenate
+    sta_plotting = torch.concat([sta_robs_plotting, sta_rhat0_plotting], 0)
+
+    axs[i].imshow(sta_plotting, aspect='auto', cmap='gray', extent=[lags[0], lags[1], 0, sta_plotting.shape[1]])
+    # axis off
+    axs[i].axis('off')
 
                     
 #%%
