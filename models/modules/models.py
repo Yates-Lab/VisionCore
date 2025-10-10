@@ -219,15 +219,31 @@ class ModularV1Model(nn.Module):
         # Process through convnet
         x_conv = self.convnet(x)
 
+        # Handle tuple outputs (Polar-V1)
+        if isinstance(x_conv, tuple):
+            feats = x_conv
+        else:
+            feats = x_conv
+
         # Process through modulator
         if self.modulator is not None and behavior is not None:
-            x_conv = self.modulator(x_conv, behavior)
+            feats = self.modulator(feats, behavior)
 
-        # Process through recurrent    
-        x_recurrent = self.recurrent(x_conv)
+        # Set modulator reference for recurrent (Polar-V1)
+        if hasattr(self.recurrent, 'set_modulator'):
+            self.recurrent.set_modulator(self.modulator)
+
+        # Process through recurrent
+        x_recurrent = self.recurrent(feats)
+
+        # Handle list outputs (Polar-V1)
+        if isinstance(x_recurrent, list):
+            readout_input = x_recurrent
+        else:
+            readout_input = x_recurrent
 
         # Process through readout
-        output = self.readout(x_recurrent)
+        output = self.readout(readout_input)
 
         # Apply activation function
         output = self.activation(output)
@@ -449,16 +465,32 @@ class MultiDatasetV1Model(ModularV1Model):
 
             # Process through shared convnet
             x_conv = self.convnet(x)
-        
+
+        # Handle tuple outputs (Polar-V1)
+        if isinstance(x_conv, tuple):
+            feats = x_conv
+        else:
+            feats = x_conv
+
         # Process through shared modulator
         if self.modulator is not None and behavior is not None:
-            x_conv = self.modulator(x_conv, behavior)
-        
+            feats = self.modulator(feats, behavior)
+
+        # Set modulator reference for recurrent (Polar-V1)
+        if hasattr(self.recurrent, 'set_modulator'):
+            self.recurrent.set_modulator(self.modulator)
+
         # Process through shared recurrent
-        x_recurrent = self.recurrent(x_conv)
-        
+        x_recurrent = self.recurrent(feats)
+
+        # Handle list outputs (Polar-V1)
+        if isinstance(x_recurrent, list):
+            readout_input = x_recurrent
+        else:
+            readout_input = x_recurrent
+
         # Route through appropriate readout
-        output = self.readouts[dataset_idx](x_recurrent)
+        output = self.readouts[dataset_idx](readout_input)
 
         # Apply activation function
         output = self.activation(output)

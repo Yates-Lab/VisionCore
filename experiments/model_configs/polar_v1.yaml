@@ -1,0 +1,47 @@
+# Polar-V1 Model Configuration
+# This configuration implements the full Polar-V1 model with all components
+
+model_type: v1multi
+
+# ConvNet: Polar spatial processing (pyramid + quadrature + polar decompose)
+convnet:
+  type: polar
+  params:
+    n_pyramid_levels: 4
+    n_pairs: 16
+    kernel_size: 7
+
+# Modulator: Polar behavior encoding (gaze encoder + behavior encoder)
+modulator:
+  type: polar
+  params:
+    beh_dim: 128
+    dt: 0.004166667  # 1/240 Hz = 4.17ms (using explicit decimal to avoid YAML parsing issues)
+    use_pos_fourier: true
+    Kpos: 2
+    init_pos_freq_cpx: 0.015625  # 1/64 (using explicit decimal)
+
+# Recurrent: Polar dynamics + temporal summarization
+recurrent:
+  type: polar
+  params:
+    dt: 0.004166667  # 1/240 Hz = 4.17ms
+    lambda_fix: 10.0
+    lambda_sac: 40.0
+    alpha_fast: 0.74
+    alpha_slow: 0.95
+    base_freq_cpx: 0.15
+    use_behavior: true
+    use_jepa: false
+
+# Readout: Multi-level Gaussian readout
+readout:
+  type: polar
+  params:
+    # n_units will be set per dataset
+
+# Output activation
+output_activation: softplus
+
+# Training parameters
+baseline_enabled: false

@@ -127,6 +127,12 @@ def create_convnet(
         core = PyrNet(cfg)
         return core, core.get_output_channels()
 
+    # Handle polar convnet separately since it's in its own module
+    if convnet_type.lower() == 'polar':
+        from .modules.polar_convnet import PolarConvNet
+        core = PolarConvNet(cfg)
+        return core, core.get_output_channels()
+
     # Handle other convnets
     from .modules.convnet import CONVNETS
     # build the network
@@ -179,6 +185,24 @@ def create_recurrent(
         layer = nn.LSTM(input_dim, hidden_dim, batch_first=True, **kwargs)
         return layer, hidden_dim
 
+    if r == "polar":
+        from .modules.polar_recurrent import PolarRecurrent
+        # input_dim should be (n_pairs, n_levels) for Polar
+        if isinstance(input_dim, tuple):
+            config = {
+                'n_pairs': input_dim[0],
+                'n_levels': input_dim[1],
+            }
+        else:
+            raise ValueError("Polar recurrent requires input_dim as (n_pairs, n_levels)")
+
+        config.update(kwargs)
+        layer = PolarRecurrent(config)
+
+        # Output channels: 5 summaries per pair per level
+        output_channels = 5 * config['n_pairs']
+        return layer, output_channels
+
     raise ValueError(f"Unknown recurrent_type '{recurrent_type}'")
 
 
@@ -202,23 +226,44 @@ def create_modulator(
     # Import the MODULATORS dictionary
     from .modules.modulator import MODULATORS
     
-    # Check if modulator type exists
+    # Handle polar modulator separately since it has different interface
     modulator_type = modulator_type.lower()
+    if modulator_type == 'polar':
+        from .modules.polar_modulator import PolarModulator
+        # feature_dim should be (n_pairs, n_levels) for Polar
+        feature_dim = kwargs.pop('feature_dim', None)
+        if feature_dim is None:
+            raise ValueError("Polar modulator requires 'feature_dim' as (n_pairs, n_levels)")
+
+        config = {
+            'n_pairs': feature_dim[0],
+            'n_levels': feature_dim[1],
+            'behavior_dim': kwargs.pop('behavior_dim', kwargs.pop('n_vars', 2)),
+        }
+        config.update(kwargs)
+
+        modulator = PolarModulator(config)
+        return modulator, modulator.out_dim
+
+    # Import the MODULATORS dictionary
+    from .modules.modulator import MODULATORS
+
+    # Check if modulator type exists
     if modulator_type not in MODULATORS:
         raise ValueError(f"Unknown modulator type: {modulator_type}")
-    
+
     # Create config dictionary
     config = {
         'type': modulator_type,
         'behavior_dim': kwargs.pop('behavior_dim', kwargs.pop('n_vars', 2)),
     }
-    
+
     # Add remaining kwargs to config
     config.update(kwargs)
-    
+
     # Build modulator using the appropriate class from MODULATORS
     modulator = MODULATORS[modulator_type](config)
-    
+
     # Return modulator and its output dimension
     return modulator, modulator.out_dim
 
@@ -298,6 +343,14 @@ def create_readout(
             n_units=config['n_units'],
             bias=config['bias']
         )
+
+    elif readout_type == 'polar':
+        from .modules.polar_readout import PolarMultiLevelReadout
+        config = {
+            'n_units': kwargs.get('n_units', kwargs.get('n_neurons', 8))
+        }
+        config.update(kwargs)
+        return PolarMultiLevelReadout(config)
 
     else:
         raise ValueError(f"Unknown readout type: {readout_type}")

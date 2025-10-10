@@ -17,3 +17,10 @@ from .conv_blocks import ConvBlock
 
 # Model architectures
 from .models import ModularV1Model, MultiDatasetV1Model
+
+# Polar-V1 modules
+from .polar_convnet import PolarConvNet, PyramidAdapter, QuadratureFilterBank2D, PolarDecompose
+from .polar_modulator import PolarModulator, MinimalGazeEncoder, BehaviorEncoder
+from .polar_recurrent import PolarRecurrent, PolarDynamics, TemporalSummarizer, init_kxy
+from .polar_readout import PolarMultiLevelReadout, GaussianReadout
+from .polar_jepa import PolarJEPA
