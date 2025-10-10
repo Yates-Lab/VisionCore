@@ -199,12 +199,11 @@ def model_pred(batch, model, dataset_idx, stage='pred', include_modulator=True, 
 
 #%% LOAD A MODEL
 
-
-model_type = 'res_small_gru'
+model_type = 'learned_res_small_gru'
 model, model_info = load_model(
         model_type=model_type,
         model_index=None, # none for best model
-        checkpoint_path=None,
+        checkpoint_path='/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage/checkpoints/learned_res_small_gru_ddp_bs256_ds30_lr1e-3_wd1e-4_corelrscale0.5_warmup5/last-v1.ckpt',
         checkpoint_dir=checkpoint_dir,
         device='cpu'
     )
@@ -215,7 +214,7 @@ model.model.convnet.use_checkpointing = False
 
 model = model.to(device)
 
-# plt.plot(model.model.frontend.temporal_conv.weight.squeeze().detach().cpu().T)
+plt.plot(model.model.frontend.temporal_conv.weight.squeeze().detach().cpu().T)
 #%% Run bps analysis to find good cells / get STA
 dataset_idx = 0
 batch_size = 64 # keep small because things blow up fast!
@@ -230,75 +229,6 @@ inds = get_stim_inds(stim_type, train_data, val_data)
 
 dataset = val_data.shallow_copy()
 dataset.inds = inds
-
-
-
-# #%% DEBUGGING FIXRSVP CCNORM
-# from eval_stack_multidataset import run_bps_analysis, run_ccnorm_analysis, run_saccade_analysis
-# from pathlib import Path
-# from eval_stack_utils import get_fixrsvp_trials
-
-# # Get trial-aligned FixRSVP data
-# model_name = model_info['experiment']
-# save_dir = Path("/mnt/ssd/YatesMarmoV1/conv_model_fits/eval_stack_120") / model_name
-
-# stim_type = 'fixrsvp'
-# stim_inds = get_stim_inds(stim_type, train_data, val_data)
-# result = evaluate_dataset(
-#                     model, train_data, stim_inds, dataset_idx, batch_size, stim_type.capitalize()
-#                 )
-# robs, rhat, bps = result['robs'], result['rhat'], result['bps']
-
-# bps_results = {'fixrsvp': (robs, rhat, bps)}
-
-# #%%
-
-# stim_indices = get_stim_inds('fixrsvp', train_data, val_data)
-# data = val_data.shallow_copy()
-# data.inds = stim_indices
-
-# dset_idx = np.unique(stim_indices[:,0]).item()
-# time_inds = data.dsets[dset_idx]['psth_inds'].numpy()
-# trial_inds = data.dsets[dset_idx]['trial_inds'].numpy()
-# unique_trials = np.unique(trial_inds)
-
-# n_trials = len(unique_trials)
-# n_time = np.max(time_inds).item()+1
-# n_units = data.dsets[dset_idx]['robs'].shape[1]
-# robs_trial = np.nan*np.zeros((n_trials, n_time, n_units))
-# rhat_trial = np.nan*np.zeros((n_trials, n_time, n_units))
-# dfs_trial = np.nan*np.zeros((n_trials, n_time, n_units))
-
-# for itrial in range(n_trials):
-#     trial_idx = np.where(trial_inds == unique_trials[itrial])[0]
-#     eval_inds = np.where(np.isin(stim_indices[:,1], trial_idx))[0]
-#     data_inds = trial_idx[np.where(np.isin(trial_idx, stim_indices[:,1]))[0]]
-
-#     assert torch.all(robs[eval_inds] == data.dsets[dset_idx]['robs'][data_inds]).item(), 'robs mismatch'
-
-#     robs_trial[itrial, time_inds[data_inds]] = robs[eval_inds]
-#     rhat_trial[itrial, time_inds[data_inds]] = rhat[eval_inds]
-#     dfs_trial[itrial, time_inds[data_inds]] = data.dsets[dset_idx]['dfs'][data_inds]
-
-# cid = 10 
-# #%%
-# cid +=1
-
-# plt.subplot(2,1,1)
-# plt.imshow(robs_trial[:,:,cid], aspect='auto', interpolation='none', cmap='gray_r')
-# plt.xlim(0, 200)
-# plt.subplot(2,1,2)
-# plt.imshow(rhat_trial[:,:,cid], aspect='auto', interpolation='none', cmap='gray_r')
-# plt.xlim(0, 200)
-# ax = plt.gca().twinx()
-# ax.plot(np.nanmean(robs_trial[:,:,cid], 0), 'k')
-# ax.plot(np.nanmean(rhat_trial[:,:,cid], 0), 'r')
-# plt.show()
-
-# #%%
-# robs_trial, rhat_trial, dfs_trial = get_fixrsvp_trials(
-#     model, bps_results, dataset_idx, train_data, val_data
-# )
 
 
 #%% STA utilities

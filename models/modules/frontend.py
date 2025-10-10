@@ -530,7 +530,7 @@ class LearnableTemporalConv(nn.Module):
                  num_channels=6,
                  init_type='gaussian_derivatives',
                  causal=True,
-                 anti_aliasing=True,
+                 anti_aliasing=False,
                  bias=False):
         super().__init__()
 

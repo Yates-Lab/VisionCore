@@ -16,6 +16,7 @@ adapter:
 frontend:
   type: learnable_temporal
   params: {kernel_size: 16, num_channels: 4, init_type: gaussian_derivatives,
+          anti_aliasing: false,
           causal: true, bias: false}
 
 # Convnet configuration - ResNet with per-layer block configs

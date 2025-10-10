@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 import pytorch_lightning as pl
 
-from models.losses import MaskedLoss, PoissonBPSAggregator
+from models.losses import MaskedLoss, PoissonBPSAggregator, MaskedZIPNLLLoss
 from training.regularizers import create_regularizers, get_excluded_params_for_weight_decay
 from training.schedulers import LinearWarmupCosineAnnealingLR
 
@@ -136,7 +136,18 @@ class MultiDatasetModel(pl.LightningModule):
         self.core_lr_scale = lr * self.hparams.get("core_lr_scale", 1.0)
         self.head_lr = lr  # unchanged for dataset heads
         self.log_input = isinstance(self.model.activation, nn.Identity)
-        self.loss_fn = MaskedLoss(nn.PoissonNLLLoss(log_input=self.log_input, reduction="none"))
+
+        # Initialize loss function based on config
+        loss_type = self.model_config.get('loss_type', 'poisson')
+        if loss_type == 'zip' or loss_type == 'zero_inflated_poisson':
+            self.loss_fn = MaskedZIPNLLLoss(log_input=self.log_input)
+            print(f"Using Zero-Inflated Poisson loss (log_input={self.log_input})")
+        elif loss_type == 'poisson':
+            self.loss_fn = MaskedLoss(nn.PoissonNLLLoss(log_input=self.log_input, reduction="none"))
+            print(f"Using standard Poisson loss (log_input={self.log_input})")
+        else:
+            raise ValueError(f"Unknown loss_type: {loss_type}. Must be 'poisson' or 'zip'")
+
         self.bps_aggs = [PoissonBPSAggregator() for _ in self.names]
         self.val_losses = []
 

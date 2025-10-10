@@ -148,8 +148,207 @@ class MaskedLoss(nn.Module):
 class MaskedPoissonNLLLoss(MaskedLoss):
     """
     Masked Poisson negative log-likelihood loss function.
-    
+
     This is a specialized version of the MaskedLoss class for Poisson NLL.
     """
     def __init__(self, pred_key='rhat', target_key='robs', mask_key='dfs'):
         super().__init__(nn.PoissonNLLLoss(log_input=False, full=False, reduction='none'), pred_key, target_key, mask_key)
+
+
+class ZeroInflatedPoissonNLLLoss(nn.Module):
+    """
+    Zero-Inflated Poisson (ZIP) negative log-likelihood loss.
+
+    The ZIP distribution models data that has excess zeros beyond what a standard
+    Poisson distribution would predict. It's a mixture of:
+    - A point mass at zero (with probability pi)
+    - A Poisson distribution (with probability 1-pi and rate lambda)
+
+    The model outputs two parameters:
+    - lambda (lam): The Poisson rate parameter (must be > 0)
+    - pi: The probability of the zero-inflation component (must be in [0, 1])
+
+    Parameters
+    ----------
+    log_input : bool, default=False
+        If True, the loss expects log(lambda) as input instead of lambda.
+        This can improve numerical stability during training.
+    eps : float, default=1e-8
+        Small constant for numerical stability in log computations
+    reduction : str, default='none'
+        Specifies the reduction to apply to the output:
+        'none': no reduction will be applied
+        'mean': the sum of the output will be divided by the number of elements
+        'sum': the output will be summed
+    pi_key : str, default='pi'
+        Key for the zero-inflation probability in the batch dictionary
+
+    Notes
+    -----
+    The negative log-likelihood is computed as:
+    - For y = 0: -log(pi + (1-pi) * exp(-lambda))
+    - For y > 0: -log(1-pi) - y*log(lambda) + lambda + log(y!)
+
+    The model should output both 'rhat' (lambda or log(lambda)) and 'pi'.
+    """
+
+    def __init__(self, log_input=False, eps=1.0e-8, reduction='none', pi_key='pi'):
+        super().__init__()
+        self.log_input = log_input
+        self.eps = eps
+        self.reduction = reduction
+        self.pi_key = pi_key
+
+    def forward(self, input, target):
+        """
+        Compute ZIP negative log-likelihood.
+
+        Parameters
+        ----------
+        input : torch.Tensor or tuple of torch.Tensor
+            If tuple: (lam, pi) where lam is the Poisson rate and pi is zero-inflation prob
+            If tensor: assumes this is lam, and pi must be provided separately via batch dict
+        target : torch.Tensor
+            Observed counts (non-negative integers)
+
+        Returns
+        -------
+        torch.Tensor
+            Negative log-likelihood loss
+        """
+        # Handle input format
+        if isinstance(input, tuple):
+            lam, pi = input
+        else:
+            # This case is for compatibility with MaskedLoss wrapper
+            # pi should be extracted from batch in the wrapper
+            lam = input
+            pi = None  # Will be handled by wrapper
+
+        # Convert from log space if needed
+        if self.log_input:
+            lam = torch.exp(lam)
+
+        # Ensure lam is positive
+        lam = torch.clamp(lam, min=self.eps)
+
+        # If pi is provided as part of input tuple
+        if pi is not None:
+            # Ensure pi is in [0, 1]
+            pi = torch.clamp(pi, min=self.eps, max=1.0 - self.eps)
+
+            # Compute negative log-likelihood
+            # For y = 0: -log(pi + (1-pi) * exp(-lam))
+            # For y > 0: -log(1-pi) + y*log(lam) - lam - lgamma(y+1)
+            log_p = torch.where(
+                target == 0,
+                torch.log(pi + (1 - pi) * torch.exp(-lam) + self.eps),
+                torch.log(1 - pi + self.eps)
+                + target * torch.log(lam + self.eps)
+                - lam
+                - torch.lgamma(target + 1)
+            )
+            nll = -log_p
+        else:
+            # Fallback to standard Poisson if pi not provided
+            # This maintains compatibility
+            log_p = target * torch.log(lam + self.eps) - lam - torch.lgamma(target + 1)
+            nll = -log_p
+
+        # Apply reduction
+        if self.reduction == 'none':
+            return nll
+        elif self.reduction == 'mean':
+            return nll.mean()
+        elif self.reduction == 'sum':
+            return nll.sum()
+        else:
+            raise ValueError(f"Invalid reduction mode: {self.reduction}")
+
+
+class MaskedZIPNLLLoss(nn.Module):
+    """
+    Masked Zero-Inflated Poisson negative log-likelihood loss.
+
+    This wrapper applies masking to the ZIP loss, similar to MaskedLoss but
+    specifically designed for ZIP which requires both lambda and pi parameters.
+
+    Parameters
+    ----------
+    log_input : bool, default=False
+        If True, expects log(lambda) as input
+    eps : float, default=1e-8
+        Small constant for numerical stability
+    pred_key : str, default='rhat'
+        Key for the predicted lambda values in the input dictionary
+    pi_key : str, default='pi'
+        Key for the predicted pi values in the input dictionary
+    target_key : str, default='robs'
+        Key for the target values in the input dictionary
+    mask_key : str, default='dfs'
+        Key for the mask values in the input dictionary
+
+    Example
+    -------
+    >>> loss_fn = MaskedZIPNLLLoss(log_input=False)
+    >>> batch = {
+    ...     'rhat': predicted_lambda,  # (N, n_units)
+    ...     'pi': predicted_pi,         # (N, n_units)
+    ...     'robs': observed_counts,    # (N, n_units)
+    ...     'dfs': data_filter_mask     # (N, n_units)
+    ... }
+    >>> loss = loss_fn(batch)
+    """
+
+    def __init__(self, log_input=False, eps=1.0e-8,
+                 pred_key='rhat', pi_key='pi', target_key='robs', mask_key='dfs'):
+        super().__init__()
+        self.loss_fn = ZeroInflatedPoissonNLLLoss(log_input=log_input, eps=eps, reduction='none')
+        self.pred_key = pred_key
+        self.pi_key = pi_key
+        self.target_key = target_key
+        self.mask_key = mask_key
+        # For compatibility with MaskedLoss interface
+        self.reduction = 'none'
+
+    def forward(self, batch):
+        """
+        Compute masked ZIP loss.
+
+        Parameters
+        ----------
+        batch : dict
+            Dictionary containing predictions, targets, and optional mask
+
+        Returns
+        -------
+        torch.Tensor
+            Scalar loss value
+        """
+        lam = batch[self.pred_key]
+        target = batch[self.target_key]
+
+        # Get pi if available, otherwise use a default (no zero-inflation)
+        if self.pi_key in batch:
+            pi = batch[self.pi_key]
+            loss = self.loss_fn((lam, pi), target)
+        else:
+            # Fallback: no zero-inflation (pi=0)
+            # This makes it equivalent to standard Poisson
+            loss = self.loss_fn(lam, target)
+
+        # Apply mask if present
+        if self.mask_key in batch:
+            mask = batch[self.mask_key]
+            if mask.ndim == 1:
+                mask = mask[:, None]
+                div = mask.sum() * target.shape[1]
+            else:
+                div = mask.sum()
+
+            loss = loss * mask
+            loss = loss.sum() / div
+        else:
+            loss = loss.mean()
+
+        return loss

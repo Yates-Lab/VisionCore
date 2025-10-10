@@ -120,6 +120,12 @@ def create_convnet(
         from .modules.x3d import X3DNet
         core = X3DNet(cfg)
         return core, core.get_output_channels()
+    
+    # Handle pyramid conv separately since it's in its own module
+    if 'pyr' in convnet_type.lower():
+        from .modules.pyrConv import PyrNet
+        core = PyrNet(cfg)
+        return core, core.get_output_channels()
 
     # Handle other convnets
     from .modules.convnet import CONVNETS
