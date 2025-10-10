@@ -1,0 +1,44 @@
+types: [backimage]
+session_dir: ./sessions
+sessions: [Allen_2022-02-16,  Allen_2022-03-04,  Allen_2022-04-08,  Allen_2022-06-10,  Logan_2020-02-29, Allen_2022-02-18,  Allen_2022-03-30,  Allen_2022-04-13,  Allen_2022-08-05,  Logan_2020-03-02, Allen_2022-02-24,  Allen_2022-04-01,  Allen_2022-04-15,  Logan_2019-12-20,  Logan_2020-03-04, Allen_2022-03-02,  Allen_2022-04-06,  Allen_2022-06-01,  Logan_2019-12-23,  Logan_2020-03-06]
+sampling:
+  source_rate: 240
+  target_rate: 120
+keys_lags:
+  robs: 0
+  stim: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  behavior: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  dfs: 0
+
+transforms:
+  stim:
+    source: stim
+    ops:
+      - pixelnorm: {}
+      - dacones:     # acausal raised-cosine embedding
+          alpha: 0.01
+          beta: 0.00008
+          gamma: 0.5
+          tau_y_ms: 5.0
+          tau_z_ms: 60.0
+          n_y: 5.0
+          n_z: 2.0
+          filter_length: 32
+          learnable_params: false
+    expose_as: stim
+  
+  eye_pos:
+    source: eyepos
+    ops: []  # No processing, just pass through
+    expose_as: behavior
+
+datafilters:
+  dfs:
+    ops: [{valid_nlags: {n_lags: 32}}, {missing_pct: {theshold: 45}}]
+    expose_as: dfs
+    
+train_val_split: 0.8
+seed: 1002
+
+
+

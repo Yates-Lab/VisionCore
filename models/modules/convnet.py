@@ -5,7 +5,7 @@ from torch.utils.checkpoint import checkpoint
 from typing import List, Dict, Any, Tuple, Union, Optional
 
 from .common import chomp
-
+# Avoid circular import - ViViT will be imported lazily when needed
 
 def chomp_causal_spatial(tensor_to_crop: torch.Tensor, reference_tensor: torch.Tensor) -> torch.Tensor:
     """
@@ -342,6 +342,7 @@ class DenseNet(BaseConvNet):
         """Get the number of output channels from the network."""
         return self._final_out_channels
 
+
 CONVNETS = {'vanilla': VanillaCNN,
             'cnn': VanillaCNN,
             'resnet': ResNet,
@@ -359,4 +360,8 @@ def build_model(config: Dict[str, Any]) -> nn.Module:
         # Import X3DNet from x3d module
         from .x3d import X3DNet
         return X3DNet(config)
+    if model_type == 'vivit':
+        # Import ViViT from viT module (lazy import to avoid circular dependency)
+        from .viT import ViViT
+        return ViViT(config)
     raise ValueError(f"Unknown model type: '{model_type}'.")

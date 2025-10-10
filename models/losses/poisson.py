@@ -185,10 +185,11 @@ class ZeroInflatedPoissonNLLLoss(nn.Module):
 
     Notes
     -----
-    The negative log-likelihood is computed as:
+    The negative log-likelihood is computed as (omitting constant factorial term):
     - For y = 0: -log(pi + (1-pi) * exp(-lambda))
-    - For y > 0: -log(1-pi) - y*log(lambda) + lambda + log(y!)
+    - For y > 0: -log(1-pi) - y*log(lambda) + lambda
 
+    The factorial term log(y!) is omitted as it doesn't affect gradients.
     The model should output both 'rhat' (lambda or log(lambda)) and 'pi'.
     """
 
@@ -237,23 +238,21 @@ class ZeroInflatedPoissonNLLLoss(nn.Module):
             # Ensure pi is in [0, 1]
             pi = torch.clamp(pi, min=self.eps, max=1.0 - self.eps)
 
-            # Compute negative log-likelihood
+            # Compute negative log-likelihood (without factorial term - doesn't affect gradients)
             # For y = 0: -log(pi + (1-pi) * exp(-lam))
-            # For y > 0: -log(1-pi) + y*log(lam) - lam - lgamma(y+1)
+            # For y > 0: -log(1-pi) - y*log(lam) + lam
             log_p = torch.where(
                 target == 0,
                 torch.log(pi + (1 - pi) * torch.exp(-lam) + self.eps),
                 torch.log(1 - pi + self.eps)
                 + target * torch.log(lam + self.eps)
                 - lam
-                - torch.lgamma(target + 1)
             )
             nll = -log_p
         else:
             # Fallback to standard Poisson if pi not provided
-            # This maintains compatibility
-            log_p = target * torch.log(lam + self.eps) - lam - torch.lgamma(target + 1)
-            nll = -log_p
+            # This maintains compatibility (without factorial term)
+            nll = lam - target * torch.log(lam + self.eps)
 
         # Apply reduction
         if self.reduction == 'none':

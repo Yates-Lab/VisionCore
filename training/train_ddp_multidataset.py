@@ -108,7 +108,12 @@ def main():
     # Model compilation
     p.add_argument("--compile", action="store_true", default=False,
                    help="Enable torch.compile for model compilation")
-    
+
+    # Loss function
+    p.add_argument("--loss_type", type=str, default=None,
+                   choices=["poisson", "zip", "zero_inflated_poisson"],
+                   help="Loss function type (overrides model config if specified)")
+
     # Hardware and performance
     p.add_argument("--precision", type=str, default="bf16",
                    choices=["16", "bf16", "32", "16-mixed", "bf16-mixed"],
@@ -170,7 +175,8 @@ def main():
         max_ds=args.max_datasets,
         pretrained_checkpoint=args.pretrained_checkpoint,
         freeze_vision=args.freeze_vision,
-        compile_model=args.compile
+        compile_model=args.compile,
+        loss_type=args.loss_type
     )
     
     # Pass additional hyperparameters to model

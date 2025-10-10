@@ -47,6 +47,9 @@ NUM_GPUS=2             # Use both RTX 6000 Ada GPUs
 NUM_WORKERS=16         # Optimized for 64 CPU cores
 STEPS_PER_EPOCH=512    # Number of steps per epoch
 
+# Loss function configuration
+USE_ZIP_LOSS=true     # Set to 'true' to use Zero-Inflated Poisson loss instead of standard Poisson
+
 # Project and data paths
 PROJECT_NAME="multidataset_backimage_120"
 
@@ -67,8 +70,16 @@ MODEL_CONFIGS=(
 run_training() {
     local MODEL_CONFIG=$1
     local MODEL_CONFIG_NAME=$(basename "$MODEL_CONFIG" .yaml)
-    local EXPERIMENT_NAME="${MODEL_CONFIG_NAME}_ddp_bs${BATCH_SIZE}_ds${MAX_DATASETS}_lr${LEARNING_RATE}_wd${WEIGHT_DECAY}_corelrscale${CORE_LR_SCALE}_warmup${WARMUP_EPOCHS}"
-    
+
+    # Add ZIP suffix to experiment name if using ZIP loss
+    if [ "$USE_ZIP_LOSS" = true ]; then
+        local LOSS_SUFFIX="_zip"
+    else
+        local LOSS_SUFFIX=""
+    fi
+
+    local EXPERIMENT_NAME="${MODEL_CONFIG_NAME}_ddp_bs${BATCH_SIZE}_ds${MAX_DATASETS}_lr${LEARNING_RATE}_wd${WEIGHT_DECAY}_corelrscale${CORE_LR_SCALE}_warmup${WARMUP_EPOCHS}${LOSS_SUFFIX}"
+
     echo ""
     echo "============================================================"
     echo "STARTING TRAINING: $MODEL_CONFIG_NAME"
@@ -86,6 +97,7 @@ run_training() {
     echo "Max epochs: $MAX_EPOCHS"
     echo "Precision: $PRECISION"
     echo "Dataset dtype: $DSET_DTYPE"
+    echo "Loss type: $([ "$USE_ZIP_LOSS" = true ] && echo "Zero-Inflated Poisson" || echo "Poisson")"
     echo "GPUs: $NUM_GPUS"
     echo "Workers: $NUM_WORKERS"
     echo "Dataset configs: $DATASET_CONFIGS_PATH"
@@ -103,10 +115,10 @@ run_training() {
     #     --precision 32           \
     #     --project_name debug2gpu
 
-    # Launch training
-    python training/train_ddp_multidataset.py \
-        --model_config "$MODEL_CONFIG" \
-        --dataset_configs_path "$DATASET_CONFIGS_PATH" \
+    # Build training command with optional ZIP loss flag
+    local TRAINING_CMD="python training/train_ddp_multidataset.py \
+        --model_config \"$MODEL_CONFIG\" \
+        --dataset_configs_path \"$DATASET_CONFIGS_PATH\" \
         --max_datasets $MAX_DATASETS \
         --batch_size $BATCH_SIZE \
         --learning_rate $LEARNING_RATE \
@@ -118,15 +130,23 @@ run_training() {
         --precision $PRECISION \
         --dset_dtype $DSET_DTYPE \
         --num_gpus $NUM_GPUS \
-        --project_name "$PROJECT_NAME" \
-        --experiment_name "$EXPERIMENT_NAME" \
-        --checkpoint_dir "$CHECKPOINT_DIR" \
+        --project_name \"$PROJECT_NAME\" \
+        --experiment_name \"$EXPERIMENT_NAME\" \
+        --checkpoint_dir \"$CHECKPOINT_DIR\" \
         --accumulate_grad_batches 1 \
         --gradient_clip_val 1.0 \
         --steps_per_epoch $STEPS_PER_EPOCH \
         --num_workers $NUM_WORKERS \
         --early_stopping_patience 50 \
-        --early_stopping_min_delta 0.0
+        --early_stopping_min_delta 0.0"
+
+    # Add loss type flag if using ZIP loss
+    if [ "$USE_ZIP_LOSS" = true ]; then
+        TRAINING_CMD="$TRAINING_CMD --loss_type zip"
+    fi
+
+    # Launch training
+    eval $TRAINING_CMD
         # --compile \
         # --enable_curriculum
         # --limit_val_batches 20 \

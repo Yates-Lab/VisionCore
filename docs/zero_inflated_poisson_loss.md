@@ -30,15 +30,47 @@ The negative log-likelihood (what we minimize) is:
 ```
 NLL = {
     -log(π + (1-π) * exp(-λ))                                    if y = 0
-    -log(1-π) - y*log(λ) + λ + log(y!)                          if y > 0
+    -log(1-π) - y*log(λ) + λ                                     if y > 0
 }
 ```
 
+**Note**: The factorial term `log(y!)` is omitted as it doesn't depend on model parameters and doesn't affect gradients.
+
 ## Usage
 
-### 1. Basic Configuration
+### 1. Command-Line Option (Recommended)
 
-To use ZIP loss, add `loss_type: zip` to your model configuration YAML file:
+The easiest way to use ZIP loss is via the `--loss_type` command-line argument:
+
+```bash
+python training/train_ddp_multidataset.py \
+    --model_config experiments/model_configs/res_small_gru.yaml \
+    --dataset_configs_path experiments/dataset_configs/multi_basic_120_backimage_all.yaml \
+    --loss_type zip \
+    --batch_size 256 \
+    --learning_rate 1e-3 \
+    --max_epochs 100 \
+    # ... other arguments ...
+```
+
+**Using the batch training script:**
+
+Edit `experiments/run_all_models_backimage.sh` and set:
+
+```bash
+# Loss function configuration
+USE_ZIP_LOSS=true     # Set to 'true' to use Zero-Inflated Poisson loss
+```
+
+Then run:
+
+```bash
+bash experiments/run_all_models_backimage.sh
+```
+
+### 2. Model Configuration File
+
+Alternatively, add `loss_type: zip` to your model configuration YAML file:
 
 ```yaml
 # Model configuration
@@ -52,6 +84,8 @@ loss_type: zip  # or 'zero_inflated_poisson'
 # Output activation should be 'none' for log-space predictions
 output_activation: none
 ```
+
+**Note**: Command-line `--loss_type` overrides the config file setting.
 
 ### 2. Model Output Requirements
 
