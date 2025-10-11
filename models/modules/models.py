@@ -314,15 +314,16 @@ class MultiDatasetV1Model(ModularV1Model):
         frontend_output_channels = None  # Will be set from first frontend
 
         default_adapter_config = self.model_config.get('adapter', {'type': 'none', 'params': {}})
-        
+
         for dataset_config in self.dataset_configs:
             adapter_config = dataset_config.get('adapter', default_adapter_config)
-        
+            adapter_params = adapter_config.get('params') or {}
+
             adapter, _ = create_frontend(
                 frontend_type=adapter_config['type'],
                 in_channels=self.initial_input_channels,
                 sampling_rate=self.sampling_rate,
-                **adapter_config['params']
+                **adapter_params
             )
 
             self.adapters.append(adapter)
@@ -330,29 +331,33 @@ class MultiDatasetV1Model(ModularV1Model):
         # build front end
         frontend_config = self.model_config.get('frontend', {'type': 'none', 'params': {}})
         frontend_type = frontend_config['type']
-        frontend_params = frontend_config['params']
+        frontend_params = frontend_config.get('params') or {}
         self.frontend, frontend_output_channels = create_frontend(
             frontend_type=frontend_type,
             in_channels=self.initial_input_channels,
             sampling_rate=self.sampling_rate,
             **frontend_params
         )
-    
+
         # Build shared convnet
         convnet_config = self.model_config.get('convnet', {'type': 'densenet', 'params': {}})
         convnet_type = convnet_config['type']
-        convnet_params = convnet_config['params']
+        convnet_params = convnet_config.get('params') or {}
         self.convnet, convnet_output_channels = create_convnet(
             convnet_type=convnet_type,
             in_channels=frontend_output_channels,
             **convnet_params
         )
         print(f"Convnet output channels: {convnet_output_channels}")
-        
+
         # Build shared modulator
         modulator_config = self.model_config.get('modulator', {'type': 'none', 'params': {}})
         modulator_type = modulator_config['type']
-        modulator_params = modulator_config['params'].copy()
+        modulator_params = modulator_config.get('params') or {}
+        if modulator_params:
+            modulator_params = modulator_params.copy()
+        else:
+            modulator_params = {}
         modulator_params['feature_dim'] = convnet_output_channels
         self.modulator, modulator_dim = create_modulator(
             modulator_type=modulator_type,
@@ -377,7 +382,7 @@ class MultiDatasetV1Model(ModularV1Model):
         # Build shared recurrent
         recurrent_config = self.model_config.get('recurrent', {'type': 'none', 'params': {}})
         recurrent_type = recurrent_config['type']
-        recurrent_params = recurrent_config['params']
+        recurrent_params = recurrent_config.get('params') or {}
         self.recurrent, recurrent_output_channels = create_recurrent(
             recurrent_type=recurrent_type,
             input_dim=current_channels,
@@ -398,7 +403,12 @@ class MultiDatasetV1Model(ModularV1Model):
                 readout_config = model_readout_config
 
             readout_type = readout_config['type']
-            readout_params = readout_config['params'].copy()
+            # Handle case where params is None (e.g., when YAML has only comments)
+            readout_params = readout_config.get('params') or {}
+            if readout_params:
+                readout_params = readout_params.copy()
+            else:
+                readout_params = {}
 
             # Set n_units based on dataset cids
             cids = dataset_config.get('cids', [])

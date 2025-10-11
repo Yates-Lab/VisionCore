@@ -262,6 +262,12 @@ class PolarRecurrent(nn.Module):
             if self.modulator is None:
                 raise RuntimeError("Modulator not set. Call set_modulator() first.")
             beh_params = self.modulator.beh_params
+            if beh_params is None:
+                raise RuntimeError(
+                    "Behavior parameters not available. "
+                    "When use_behavior=True, you must pass behavior data to the model forward method: "
+                    "model(stimulus, dataset_idx, behavior)"
+                )
             A_adv, U_adv = self.dynamics(A_list, U_list, beh_params)
         else:
             A_adv, U_adv = A_list, U_list
@@ -281,7 +287,21 @@ class PolarRecurrent(nn.Module):
             self.modulator = modulator
 
     def get_jepa_loss(self):
-        """Get JEPA loss for auxiliary loss."""
+        """Get JEPA loss for auxiliary loss (legacy method)."""
         if self.jepa is not None:
             return self.jepa.get_jepa_loss()
-        return torch.tensor(0.0)
+        return None
+
+    def get_auxiliary_loss(self):
+        """
+        Get auxiliary loss from this module.
+
+        This is the standard interface for auxiliary losses.
+        Returns JEPA loss if JEPA is enabled.
+
+        Returns
+        -------
+        torch.Tensor or None
+            Auxiliary loss if available, None otherwise
+        """
+        return self.get_jepa_loss()

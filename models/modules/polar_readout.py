@@ -44,7 +44,7 @@ class GaussianReadout(nn.Module):
         """
         Args:
             feat: [B, C, H, W] features
-            
+
         Returns:
             output: [B, n_neurons] readout values
         """
@@ -62,9 +62,12 @@ class GaussianReadout(nn.Module):
         denom = 2*(1 - rho**2 + 1e-6)
         G = torch.exp(-A/denom)                                    # [n,H,W]
 
-        # sample + channel mix
-        G = G.unsqueeze(0).unsqueeze(2)                            # [1,n,1,H,W]
-        pooled = (feat.unsqueeze(1) * G).sum(dim=(-1, -2))         # [B,n,C]
+        # Memory-efficient spatial pooling using einsum
+        # G: [n, H, W], feat: [B, C, H, W]
+        # We want: pooled[b, n, c] = sum_{h,w} feat[b, c, h, w] * G[n, h, w]
+        pooled = torch.einsum('nhw,bchw->bnc', G, feat)            # [B,n,C]
+
+        # Channel mixing
         out = (pooled * self.weight[None].to(feat.dtype)).sum(-1)  # [B,n]
         return out
 
@@ -86,15 +89,20 @@ class PolarMultiLevelReadout(nn.Module):
         """Initialize readouts based on input feature shapes."""
         if self.readouts is not None:
             return
-        
+
         n_levels = len(feats_per_level)
         self.readouts = nn.ModuleList()
-        
+
+        # Get device and dtype from first feature
+        device = feats_per_level[0].device
+        dtype = feats_per_level[0].dtype
+
         for l, feat in enumerate(feats_per_level):
             C, H, W = feat.shape[1], feat.shape[2], feat.shape[3]
-            self.readouts.append(
-                GaussianReadout(C=C, H=H, W=W, n_neurons=self.n_neurons)
-            )
+            readout = GaussianReadout(C=C, H=H, W=W, n_neurons=self.n_neurons)
+            # Move to same device as features
+            readout = readout.to(device=device)
+            self.readouts.append(readout)
     
     def forward(self, feats_per_level: List[torch.Tensor]) -> torch.Tensor:
         """

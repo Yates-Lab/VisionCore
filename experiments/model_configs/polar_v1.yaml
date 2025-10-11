@@ -16,7 +16,7 @@ modulator:
   type: polar
   params:
     beh_dim: 128
-    dt: 0.004166667  # 1/240 Hz = 4.17ms (using explicit decimal to avoid YAML parsing issues)
+    dt: 0.008333  # 1/120 Hz = 8.33ms
     use_pos_fourier: true
     Kpos: 2
     init_pos_freq_cpx: 0.015625  # 1/64 (using explicit decimal)
@@ -25,14 +25,14 @@ modulator:
 recurrent:
   type: polar
   params:
-    dt: 0.004166667  # 1/240 Hz = 4.17ms
+    dt: 0.008333   # 1/120 Hz = 8.33ms
     lambda_fix: 10.0
     lambda_sac: 40.0
     alpha_fast: 0.74
     alpha_slow: 0.95
     base_freq_cpx: 0.15
     use_behavior: true
-    use_jepa: false
+    use_jepa: false  # JEPA requires temporal windowing (future work)
 
 # Readout: Multi-level Gaussian readout
 readout:
@@ -45,3 +45,6 @@ output_activation: softplus
 
 # Training parameters
 baseline_enabled: false
+
+# Auxiliary loss weights (for future use)
+lambda_jepa: 0.5  # Weight for JEPA loss when enabled
