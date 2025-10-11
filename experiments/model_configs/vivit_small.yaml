@@ -1,0 +1,141 @@
+# ViViT Small - Faster training for experimentation
+# Reduced model size for quick iteration and debugging
+
+model_type: v1multi
+
+# Model dimensions
+sampling_rate: 240
+initial_input_channels: 1
+
+# Frontend configuration
+adapter:
+  type: adapter
+  params: {grid_size: 51, init_sigma: 1.0, transform: scale}
+
+frontend:
+  type: none
+  params: {}
+
+# ViViT Convnet configuration - SMALL VERSION
+convnet:
+  type: vivit
+  params:
+    final_activation: softplus
+    dim: 3
+    checkpointing: false
+    
+    # Tokenizer parameters - larger patches for fewer tokens
+    tokenizer:
+      kernel_size: [8, 8, 8]  # Larger patches = fewer tokens = faster
+      stride: [8, 8, 8]
+      norm: rmsnorm
+      padding: 0
+    
+    # Smaller embedding dimension
+    embedding_dim: 192  # Half of baseline
+    
+    # Fewer transformer layers
+    num_spatial_blocks: 4   # Reduced from 6
+    num_temporal_blocks: 4  # Reduced from 6
+    
+    # Attention configuration
+    num_heads: 4
+    head_dim: 48  # embedding_dim = 4 * 48 = 192
+    
+    # Smaller feedforward
+    ff_dim: 768  # 4x embedding_dim
+    ff_activation: swiglu
+    
+    # Regularization
+    mha_dropout: 0.1
+    ff_dropout: 0.1
+    drop_path: 0.05  # Reduced
+    patch_dropout: 0.05  # Reduced
+    
+    # Architecture choices
+    use_rope: true
+    flash_attention: true
+    norm: rmsnorm
+    normalize_qk: false
+    grad_checkpointing: false
+    
+    # No register tokens for small model
+    use_register_tokens: false
+    num_register_tokens: 0
+    
+    # Transformer parameters
+    transformer_params:
+      num_heads: 4
+      head_dim: 48
+      ff_dim: 768
+      ff_activation: swiglu
+      mha_dropout: 0.1
+      ff_dropout: 0.1
+      drop_path: 0.05
+      use_rope: true
+      flash_attention: true
+      is_causal: false
+      norm: rmsnorm
+      normalize_qk: false
+      grad_checkpointing: false
+
+# Modulator configuration
+modulator:
+  type: convgru
+  params:
+    behavior_dim: 42
+    feature_dim: 192  # Match embedding_dim
+    hidden_dim: 192
+    beh_emb_dim: 16  # Smaller
+    kernel_size: 3
+
+# No recurrent layer
+recurrent:
+  type: none
+  params: {}
+
+# Readout configuration
+readout:
+  type: gaussian
+  params:
+    n_units: 8
+    bias: true
+    initial_std: 5.0
+    initial_mean_scale: 0.1
+
+output_activation: none
+
+# Regularization
+regularization:
+  - name: readout_sparsity
+    type: l1
+    lambda: 1.0e-7
+    apply_to: ["readouts/features"]
+    schedule:
+      kind: warmup
+      start_epoch: 1
+  
+  - name: decay_readout_std
+    type: proximal_clamp_positive
+    lambda: 1.5
+    apply_to: ["readouts/std"]
+    schedule:
+      kind: linear_decay
+      start_epoch: 0
+      end_epoch: 50
+      start_lambda: 10.0
+  
+  - name: exclude_means_from_wd
+    type: l2
+    lambda: 0.0
+    apply_to: ["readouts/mean"]
+    schedule:
+      kind: constant
+
+# Notes:
+# - Smaller model for faster experimentation
+# - Input: (B, 1, 300, 36, 64)
+# - After tokenizer: (B, 37, 36, 192) -> 37 temporal, 36 spatial (4.5x8 ≈ 6x6), 192 dims
+# - Much faster training and inference
+# - Good for debugging and hyperparameter search
+
