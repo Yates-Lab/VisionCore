@@ -347,7 +347,8 @@ CONVNETS = {'vanilla': VanillaCNN,
             'cnn': VanillaCNN,
             'resnet': ResNet,
             'densenet': DenseNet,
-            'shifttcn': ShiftTCN}
+            'shifttcn': ShiftTCN,
+            'vivit': None}  # ViViT handled separately in factory due to lazy import
 
 def build_model(config: Dict[str, Any]) -> nn.Module:
     """Builds a CNN model based on config."""
