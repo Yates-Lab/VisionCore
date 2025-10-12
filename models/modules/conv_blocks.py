@@ -161,7 +161,7 @@ class ResBlock(nn.Module):
      This implementation handles both identity shortcuts and projection shortcuts,
      and ensures proper spatial dimension matching between the main path and shortcut.
      """
-     def __init__(self, main_block: ConvBlock, shortcut: nn.Module, post_add_activation: nn.Module):
+     def __init__(self, main_block: ConvBlock, shortcut: nn.Module, post_add_activation: nn.Module = nn.Identity()):
           super().__init__()
           self.main_block = main_block
           self.shortcut = shortcut

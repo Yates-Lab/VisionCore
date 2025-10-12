@@ -23,7 +23,7 @@ frontend:
 convnet:
   type: resnet
   params:
-    final_activation: softplus
+    final_activation: none
     channels: [8, 256, 128]
     dim: 3
     checkpointing: false

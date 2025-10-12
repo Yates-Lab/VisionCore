@@ -10,7 +10,7 @@ conda activate fix2
 
 # Set environment variables for optimal performance
 export CUDA_VISIBLE_DEVICES=0,1
-export NCCL_DEBUG=WARN
+export NCCL_DEBUG=ERROR
 export PYTHONPATH="${PYTHONPATH}:$(pwd)"
 
 # NCCL settings that fixed the DDP hang

@@ -175,7 +175,7 @@ def build_resnet_config(
         'base_channels': out_channels,
         'checkpointing': use_checkpointing,
         'resnet_shortcut_norm_type': norm_type,
-        'resnet_post_add_activation': 'relu',
+        'resnet_post_add_activation': 'none',
         'stem_config': {
             'out_channels': out_channels,
             'conv_params': {

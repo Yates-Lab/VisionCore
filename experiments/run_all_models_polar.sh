@@ -10,7 +10,7 @@ conda activate yatesfv
 
 # Set environment variables for optimal performance
 export CUDA_VISIBLE_DEVICES=0,1
-export NCCL_DEBUG=WARN
+export NCCL_DEBUG=ERROR
 export PYTHONPATH="${PYTHONPATH}:$(pwd)"
 
 # NCCL settings that fixed the DDP hang
@@ -28,7 +28,7 @@ export LD_LIBRARY_PATH="$HOME/.local/lib:$LD_LIBRARY_PATH"
 # export TORCH_DISTRIBUTED_DEBUG=DETAIL
 # export NCCL_DEBUG=INFO
 export PYTHONFAULTHANDLER=1
-export CUDA_LAUNCH_BLOCKING=1
+export CUDA_LAUNCH_BLOCKING=0
 export TORCH_SHOW_CPP_STACKTRACES=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:128
 
