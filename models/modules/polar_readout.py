@@ -10,6 +10,7 @@ This handles spatial pooling per neuron across multiple pyramid levels.
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from typing import List, Tuple
 
 __all__ = ['PolarMultiLevelReadout', 'GaussianReadout']
@@ -22,15 +23,19 @@ class GaussianReadout(nn.Module):
     Positions & covariances are learned per neuron+level.
     """
     
-    def __init__(self, C: int, H: int, W: int, n_neurons: int):
+    def __init__(self, C: int, H: int, W: int, n_neurons: int, initial_std: float = 5.0, initial_mean_scale: float = 0.0):
         super().__init__()
         self.n = n_neurons
         self.C, self.H, self.W = C, H, W
-        self.mu    = nn.Parameter(torch.rand(n_neurons, 2)*2-1)
-        self.logsx = nn.Parameter(torch.zeros(n_neurons))
-        self.logsy = nn.Parameter(torch.zeros(n_neurons))
+
+        # Gaussian position parameters - EXACTLY like DynamicGaussianReadout
+        self.mu    = nn.Parameter(initial_mean_scale * torch.randn(n_neurons, 2))
+        self.logsx = nn.Parameter(torch.log(torch.ones(n_neurons) * initial_std))
+        self.logsy = nn.Parameter(torch.log(torch.ones(n_neurons) * initial_std))
         self.rho   = nn.Parameter(torch.zeros(n_neurons))
-        self.weight= nn.Parameter(torch.randn(n_neurons, C)*0.01)
+
+        # Feature weights - 1x1 conv like BaseFactorizedReadout (no bias in features)
+        self.features = nn.Conv2d(C, n_neurons, kernel_size=1, bias=False)
 
     @staticmethod
     def gaussian_grid(H, W, device, dtype):
@@ -50,6 +55,11 @@ class GaussianReadout(nn.Module):
         """
         # feat: [B, C, H, W]
         B, C, H, W = feat.shape
+
+        # Apply feature weights FIRST (like DynamicGaussianReadout)
+        feat_weighted = self.features(feat)  # [B, n_neurons, H, W]
+
+        # Compute Gaussian mask
         grid = self.gaussian_grid(H, W, feat.device, feat.dtype)   # [H,W,2]
         X = grid.unsqueeze(0).expand(self.n, H, W, 2)              # [n,H,W,2]
         mu = self.mu[:, None, None, :]                             # [n,1,1,2]
@@ -62,13 +72,9 @@ class GaussianReadout(nn.Module):
         denom = 2*(1 - rho**2 + 1e-6)
         G = torch.exp(-A/denom)                                    # [n,H,W]
 
-        # Memory-efficient spatial pooling using einsum
-        # G: [n, H, W], feat: [B, C, H, W]
-        # We want: pooled[b, n, c] = sum_{h,w} feat[b, c, h, w] * G[n, h, w]
-        pooled = torch.einsum('nhw,bchw->bnc', G, feat)            # [B,n,C]
-
-        # Channel mixing
-        out = (pooled * self.weight[None].to(feat.dtype)).sum(-1)  # [B,n]
+        # Apply Gaussian mask and sum over spatial dimensions
+        # feat_weighted: [B, n, H, W], G: [n, H, W]
+        out = (feat_weighted * G.unsqueeze(0)).sum(dim=(-2, -1))  # [B, n]
         return out
 
 
@@ -80,10 +86,17 @@ class PolarMultiLevelReadout(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.n_neurons = config['n_units']
-        
+        # Match DynamicGaussianReadout defaults EXACTLY
+        self.initial_std = config.get('initial_std', 5.0)
+        self.initial_mean_scale = config.get('initial_mean_scale', 0.0)
+
         # Will be lazy-initialized on first forward
         self.readouts = None
-        self.bias = nn.Parameter(torch.zeros(self.n_neurons))
+        # Initialize bias exactly like DynamicGaussianReadout
+        if config.get('bias', True):
+            self.bias = nn.Parameter(torch.zeros(self.n_neurons))
+        else:
+            self.register_parameter('bias', None)
     
     def _lazy_init(self, feats_per_level: List[torch.Tensor]):
         """Initialize readouts based on input feature shapes."""
@@ -99,7 +112,9 @@ class PolarMultiLevelReadout(nn.Module):
 
         for l, feat in enumerate(feats_per_level):
             C, H, W = feat.shape[1], feat.shape[2], feat.shape[3]
-            readout = GaussianReadout(C=C, H=H, W=W, n_neurons=self.n_neurons)
+            readout = GaussianReadout(C=C, H=H, W=W, n_neurons=self.n_neurons,
+                                     initial_std=self.initial_std,
+                                     initial_mean_scale=self.initial_mean_scale)
             # Move to same device as features
             readout = readout.to(device=device)
             self.readouts.append(readout)
@@ -118,8 +133,11 @@ class PolarMultiLevelReadout(nn.Module):
         parts = []
         for l, feat in enumerate(feats_per_level):
             parts.append(self.readouts[l](feat))
-        
+
         output = torch.stack(parts, dim=-1).sum(dim=-1)
-        output = output + self.bias
-        
+
+        # Add bias if present
+        if self.bias is not None:
+            output = output + self.bias
+
         return output

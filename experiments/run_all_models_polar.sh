@@ -35,7 +35,7 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:128
 # Training configuration
 BATCH_SIZE=256          # Conservative batch size for polar model (memory intensive)
 MAX_DATASETS=30        # Scale to all datasets (28 if removed the two bad sessions)
-LEARNING_RATE=3e-4     # Conservative learning rate for complex polar model
+LEARNING_RATE=1e-3     # Conservative learning rate for complex polar model
 CORE_LR_SCALE=0.5
 LR_SCHEDULER="cosine_warmup"  # Use cosine annealing with warmup
 WARMUP_EPOCHS=5        # Number of warmup epochs
@@ -61,10 +61,11 @@ mkdir -p $CHECKPOINT_DIR
 
 # Array of model configurations to run
 MODEL_CONFIGS=(
-    # "experiments/model_configs/polar_v1.yaml"
+    "experiments/model_configs/polar_v1.yaml"
     "experiments/model_configs/polar_v1_behavior_only.yaml"
     # "experiments/model_configs/polar_v1_jepa_only.yaml"
     "experiments/model_configs/polar_v1_minimal.yaml"
+    
     # "experiments/model_configs/learned_res_small_gru.yaml"
 
     # "experiments/model_configs/res_small_gru.yaml"

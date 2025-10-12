@@ -252,82 +252,29 @@ class MultiDatasetModel(pl.LightningModule):
 
     def _compute_auxiliary_loss(self):
         """
-        Compute auxiliary losses from any model components that provide them.
-
-        This method checks all model components (convnet, modulator, recurrent, etc.)
-        for auxiliary loss methods and aggregates them.
+        Compute auxiliary loss for PC modulator if present.
 
         Returns
         -------
         torch.Tensor or None
-            Total auxiliary loss if any components provide it, None otherwise
+            Auxiliary loss if PC modulator is present and has prediction error
         """
-        total_aux_loss = None
-        aux_loss_components = {}
+        # Check if model has a PC modulator with prediction error
+        if hasattr(self.model, 'modulator') and self.model.modulator is not None:
+            if hasattr(self.model.modulator, 'pred_err') and self.model.modulator.pred_err is not None:
+                # Get lambda weight from model config or use default
+                lambda_pred = getattr(self, 'lambda_pred', 0.1)
+                if hasattr(self, 'hparams') and hasattr(self.hparams, 'model_config'):
+                    lambda_pred = self.hparams.model_config.get('lambda_pred', lambda_pred)
+                elif hasattr(self, 'model_config'):
+                    lambda_pred = self.model_config.get('lambda_pred', lambda_pred)
 
-        # List of model components to check for auxiliary losses
-        components_to_check = [
-            ('convnet', self.model.convnet if hasattr(self.model, 'convnet') else None),
-            ('modulator', self.model.modulator if hasattr(self.model, 'modulator') else None),
-            ('recurrent', self.model.recurrent if hasattr(self.model, 'recurrent') else None),
-            ('frontend', self.model.frontend if hasattr(self.model, 'frontend') else None),
-        ]
-
-        for component_name, component in components_to_check:
-            if component is None:
-                continue
-
-            # Check for get_auxiliary_loss() method (preferred)
-            if hasattr(component, 'get_auxiliary_loss') and callable(getattr(component, 'get_auxiliary_loss')):
-                try:
-                    aux_loss = component.get_auxiliary_loss()
-                    if aux_loss is not None and aux_loss != 0.0:
-                        # Get lambda weight from config
-                        lambda_key = f'lambda_{component_name}'
-                        lambda_weight = self.model_config.get(lambda_key, 1.0)
-                        weighted_loss = lambda_weight * aux_loss
-                        aux_loss_components[component_name] = weighted_loss
-                        if total_aux_loss is None:
-                            total_aux_loss = weighted_loss
-                        else:
-                            total_aux_loss = total_aux_loss + weighted_loss
-                except Exception as e:
-                    print(f"Warning: Failed to compute auxiliary loss for {component_name}: {e}")
-
-            # Legacy support: Check for specific loss methods
-            # PC modulator with pred_err
-            elif component_name == 'modulator' and hasattr(component, 'pred_err') and component.pred_err is not None:
-                lambda_pred = self.model_config.get('lambda_pred', 0.1)
-                pred_err = component.pred_err
+                # Compute L2 loss on prediction error
+                pred_err = self.model.modulator.pred_err
                 aux_loss = lambda_pred * (pred_err ** 2).mean()
-                aux_loss_components['pc_modulator'] = aux_loss
-                if total_aux_loss is None:
-                    total_aux_loss = aux_loss
-                else:
-                    total_aux_loss = total_aux_loss + aux_loss
+                return aux_loss
 
-            # JEPA loss (legacy support)
-            elif hasattr(component, 'get_jepa_loss') and callable(getattr(component, 'get_jepa_loss')):
-                try:
-                    jepa_loss = component.get_jepa_loss()
-                    if jepa_loss is not None and jepa_loss != 0.0:
-                        lambda_jepa = self.model_config.get('lambda_jepa', 0.5)
-                        weighted_loss = lambda_jepa * jepa_loss
-                        aux_loss_components['jepa'] = weighted_loss
-                        if total_aux_loss is None:
-                            total_aux_loss = weighted_loss
-                        else:
-                            total_aux_loss = total_aux_loss + weighted_loss
-                except Exception as e:
-                    print(f"Warning: Failed to compute JEPA loss for {component_name}: {e}")
-
-        # Log individual auxiliary loss components
-        if aux_loss_components and self.global_rank == 0:
-            for name, loss in aux_loss_components.items():
-                self.log(f'aux_loss/{name}', loss.item(),
-                        on_step=True, on_epoch=True, prog_bar=False, sync_dist=False)
-
-        return total_aux_loss
+        return None
 
     def forward(self, stim, ds_idx, beh=None):
         """
@@ -457,9 +404,6 @@ class MultiDatasetModel(pl.LightningModule):
                 self.log('aux_loss', aux_loss.item(),
                         batch_size=sum(len(b) for b in bl),
                         on_step=True, on_epoch=True, prog_bar=False, sync_dist=False)
-                # Debug output for first few steps
-                if self.global_step < 5:
-                    print(f"🎯 Step {self.global_step}: aux_loss={aux_loss.item():.6f}, base_loss={base_loss.item():.6f}")
 
         # Add regularization penalties
         epoch = self.current_epoch

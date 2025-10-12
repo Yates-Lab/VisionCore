@@ -137,8 +137,26 @@ class PolarJEPA(nn.Module):
         
         return torch.stack(losses).mean()
 
+    def compute_and_store_loss(self,
+                               feats_ctx: List[torch.Tensor],
+                               feats_tgt: List[torch.Tensor],
+                               mask_ratio: float = 0.5):
+        """
+        Compute JEPA loss and store it for later retrieval.
+
+        Args:
+            feats_ctx: Context features (early frames) - List of [B, C, H, W]
+            feats_tgt: Target features (late frames) - List of [B, C, H, W]
+            mask_ratio: Fraction of spatial tokens to mask
+        """
+        # Compute loss using the existing method
+        self._jepa_loss = self.compute_jepa_loss(feats_ctx, feats_tgt, mask_ratio)
+
+        # Update EMA teacher
+        self.ema_update()
+
     def get_jepa_loss(self) -> torch.Tensor:
         """Get the stored JEPA loss."""
         if self._jepa_loss is None:
-            return torch.tensor(0.0)
+            return None
         return self._jepa_loss

@@ -238,6 +238,8 @@ class PolarRecurrent(nn.Module):
         if self.use_jepa:
             from .polar_jepa import PolarJEPA
             self.jepa = PolarJEPA(config)
+            # Temporal shift for JEPA (number of frames)
+            self.jepa_delta = config.get('jepa_delta', 5)
         else:
             self.jepa = None
 
@@ -272,11 +274,34 @@ class PolarRecurrent(nn.Module):
         else:
             A_adv, U_adv = A_list, U_list
 
-        # Apply JEPA (if enabled)
-        if self.jepa is not None:
-            A_adv, U_adv = self.jepa(A_adv, U_adv)
+        # Apply JEPA (if enabled) - compute loss from temporal slicing
+        # This has ZERO overhead when jepa is None or not training
+        if self.jepa is not None and self.training:
+            # Temporal shift for JEPA (frames)
+            delta = getattr(self, 'jepa_delta', 5)
 
-        # Temporal summarization
+            # Check if we have enough temporal frames
+            T = A_adv[0].shape[2]  # [B, M, T, H, W]
+            if T > delta:
+                # Split into context (early frames) and target (late frames)
+                A_ctx = [A[:, :, :-delta] for A in A_adv]
+                U_ctx = [U[:, :, :, :-delta] for U in U_adv]  # Fixed: was A_adv
+
+                A_tgt = [A[:, :, delta:] for A in A_adv]
+                U_tgt = [U[:, :, :, delta:] for U in U_adv]
+
+                # Summarize both windows
+                feats_ctx = self.summarizer(A_ctx, U_ctx)
+                feats_tgt = self.summarizer(A_tgt, U_tgt)
+
+                # Compute and store JEPA loss (with stop-grad on target)
+                self.jepa.compute_and_store_loss(feats_ctx, feats_tgt)
+            else:
+                # Not enough frames for JEPA, store zero loss
+                if hasattr(self.jepa, '_jepa_loss'):
+                    self.jepa._jepa_loss = None
+
+        # Temporal summarization for readout (use full window)
         feats_per_level = self.summarizer(A_adv, U_adv)
 
         return feats_per_level
