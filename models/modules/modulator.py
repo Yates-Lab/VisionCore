@@ -329,7 +329,7 @@ class ConvGRUModulator(BaseModulator):
     """
 
     def _build_modulator(self):
-        """Build the behavior embedding and ConvGRU processor."""
+        """Build the behavior embedding and ConvGRU processor with optimizations."""
         cfg = self.config
         self.feature_dim = cfg['feature_dim']
         self.behavior_dim = cfg['behavior_dim']
@@ -337,15 +337,31 @@ class ConvGRUModulator(BaseModulator):
         self.beh_emb_dim = cfg.get('beh_emb_dim', 16)
         self.kernel_size = cfg.get('kernel_size', 3)
 
+        # ConvGRU optimization options
+        use_layer_norm = cfg.get('use_layer_norm', True)
+        use_depthwise = cfg.get('use_depthwise', False)
+        use_grouped = cfg.get('use_grouped', False)
+        num_groups = cfg.get('num_groups', 1)
+        learnable_h0 = cfg.get('learnable_h0', True)
+        use_residual = cfg.get('use_residual', False)
+        grad_clip_val = cfg.get('grad_clip_val', None)
+
         # Behavior embedding
         self.beh_emb = nn.Linear(self.behavior_dim, self.beh_emb_dim)
 
-        # ConvGRU processor
+        # ConvGRU processor with optimizations
         # Input = features + embedded behavior
         self.gru = ConvGRU(
             in_ch=self.feature_dim + self.beh_emb_dim,
             hid_ch=self.hidden_dim,
-            k=self.kernel_size
+            k=self.kernel_size,
+            use_layer_norm=use_layer_norm,
+            use_depthwise=use_depthwise,
+            use_grouped=use_grouped,
+            num_groups=num_groups,
+            learnable_h0=learnable_h0,
+            use_residual=use_residual,
+            grad_clip_val=grad_clip_val
         )
 
         # Output projection to remove tanh clipping

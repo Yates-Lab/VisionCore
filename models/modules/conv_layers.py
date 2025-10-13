@@ -55,7 +55,10 @@ class AntiAliasedConv1d(nn.Conv1d):
       - aa_cutoff:       normalized cutoff (0..0.5, Nyquist=0.5). Default 0.45
       - aa_transition:   transition width (0..0.5-cutoff). Default 0.05
       - aa_fft_pad:      pad factor for FFT length (>=1). Default 2
-      - aa_enable:       bool to toggle. Default True
+      - aa_enable:       bool to toggle all anti-aliasing. Default True
+      - aa_enable_time:  bool to toggle time-domain windowing. Default True
+      - aa_enable_freq:  bool to toggle frequency-domain filtering. Default True
+      - aa_double_window: bool to apply time window after IFFT to reduce ripple. Default True
     """
     def __init__(
         self,
@@ -77,12 +80,18 @@ class AntiAliasedConv1d(nn.Conv1d):
         aa_transition: float = 0.05,
         aa_fft_pad: int = 2,
         aa_enable: bool = True,
+        aa_enable_time: bool = True,
+        aa_enable_freq: bool = False,
+        aa_double_window: bool = True,
     ):
         super().__init__(in_channels, out_channels, kernel_size, stride, padding,
                          dilation, groups, bias, padding_mode, device=device, dtype=dtype)
 
         # Store AA config
         self.aa_enable = aa_enable
+        self.aa_enable_time = aa_enable_time
+        self.aa_enable_freq = aa_enable_freq
+        self.aa_double_window = aa_double_window
         self.aa_time_window = aa_time_window.lower()
         self.aa_kaiser_beta = float(aa_kaiser_beta)
         self.aa_cutoff = float(aa_cutoff)
@@ -101,8 +110,9 @@ class AntiAliasedConv1d(nn.Conv1d):
         self.register_buffer("_aa_time_win", None, persistent=False)
         self.register_buffer("_aa_freq_mask", None, persistent=False)
         self.register_buffer("_aa_freqs", None, persistent=False)
-        self.register_buffer("_aa_last_device", None, persistent=False)
-        self.register_buffer("_aa_last_dtype", None, persistent=False)
+        # Track device/dtype for lazy rebuild
+        self._aa_last_device = None
+        self._aa_last_dtype = None
 
     def _maybe_build_windows(self, device, dtype):
         # Rebuild if device/dtype changed or not built yet
@@ -133,8 +143,9 @@ class AntiAliasedConv1d(nn.Conv1d):
         self._aa_time_win = w  # [k]
         self._aa_freqs = freqs.to(device=device, dtype=dtype)            # [Nfft//2+1]
         self._aa_freq_mask = mask                                       # [Nfft//2+1]
-        self._aa_last_device = torch.tensor(0, device=device, dtype=torch.int8)
-        self._aa_last_dtype = torch.tensor(0, device=device, dtype=torch.int8)
+        # Fix: Actually track device and dtype (not dummy tensors)
+        self._aa_last_device = device
+        self._aa_last_dtype = dtype
 
     def _window_weight(self):
         """
@@ -146,33 +157,43 @@ class AntiAliasedConv1d(nn.Conv1d):
 
         device = self.weight.device
         dtype = self.weight.dtype
-        self._maybe_build_windows(device, dtype)
-
-        w_time = self._aa_time_win  # [k]
-        mask = self._aa_freq_mask   # [Nfft//2+1]
-        Nfft = (mask.numel() - 1) * 2
 
         # Shapes:
         # weight: [out_ch, in_ch/groups, k]
         k = self.kernel_size[0]
         w = self.weight
 
-        # Time-domain windowing (broadcast over out/in channels)
-        w_t = w * w_time.view(1, 1, k)
+        # If neither time nor freq windowing is enabled, return original weight
+        if not self.aa_enable_time and not self.aa_enable_freq:
+            return w
 
-        # FFT along kernel axis
-        Wf = torch.fft.rfft(w_t, n=Nfft, dim=2)  # [out, in, Nfft//2+1]
+        # Build windows if needed
+        self._maybe_build_windows(device, dtype)
+        w_time = self._aa_time_win  # [k]
 
-        # Apply smooth low-pass mask in frequency domain
-        Wf_lp = Wf * mask.view(1, 1, -1)
+        # Time-domain windowing (if enabled)
+        if self.aa_enable_time:
+            w = w * w_time.view(1, 1, k)
 
-        # Back to time
-        w_lp = torch.fft.irfft(Wf_lp, n=Nfft, dim=2)[..., :k]  # trim to original length
+        # Frequency-domain filtering (if enabled)
+        if self.aa_enable_freq:
+            mask = self._aa_freq_mask   # [Nfft//2+1]
+            Nfft = (mask.numel() - 1) * 2
 
-        # (Optional) a second gentle time-window to reduce edge ripple post-ifft
-        w_lp = w_lp * w_time.view(1, 1, k)
+            # FFT along kernel axis
+            Wf = torch.fft.rfft(w, n=Nfft, dim=2)  # [out, in, Nfft//2+1]
 
-        return w_lp
+            # Apply smooth low-pass mask in frequency domain
+            Wf_lp = Wf * mask.view(1, 1, -1)
+
+            # Back to time
+            w = torch.fft.irfft(Wf_lp, n=Nfft, dim=2)[..., :k]  # trim to original length
+
+            # (Optional) a second gentle time-window to reduce edge ripple post-ifft
+            if self.aa_enable_time and self.aa_double_window:
+                w = w * w_time.view(1, 1, k)
+
+        return w
 
     def forward(self, input):
         # identical to nn.Conv1d.forward but with windowed weight

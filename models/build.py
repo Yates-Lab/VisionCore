@@ -85,11 +85,32 @@ def initialize_model_components(model: nn.Module, init_bias=None) -> None:
         else:
             raise ValueError("Model must have a 'readout' or 'readouts' attribute for bias initialization")
 
+    # Zero-init the final normalization layer in each ResNet block for better gradient flow
+    # This is a modern ResNet best practice (used in ResNet-v2, etc.)
+    from .modules.conv_blocks import ResBlock
+    from .modules.norm_act_pool import RMSNorm
+
+    for module in model.modules():
+        if isinstance(module, ResBlock):
+            # Zero-init the last norm in the main_block
+            # This makes the residual branch initially contribute nothing,
+            # so the network starts as identity mappings
+            if hasattr(module.main_block, 'components') and 'norm' in module.main_block.components:
+                norm_layer = module.main_block.components['norm']
+                # Zero-init gamma (scale) for RMSNorm, BatchNorm, LayerNorm, etc.
+                if hasattr(norm_layer, 'weight') and norm_layer.weight is not None:
+                    nn.init.zeros_(norm_layer.weight)
+                # Also zero-init gamma for RMSNorm if it has affine parameters
+                if isinstance(norm_layer, RMSNorm) and norm_layer.affine:
+                    nn.init.zeros_(norm_layer.gamma)
+
     for name, module in model.named_modules():
-        # DenseNet initialization
+        # ConvNet initialization (DenseNet, ResNet, etc.)
         if 'densenet' in name.lower() or 'convnet' in name.lower():
             if isinstance(module, nn.Conv2d) or isinstance(module, nn.Conv3d):
-                nn.init.kaiming_normal_(module.weight, mode='fan_out', nonlinearity='relu')
+                # Use leaky_relu approximation for SiLU/Swish activations
+                # SiLU has an effective gain closer to leaky_relu with small negative slope
+                nn.init.kaiming_normal_(module.weight, mode='fan_out', nonlinearity='leaky_relu', a=0.01)
             elif isinstance(module, nn.BatchNorm2d) or isinstance(module, nn.BatchNorm3d) or isinstance(module, nn.LayerNorm):
                 if hasattr(module, 'weight') and module.weight is not None:
                     nn.init.constant_(module.weight, 1.0)

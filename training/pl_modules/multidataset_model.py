@@ -533,7 +533,9 @@ class MultiDatasetModel(pl.LightningModule):
         if head_params_no_wd:
             param_groups.append({"params": head_params_no_wd, "lr": self.head_lr, "weight_decay": 0.0})
 
-        optim = torch.optim.AdamW(param_groups)
+        # Use optimized AdamW betas for better generalization
+        # beta2=0.95 (instead of default 0.999) helps with noisy multi-dataset gradients
+        optim = torch.optim.AdamW(param_groups, betas=(0.9, 0.95), eps=1e-8)
 
         # Log regularization info
         if excluded_param_names and self.global_rank == 0:

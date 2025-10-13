@@ -1,0 +1,148 @@
+# V1 multidataset model configuration with OPTIMIZED ResNet convnet and ConvGRU modulation
+# This model has shared components (frontend, ResNet, modulator)
+# and experiment specific components (adapter, readout)
+# 
+# OPTIMIZATIONS APPLIED:
+# 1. RMSNorm with learnable affine parameters (gamma/beta)
+# 2. Proper initialization for SiLU activation (kaiming with leaky_relu approximation)
+# 3. Zero-init for final norm in residual blocks (better gradient flow)
+# 4. Weight normalization enabled on early layers (using standard conv)
+# 5. Improved channel progression: 64 -> 128 -> 256 (monotonically increasing)
+# 6. Standard convolutions (compatible with weight norm)
+model_type: v1multi
+
+# Model dimensions
+sampling_rate: 240
+initial_input_channels: 1 # number of channels in the input data
+
+# Frontend configuration
+adapter:
+  type: adapter
+  params: {grid_size: 51, init_sigma: 1, transform: scale}
+
+frontend:
+  type: learnable_temporal
+  params: {kernel_size: 16, num_channels: 4, init_type: gaussian_derivatives,
+          anti_aliasing: false,
+          causal: true, bias: false}
+
+# Convnet configuration - OPTIMIZED ResNet with per-layer block configs
+convnet:
+  type: resnet
+  params:
+    final_activation: none  # Keep linear path for phase sensitivity
+    channels: [64, 128, 256]  # Monotonically increasing (was [8, 256, 128])
+    dim: 3
+    checkpointing: false
+    block_configs:
+
+      # Stage 0: Initial feature extraction with weight norm for stability
+      - conv_params:
+          type: standard  # Standard conv (compatible with weight norm)
+          kernel_size: [3, 5, 5]
+          padding:    [1, 3, 3]
+          stride:     2
+        norm_type: rms
+        norm_params:
+          affine: true  # Enable learnable gamma/beta
+        act_type: silu
+        dropout: 0.0
+        use_weight_norm: true  # Weight norm on early layer for stability
+        pool_params: null
+
+      # Stage 1: First downsample
+      - conv_params:
+          type: standard
+          kernel_size: [3, 5, 5]
+          padding:    [1, 3, 3]
+          stride:     1
+        norm_type: rms
+        norm_params:
+          affine: true  # Enable learnable gamma/beta
+        act_type: silu
+        dropout: 0.1
+        use_weight_norm: false
+        pool_params:
+          type: aablur
+          stride: 2
+          r: 8
+          use_soft: true
+
+      # Stage 2: Second downsample with dilation for larger receptive field
+      - conv_params:
+          type: standard
+          kernel_size: [3, 3, 3]
+          padding:    [2, 2, 2] 
+          dilation:   2  # Enlarge receptive field
+          stride: 1
+        norm_type: rms
+        norm_params:
+          affine: true  # Enable learnable gamma/beta
+        act_type: silu
+        dropout: 0.2
+        use_weight_norm: false
+        pool_params:
+          type: aablur
+          stride: 2
+          r: 16
+          use_soft: true
+
+# Modulator configuration - ConvGRU
+modulator:
+  type: convgru
+  params:
+    behavior_dim: 42
+    feature_dim: 256  # Updated to match final ResNet stage (was 128)
+    hidden_dim: 256   # Match feature_dim for stability
+    beh_emb_dim: 32   # Behavior embedding dimension
+    kernel_size: 3    # ConvGRU kernel size
+
+# Recurrent configuration
+recurrent:
+  type: none
+  params: {}
+
+# Readout configuration
+readout:
+  type: gaussian
+  params:
+    n_units: 8
+    bias: true
+    initial_std: 5.0
+    initial_mean_scale: 0.1
+
+output_activation: none
+
+regularization:
+  - name: readout_sparsity
+    type: l1
+    lambda: 1.0e-7
+    apply_to: ["readouts/features"]
+    schedule:
+      kind: warmup
+      start_epoch: 1
+  - name: decay_readout_std
+    type: proximal_clamp_positive
+    lambda: 1.5  # final max std value
+    apply_to: ["readouts/std"]  # matches readouts.X.std_*
+    schedule:
+      kind: linear_decay
+      start_epoch: 0
+      end_epoch: 50
+      start_lambda: 10.0  # initial max 
+  - name: exclude_means_from_wd
+    type: l2
+    lambda: 0.0  # No penalty, but excludes from weight decay
+    apply_to: ["readouts/mean"]
+    schedule:
+      kind: constant
+
+# OPTIMIZATION NOTES:
+# 1. RMSNorm now has learnable affine parameters (gamma/beta) for better expressiveness
+# 2. Initialization uses kaiming with leaky_relu (a=0.01) to match SiLU activation
+# 3. Zero-init applied to final norm in each ResBlock (done in initialize_model_components)
+# 4. Weight normalization enabled on first layer for training stability
+# 5. Channel progression is now monotonically increasing: 64 -> 128 -> 256
+# 6. Standard convolutions used (compatible with weight normalization)
+# 7. Final activation is 'none' to preserve linear path for phase sensitivity
+

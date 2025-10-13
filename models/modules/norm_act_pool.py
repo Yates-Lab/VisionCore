@@ -158,24 +158,38 @@ class BSoftplus(nn.Module):
 
 
 class RMSNorm(nn.Module):
-    def __init__(self, norm_dims: tuple = (1,), eps: float = 1e-4):
+    def __init__(self, num_features: int, norm_dims: tuple = (1,), eps: float = 1e-4, affine: bool = True):
         """
-        Custom Root Mean Square Normalization (no learnable parameters)
+        Root Mean Square Normalization with optional learnable affine parameters.
 
         Args:
+            num_features (int): Number of features (channels) for affine parameters.
+                               Only used if affine=True.
             norm_dims (tuple): A tuple of dimension indices over which the mean
                                of squares will be computed. These are the
                                dimensions that get normalized.
-                               E.g., `(-1,)` for the last dimension. 
+                               E.g., `(-1,)` for the last dimension.
                                Defaults to the channel dimension: (1,)
             eps (float): A small value added to the denominator for
                          numerical stability.
+            affine (bool): If True, adds learnable scale (gamma) and shift (beta) parameters.
+                          Default: True (recommended for better performance).
         """
         super().__init__()
         if not isinstance(norm_dims, tuple):
             raise TypeError("norm_dims must be a tuple of dimension indices.")
         self.norm_dims = norm_dims
         self.eps = eps
+        self.affine = affine
+        self.num_features = num_features
+
+        if affine:
+            # Learnable scale and shift parameters
+            self.gamma = nn.Parameter(torch.ones(num_features))
+            self.beta = nn.Parameter(torch.zeros(num_features))
+        else:
+            self.register_parameter('gamma', None)
+            self.register_parameter('beta', None)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Ensure computation is in FP32 for numerical stability
@@ -185,11 +199,21 @@ class RMSNorm(nn.Module):
         mean_of_squares = torch.mean(x_fp32.pow(2), dim=self.norm_dims, keepdim=True)
         normalized_x = x_fp32 * torch.rsqrt(mean_of_squares + self.eps)
 
+        # Apply affine transformation if enabled
+        if self.affine:
+            # Reshape gamma and beta to broadcast correctly
+            # For (B, C, ...) tensors, we want (1, C, 1, 1, ...) shape
+            shape = [1] * x.ndim
+            shape[1] = self.num_features  # Channel dimension
+            gamma = self.gamma.view(*shape).float()
+            beta = self.beta.view(*shape).float()
+            normalized_x = normalized_x * gamma + beta
+
         # Convert back to input dtype
         return normalized_x.to(input_dtype)
 
     def extra_repr(self) -> str:
-        return f"norm_dims={self.norm_dims}, eps={self.eps}"
+        return f"num_features={self.num_features}, norm_dims={self.norm_dims}, eps={self.eps}, affine={self.affine}"
     
 class LayerNorm(nn.Module):
     def __init__(self, norm_dims: tuple = (1,), eps: float = 1e-4):
@@ -343,7 +367,7 @@ def get_norm_layer(norm_type: Optional[str],
 
     elif norm_type_lower == 'rms':
         if isinstance(target_dim, int): target_dim = (target_dim,)
-        return RMSNorm(target_dim, eps=eps) # custom RMS norm with no learned parameters
+        return RMSNorm(num_features, target_dim, eps=eps, affine=affine) # custom RMS norm with optional affine parameters
 
     elif norm_type_lower == 'group':
         num_groups = norm_params.get('num_groups', 1) # Default to 1 (LayerNorm-like over spatial)
