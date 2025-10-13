@@ -133,6 +133,12 @@ def create_convnet(
         core = PolarConvNet(cfg)
         return core, core.get_output_channels()
 
+    # Handle ViViT separately since it's in its own module
+    if convnet_type.lower() == 'vivit':
+        from .modules.viT import ViViT
+        core = ViViT(cfg)
+        return core, core.get_output_channels()
+
     # Handle other convnets
     from .modules.convnet import CONVNETS
     # build the network

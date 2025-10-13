@@ -1,0 +1,145 @@
+# ViViT (Video Vision Transformer) model configuration
+# Based on Arnab et al. 2021, adapted for neural encoding
+# This model uses spatiotemporal tokenization with separate spatial and temporal transformers
+
+model_type: v1multi
+
+# Model dimensions
+sampling_rate: 240
+initial_input_channels: 1  # Visual input only (behavior handled separately by modulator)
+
+# Frontend configuration - use adapter for spatial preprocessing
+adapter:
+  type: adapter
+  params: {grid_size: 51, init_sigma: 1.0, transform: scale}
+
+# No temporal frontend - ViViT handles temporal processing
+frontend:
+  type: none
+  params: {}
+
+# ViViT Convnet configuration
+convnet:
+  type: vivit
+  params:
+    final_activation: softplus
+    dim: 3
+    checkpointing: false  # Set to true if memory is tight
+    
+    # Tokenizer parameters (3D spatiotemporal patches)
+    tokenizer:
+      kernel_size: [4, 4, 4]  # (T, H, W) patch size
+      stride: [4, 4, 4]       # (T, H, W) stride - no overlap
+      norm: rmsnorm           # RMSNorm is faster than LayerNorm
+      padding: 0              # Zero padding handled automatically
+    
+    # Embedding dimension (D_emb in paper)
+    embedding_dim: 384
+    
+    # Transformer architecture
+    num_spatial_blocks: 6   # Number of spatial transformer layers
+    num_temporal_blocks: 6  # Number of temporal transformer layers (with causal masking)
+    
+    # Attention configuration
+    num_heads: 6
+    head_dim: 64  # embedding_dim = num_heads * head_dim = 6 * 64 = 384
+    
+    # Feedforward network configuration
+    ff_dim: 1536  # 4x embedding_dim is standard for transformers
+    ff_activation: swiglu  # SwiGLU activation (better than GELU)
+    
+    # Regularization
+    mha_dropout: 0.1      # Multi-head attention dropout
+    ff_dropout: 0.1       # Feedforward dropout
+    drop_path: 0.1        # Stochastic depth
+    patch_dropout: 0.1    # Patch dropout (p_token in paper)
+    
+    # Architecture choices
+    use_rope: true              # Rotary Position Embeddings (RoPE)
+    flash_attention: true       # Use FlashAttention-2 if available
+    norm: rmsnorm               # Normalization type
+    normalize_qk: false         # QK normalization (usually not needed with RoPE)
+    grad_checkpointing: false   # Gradient checkpointing (saves memory, slower)
+    
+    # Register tokens (optional, for better attention interpretability)
+    use_register_tokens: false  # Set to true to enable
+    num_register_tokens: 4      # Number of register tokens per layer
+    
+    # Transformer-specific parameters
+    transformer_params:
+      num_heads: 6
+      head_dim: 64
+      ff_dim: 1536
+      ff_activation: swiglu
+      mha_dropout: 0.1
+      ff_dropout: 0.1
+      drop_path: 0.1
+      use_rope: true
+      flash_attention: true
+      is_causal: false  # Overridden for temporal blocks
+      norm: rmsnorm
+      normalize_qk: false
+      grad_checkpointing: false
+
+# Modulator configuration - use existing ConvGRU modulator
+modulator:
+  type: convgru
+  params:
+    behavior_dim: 42        # Number of behavior features from dataset
+    feature_dim: 384        # Must match embedding_dim
+    hidden_dim: 384         # Match feature_dim for stability
+    beh_emb_dim: 32         # Behavior embedding dimension
+    kernel_size: 3          # ConvGRU kernel size
+
+# No recurrent layer (temporal processing handled by ViViT)
+recurrent:
+  type: none
+  params: {}
+
+# Readout configuration - use existing DynamicGaussianReadout
+# It will automatically use the last time step from (B, C, T, H, W)
+readout:
+  type: gaussian
+  params:
+    n_units: 8              # Will be set per dataset
+    bias: true
+    initial_std: 5.0
+    initial_mean_scale: 0.1
+
+output_activation: none
+
+# Regularization (same as other models)
+regularization:
+  - name: readout_sparsity
+    type: l1
+    lambda: 1.0e-7
+    apply_to: ["readouts/features"]
+    schedule:
+      kind: warmup
+      start_epoch: 1
+  
+  - name: decay_readout_std
+    type: proximal_clamp_positive
+    lambda: 1.5  # Final max std value
+    apply_to: ["readouts/std"]
+    schedule:
+      kind: linear_decay
+      start_epoch: 0
+      end_epoch: 50
+      start_lambda: 10.0  # Initial max
+  
+  - name: exclude_means_from_wd
+    type: l2
+    lambda: 0.0  # No penalty, but excludes from weight decay
+    apply_to: ["readouts/mean"]
+    schedule:
+      kind: constant
+
+# Notes:
+# - Input shape: (B, 1, 300, 36, 64) -> visual stimulus
+# - After tokenizer: (B, 75, 144, 384) -> 75 temporal tokens, 144 spatial tokens (9x16), 384 dims
+# - After spatial transformer: (B, 75, 144, 384) -> spatial relationships learned
+# - After temporal transformer: (B, 75, 144, 384) -> temporal relationships learned (causal)
+# - Output shape: (B, 384, 75, 9, 16) -> compatible with DynamicGaussianReadout
+# - Readout uses last time step: (B, 384, 9, 16) -> (B, n_units)
+
