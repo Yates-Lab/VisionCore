@@ -18,7 +18,7 @@ __all__ = ['StandardConv', 'DepthwiseConv']
 Helpers for anti-aliasing convolutions
 '''
 
-def _get_window_fn(window_type, window_size, **window_kwargs):
+def _get_window_fn(window_type: str, window_size: int, **window_kwargs):
     """
     Get a window function from torch.signal.windows.
 
@@ -45,9 +45,27 @@ class AntiAliasedMixin:
     # expects: self.aa_time, self.aa_freq, self.aa_window, self.aa_window_kwargs,
     #          self.aa_fft_pad, self.aa_double_time
 
+    def _get_cached_window(self, size: int, device, dtype) -> torch.Tensor:
+        """Get or create cached window function."""
+        cache_key = f'_aa_window_{size}'
+
+        # Check if cached window exists and matches device/dtype
+        if hasattr(self, cache_key):
+            cached = getattr(self, cache_key)
+            if cached.device == device and cached.dtype == dtype:
+                return cached
+
+        # Create and cache new window
+        w = _get_window_fn(self.aa_window, size, **(self.aa_window_kwargs or {}))
+        w = w / w.max().clamp_min(1e-8)  # Normalize
+        w = w.to(device=device, dtype=dtype)
+
+        # Register as buffer (moves with .to() calls, saved in state_dict)
+        self.register_buffer(cache_key, w, persistent=False)
+        return w
+
     def _win1d(self, size, device, dtype):
-        w = _get_window_fn(self.aa_window, size, **(self.aa_window_kwargs or {})).to(device=device, dtype=dtype)
-        return w / w.max().clamp_min(torch.finfo(w.dtype).eps)
+        return self._get_cached_window(size, device, dtype)
 
     def _kernel_axes(self, dim):  # which axes are kernel dims in weight
         return {1: (-1,), 2: (-2, -1), 3: (-3, -2, -1)}[dim]
