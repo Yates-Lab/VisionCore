@@ -205,6 +205,8 @@ def extract_model_type(exp_name):
         return 'learned_res'
     elif 'res_small_gru' in exp_name:
         return 'res_small_gru'
+    elif 'vivit_small' in exp_name:
+        return 'vivit_small'
     elif 'modulator_only_convgru' in exp_name:
         return 'modulator_only_convgru'
     else:

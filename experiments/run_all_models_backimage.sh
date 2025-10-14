@@ -33,14 +33,14 @@ export TORCH_SHOW_CPP_STACKTRACES=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:128
 
 # Training configuration
-BATCH_SIZE=384          # Optimal batch size per GPU
+BATCH_SIZE=256          # Optimal batch size per GPU
 MAX_DATASETS=30        # Scale to all datasets (28 if removed the two bad sessions)
 LEARNING_RATE=1e-3    # standard learning rate
-CORE_LR_SCALE=2.0
+CORE_LR_SCALE=1.0
 LR_SCHEDULER="cosine_warmup"  # Use cosine annealing with warmup
 WARMUP_EPOCHS=10        # Number of warmup epochs
 WEIGHT_DECAY=1e-5
-MAX_EPOCHS=100        # Long training run with early stopping protection
+MAX_EPOCHS=50        # Long training run with early stopping protection
 PRECISION="bf16-mixed"
 DSET_DTYPE="bfloat16"  # Dataset storage dtype: uint8 (1x), bfloat16 (2x), float32 (4x memory)
 NUM_GPUS=2             # Use both RTX 6000 Ada GPUs
@@ -61,9 +61,11 @@ mkdir -p $CHECKPOINT_DIR
 
 # Array of model configurations to run
 MODEL_CONFIGS=(
+    "experiments/model_configs/cones_res_small_gru_optimized.yaml"
     "experiments/model_configs/vivit_small.yaml"
-    # "experiments/model_configs/learned_res_small_gru_optimized.yaml"
     "experiments/model_configs/learned_res_small_gru_optimized_aa.yaml"
+    # "experiments/model_configs/learned_res_small_gru_optimized.yaml"
+    
     # "experiments/model_configs/learned_res_optimized_gru.yaml"
     # "experiments/model_configs/res_small_gru.yaml"
     # "configs_multi/modulator_only_convgru.yaml"  # Test the new modulator-only model   
@@ -137,7 +139,7 @@ run_training() {
         --experiment_name \"$EXPERIMENT_NAME\" \
         --checkpoint_dir \"$CHECKPOINT_DIR\" \
         --accumulate_grad_batches 1 \
-        --gradient_clip_val 1.0 \
+        --gradient_clip_val 100.0 \
         --steps_per_epoch $STEPS_PER_EPOCH \
         --num_workers $NUM_WORKERS \
         --early_stopping_patience 50 \

@@ -116,49 +116,47 @@ batch = train_datasets[f'dataset_{dataset_id}'][inds]
 batch = {k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)}
 
 #%%
+
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
+from einops import rearrange
+
+# --- helpers: upcast before view_as_complex; downcast on return ---
+
+def _pair_to_complex(y, work_dtype=torch.float32):
+    # y: [B, 2K, T, H, W] interleaved (Re, Im)
+    # upcast to a supported real dtype for complex packing
+    y = y.to(work_dtype)
+    B, C2, T, H, W = y.shape
+    assert C2 % 2 == 0, "Channel count must be even (Re/Im pairs)."
+    y2 = y.view(B, C2//2, 2, T, H, W)                     # [B, K, 2, T, H, W]
+    z  = torch.view_as_complex(y2.movedim(2, -1).contiguous())  # [B, K, T, H, W] complex64
+    return z
+
+def _complex_to_pair(z, out_dtype):
+    # z: [B, K, T, H, W] complex
+    y2 = torch.view_as_real(z)                             # [B, K, T, H, W, 2], real dtype matches z.real
+    y2 = y2.movedim(-1, 2).contiguous()                    # [B, K, 2, T, H, W]
+    y  = y2.view(z.size(0), z.size(1)*2, z.size(2), z.size(3), z.size(4))  # [B, 2K, T, H, W]
+    return y.to(out_dtype)
+
+def _normalize_complex(z, eps):
+    return z / (torch.abs(z) + eps)
+
 
 class PP(nn.Module):
-    """ Polar Prediction Model
-
-    Predict by extrapolating local phases of learned convolutional tight frame
-
-    f: int
-        spatial size of filter
-    k: int
-        number of pairs of channels
-    i: int
-        number of channels in
-    d: int
-        downsampling factor (stride of the convolution)
-    c: int
-        size of spatial crop
-    mode: str in ['valid', 'same']
-        spatial zero padding
-    branch: str in ['phase', 'phase_cmplx']
-        choice of real or complex valued implementation of polar prediction,
-        which are identical up to machine precision
-    epsilon: float
-        stability of division
-    activation: str in ['linear', 'amplitude', 'amplitude_linear']
-        choice of nonlinearity
-    tied: boolean
-        sharing analysis and synthesis weights
-    """
     def __init__(
-            self, f=17, k=16, i=1, d=1, c=17, mode='valid', branch='phase',
-            epsilon=1e-10, activation="amplitude", init_scale=1, tied=True,
-        ):
+        self, f=17, k=16, i=1, d=1, c=0, mode='valid', branch='phase',
+        epsilon=1e-10, activation="amplitude", init_scale=1, tied=True,
+    ):
         super().__init__()
-
         W = torch.randn(k*2, i, 1, f, f) / f**2
         self.W = nn.Parameter(W * init_scale)
         self.tied = tied
         if not tied:
-           V = torch.randn(k*2, i, 1, f, f) / f**2
-           self.V = nn.Parameter(V * init_scale)
+            V = torch.randn(k*2, i, 1, f, f) / f**2
+            self.V = nn.Parameter(V * init_scale)
 
         self.stride = (1, d, d)
         self.space_crop = c
@@ -169,189 +167,182 @@ class PP(nn.Module):
             self.padding = (0, f//2, f//2)
             self.out_padding = (0, d-1, d-1)
 
-        if branch == 'phase':
-            self.tick = self.tick_real
-        elif branch == 'phase_cmplx':
-            self.tick = self.tick_cmplx
-
-        self.epsilon = torch.tensor(epsilon)
+        self.branch   = branch
+        self.epsilon  = float(epsilon)  # keep as float; we’ll create tensors on-the-fly with the right dtype
         self.activation = activation
 
+    # ----- Analysis / synthesis -----
+    def analysis(self, x):
+        # x: [B, i, T, H, W]
+        return F.conv3d(x, self.W, stride=self.stride, padding=self.padding)
+
+    def synthesis(self, y):
+        W = self.W if self.tied else self.V
+        return F.conv_transpose3d(
+            y, W, stride=self.stride, padding=self.padding, output_padding=self.out_padding
+        )
+
+    
+    @torch.no_grad()
+    def advance(self, y):
+        """
+        y: [B, 2K, T, H, W] (interleaved real/imag pairs)
+        returns y_hat same shape; indices >=2 predicted from t-1, t
+        """
+        B, C, T, H, W = y.shape
+        if T < 3:
+            return torch.zeros_like(y)
+
+        y_hat = torch.zeros_like(y)
+
+        # previous & current frames for all t (keep contiguous for view ops)
+        p = y[:, :, :-2].contiguous()   # [B, 2K, T-2, H, W]
+        c = y[:, :, 1:-1].contiguous()  # [B, 2K, T-2, H, W]
+
+        out_dtype = y.dtype  # likely bfloat16 under AMP
+
+        # Do complex math in float32 regardless of AMP to satisfy view_as_complex
+        with torch.autocast(device_type='cuda', enabled=False):
+            if self.branch in ("phase", "phase_cmplx"):
+                zp = _pair_to_complex(p, work_dtype=torch.float32)  # complex64
+                zc = _pair_to_complex(c, work_dtype=torch.float32)
+
+                eps = torch.tensor(self.epsilon, dtype=zc.real.dtype, device=zc.device)
+
+                # delta = normalize(c) * conj(normalize(p))
+                nzc   = _normalize_complex(zc, eps)
+                nzp   = _normalize_complex(zp, eps)
+                delta = nzc * torch.conj(nzp)
+
+                zf = delta * zc  # predicted next complex coefficient
+
+                y_hat[:, :, 2:] = _complex_to_pair(zf, out_dtype=out_dtype)
+            else:
+                raise ValueError(f"Unknown branch: {self.branch}")
+
+        return y_hat
+
+    # ----- The rest stays the same -----
     def forward(self, x):
         y = self.analysis(x)
-        x = self.nonlin(y)
-        return x
+        return self.nonlin(y)
 
     def predict(self, x):
-        y = self.analysis(x)
+        y     = self.analysis(x)
         y_hat = self.advance(y)
         x_hat = self.synthesis(y_hat)
         x, x_hat = self.crop(x, x_hat)
         return x, x_hat
 
-    def analysis(self, x):
-        return F.conv3d(x, self.W, stride=self.stride, padding=self.padding)
-
-    def synthesis(self, y):
-        if self.tied:
-            W = self.W
-        else:
-            W = self.V
-        return F.conv_transpose3d(
-            y, W, stride=self.stride, padding=self.padding,
-            output_padding=self.out_padding
-        )
-
-    def advance(self, y):
-        T = y.shape[2]
-        y_hat = torch.zeros_like(y)
-        for t in range(1, T-1):
-            y_hat[:, :, t+1] = self.tick(y[:, :, t-1], y[:, :, t])
-        return y_hat
-
-    def tick_real(self, p, c):
-        delta = self.mult(self.norm(c), self.conj(self.norm(p)))
-        f = self.mult(delta, c)
-        return f
-
-    def mult(self, a, b):
-        c = torch.empty_like(a, device=a.device)
-        # plain
-        # c[:,  ::2] = a[:,  ::2] * b[:, ::2] - a[:, 1::2] * b[:, 1::2]
-        # c[:, 1::2] = a[:, 1::2] * b[:, ::2] + a[:,  ::2] * b[:, 1::2]
-        # Gauss's trick
-        one = a[:,  ::2] * b[:, ::2]
-        two = a[:, 1::2] * b[:, 1::2]
-        three = (a[:,  ::2] + a[:, 1::2]) * (b[:, ::2] + b[:, 1::2])
-        c[:,  ::2] = one - two
-        c[:, 1::2] = three - one - two
-        return c
-
-    def norm(self, x):
-        x_ = torch.empty_like(x, device=x.device)
-        n = (x[:, ::2] ** 2 + x[:, 1::2] ** 2 + self.epsilon) ** .5
-        x_[:, ::2], x_[:, 1::2] = x[:, ::2] / n, x[:, 1::2] / n
-        return x_
-
-    def conj(self, x):
-        x[:, 1::2] = -x[:, 1::2]
-        return x
-
-    def tick_cmplx(self, p, c):
-        p = self.rect2pol(p)
-        c = self.rect2pol(c)
-        delta = c * p.conj() / torch.maximum(
-            torch.abs(c) * torch.abs(p), self.epsilon
-        )
-        f = delta * c
-        f = self.pol2rect(f)
-        return f
-
-    def rect2pol(self, y):
-        return torch.complex(y[:, ::2], y[:, 1::2])
-
-    def pol2rect(self, z):
-        return rearrange(
-            torch.stack((z.real, z.imag), dim=1), 'b c k h w-> b (k c) h w'
-        )
-
     def nonlin(self, y):
-        if self.activation is None:
-            x = y
-        elif self.activation == 'linear':
-            x = y.real
-        elif self.activation == 'amplitude':
-            x = torch.abs(y)
-        elif self.activation == 'amplitude_linear':
-            x = torch.cat((y.real, torch.abs(y)), dim=1)
-        return x
-
-    def autoencode(self, x):
-        return self.synthesis(self.analysis(x))
+        # y is real-valued feature map if called here; most activations are used post-predict on complex
+        return y
 
     def crop(self, x, x_hat, tau=2):
-        """
-        prediction only valid for center picture and after a warmup period
-        """
         H, W = x.shape[-2:]
         c = self.space_crop
         target = x[:, :, tau:, c:H-c, c:W-c]
-        pred = x_hat[:, :, tau:, c:H-c, c:W-c]
-        assert target.shape == pred.shape, f"{target.shape} {pred.shape}"
-        assert target.shape[-1] > 0, f"target shape {target.shape}"
+        pred   = x_hat[:, :, tau:, c:H-c, c:W-c]
         return target, pred
 
-
+# ---------- Multiscale wrapper with Laplacian pyramid ----------
 class mPP(PP):
-    """multiscale Polar Prediction Model
-
-    spatial filtering and temporal processing of fixed Laplacian pyramid
-    coefficients, same learned filters applied at each scale
-    
-    J: int
-        number of scales
-    see documentation of PP for other arguments
-
-    NOTE
-    - explicit downsampling for speed
-    """
-    def __init__(
-            self, f=17, k=16, i=1, d=1, c=17, mode='valid', branch='phase',
-            epsilon=1e-10, activation="amplitude", init_scale=1, tied=True, J=4
-        ):
-        super().__init__(
-            f=f, k=k, i=i, d=d, c=c, mode=mode, branch=branch, epsilon=epsilon,
-            activation=activation, init_scale=init_scale, tied=tied
-        )
-
+    def __init__(self, *args, J=4, **kwargs):
+        super().__init__(*args, **kwargs)
+        from plenoptic.simulate import LaplacianPyramid
         self.lpyr = LaplacianPyramid(J)
 
+    def analysis_pyr(self, x):
+        # x: [B, C=1, T, H, W]  -> laplacian per frame -> per-level conv3d
+        B = x.size(0)
+        x_btchw = rearrange(x, "B C T H W -> (B T) C H W")
+        levels = self.lpyr(x_btchw)                             # list of [(B*T), C_l, H_l, W_l]
+        levels_5d = [rearrange(L, "(B T) C H W -> B C T H W", B=B, T=x.size(2)) for L in levels]
+        # same learned filters per scale:
+        feats = [self.analysis(L) for L in levels_5d]           # each: [B, 2K, T, H_l', W_l']
+        return feats
+
+    def synthesis_pyr(self, feats):
+        # feats: list of [B, 2K, T, H_l', W_l']
+        recon_levels = [self.synthesis(F) for F in feats]       # list of [B, 1, T, H_l, W_l]
+        B, _, T, _, _ = recon_levels[0].shape
+        recon_btchw = [rearrange(R, "B C T H W -> (B T) C H W") for R in recon_levels]
+        x_btchw = self.lpyr.recon_pyr(recon_btchw)              # [(B*T), 1, H, W]
+        x = rearrange(x_btchw, "(B T) C H W -> B C T H W", B=B, T=T)
+        return x
+
     def predict(self, x):
-        y = self.analysis_pyr(x)
-        y_hat = [self.advance(y) for y in y]
-        x_hat = self.synthesis_pyr(y_hat)
+        levels = self.analysis_pyr(x)
+        # vectorized advance per scale (no loops over time)
+        levels_pred = [self.advance(L) for L in levels]
+        x_hat = self.synthesis_pyr(levels_pred)
         x, x_hat = self.crop(x, x_hat)
         return x, x_hat
 
-    def analysis_pyr(self, x):
-        # NOTE: the pyramid expects 4 dimensional input tensors
-        B = len(x)
-        x = rearrange(x, "B C T H W -> (B T) C H W")
-        y = self.lpyr(x)
-        y = [rearrange(y, "(B T) C H W -> B C T H W", B=B) for y in y]
-        y = [self.analysis(y) for y in y]
-        return y
-
-    def synthesis_pyr(self, y):
-        y = [self.synthesis(y) for y in y]
-        B = len(y[0])
-        y = [rearrange(y, "B C T H W -> (B T) C H W") for y in y]
-        x = self.lpyr.recon_pyr(y)
-        x = rearrange(x, "(B T) C H W -> B C T H W", B=B)
-        return x
-
     def to(self, device):
-        new_self = super(mPP, self).to(device)
+        new_self = super().to(device)
         new_self.lpyr = new_self.lpyr.to(device)
         return new_self
 
-# F.conv3d(y[2], W, stride=stride, padding=f//2)
 
 #%%
                         # convert to rates
 
 batch = {k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)}
 
-
 Nlevels = 3
-pyrConv = mPP(J=Nlevels, mode='same').to(device)
+pyr = mPP(J=Nlevels, mode='same', branch='phase', k=16).to(device)
+
 
 with AMP_BF16():
-    y = pyrConv.analysis_pyr(batch['stim'])
+    y_levels = pyr.analysis_pyr(batch['stim'])    # list of [B, 2K, T, H_l, W_l]
+    y_advanced = [pyr.advance(L) for L in y_levels]
+    # visualize one level
+    # frames = y_levels[2].detach().cpu().float()[:10, [0], 0]  # as you did
+    x_tgt, x_pred = pyr.predict(batch['stim'])
 
 
 #%%
 
+with AMP_BF16():
+    y_levels = pyr.analysis_pyr(batch['stim'])    # list of [B, 2K, T, H_l, W_l]
+    
+    y = y_levels[0]
+    # previous & current frames for all t (keep contiguous for view ops)
+    p = y[:, :, :-2].contiguous()   # [B, 2K, T-2, H, W]
+    c = y[:, :, 1:-1].contiguous()  # [B, 2K, T-2, H, W]
+
+    out_dtype = y.dtype  # likely bfloat16 under AMP
+
+    # Do complex math in float32 regardless of AMP to satisfy view_as_complex
+    with torch.autocast(device_type='cuda', enabled=False):
+        zp = _pair_to_complex(p, work_dtype=torch.float32)  # complex64
+        zc = _pair_to_complex(c, work_dtype=torch.float32)
+
+        eps = torch.tensor(1e-5, dtype=zc.real.dtype, device=zc.device)
+
+        # delta = normalize(c) * conj(normalize(p))
+        nzc   = _normalize_complex(zc, eps)
+        nzp   = _normalize_complex(zp, eps)
+        delta = nzc * torch.conj(nzp)
+
+        zf = delta * zc  # predict
+    
+
+#%%
+
+delta_pair = _complex_to_pair(delta, out_dtype=out_dtype)
+#%%
+
+fig_w = make_grid(y_levels[2].detach().cpu().float()[0, 0, :].unsqueeze(1), nrow=10, normalize=True)
+plt.subplot(2,1,1)
+plt.imshow(fig_w.permute(1, 2, 0).numpy())
+
+plt.subplot(2,1,2)
+fig_w = make_grid(delta_pair.detach().cpu().float()[0, 0, :].unsqueeze(1), nrow=10, normalize=True)
+plt.imshow(fig_w.permute(1, 2, 0).numpy())
+
+#%%
 l = 0
 c = y[l][:, :, 1]
 p = y[l][:, :, 0]

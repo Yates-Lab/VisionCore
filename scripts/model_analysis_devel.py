@@ -199,7 +199,7 @@ def model_pred(batch, model, dataset_idx, stage='pred', include_modulator=True, 
 
 #%% LOAD A MODEL
 
-model_type = 'learned_res_small_gru_optimized'
+model_type = 'vivit_small'
 model, model_info = load_model(
         model_type=model_type,
         model_index=None, # none for best model

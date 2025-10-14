@@ -15,7 +15,7 @@ adapter:
 frontend:
   type: learnable_temporal
   params: {kernel_size: 16, num_channels: 4, init_type: gaussian_derivatives,
-          anti_aliasing: false,
+          anti_aliasing: true,
           causal: true, bias: false}
 
 # ViViT Convnet configuration - SMALL VERSION
@@ -28,24 +28,24 @@ convnet:
     
     # Tokenizer parameters - larger patches for fewer tokens
     tokenizer:
-      kernel_size: [8, 8, 8]  # Larger patches = fewer tokens = faster
-      stride: [8, 8, 8]
+      kernel_size: [8, 4, 4]  # Larger patches = fewer tokens = faster
+      stride: [8, 4, 4]
       norm: rmsnorm
       padding: 0
     
     # Smaller embedding dimension
-    embedding_dim: 192  # Half of baseline
+    embedding_dim: 256  # Half of baseline
     
     # Fewer transformer layers
-    num_spatial_blocks: 4   # Reduced from 6
-    num_temporal_blocks: 4  # Reduced from 6
+    num_spatial_blocks: 6
+    num_temporal_blocks: 6
     
     # Attention configuration
     num_heads: 4
     head_dim: 48  # embedding_dim = 4 * 48 = 192
     
     # Smaller feedforward
-    ff_dim: 768  # 4x embedding_dim
+    ff_dim: 1024  # 4x embedding_dim
     ff_activation: swiglu
     
     # Regularization
@@ -58,7 +58,7 @@ convnet:
     use_rope: true
     flash_attention: true
     norm: rmsnorm
-    normalize_qk: false
+    normalize_qk: true
     grad_checkpointing: false
     
     # No register tokens for small model
@@ -86,9 +86,9 @@ modulator:
   type: convgru
   params:
     behavior_dim: 42
-    feature_dim: 192  # Match embedding_dim
-    hidden_dim: 192
-    beh_emb_dim: 16  # Smaller
+    feature_dim: 256
+    hidden_dim: 256
+    beh_emb_dim: 32
     kernel_size: 3
 
 # No recurrent layer

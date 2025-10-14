@@ -44,7 +44,7 @@ AMP_BF16 = lambda: torch.autocast(device_type="cuda", dtype=torch.bfloat16)
 #%%
 from models.config_loader import load_dataset_configs
 import os
-config_path = Path("/home/jake/repos/VisionCore/experiments/model_configs/learned_res_optimized_gru.yaml")
+config_path = Path("/home/jake/repos/VisionCore/experiments/model_configs/cones_res_small_gru_optimized.yaml")
 
 dataset_configs_path = "/home/jake/repos/VisionCore/experiments/dataset_configs/multi_basic_120_backimage_all.yaml"
 dataset_configs = load_dataset_configs(dataset_configs_path)

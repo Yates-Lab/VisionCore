@@ -1,10 +1,18 @@
 """
 Test script for AntiAliasedConv1d fixes and new features.
 """
+#%%
 import torch
 import torch.nn as nn
-from models.modules.conv_layers import AntiAliasedConv1d
+import matplotlib.pyplot as plt
 
+
+
+plt.plot(torch.signal.windows.hann(10))
+plt.plot(torch.signal.windows.cosine(10))
+plt.plot(torch.signal.windows.hamming(10))
+plt.plot(torch.signal.windows.kaiser(10))
+#%%
 def test_device_tracking():
     """Test that device tracking works correctly."""
     print("Testing device tracking fix...")
