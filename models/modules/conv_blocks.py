@@ -92,13 +92,13 @@ class ConvBlock(nn.Module):
         # Apply weight normalization only to layers that have a direct 'weight' parameter
         # DepthwiseConv and other composite layers don't have a direct 'weight' attribute
         if use_weight_norm:
-            if hasattr(conv_layer, 'weight'):
-                conv_layer = weight_norm(conv_layer, name='weight', dim=_conv_params.get('weight_norm_dim', 0))
+            if hasattr(conv_layer, 'apply_weight_norm'):
+                conv_layer.apply_weight_norm(_conv_params.get('weight_norm_dim', 0))
             else:
                 # For composite layers like DepthwiseConv, skip weight norm or apply to sub-layers
                 # For now, we'll just skip it with a warning
                 import warnings
-                warnings.warn(f"Weight normalization requested but {conv_type} conv doesn't have a direct 'weight' parameter. Skipping.")
+                warnings.warn(f"Weight normalization requested but {conv_type} conv doesn't have a direct 'apply_weight_norm' method. Skipping.")
 
         self.components['conv'] = conv_layer
 
