@@ -30,6 +30,7 @@ def chomp_causal_spatial(tensor_to_crop: torch.Tensor, reference_tensor: torch.T
         tensor_to_crop = chomp(tensor_to_crop, target_spatial_shape)
 
     return tensor_to_crop
+
 from .conv_blocks import ConvBlock, ResBlock
 from .norm_act_pool import get_activation_layer
 from .shifttcn import ShiftTCN
@@ -153,78 +154,54 @@ class ResNet(BaseConvNet):
             self._add_resnet_block(main_block, current_channels, main_block_out_ch, cfg)
             current_channels = main_block_out_ch
 
+    def _get_total_stride(self, block_cfg):
+        """Calculate total stride from conv and pool params."""
+        if not block_cfg:
+            return 1
+
+        conv_params = block_cfg.get('conv_params', {})
+        pool_params = block_cfg.get('pool_params', {})
+
+        conv_stride = conv_params.get('stride', 1)
+        pool_stride = pool_params.get('stride', 1) if pool_params else 1
+
+        # Multiply strides
+        if isinstance(conv_stride, tuple) and isinstance(pool_stride, tuple):
+            return tuple(c * p for c, p in zip(conv_stride, pool_stride))
+        elif isinstance(conv_stride, tuple):
+            return tuple(c * pool_stride for c in conv_stride)
+        elif isinstance(pool_stride, tuple):
+            return tuple(conv_stride * p for p in pool_stride)
+        else:
+            return conv_stride * pool_stride
+
     def _add_resnet_block(self, main_block, current_channels, main_block_out_ch, block_cfg=None):
         """Add a ResNet block with shortcut connection."""
-        # Enhanced shortcut connection handling
-        needs_projection = False
 
-        # Infer stride from main_block's conv_params and pool_params
-        if block_cfg:
-            block_conv_params = block_cfg.get('conv_params', {})
-            block_pool_params = block_cfg.get('pool_params', {})
+        # Determine if we need projection
+        needs_projection = (current_channels != main_block_out_ch)
+
+        # Infer stride from block config
+        total_stride = self._get_total_stride(block_cfg)
+
+        # Check if stride requires projection
+        if isinstance(total_stride, tuple):
+            needs_stride_projection = any(s > 1 for s in total_stride)
         else:
-            # For new unified format, get from main_block config
-            block_conv_params = getattr(main_block, 'config', {}).get('conv_params', {})
-            block_pool_params = getattr(main_block, 'config', {}).get('pool_params', {})
+            needs_stride_projection = total_stride > 1
 
-        conv_stride_cfg = block_conv_params.get('stride', 1)
-        pool_stride_cfg = block_pool_params.get('stride', 1) if block_pool_params else 1
-
-        # Calculate total effective stride (conv_stride * pool_stride)
-        if isinstance(conv_stride_cfg, tuple) and isinstance(pool_stride_cfg, tuple):
-            total_stride_cfg = tuple(c * p for c, p in zip(conv_stride_cfg, pool_stride_cfg))
-        elif isinstance(conv_stride_cfg, tuple):
-            total_stride_cfg = tuple(c * pool_stride_cfg for c in conv_stride_cfg)
-        elif isinstance(pool_stride_cfg, tuple):
-            total_stride_cfg = tuple(conv_stride_cfg * p for p in pool_stride_cfg)
-        else:
-            total_stride_cfg = conv_stride_cfg * pool_stride_cfg
-
-        # Check if total stride requires projection
-        if isinstance(total_stride_cfg, tuple):
-            needs_projection = any(s > 1 for s in total_stride_cfg)
-        else:
-            needs_projection = total_stride_cfg > 1
-
-        # Check if channel dimensions require projection
-        if current_channels != main_block_out_ch:
-            needs_projection = True
-
-        # Check if projection is enabled in config
-        enable_projection = self.config.get('resnet_shortcut_projection', True)
-
-        # Default to identity shortcut
-        shortcut: nn.Module = nn.Identity()
-
-        # Create projection shortcut if needed and enabled
-        if needs_projection and enable_projection:
-            ShortcutConv = nn.Conv2d if self.dim == 2 else nn.Conv3d
-
-            # Get shortcut parameters from config
-            sc_params = self.config.get('resnet_shortcut_params', {})
-            kernel_size = sc_params.get('kernel_size', 1)
-            bias = sc_params.get('bias', False)
-
-            # Shortcut norm can be configured
-            sc_norm_type = self.config.get('resnet_shortcut_norm_type')
-
-            # Get shortcut normalization parameters
-            sc_norm_params = self.config.get('resnet_shortcut_norm_params', {})
-
-            from .norm_act_pool import get_norm_layer
-            sc_norm = get_norm_layer(sc_norm_type, main_block_out_ch, self.dim, sc_norm_params)
-
-            # Create the projection shortcut
-            shortcut = nn.Sequential(
-                ShortcutConv(
-                    current_channels,
-                    main_block_out_ch,
-                    kernel_size=kernel_size,
-                    stride=total_stride_cfg,
-                    bias=bias
-                ),
-                sc_norm
+        if needs_projection or needs_stride_projection:
+            # Simple 1x1 conv projection (linear, no normalization or activation)
+            Conv = nn.Conv2d if self.dim == 2 else nn.Conv3d
+            shortcut = Conv(
+                current_channels,
+                main_block_out_ch,
+                kernel_size=1,
+                stride=total_stride,
+                bias=False
             )
+        else:
+            shortcut = nn.Identity()
 
         post_add_act = get_activation_layer(self.config.get('resnet_post_add_activation'))
         self.layers.append(ResBlock(main_block, shortcut, post_add_act))
