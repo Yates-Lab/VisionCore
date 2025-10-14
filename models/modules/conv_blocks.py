@@ -85,8 +85,7 @@ class ConvBlock(nn.Module):
         _conv_params.setdefault('bias', norm_type in ['none', None]) # Bias if no norm
 
         # Add dim parameter for conv types that need it
-        if conv_type in ['standard', 'depthwise']:
-            _conv_params['dim'] = self.dim
+        _conv_params['dim'] = self.dim
 
         conv_layer = ConvClass(in_channels=self.in_channels, out_channels=self._out_channels_conv, **_conv_params)
 

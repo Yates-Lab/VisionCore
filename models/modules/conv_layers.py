@@ -10,8 +10,9 @@ import torch.nn.functional as F
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import Union, Sequence, Tuple, Optional
+from torch.nn.utils import weight_norm, remove_weight_norm
 
-__all__ = ['ConvBase', 'StandardConv', 'StackedConv2d', 'WindowedConv2d', 'SeparableWindowedConv2D', 'AntiAliasedConv1d']
+__all__ = ['StandardConv', 'DepthwiseConv']
 
 '''
 Helpers for anti-aliasing convolutions
@@ -53,7 +54,8 @@ class AntiAliasedMixin:
 
     def _apply_spacetime_window(self, w: torch.Tensor, dim: int) -> torch.Tensor:
         axes = self._kernel_axes(dim)
-        win = 1.0
+        win = torch.ones(1, device=w.device, dtype=w.dtype)
+
         for ax in axes:
             vec = self._win1d(w.shape[ax], w.device, w.dtype)
             shape = [1]*w.ndim; shape[ax] = w.shape[ax]
@@ -265,55 +267,45 @@ class ConvBase(AntiAliasedMixin, nn.Module):
                          fontsize=12)
             fig.tight_layout(rect=[0, 0, 1, 0.95])  # Adjust for suptitle
 
-        elif weights.ndim == 3: # 1D conv
-
-            # Handle 1D convolution weights: [out_channels, in_channels, width]
+        elif weights.ndim == 3:  # 1D conv: [Cout, Cin, W]
             out_channels, in_channels, width = weights.shape
-            weights = weights.unsqueeze(-1)  # Add a dummy dimension for height
-
-            # Create a figure with subplots for each input channel
-            n_in_cols = min(4, in_channels)  # Limit to 4 columns for readability
+            weights_img = weights.unsqueeze(-2)  # -> [Cout, Cin, 1, W]
+            n_in_cols = min(4, in_channels)
             n_in_rows = int(np.ceil(in_channels / n_in_cols))
 
             fig, axs = plt.subplots(n_in_rows, n_in_cols,
-                                    figsize=(n_in_cols * 3, n_in_rows * 2.5),
+                                    figsize=(n_in_cols * 3, n_in_rows * 2.0),
                                     squeeze=False)
             axs_flat = axs.flatten()
-
-            # Global min/max for consistent scaling if requested
             global_min = weights.min().item() if scale_globally else None
             global_max = weights.max().item() if scale_globally else None
 
+            import torchvision.utils as vutils
             for i_in in range(in_channels):
-                if i_in < len(axs_flat):
-                    ax = axs_flat[i_in]
-                    ax.axis('off')
+                if i_in >= len(axs_flat): break
+                ax = axs_flat[i_in]
+                ax.axis('off')
+                # [Cout, 1, 1, W] grid
+                reshaped = weights_img[:, i_in].unsqueeze(1)  # [Cout, 1, 1, W]
+                nrow = int(np.ceil(np.sqrt(out_channels)))
+                grid = vutils.make_grid(
+                    reshaped,
+                    nrow=nrow,
+                    normalize=True,
+                    scale_each=not scale_globally,
+                    padding=1,
+                    pad_value=0.5,
+                    value_range=(global_min, global_max) if scale_globally else None
+                )
+                ax.imshow(grid.permute(1, 2, 0).numpy(), interpolation='nearest')
+                ax.set_title(f'Input Channel {i_in}', fontsize=10)
 
-                    # Extract weights for this input channel: [out_channels, height, width]
-                    channel_weights = weights[:, i_in]
+            for j in range(in_channels, len(axs_flat)):
+                axs_flat[j].axis('off')
 
-                    # Reshape to [out_channels, 1, height, width] for make_grid
-                    reshaped_weights = channel_weights.unsqueeze(1)
-
-                    # Create grid with sqrt(out_channels) kernels per row
-                    nrow = int(np.ceil(np.sqrt(out_channels)))
-                    
-                    ax.plot(reshaped_weights.squeeze().numpy())
-            
-            # Hide any unused subplots
-            for i in range(in_channels, len(axs_flat)):
-                axs_flat[i].axis('off')
-                axs_flat[i].set_title(f'Input Channel {i_in}', fontsize=10)
-                axs_flat[i].set_ylabel('Weight Value')
-                axs_flat[i].set_xlabel('Kernel Index')
-                axs_flat[i].grid(True, alpha=0.3)
-                axs_flat[i].tick_params(axis='both', labelsize=8)
-                axs_flat[i].set_xticks(np.arange(0, width, max(1, width//10)))
-                axs_flat[i].set_yticks(np.arange(global_min, global_max, (global_max - global_min)/10))
-        
             fig.suptitle(f'{self.__class__.__name__} 1D Weights: {out_channels} Out-Channels, {in_channels} In-Channels',
-                         fontsize=12)
-            fig.tight_layout(rect=[0, 0, 1, 0.95])  # Adjust for suptitle
+                        fontsize=12)
+            fig.tight_layout(rect=[0, 0, 1, 0.95])
 
         return fig, axs
 
@@ -324,32 +316,47 @@ class StandardConv(ConvBase):
     def __init__(self, dim: int, in_channels: int, out_channels: int, kernel_size: Union[int, Sequence[int]],
                  stride: Union[int, Sequence[int]] = 1, padding: Union[int, Sequence[int]] = 0,
                  dilation: Union[int, Sequence[int]] = 1, groups: int = 1, bias: bool = True,
-                 padding_mode: str = 'replicate'):
-        super().__init__()
+                 padding_mode: str = 'replicate', **kwargs):
+        super().__init__(**kwargs)
         if dim not in [1, 2, 3]: raise ValueError(f"Unsupported dim for StandardConv: {dim}.")
+        self.dim = dim
         ConvNd = ConvNds[dim]
 
         self.conv = ConvNd(in_channels, out_channels, kernel_size, stride=stride,
                            padding=padding, dilation=dilation, groups=groups,
                            bias=bias, padding_mode=padding_mode)
-    def forward(self, x: torch.Tensor) -> torch.Tensor: return self.conv(x)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.conv._conv_forward(x, self.weight, self.conv.bias)
+
+    def apply_weight_norm(self, dim: int = 0):
+        self.conv = weight_norm(self.conv, name='weight', dim=dim)
+
+    def remove_weight_norm(self):
+        self.conv = remove_weight_norm(self.conv)
+        
     @property
-    def weight(self) -> torch.Tensor: return self.conv.weight
+    def weight(self) -> torch.Tensor:
+        w = self.conv.weight
+        if self.aa_time or self.aa_freq:
+            w = self._aa_weight(w, self.dim)
+        return w
 
 class DepthwiseConv(ConvBase):
-    """Depth-wise-separable conv (2-D or 3-D).  Returns full fused kernel for plotting."""
+    """Depth-wise-separable conv (1-D, 2-D, or 3-D). Returns fused kernel for plotting."""
     def __init__(self, dim: int, in_channels: int, out_channels: int,
                  kernel_size: Union[int, Sequence[int]],
                  stride: Union[int, Sequence[int]] = 1,
                  padding: Union[int, Sequence[int]] = 0,
                  dilation: Union[int, Sequence[int]] = 1,
-                 bias: bool = True, padding_mode: str = "replicate"):
+                 bias: bool = True, padding_mode: str = "replicate", **kwargs):
 
-        super().__init__()
-        if dim not in (2, 3):
+        super().__init__(**kwargs)
+        if dim not in (1, 2, 3):
             raise ValueError(f"Unsupported dim {dim} for DepthwiseConv")
 
-        Conv = nn.Conv2d if dim == 2 else nn.Conv3d
+        self.dim = dim
+        Conv = ConvNds[dim]
 
         # depth-wise (groups = Cin)
         self.depthwise = Conv(
@@ -360,26 +367,54 @@ class DepthwiseConv(ConvBase):
         # point-wise 1×1(×1)
         self.pointwise = Conv(in_channels, out_channels, 1, bias=bias)
 
-    def forward(self, x):
-        return self.pointwise(self.depthwise(x))
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Anti-alias only the spatial/temporal kernel (depthwise)
+        dw_weight = self.depthwise.weight
+        if self.aa_time or self.aa_freq:
+            dw_weight = self._aa_weight(dw_weight, self.dim)
 
-    # -------- weight property for plotting --------
+        # Use AA'd depthwise kernels; pointwise is not windowed
+        x = self.depthwise._conv_forward(x, dw_weight, self.depthwise.bias)
+        return self.pointwise(x)
+
+    # -------- weight property for plotting (fused kernel) --------
+    def apply_weight_norm(self, dim: int = 0):
+        self.pointwise = weight_norm(self.pointwise, name='weight', dim=dim)
+        self.depthwise = weight_norm(self.depthwise, name='weight', dim=dim)
+    
+    def remove_weight_norm(self):
+        self.pointwise = remove_weight_norm(self.pointwise)
+        self.depthwise = remove_weight_norm(self.depthwise)
+
     @property
     def weight(self) -> torch.Tensor:
         """
-        Effective fused kernel of shape  
-        (C_out, C_in, kT, kH, kW)  ─ exactly what plot_weights() expects.
+        Effective fused kernel of shape:
+          - 1D: (C_out, C_in, K)
+          - 2D: (C_out, C_in, H, W)
+          - 3D: (C_out, C_in, D, H, W)
         """
-
-        # permute dim 0 and 1 for depthwise (handle 2D and 3D)
         dw = self.depthwise.weight
-        if dw.dim() == 4: dw = dw.permute(1, 0, 2, 3)  # 2D
-        else: dw = dw.permute(1, 0, 2, 3, 4)  # 3D
+        if self.aa_time or self.aa_freq:
+            dw = self._aa_weight(dw, self.dim)
 
-        pw = self.pointwise.weight
+        # Reorder depthwise to put Cin in the second dim for broadcasting with pointwise
+        if dw.dim() == 3:       # 1D: [Cin, 1, K] -> [1, Cin, K]
+            dw = dw.permute(1, 0, 2)
+        elif dw.dim() == 4:     # 2D: [Cin, 1, H, W] -> [1, Cin, H, W]
+            dw = dw.permute(1, 0, 2, 3)
+        elif dw.dim() == 5:     # 3D: [Cin, 1, D, H, W] -> [1, Cin, D, H, W]
+            dw = dw.permute(1, 0, 2, 3, 4)
+        else:
+            raise RuntimeError(f"Unexpected depthwise weight ndim: {dw.dim()}")
 
+        pw = self.pointwise.weight  # shapes:
+        # 1D: (C_out, C_in, 1)
+        # 2D: (C_out, C_in, 1, 1)
+        # 3D: (C_out, C_in, 1, 1, 1)
+
+        # Broadcasting multiply to get fused (C_out, C_in, K/HW/DHW)
         eff = pw * dw
-
         return eff
     
 
