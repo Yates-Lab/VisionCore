@@ -137,20 +137,46 @@ class TemporalSummarizer(nn.Module):
     """Causal summaries per channel/pixel over T frames.
        Outputs (per channel): last, ema_fast, ema_slow, derivative, temporal_energy.
     """
-    
-    def __init__(self, alpha_fast: float = 0.74, alpha_slow: float = 0.95):
-        super().__init__()
-        self.alpha_fast = alpha_fast
-        self.alpha_slow = alpha_slow
 
-    @staticmethod
-    def _ema(x: torch.Tensor, alpha: float) -> torch.Tensor:
+    def __init__(self, alpha_fast: float = 0.74, alpha_slow: float = 0.95, learnable_alphas: bool = True):
+        super().__init__()
+        # Make alpha parameters learnable (constrained to [0, 1] via sigmoid)
+        if learnable_alphas:
+            # Store in logit space for unconstrained optimization
+            self.alpha_fast_logit = nn.Parameter(torch.logit(torch.tensor(alpha_fast)))
+            self.alpha_slow_logit = nn.Parameter(torch.logit(torch.tensor(alpha_slow)))
+        else:
+            self.register_buffer('alpha_fast_logit', torch.logit(torch.tensor(alpha_fast)))
+            self.register_buffer('alpha_slow_logit', torch.logit(torch.tensor(alpha_slow)))
+
+    @property
+    def alpha_fast(self):
+        """Get alpha_fast constrained to [0, 1]."""
+        return torch.sigmoid(self.alpha_fast_logit)
+
+    @property
+    def alpha_slow(self):
+        """Get alpha_slow constrained to [0, 1]."""
+        return torch.sigmoid(self.alpha_slow_logit)
+
+    def _ema(self, x: torch.Tensor, alpha: torch.Tensor) -> torch.Tensor:
+        """Compute exponential moving average.
+
+        Args:
+            x: [B,C,T,H,W] input tensor
+            alpha: scalar tensor (0-1) for EMA decay
+
+        Returns:
+            [B,C,T,H,W] EMA output
+        """
         # x: [B,C,T,H,W]
         B,C,T,H,W = x.shape
         out = []
         acc = torch.zeros(B,C,H,W, device=x.device, dtype=x.dtype)
+        # Convert alpha to same dtype as x for computation
+        alpha_val = alpha.to(x.dtype)
         for t in range(T):
-            acc = alpha*acc + (1-alpha)*x[:,:,t]
+            acc = alpha_val*acc + (1-alpha_val)*x[:,:,t]
             out.append(acc.unsqueeze(2))
         return torch.cat(out, dim=2)
 
@@ -246,7 +272,8 @@ class PolarRecurrent(nn.Module):
         # Temporal summarizer (always used)
         self.summarizer = TemporalSummarizer(
             alpha_fast=config.get('alpha_fast', 0.74),
-            alpha_slow=config.get('alpha_slow', 0.95)
+            alpha_slow=config.get('alpha_slow', 0.95),
+            learnable_alphas=config.get('learnable_alphas', True)  # Default: learnable
         )
 
     def forward(self, feats):

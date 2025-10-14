@@ -199,11 +199,11 @@ def model_pred(batch, model, dataset_idx, stage='pred', include_modulator=True, 
 
 #%% LOAD A MODEL
 
-model_type = 'learned_res_small_gru'
+model_type = 'learned_res_small_gru_optimized'
 model, model_info = load_model(
         model_type=model_type,
         model_index=None, # none for best model
-        checkpoint_path='/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage/checkpoints/learned_res_small_gru_ddp_bs256_ds30_lr1e-3_wd1e-4_corelrscale0.5_warmup5_zip/epoch=93-val_bps_overall=0.4556.ckpt',
+        checkpoint_path=None,
         checkpoint_dir=checkpoint_dir,
         device='cpu'
     )

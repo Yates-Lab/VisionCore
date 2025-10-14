@@ -8,8 +8,8 @@ convnet:
   type: polar
   params:
     n_pyramid_levels: 4
-    n_pairs: 16
-    kernel_size: 7
+    n_pairs: 64
+    kernel_size: 15
 
 # Modulator: Polar behavior encoding (gaze encoder + behavior encoder)
 modulator:

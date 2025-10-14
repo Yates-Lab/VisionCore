@@ -183,6 +183,8 @@ def extract_model_type(exp_name):
         return 'learned_res_small_pc'
     elif 'learned_res_small_none_gru_none_pool' in exp_name:
         return 'learned_res_small_none_gru_none_pool'
+    elif 'learned_res_small_gru_optimized' in exp_name:
+        return 'learned_res_small_gru_optimized'
     elif 'learned_res_small_gru' in exp_name:
         return 'learned_res_small_gru'
     elif 'learned_res_small_none_gru' in exp_name:

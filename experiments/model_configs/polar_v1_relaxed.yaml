@@ -1,0 +1,111 @@
+# Polar-V1 Model Configuration with RELAXED/LEARNABLE Temporal Constants
+# This configuration implements the full Polar-V1 model with more flexible temporal dynamics
+#
+# KEY CHANGES FROM polar_v1.yaml:
+# 1. Wider initial ranges for lambda_fix and lambda_sac (will be learned)
+# 2. Learnable alpha_fast and alpha_slow (enabled by default)
+# 3. More relaxed initial values to let the model find optimal dynamics
+
+model_type: v1multi
+
+# ConvNet: Polar spatial processing (pyramid + quadrature + polar decompose)
+convnet:
+  type: polar
+  params:
+    n_pyramid_levels: 4
+    n_pairs: 64
+    kernel_size: 15
+
+# Modulator: Polar behavior encoding (gaze encoder + behavior encoder)
+modulator:
+  type: polar
+  params:
+    beh_dim: 128
+    dt: 0.008333  # 1/120 Hz = 8.33ms
+    use_pos_fourier: true
+    Kpos: 2
+    init_pos_freq_cpx: 0.015625  # 1/64 (using explicit decimal)
+
+# Recurrent: Polar dynamics + temporal summarization with LEARNABLE temporal constants
+recurrent:
+  type: polar
+  params:
+    dt: 0.008333   # 1/120 Hz = 8.33ms
+    
+    # Amplitude relaxation rates (LEARNABLE - these are just initializations)
+    # Original: lambda_fix=10.0 (τ=100ms), lambda_sac=40.0 (τ=25ms)
+    # Relaxed: Start with slower decay, let model learn optimal rates
+    lambda_fix: 5.0     # τ=200ms (2x slower than original - more persistent)
+    lambda_sac: 20.0    # τ=50ms (2x slower than original - less suppression)
+    
+    # EMA decay rates (LEARNABLE - these are just initializations)
+    # Original: alpha_fast=0.74 (τ≈32ms), alpha_slow=0.95 (τ≈167ms)
+    # Relaxed: Start with intermediate values, let model learn
+    alpha_fast: 0.80    # τ≈42ms (slightly slower than original)
+    alpha_slow: 0.90    # τ≈83ms (faster than original - more responsive)
+    learnable_alphas: true  # Enable learning of alpha parameters
+    
+    # Spatial frequency base
+    base_freq_cpx: 0.15
+    
+    # Flags
+    use_behavior: true
+    use_jepa: false  # JEPA requires temporal windowing (future work)
+
+# Readout: Multi-level Gaussian readout
+readout:
+  type: polar
+  params:
+    n_units: 8
+    bias: true
+    initial_std: 5.0
+    initial_mean_scale: 0.1
+
+# Output activation - use identity (none) for log-space
+output_activation: none
+
+# Auxiliary loss weights (for future use)
+lambda_jepa: 0.5  # Weight for JEPA loss when enabled
+
+# NOTES ON TEMPORAL CONSTANTS:
+#
+# All temporal constants are now LEARNABLE parameters that will be optimized during training!
+#
+# 1. lambda_fix and lambda_sac (Amplitude Relaxation):
+#    - Control how fast features decay during fixation vs saccade
+#    - Higher values = faster decay (shorter memory)
+#    - Lower values = slower decay (longer memory)
+#    - Original: 10.0 and 40.0 (4x faster during saccades)
+#    - Relaxed: 5.0 and 20.0 (still 4x ratio, but 2x slower overall)
+#    - The model will learn the optimal rates from data!
+#
+# 2. alpha_fast and alpha_slow (EMA Decay):
+#    - Control temporal integration windows for fast/slow traces
+#    - Higher alpha = longer memory (slower decay)
+#    - Lower alpha = shorter memory (faster decay)
+#    - Original: 0.74 and 0.95 (32ms and 167ms time constants)
+#    - Relaxed: 0.80 and 0.90 (42ms and 83ms time constants)
+#    - The model will learn the optimal values from data!
+#
+# 3. Why Relaxed Initialization?
+#    - Original values were hand-tuned for specific assumptions
+#    - Your data may have different temporal statistics
+#    - Starting with more moderate values gives the optimizer more room to explore
+#    - The model can learn to be faster OR slower as needed
+#
+# 4. Monitoring During Training:
+#    - You can log these parameters to see how they evolve
+#    - Add to your training script:
+#      ```python
+#      if hasattr(model.recurrent, 'dynamics'):
+#          wandb.log({
+#              'lambda_fix': model.recurrent.dynamics.lambda_fix.item(),
+#              'lambda_sac': model.recurrent.dynamics.lambda_sac.item(),
+#          })
+#      if hasattr(model.recurrent, 'summarizer'):
+#          wandb.log({
+#              'alpha_fast': model.recurrent.summarizer.alpha_fast.item(),
+#              'alpha_slow': model.recurrent.summarizer.alpha_slow.item(),
+#          })
+#      ```
+

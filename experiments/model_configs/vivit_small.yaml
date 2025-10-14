@@ -13,8 +13,10 @@ adapter:
   params: {grid_size: 51, init_sigma: 1.0, transform: scale}
 
 frontend:
-  type: none
-  params: {}
+  type: learnable_temporal
+  params: {kernel_size: 16, num_channels: 4, init_type: gaussian_derivatives,
+          anti_aliasing: false,
+          causal: true, bias: false}
 
 # ViViT Convnet configuration - SMALL VERSION
 convnet:
@@ -74,7 +76,7 @@ convnet:
       drop_path: 0.05
       use_rope: true
       flash_attention: true
-      is_causal: false
+      is_causal: true
       norm: rmsnorm
       normalize_qk: false
       grad_checkpointing: false

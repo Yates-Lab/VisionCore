@@ -79,12 +79,13 @@ class ViViT(BaseConvNet):
             )
 
         # Temporal transformer blocks (with causal masking)
+        temporal_params = transformer_params.copy()
+        temporal_params['is_causal'] = True  # Override for temporal blocks
         for _ in range(self.num_temporal_blocks):
             self.blocks.append(
                 TransformerBlock(
                     input_shape=(100, self.embedding_dim),  # Placeholder
-                    is_causal=True,
-                    **transformer_params
+                    **temporal_params
                 )
             )
 
