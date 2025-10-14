@@ -530,8 +530,8 @@ class LearnableTemporalConv(nn.Module):
                  num_channels=6,
                  init_type='gaussian_derivatives',
                  causal=True,
-                 anti_aliasing=False,
-                 bias=False):
+                 bias=False,
+                 **kwargs):
         super().__init__()
 
         self.kernel_size = kernel_size
@@ -541,24 +541,16 @@ class LearnableTemporalConv(nn.Module):
 
         # Create the temporal convolution layer
         # This will be applied to each spatial location independently
-        if anti_aliasing:
-            from .conv_layers import AntiAliasedConv1d
-            self.temporal_conv = AntiAliasedConv1d(
-                in_channels=1,  # Process each input channel separately
-                out_channels=num_channels,
-                kernel_size=self.kernel_size,
-                bias=bias,
-                padding=0  # Valid convolution for causal behavior
-            )
-        else:
-            # Standard causal convolution
-            self.temporal_conv = nn.Conv1d(
-                in_channels=1,  # Process each input channel separately
-                out_channels=num_channels,
-                kernel_size=self.kernel_size,
-                bias=bias,
-                padding=0  # Valid convolution for causal behavior
-            )
+        from .conv_layers import StandardConv
+        self.temporal_conv = StandardConv(
+            dim=1,
+            in_channels=1,  # Process each input channel separately
+            out_channels=num_channels,
+            kernel_size=self.kernel_size,
+            bias=bias,
+            padding=0,  # Valid convolution for causal behavior
+            **kwargs
+        )
 
         # Initialize the temporal kernels
         self._initialize_kernels()
@@ -627,7 +619,8 @@ class LearnableTemporalConv(nn.Module):
             kernels.append(kernel)
 
         kernel_tensor = torch.stack(kernels, dim=0).unsqueeze(1)
-        self.temporal_conv.weight.data = kernel_tensor
+        # Access the underlying conv parameter, not the property
+        self.temporal_conv.conv.weight.data = kernel_tensor
 
     def forward(self, x):
         """
@@ -675,7 +668,8 @@ class LearnableTemporalConv(nn.Module):
 
     def plot_kernels(self, ax=None):
         """Plot the learned temporal kernels."""
-        kernels = self.temporal_conv.weight.data.cpu().numpy()  # [num_channels, 1, kernel_size]
+        # Use the weight property to get anti-aliased weights for plotting
+        kernels = self.temporal_conv.weight.detach().cpu().numpy()  # [num_channels, 1, kernel_size]
 
         if ax is None:
             fig, ax = plt.subplots(1, 1, figsize=(8, 4))
