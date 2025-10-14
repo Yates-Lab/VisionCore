@@ -42,7 +42,7 @@ def _get_window_fn(window_type: str, window_size: int, **window_kwargs):
     return window
 
 class AntiAliasedMixin:
-    # expects: self.aa_time, self.aa_freq, self.aa_window, self.aa_window_kwargs,
+    # expects: self.aa_signal, self.aa_freq, self.aa_window, self.aa_window_kwargs,
     #          self.aa_fft_pad, self.aa_double_time
 
     def _get_cached_window(self, size: int, device, dtype) -> torch.Tensor:
@@ -90,7 +90,7 @@ class AntiAliasedMixin:
         half = wf[bins - 1:]                              # descending half (1→0 to Nyquist)
         W = W * half.view(1, 1, -1)
         out = torch.fft.irfft(W, n=Nfft, dim=-1)[..., :k]
-        if self.aa_time and self.aa_double_time:
+        if self.aa_signal and self.aa_double_time:
             out = self._apply_spacetime_window(out, dim=1)
         return out
 
@@ -120,12 +120,12 @@ class AntiAliasedMixin:
             slices.append(slice(start, start + k))
         out = wf[tuple(slices)]
 
-        if self.aa_time and self.aa_double_time:
+        if self.aa_signal and self.aa_double_time:
             out = self._apply_spacetime_window(out, dim=dim)
         return out
 
     def _aa_weight(self, w: torch.Tensor, dim: int) -> torch.Tensor:
-        if self.aa_time:
+        if self.aa_signal:
             w = self._apply_spacetime_window(w, dim)
         if self.aa_freq:
             w = self._freq_aa_1d(w) if dim == 1 else self._freq_aa_nd(w, dim)
@@ -135,15 +135,15 @@ class AntiAliasedMixin:
 class ConvBase(AntiAliasedMixin, nn.Module):
     """Base class for convolution modules with weight plotting."""
     def __init__(self,
-            aa_time: bool = False,
-            aa_freq: bool = False,
+            aa_signal: bool = False, # signal domain weight windowing
+            aa_freq: bool = False, # frequency domain weight windowing
             aa_window: str = 'hann',
             aa_window_kwargs: Optional[dict] = None,
             aa_fft_pad: int = 2,
             aa_double_time: bool = False):
-        
+
         super().__init__()
-        self.aa_time = aa_time
+        self.aa_signal = aa_signal
         self.aa_freq = aa_freq
         self.aa_window = aa_window
         self.aa_window_kwargs = aa_window_kwargs
@@ -356,7 +356,7 @@ class StandardConv(ConvBase):
     @property
     def weight(self) -> torch.Tensor:
         w = self.conv.weight
-        if self.aa_time or self.aa_freq:
+        if self.aa_signal or self.aa_freq:
             w = self._aa_weight(w, self.dim)
         return w
 
@@ -388,7 +388,7 @@ class DepthwiseConv(ConvBase):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Anti-alias only the spatial/temporal kernel (depthwise)
         dw_weight = self.depthwise.weight
-        if self.aa_time or self.aa_freq:
+        if self.aa_signal or self.aa_freq:
             dw_weight = self._aa_weight(dw_weight, self.dim)
 
         # Use AA'd depthwise kernels; pointwise is not windowed
@@ -413,7 +413,7 @@ class DepthwiseConv(ConvBase):
           - 3D: (C_out, C_in, D, H, W)
         """
         dw = self.depthwise.weight
-        if self.aa_time or self.aa_freq:
+        if self.aa_signal or self.aa_freq:
             dw = self._aa_weight(dw, self.dim)
 
         # Reorder depthwise to put Cin in the second dim for broadcasting with pointwise

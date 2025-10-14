@@ -3,9 +3,12 @@ import torch
 import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 from typing import List, Dict, Any, Tuple, Union, Optional
-
 from .common import chomp
-# Avoid circular import - ViViT will be imported lazily when needed
+from .conv_blocks import ConvBlock, ResBlock
+from .norm_act_pool import get_activation_layer
+from .shifttcn import ShiftTCN
+
+__all__ = ['BaseConvNet', 'VanillaCNN', 'ResNet', 'DenseNet', 'ShiftTCN']
 
 def chomp_causal_spatial(tensor_to_crop: torch.Tensor, reference_tensor: torch.Tensor) -> torch.Tensor:
     """
@@ -31,11 +34,7 @@ def chomp_causal_spatial(tensor_to_crop: torch.Tensor, reference_tensor: torch.T
 
     return tensor_to_crop
 
-from .conv_blocks import ConvBlock, ResBlock
-from .norm_act_pool import get_activation_layer
-from .shifttcn import ShiftTCN
 
-__all__ = ['BaseConvNet', 'VanillaCNN', 'ResNet', 'DenseNet', 'ShiftTCN']
 
 class BaseConvNet(nn.Module):
     """Base class for configurable convolutional networks."""

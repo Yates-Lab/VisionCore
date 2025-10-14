@@ -61,9 +61,10 @@ mkdir -p $CHECKPOINT_DIR
 
 # Array of model configurations to run
 MODEL_CONFIGS=(
-    "experiments/model_configs/cones_res_small_gru_optimized.yaml"
-    "experiments/model_configs/vivit_small.yaml"
     "experiments/model_configs/learned_res_small_gru_optimized_aa.yaml"
+    # "experiments/model_configs/learned_res_small_film.yaml"
+    # "experiments/model_configs/vivit_small.yaml"
+    # 
     # "experiments/model_configs/learned_res_small_gru_optimized.yaml"
     
     # "experiments/model_configs/learned_res_optimized_gru.yaml"

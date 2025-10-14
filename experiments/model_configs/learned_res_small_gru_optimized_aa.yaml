@@ -27,52 +27,52 @@ adapter:
 frontend:
   type: learnable_temporal
   params: {kernel_size: 16, num_channels: 4, init_type: gaussian_derivatives,
-          anti_aliasing: true,
-          causal: true, bias: false}
+          aa_signal: true,
+          causal: true,
+          bias: false}
 
 # Convnet configuration - ResNet with ORIGINAL architecture + affine RMSNorm
 convnet:
   type: resnet
   params:
     final_activation: none
-    channels: [128, 128, 256]  # ORIGINAL channel progression (kept!)
+    channels: [64, 128, 256]
     dim: 3
     checkpointing: false
     block_configs:
 
       # Stage 0: keep full res, no pooling
       - conv_params:
-          type: standard  # STANDARD conv (not depthwise - keeps capacity!)
-          kernel_size: [3, 5, 5]
-          padding:    [1, 3, 3]
+          type: depthwise
+          kernel_size: [3, 9, 9]
+          padding:    [1, 1, 1]
           stride:     2
         norm_type: rms
         norm_params:
-          affine: true  # NEW: Enable learnable gamma/beta
-        act_type: silu
+          affine: true
+        act_type: gelu
         dropout: 0.0
         pool_params: null
 
       # Stage 1: 
       - conv_params:
-          type: standard  # STANDARD conv (not depthwise)
-          kernel_size: [3, 5, 5]
-          padding:    [1, 3, 3]
+          type: depthwise
+          kernel_size: [3, 3, 3]
+          padding:    [1, 1, 1]
           stride:     1
         norm_type: rms
         norm_params:
-          affine: true  # NEW: Enable learnable gamma/beta
-        act_type: silu
+          affine: true
+        act_type: gelu
         dropout: 0.1
         pool_params:
-          type: aablur
+          type: avg
+          kernel_size: 2
           stride: 2
-          r: 8
-          use_soft: true
 
       # Stage 2: second (final) downsample, then dilation
       - conv_params:
-          type: standard  # STANDARD conv (not depthwise)
+          type: depthwise  # STANDARD conv (not depthwise)
           kernel_size: [3, 3, 3]
           padding:    [2,2,2] 
           dilation:   2           # enlarge RF, keep 13×13 map
@@ -80,33 +80,32 @@ convnet:
         norm_type: rms
         norm_params:
           affine: true  # NEW: Enable learnable gamma/beta
-        act_type: silu
-        dropout: 0.2
+        act_type: gelu
+        dropout: 0.1
         pool_params:
-          type: aablur
-          stride: 1  # ORIGINAL (not stride 2!)
-          r: 16
-          use_soft: true
-          
+          type: avg
+          kernel_size: 2
+          stride: 2
+
 
 # Modulator configuration - ConvGRU with SAFE optimizations
 modulator:
   type: convgru
   params:
     behavior_dim: 42
-    feature_dim: 256  # ORIGINAL (matches final ResNet stage of 128)
-    hidden_dim: 256   # ORIGINAL (match feature_dim for stability)
-    beh_emb_dim: 32   # ORIGINAL
-    kernel_size: 3    # ORIGINAL
+    feature_dim: 256 
+    hidden_dim: 256  
+    beh_emb_dim: 32  
+    kernel_size: 3   
     
-    # ConvGRU Optimizations (SAFE ones only!)
-    use_layer_norm: true      # NEW: Major stability improvement
-    learnable_h0: true         # NEW: Better than zero init
-    use_depthwise: false       # ORIGINAL: Keep standard convs
-    use_grouped: false         # ORIGINAL: No grouping
-    num_groups: 1              # ORIGINAL
-    use_residual: true        # ORIGINAL: No residual
-    grad_clip_val: null        # ORIGINAL: No clipping
+    # ConvGRU Optimizations
+    use_layer_norm: true      
+    learnable_h0: true         
+    use_depthwise: false       
+    use_grouped: false         
+    num_groups: 1              
+    use_residual: false        
+    grad_clip_val: null        
 
 # Recurrent configuration
 recurrent:

@@ -6,7 +6,7 @@ from typing import Optional, Dict, Any, Union, Tuple
 
 from .common import SplitRelu # Assuming common.py is in the same directory level
 
-__all__ = ['get_norm_layer', 'get_activation_layer', 'get_pooling_layer', 'RMSNorm', 'LayerNorm', 'BSoftplus', 'AABlur_SE_SoftPool', 'LocalChannelSpatialAttn']
+__all__ = ['get_norm_layer', 'get_activation_layer', 'get_pooling_layer', 'RMSNorm', 'LayerNorm', 'BSoftplus', 'AABlur_SE_SoftPool', 'SE_SoftPool', 'LocalChannelSpatialAttn']
 
 
 class LocalChannelSpatialAttn(nn.Module):
@@ -104,8 +104,14 @@ class AABlur_SE_SoftPool(nn.Module):
         )
 
     def _softpool2d(self, x: torch.Tensor, k: int = 2, s: int = 2) -> torch.Tensor:
-        """SoftPool implementation for 2D tensors."""
-        w = torch.exp(x)
+        """SoftPool implementation for 2D tensors with numerical stability.
+
+        Uses temperature scaling to prevent exp() overflow on large activations.
+        Temperature of 10.0 keeps exp() in a safe range even for activations up to 50.
+        """
+        temperature = 10.0
+        x_scaled = x / temperature
+        w = torch.exp(x_scaled)
         return F.avg_pool2d(x * w, k, s) / (F.avg_pool2d(w, k, s) + 1e-6)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -117,6 +123,59 @@ class AABlur_SE_SoftPool(nn.Module):
             x = self._softpool2d(x, 2, self.stride)
         else:
             x = F.avg_pool2d(x, 2, self.stride)
+        h2, w2 = x.shape[-2:]
+        x = x.view(b, t, c, h2, w2).permute(0, 2, 1, 3, 4)
+
+        # channel-wise gating (SE)
+        return x * self.se(x)
+
+
+class SE_SoftPool(nn.Module):
+    """
+    Stride-N downsample with optional SoftPool and SE gate (no anti-aliasing blur).
+    Works on (B, C, T, H, W) tensors from a spatiotemporal stem.
+
+    Args:
+        C (int): Number of input channels
+        stride (int): Stride for pooling (default: 2)
+        r (int): Reduction ratio for SE block (default: 8)
+        use_soft (bool): Whether to use SoftPool instead of AvgPool (default: True)
+    """
+    def __init__(self, C: int, stride: int = 2, r: int = 8, use_soft: bool = True):
+        super().__init__()
+        self.stride = stride
+        self.use_soft = use_soft
+
+        self.se = nn.Sequential(                       # squeeze-and-excite
+            nn.AdaptiveAvgPool3d((None, 1, 1)),
+            nn.Conv3d(C, C // r, 1, bias=True),
+            nn.SiLU(),
+            nn.Conv3d(C // r, C, 1, bias=True),
+            nn.Sigmoid()
+        )
+
+    def _softpool2d(self, x: torch.Tensor, k: int = 2, s: int = 2) -> torch.Tensor:
+        """SoftPool implementation for 2D tensors with numerical stability.
+
+        Uses temperature scaling to prevent exp() overflow on large activations.
+        Temperature of 10.0 keeps exp() in a safe range even for activations up to 50.
+        """
+        temperature = 10.0
+        x_scaled = x / temperature
+        w = torch.exp(x_scaled)
+        return F.avg_pool2d(x * w, k, s) / (F.avg_pool2d(w, k, s) + 1e-6)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass. Input shape: (B, C, T, H, W)"""
+        b, c, t, h, w = x.shape
+        x = x.permute(0, 2, 1, 3, 4).reshape(b * t * c, 1, h, w)
+
+        # Pool without blur
+        if self.use_soft:
+            x = self._softpool2d(x, 2, self.stride)
+        else:
+            x = F.avg_pool2d(x, 2, self.stride)
+
         h2, w2 = x.shape[-2:]
         x = x.view(b, t, c, h2, w2).permute(0, 2, 1, 3, 4)
 
@@ -442,7 +501,7 @@ def get_activation_layer(act_type: Optional[str],
 def get_pooling_layer(pool_params: Optional[Dict[str, Any]] = None, op_dim: int = 2) -> nn.Module:
     """Factory for pooling layers.
     Can be:
-    - 'max', 'avg', 'adaptivemax', 'adaptiveavg', 'learned', 'aablur', 'locatt', or 'none'
+    - 'max', 'avg', 'adaptivemax', 'adaptiveavg', 'learned', 'aablur', 'se_pool', 'locatt', or 'none'
 
     For 'learned' pooling, pool_params should include:
     - 'in_channels': Number of input channels for the ConvBlock
@@ -453,6 +512,12 @@ def get_pooling_layer(pool_params: Optional[Dict[str, Any]] = None, op_dim: int 
     - Other ConvBlock parameters as needed
 
     For 'aablur' pooling (3D only), pool_params should include:
+    - 'channels': Number of input channels (required)
+    - 'stride': Stride for pooling (optional, default: 2)
+    - 'r': Reduction ratio for SE block (optional, default: 8)
+    - 'use_soft': Whether to use SoftPool instead of AvgPool (optional, default: True)
+
+    For 'se_pool' pooling (3D only), pool_params should include:
     - 'channels': Number of input channels (required)
     - 'stride': Stride for pooling (optional, default: 2)
     - 'r': Reduction ratio for SE block (optional, default: 8)
@@ -483,6 +548,22 @@ def get_pooling_layer(pool_params: Optional[Dict[str, Any]] = None, op_dim: int 
         use_soft = pool_params.get('use_soft', True)
 
         return AABlur_SE_SoftPool(C=channels, stride=stride, r=r, use_soft=use_soft)
+
+    if pool_type == 'se_pool':
+        # SE pooling only works with 3D tensors
+        if op_dim != 3:
+            raise ValueError("SE pooling only supports 3D tensors (op_dim=3)")
+
+        # Extract required parameters
+        channels = pool_params.get('channels')
+        if channels is None:
+            raise ValueError("'se_pool' pooling requires 'channels' parameter")
+
+        stride = pool_params.get('stride', 2)
+        r = pool_params.get('r', 8)
+        use_soft = pool_params.get('use_soft', True)
+
+        return SE_SoftPool(C=channels, stride=stride, r=r, use_soft=use_soft)
 
     elif pool_type == 'locatt':
         # LocalChannelSpatialAttn only works with 3D tensors

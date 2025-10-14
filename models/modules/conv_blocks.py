@@ -114,8 +114,8 @@ class ConvBlock(nn.Module):
         self.components['dropout'] = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         # 5. Pooling
-        # For AABlur pooling, we need to pass the conv output channel count
-        if _pool_params and _pool_params.get('type', '').lower() == 'aablur':
+        # For AABlur and SE pooling, we need to pass the conv output channel count
+        if _pool_params and _pool_params.get('type', '').lower() in ('aablur', 'se_pool'):
             _pool_params = _pool_params.copy()  # Don't modify the original
             _pool_params['channels'] = self._out_channels_conv
         self.components['pool'] = get_pooling_layer(_pool_params, self.dim)
