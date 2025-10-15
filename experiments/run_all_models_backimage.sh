@@ -61,7 +61,8 @@ mkdir -p $CHECKPOINT_DIR
 
 # Array of model configurations to run
 MODEL_CONFIGS=(
-    "experiments/model_configs/learned_res_small_gru_optimized_aa.yaml"
+    "experiments/model_configs/pyramid_stem_resnet.yaml"
+    # "experiments/model_configs/learned_res_small_gru_optimized_aa.yaml"
     # "experiments/model_configs/learned_res_small_film.yaml"
     # "experiments/model_configs/vivit_small.yaml"
     # 
@@ -143,7 +144,7 @@ run_training() {
         --gradient_clip_val 100.0 \
         --steps_per_epoch $STEPS_PER_EPOCH \
         --num_workers $NUM_WORKERS \
-        --early_stopping_patience 50 \
+        --early_stopping_patience 10 \
         --early_stopping_min_delta 0.0"
 
     # Add loss type flag if using ZIP loss

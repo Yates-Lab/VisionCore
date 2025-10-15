@@ -47,6 +47,7 @@ convnet:
           kernel_size: [3, 9, 9]
           padding:    [1, 1, 1]
           stride:     2
+          aa_signal: true
         norm_type: rms
         norm_params:
           affine: true
@@ -88,7 +89,7 @@ convnet:
           stride: 2
 
 
-# Modulator configuration - ConvGRU with SAFE optimizations
+# Modulator
 modulator:
   type: convgru
   params:

@@ -214,10 +214,10 @@ class SpatialTransformerModulator(BaseModulator):
     Channel-wise Spatial Transformer modulator.
 
     For each trial it predicts:
-        • θ  : 6-parameter affine matrix  (2×3)       ─ spatial shift / warp
-        • α  : per-channel mixing weights in [0,1]    ─ blend shifted vs. original
+        • θ  : 6-parameter affine matrix  (2x3)       ─ spatial shift / warp
+        • alpha  : per-channel mixing weights in [0,1]    ─ blend shifted vs. original
 
-    Output:  α * STN(feats)  +  (1-α) * feats
+    Output:  alpha * STN(feats)  +  (1-alpha) * feats
              shape = (N, C, T, H, W)
     """
 

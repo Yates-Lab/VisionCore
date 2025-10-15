@@ -34,7 +34,6 @@ class ConvGRUCellFast(nn.Module):
     - Layer normalization for stability
     - Depthwise-separable convolutions (optional)
     - Grouped convolutions for gates (optional)
-    - Proper reset gate application (FIXED BUG!)
 
     Implements:   g = W_x * x   +   LN(W_h * h)
                   (z, r, n) = split(g)

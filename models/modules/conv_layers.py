@@ -10,9 +10,12 @@ import torch.nn.functional as F
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import Union, Sequence, Tuple, Optional
-from torch.nn.utils import weight_norm, remove_weight_norm
+from torch.nn.utils.parametrizations import weight_norm
+from torch.nn.utils import parametrize
+from einops import rearrange
+from .common import chomp
 
-__all__ = ['StandardConv', 'DepthwiseConv']
+__all__ = ['StandardConv', 'DepthwiseConv', 'PyramidStem']
 
 '''
 Helpers for anti-aliasing convolutions
@@ -83,7 +86,7 @@ class AntiAliasedMixin:
     # 1D: rFFT + half-window (fast)
     def _freq_aa_1d(self, w: torch.Tensor) -> torch.Tensor:
         k = w.shape[-1]
-        Nfft = int(np.fft.next_fast_len(k * self.aa_fft_pad))
+        Nfft = int(2**np.ceil(np.log2(k * self.aa_fft_pad)))
         W = torch.fft.rfft(w, n=Nfft, dim=-1)
         bins = W.shape[-1]
         wf = self._win1d(2*bins - 2, w.device, w.dtype)  # full
@@ -98,7 +101,7 @@ class AntiAliasedMixin:
     def _freq_aa_nd(self, w: torch.Tensor, dim: int) -> torch.Tensor:
         axes = self._kernel_axes(dim)
         kshape = [w.shape[a] for a in axes]
-        s_fft = [int(np.fft.next_fast_len(k * self.aa_fft_pad)) for k in kshape]
+        s_fft = [int(2**np.ceil(np.log2(k * self.aa_fft_pad))) for k in kshape]
 
         W = torch.fft.fftn(w, s=s_fft, dim=axes)
         W = torch.fft.fftshift(W, dim=axes)
@@ -345,13 +348,16 @@ class StandardConv(ConvBase):
                            bias=bias, padding_mode=padding_mode)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.conv._conv_forward(x, self.weight, self.conv.bias)
+        w = self.conv.weight
+        if self.aa_signal or self.aa_freq:
+            w = self._aa_weight(w, self.dim)
+        return self.conv._conv_forward(x, w, self.conv.bias)
 
     def apply_weight_norm(self, dim: int = 0):
-        self.conv = weight_norm(self.conv, name='weight', dim=dim)
+        weight_norm(self.conv, name='weight', dim=dim)
 
     def remove_weight_norm(self):
-        self.conv = remove_weight_norm(self.conv)
+        parametrize.remove_parametrizations(self.conv, 'weight')
         
     @property
     def weight(self) -> torch.Tensor:
@@ -397,12 +403,12 @@ class DepthwiseConv(ConvBase):
 
     # -------- weight property for plotting (fused kernel) --------
     def apply_weight_norm(self, dim: int = 0):
-        self.pointwise = weight_norm(self.pointwise, name='weight', dim=dim)
-        self.depthwise = weight_norm(self.depthwise, name='weight', dim=dim)
-    
+        weight_norm(self.pointwise, name='weight', dim=dim)
+        weight_norm(self.depthwise, name='weight', dim=dim)
+
     def remove_weight_norm(self):
-        self.pointwise = remove_weight_norm(self.pointwise)
-        self.depthwise = remove_weight_norm(self.depthwise)
+        parametrize.remove_parametrizations(self.pointwise, 'weight')
+        parametrize.remove_parametrizations(self.depthwise, 'weight')
 
     @property
     def weight(self) -> torch.Tensor:
@@ -434,7 +440,124 @@ class DepthwiseConv(ConvBase):
         # Broadcasting multiply to get fused (C_out, C_in, K/HW/DHW)
         eff = pw * dw
         return eff
-    
+
+
+class PyramidStem(nn.Module):
+    """
+    Laplacian Pyramid Stem for ResNet.
+
+    Decomposes input into Laplacian pyramid levels, applies convolution to each level,
+    and concatenates the results. Optionally computes amplitude normalization.
+
+    This stem is designed to work with 3D inputs (B, C, T, H, W) and processes
+    each time frame independently through the pyramid decomposition.
+
+    Args:
+        Nlevels: Number of pyramid levels
+        in_channels: Number of input channels
+        out_channels: Number of output channels per pyramid level
+        kernel_size: Kernel size for convolution
+        stride: Stride for convolution
+        padding: Padding for convolution (can be int or 'same')
+        bias: Whether to use bias in convolution
+        amplitude_cat: If True, concatenates amplitude information
+        aa_signal: Apply signal-domain anti-aliasing to conv weights
+        aa_freq: Apply frequency-domain anti-aliasing to conv weights
+        dim: Dimensionality (must be 3 for compatibility with ResNet) - optional for compatibility
+    """
+    def __init__(self,
+                 Nlevels: int = 3,
+                 in_channels: int = 1,
+                 out_channels: int = 64,
+                 kernel_size: int = 9,
+                 stride: int = 1,
+                 padding: Union[int, str] = 'same',
+                 bias: bool = False,
+                 amplitude_cat: bool = False,
+                 aa_signal: bool = True,
+                 aa_freq: bool = True,
+                 dim: int = 3,  # For compatibility with ResNet
+                 **kwargs):  # Accept extra kwargs for compatibility
+
+        super().__init__()
+
+        if dim != 3:
+            raise ValueError(f"PyramidStem requires dim=3 for 3D inputs (B,C,T,H,W), got dim={dim}")
+
+        # Import here to avoid requiring plenoptic as a hard dependency
+        try:
+            from plenoptic.simulate import LaplacianPyramid
+        except ImportError:
+            raise ImportError("PyramidStem requires plenoptic. Install with: pip install plenoptic")
+
+        self.Nlevels = Nlevels
+        self.amplitude_cat = amplitude_cat
+
+        # Laplacian pyramid operates on 2D images
+        self.lpyr = LaplacianPyramid(Nlevels)
+
+        # Convolution is 2D since we process each time frame independently
+        self.conv = StandardConv(
+            dim=2,
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            bias=bias,
+            aa_signal=aa_signal,
+            aa_freq=aa_freq
+        )
+
+        # Apply weight normalization
+        # self.conv.apply_weight_norm(0)  # Disabled for now - may cause gradient instability
+
+        # Store for output_channels calculation
+        self._out_channels = out_channels
+
+    def forward(self, x):
+
+        batch_size = x.shape[0]
+
+        # Ensure lpyr is on the same device as input
+        if not hasattr(self.lpyr, '_device') or self.lpyr._device != x.device:
+            self.lpyr = self.lpyr.to(x.device)
+            self.lpyr._device = x.device
+
+        x = rearrange(x, "B C T H W -> (B T) C H W")
+        y = self.lpyr(x)
+        y = [self.conv(L) for L in y]
+        y = [rearrange(L, "(B T) C H W -> B C T H W", B=batch_size) for L in y]
+        min_size = min([L.shape[-1] for L in y])
+        y = [chomp(L, (min_size, min_size)) for L in y]
+        y = torch.concat(y, dim=1)
+        if self.amplitude_cat:
+            A = (y[:,::2]**2 + y[:,1::2,:,:,]**2).pow(.5)
+            # Clamp amplitude to prevent division by very small numbers
+            # This prevents NaN in forward and gradient explosion in backward
+            A_safe = torch.clamp(A, min=1e-4)
+            y[:,::2] /= A_safe
+            y[:,1::2] /= A_safe
+            y = torch.concat([A, y], dim=1)
+        return y
+
+    @property
+    def output_channels(self) -> int:
+        """
+        Returns the number of output channels.
+
+        This is required for compatibility with ResNet's stem interface.
+        """
+        # Each pyramid level contributes out_channels
+        total_channels = self._out_channels * self.Nlevels
+
+        # If amplitude_cat is enabled, we add amplitude channels
+        # Amplitude is computed from pairs of channels (real/imaginary)
+        # So we add total_channels / 2 amplitude channels
+        if self.amplitude_cat:
+            total_channels += total_channels // 2
+
+        return total_channels
 
 
 CONV_LAYER_MAP = {

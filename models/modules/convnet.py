@@ -104,10 +104,23 @@ class ResNet(BaseConvNet):
         if 'stem_config' in self.config:
             stem_cfg = self.config['stem_config'].copy()
             stem_cfg['dim'] = self.dim
-            out_ch_stem = stem_cfg.pop('out_channels')
-            # No special handling needed for normalization parameters
-            # ConvBlock will handle normalization internally
-            stem = ConvBlock(in_channels=current_channels, out_channels=out_ch_stem, **stem_cfg)
+            out_ch_stem = stem_cfg.pop('out_channels', None)
+
+            # Check for stem type (default to ConvBlock for backward compatibility)
+            stem_type = stem_cfg.pop('type', 'convblock')
+
+            if stem_type.lower() == 'pyramid':
+                # Use PyramidStem
+                from .conv_layers import PyramidStem
+                stem = PyramidStem(in_channels=current_channels, **stem_cfg)
+            elif stem_type.lower() in ['convblock', 'conv', 'standard']:
+                # Use ConvBlock (default)
+                if out_ch_stem is None:
+                    raise ValueError("ConvBlock stem requires 'out_channels' in stem_config")
+                stem = ConvBlock(in_channels=current_channels, out_channels=out_ch_stem, **stem_cfg)
+            else:
+                raise ValueError(f"Unknown stem type: '{stem_type}'. Supported types: 'pyramid', 'convblock'")
+
             self.layers.append(stem)
             current_channels = stem.output_channels
 
