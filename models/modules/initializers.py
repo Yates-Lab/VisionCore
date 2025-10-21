@@ -64,7 +64,6 @@ def _l2norm(K): K = K - K.mean(); return K / (K.norm() + 1e-8)
 def gaussian_steerable_kernels_2d(
     kernel_size=15, sigmas=(1.6,2.8,5.0),
     n_orient=8, orders=(1,2), normalize=True,
-    quadrature=False,
     device=None, dtype=None
 ):
     device = device or torch.device("cpu")
@@ -85,27 +84,16 @@ def gaussian_steerable_kernels_2d(
                 th = 2*math.pi*m/n_orient
                 # basis: [Gx, Gy]
                 Kc =  math.cos(th)*Gx + math.sin(th)*Gy             # "cos" phase
-                if quadrature:
-                    Ks = -math.sin(th)*Gx + math.cos(th)*Gy         # "sin" phase (90°)
-                    bank += [ _l2norm(Kc) if normalize else Kc,
-                              _l2norm(Ks) if normalize else Ks ]
-                else:
-                    bank.append(_l2norm(Kc) if normalize else Kc)
+                bank.append(_l2norm(Kc) if normalize else Kc)
 
         # --- order 2 (oriented) ---
         if 2 in orders:
-            # use steerable basis B1 = (Gxx - Gyy), B2 = (2 Gxy)
-            B1 = Gxx - Gyy
-            B2 = 2*Gxy
+            # Steer in Cartesian basis: G_θθ = cos²θ·Gxx + 2·sinθ·cosθ·Gxy + sin²θ·Gyy
             for m in range(n_orient):
-                th2 = 2*(2*math.pi*m/n_orient)  # double-angle
-                Kc = math.cos(th2)*B1 + math.sin(th2)*B2
-                if quadrature:
-                    Ks = -math.sin(th2)*B1 + math.cos(th2)*B2
-                    bank += [ _l2norm(Kc) if normalize else Kc,
-                              _l2norm(Ks) if normalize else Ks ]
-                else:
-                    bank.append(_l2norm(Kc) if normalize else Kc)
+                th = math.pi*m/n_orient  # orientation angle (0 to π for 2nd order)
+                c, s = math.cos(th), math.sin(th)
+                Kc = (c*c)*Gxx + 2*c*s*Gxy + (s*s)*Gyy
+                bank.append(_l2norm(Kc) if normalize else Kc)
 
     return torch.stack(bank, 0).to(device=device, dtype=dtype)  # [N,k,k]
 
@@ -113,8 +101,7 @@ def gaussian_steerable_kernels_2d(
 @torch.no_grad()
 def init_conv3d_with_2d_kernels(conv3d: torch.nn.Conv3d,
                                 kernels2d: torch.Tensor,        # [N,k,k]
-                                temporal: str = "delta",
-                                repeat_mode: str = "repeat"):
+                                temporal: str = "repeat"):
     device, dtype = conv3d.weight.device, conv3d.weight.dtype
     kt, (kh, kw) = conv3d.kernel_size[0], kernels2d.shape[-2:]
     cout, cin, groups = conv3d.out_channels, conv3d.in_channels, conv3d.groups
@@ -128,15 +115,17 @@ def init_conv3d_with_2d_kernels(conv3d: torch.nn.Conv3d,
     elif temporal == "gauss":
         t = torch.arange(kt, device=device, dtype=dtype) - (kt-1)/2
         sigma_t = max(1.0, kt/6.0); tt = torch.exp(-0.5*(t/sigma_t)**2); tt /= tt.sum().clamp_min(1e-12)
+    elif temporal == "repeat":
+        tt = torch.ones(kt, device=device, dtype=dtype) / kt
     else:
-        raise ValueError("temporal must be 'delta' or 'gauss'")
+        raise ValueError("temporal must be 'delta', 'gauss', or 'repeat'")
 
     K3 = torch.einsum('t,nkh->ntkh', tt, kernels2d.to(device=device, dtype=dtype))  # [N,kt,kh,kw]
     stack = K3.unsqueeze(1).repeat(1, cin_per_group, 1, 1, 1) / (cin_per_group**0.5)
     base  = stack.repeat(cout // N, 1, 1, 1, 1)  # [Cout, Cin/groups, kt, kh, kw]
 
     # optional: precomp for AA mask (normalize after AA): not enabled by default
-    # wp = find_window_param(conv3d, "weight"); 
+    # wp = find_window_param(conv3d, "weight");
     # if wp is not None: base = base / wp.mask.to(device=device, dtype=dtype).clamp_min(1e-4)
 
     bw = base_weight(conv3d, "weight")

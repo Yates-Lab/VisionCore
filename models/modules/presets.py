@@ -7,7 +7,6 @@ def make_steerable_conv(*,
     in_channels:int,
     kernel_hw:int, kt:int=1,
     sigmas=(1.6,2.8,5.0), n_orient=8, orders=(1,2),
-    quadrature=False,                 # <— NEW
     aa=True, wn=False, unit_norm=False,
     padding_hw=None, temporal="delta",
     **conv_kwargs
@@ -22,7 +21,7 @@ def make_steerable_conv(*,
     tmp = torch.empty(1, dtype=torch.float32)  # will be ignored; just for signature parity
     bank = gaussian_steerable_kernels_2d(
         kernel_size=kernel_hw, sigmas=sigmas,
-        n_orient=n_orient, orders=orders, quadrature=quadrature,
+        n_orient=n_orient, orders=orders,
         # device/dtype will be adjusted after conv is created; it’s fine to leave defaults here
     )
 
@@ -43,7 +42,6 @@ def make_steerable_depthwise(*,
     in_channels:int,
     kernel_hw:int, kt:int=1,
     sigmas=(1.6,2.8,5.0), n_orient=8, orders=(1,2),
-    quadrature=False,                 # <— NEW
     aa=True, wn=False, unit_norm=False,
     padding_hw=None, temporal="delta",
     **conv_kwargs
@@ -55,7 +53,7 @@ def make_steerable_depthwise(*,
 
     bank = gaussian_steerable_kernels_2d(
         kernel_size=kernel_hw, sigmas=sigmas,
-        n_orient=n_orient, orders=orders, quadrature=quadrature
+        n_orient=n_orient, orders=orders,
     )
     out_channels = bank.shape[0]
 

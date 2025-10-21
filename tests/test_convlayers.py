@@ -19,7 +19,8 @@ print(f"Using device: {device}")
 
 from DataYatesV1.utils.ipython import enable_autoreload
 enable_autoreload()
-
+#%%
+from plenoptic.simulate import SteerablePyramidFreq
 
 #%%
 
@@ -44,11 +45,10 @@ from models.modules.presets import make_steerable_conv
 
 conv = make_steerable_conv(
     in_channels=1,
-    kernel_hw=9, kt=1,
-    sigmas=(1.6,2.8,5.0), n_orient=8, orders=(1,2),
-    quadrature=False,
-    aa=True, wn=True, unit_norm=True,
-    padding_hw=0, temporal="delta",
+    kernel_hw=17, kt=1,
+    sigmas=(1.6,2.8), n_orient=8, orders=(0,1, 2),
+    aa=False, wn=False, unit_norm=False,
+    padding_hw=0, temporal="repeat",
     bias=False
 )
 
