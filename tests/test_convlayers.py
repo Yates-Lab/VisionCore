@@ -44,13 +44,15 @@ conv.plot_weights()
 from models.modules.presets import make_steerable_conv
 
 conv = make_steerable_conv(
-    in_channels=1,
+    in_channels=2,
     kernel_hw=17, kt=1,
     sigmas=(1.6,2.8), n_orient=8, orders=(0,1, 2),
-    aa=False, wn=False, unit_norm=False,
+    aa=True, wn=True, unit_norm=True,
     padding_hw=0, temporal="repeat",
     bias=False
 )
 
 conv.plot_weights()
+
+
 # %%
