@@ -310,83 +310,24 @@ class LayerNorm(nn.Module):
     def extra_repr(self) -> str:
         return f"norm_dims={self.norm_dims}, eps={self.eps}"
     
-class SafeGRN(nn.Module):
-    """Global‑Response‑Norm variant with a *learnable* additive offset.
-
-    Standard GRN divides by the per‑sample RMS of the feature map. If the RMS is
-    extremely small (sparse input) the scale factor explodes. We fix this by
-    adding a small positive constant **offset** *after* the square‑root.  The
-    denominator becomes
-
-        denom = sqrt(mean(y**2) + eps) + offset
-
-    which guarantees that the gain is bounded by ``1/offset`` regardless of
-    sparsity.
-
-    Args:
-        channels (int): #feature channels.
-        eps (float): numerical epsilon *inside* the square‑root.
-        offset (float): additive safety term.  0.2–0.5 is robust for Poisson-
-            scale data.  Make it learnable by setting ``learnable_offset=True``.
-        dim (int): 3 ⇒ input has shape (B,C,T,H,W); 2 ⇒ (B,C,H,W).
-        learnable_offset (bool): if True the offset is a learnable parameter.
-    """
-
-    def __init__(
-        self,
-        channels: int,
-        eps: float = 1e-6,
-        offset: float = 0.5,
-        dim: int = 3,
-        learnable_offset: bool = False,
-    ) -> None:
-        super().__init__()
-        self.eps = eps
-        self.dim = dim
-
-        if learnable_offset:
-            self.offset = nn.Parameter(torch.full((1,), offset))
-        else:
-            self.register_buffer("offset", torch.tensor(offset))
-
-        self.gamma = nn.Parameter(torch.ones(channels))
-        self.beta = nn.Parameter(torch.zeros(channels))
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:  # type: ignore[override]
-        reduce_dims = (2, 3, 4) if self.dim == 3 else (2, 3)
-        rms = torch.sqrt(x.pow(2).mean(dim=reduce_dims, keepdim=True) + self.eps)
-        denom = rms + self.offset.clamp(min=.1, max=1.0)
-        x_hat = x / denom
-        shape = (1, -1) + (1,) * (x.ndim - 2)
-        return (
-            self.gamma.view(*shape) * x_hat + self.beta.view(*shape)
-        )
-
     
 class GlobalResponseNorm(nn.Module):
-    def __init__(self, C, eps=1e-4, gamma_init=0.1, clamp_ratio=50.):
+    def __init__(self, C, eps=1e-4, gamma_init=0.1):
         super().__init__()
         self.gamma = nn.Parameter(torch.full((1, C, 1, 1, 1), gamma_init))
         self.beta  = nn.Parameter(torch.zeros(1, C, 1, 1, 1))
         self.eps   = eps
-        self.clamp = clamp_ratio          # ≥ 1  (set None to disable)
 
     def forward(self, x):
-        # Ensure computation is in FP32 for numerical stability
-        input_dtype = x.dtype
-        x_fp32 = x.float()
-        gamma_fp32 = self.gamma.float()
-        beta_fp32 = self.beta.float()
+        # x : (B, C, T, H, W)
+        self.gamma
+        self.beta
 
-        g   = torch.norm(x_fp32, p=2, dim=1, keepdim=True)
-        mu  = g.mean((2, 3, 4), keepdim=True)
-        r   = g / (mu + self.eps)
-        if self.clamp is not None:                       # guard FP16 range
-            r = torch.clamp(r, max=self.clamp)
-        result = x_fp32 + gamma_fp32 * (x_fp32 * r) + beta_fp32
+        gx   = torch.norm(x, p=2, dim=(2, 3, 4), keepdim=True)
+        nx = gx / (gx.mean(1, keepdim=True) + self.eps)
+        result = self.gamma * (x * nx) + self.beta + x
 
-        # Convert back to input dtype
-        return result.to(input_dtype)
+        return result
 
 def get_norm_layer(norm_type: Optional[str],
                    num_features: int,
@@ -440,7 +381,7 @@ def get_norm_layer(norm_type: Optional[str],
         return nn.GroupNorm(num_groups, num_features, eps=eps, affine=affine)
     
     elif norm_type_lower == 'grn':
-        return SafeGRN(num_features, learnable_offset=True)
+        return GlobalResponseNorm(num_features, eps=eps)
     
     else:
         raise ValueError(f"Unknown normalization type: '{norm_type}'.")

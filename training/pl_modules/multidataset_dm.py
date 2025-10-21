@@ -342,7 +342,7 @@ class MultiDatasetDM(pl.LightningDataModule):
             num_workers=self.workers,
             pin_memory=True,
             drop_last=True,
-            persistent_workers=True if self.workers > 0 else False,
+            persistent_workers=False,  # Match old code - persistent workers can cause stale state
             collate_fn=group_collate
         )
 

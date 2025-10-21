@@ -45,7 +45,7 @@ AMP_BF16 = lambda: torch.autocast(device_type="cuda", dtype=torch.bfloat16)
 from models.config_loader import load_dataset_configs
 import os
 # 
-config_path = Path("/home/jake/repos/VisionCore/experiments/model_configs/learned_res_small_gru_optimized_aa.yaml")
+config_path = Path("/home/jake/repos/VisionCore/experiments/model_configs/learned_res_split_gru.yaml")
 
 dataset_configs_path = "/home/jake/repos/VisionCore/experiments/dataset_configs/multi_basic_120_backimage_all.yaml"
 dataset_configs = load_dataset_configs(dataset_configs_path)
@@ -92,7 +92,7 @@ plt.plot(train_datasets['dataset_0'].dsets[0]['stim'][:1000,0,25,25].float().cpu
 # train_loader, val_loader = create_multidataset_loaders(train_datasets, val_datasets, batch_size=2, num_workers=os.cpu_count()//2)
 
 #%% test one dataset
-batch_size = 4
+batch_size = 256
 dataset_id = 0
 
 ntrain = len(train_datasets[f'dataset_{dataset_id}'])
@@ -110,11 +110,11 @@ batch = {k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor
 dtype = torch.bfloat16
 batch = {k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)}
 
-# # Test forward pass
-# model.eval()
-# with AMP_BF16():
-#     output = model(batch['stim'], dataset_id, batch['behavior'])
-#     print(f"Output shape: {output.shape}")
+# Test forward pass
+model.eval()
+with AMP_BF16():
+    output = model(batch['stim'], dataset_id, batch['behavior'])
+    print(f"Output shape: {output.shape}")
 
 # import torch.nn as nn
 # loss = nn.functional.poisson_nll_loss(output, batch['robs'], log_input=False, reduction='mean')

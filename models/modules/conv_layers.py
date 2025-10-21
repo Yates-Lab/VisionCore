@@ -78,6 +78,9 @@ class AntiAliasedMixin:
         win = torch.ones(1, device=w.device, dtype=w.dtype)
 
         for ax in axes:
+            # Skip windowing for kernel dimensions <= 3
+            if w.shape[ax] <= 3:
+                continue
             vec = self._win1d(w.shape[ax], w.device, w.dtype)
             shape = [1]*w.ndim; shape[ax] = w.shape[ax]
             win = win * vec.view(*shape)
@@ -86,6 +89,11 @@ class AntiAliasedMixin:
     # 1D: rFFT + half-window (fast)
     def _freq_aa_1d(self, w: torch.Tensor) -> torch.Tensor:
         k = w.shape[-1]
+        # Skip frequency windowing for kernel dimensions <= 3
+        if k <= 3:
+            if self.aa_signal and self.aa_double_time:
+                return self._apply_spacetime_window(w, dim=1)
+            return w
         Nfft = int(2**np.ceil(np.log2(k * self.aa_fft_pad)))
         W = torch.fft.rfft(w, n=Nfft, dim=-1)
         bins = W.shape[-1]
@@ -101,13 +109,24 @@ class AntiAliasedMixin:
     def _freq_aa_nd(self, w: torch.Tensor, dim: int) -> torch.Tensor:
         axes = self._kernel_axes(dim)
         kshape = [w.shape[a] for a in axes]
+
+        # Check if any dimension needs windowing (> 3)
+        needs_windowing = any(k > 3 for k in kshape)
+        if not needs_windowing:
+            if self.aa_signal and self.aa_double_time:
+                return self._apply_spacetime_window(w, dim=dim)
+            return w
+
         s_fft = [int(2**np.ceil(np.log2(k * self.aa_fft_pad))) for k in kshape]
 
         W = torch.fft.fftn(w, s=s_fft, dim=axes)
         W = torch.fft.fftshift(W, dim=axes)
 
         fw = 1.0
-        for ax, N in zip(axes, s_fft):
+        for ax, N, k in zip(axes, s_fft, kshape):
+            # Skip windowing for kernel dimensions <= 3
+            if k <= 3:
+                continue
             v = self._win1d(N, w.device, w.dtype)
             shape = [1]*W.ndim; shape[ax] = N
             fw = fw * v.view(*shape)
@@ -193,7 +212,7 @@ class ConvBase(AntiAliasedMixin, nn.Module):
             n_in_rows = int(np.ceil(in_channels / n_in_cols))
 
             fig, axs = plt.subplots(n_in_rows, n_in_cols,
-                                    figsize=(n_in_cols * 2, 2 * out_channels),
+                                    figsize=(n_in_cols * 4, 4 * out_channels),
                                     squeeze=False)
             axs_flat = axs.flatten()
 
@@ -245,7 +264,7 @@ class ConvBase(AntiAliasedMixin, nn.Module):
             n_in_rows = int(np.ceil(in_channels / n_in_cols))
 
             fig, axs = plt.subplots(n_in_rows, n_in_cols,
-                                    figsize=(n_in_cols * 3, n_in_rows * 2.5),
+                                    figsize=(n_in_cols * 5, n_in_rows * 5),
                                     squeeze=False)
             axs_flat = axs.flatten()
 

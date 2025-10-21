@@ -14,7 +14,7 @@ import math
 from matplotlib.patches import Ellipse
 from .norm_act_pool import get_activation_layer
 
-__all__ = ['BaseFactorizedReadout', 'DynamicGaussianReadout', 'DynamicGaussianReadoutEI', 'DynamicGaussianSN']
+__all__ = ['BaseFactorizedReadout', 'DynamicGaussianReadout', 'DynamicGaussianReadoutEI', 'DynamicGaussianSN', 'FlattenedLinearReadout']
 
 # --- BaseFactorizedReadout and DynamicGaussianReadout ---
 # (Assuming these are largely okay, minor adjustments for consistency if needed)
@@ -792,3 +792,26 @@ class DynamicGaussianSN(DynamicGaussianReadoutEI):
             beta_new = torch.clamp(self.beta * factor, min=min_val)
             # invert softplus to update raw param
             self._beta_raw.data.copy_(torch.log(torch.expm1(beta_new - self._beta_floor)))
+
+
+# Create a custom linear readout that handles spatial dimensions
+class FlattenedLinearReadout(nn.Module):
+    def __init__(self, in_channels, n_units, bias):
+        super().__init__()
+        self.in_channels = in_channels
+        self.n_units = n_units
+        self.adaptive_pool = nn.AdaptiveAvgPool2d((1,1))
+        self.fc = nn.Linear(in_channels, n_units, bias=bias)
+        self.bias = self.fc.bias if bias else None
+
+    def forward(self, x):
+        # Handle 5D input (N, C, S, H, W)
+        if x.dim() == 5:
+            x = x[:, :, -1]  # Take last time step -> (N, C, H, W)
+
+        # Only pool if spatial dimensions are > 1x1
+        if x.shape[-2:] != (1, 1):
+            x = self.adaptive_pool(x)  # -> (N, C, 1, 1)
+
+        x = torch.flatten(x, 1)    # -> (N, C)
+        return self.fc(x)

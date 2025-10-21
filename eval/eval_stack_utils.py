@@ -165,6 +165,10 @@ def extract_model_type(exp_name):
         return 'x3d_modulator'
     elif 'densenet_modulator' in exp_name:
         return 'densenet_modulator'
+    elif 'pyramid_stem_resnet_gru' in exp_name:
+        return 'pyramid_stem_resnet_gru'
+    elif 'pyramid_stem_resnet' in exp_name:
+        return 'pyramid_stem_resnet'
     elif 'resnet' in exp_name:
         return 'resnet'
     elif 'x3d' in exp_name:
@@ -175,6 +179,8 @@ def extract_model_type(exp_name):
         return 'core_res_modulator'
     elif 'core_res' in exp_name:
         return 'core_res'
+    elif 'learned_res_split_gru' in exp_name:
+        return 'learned_res_split_gru'
     elif 'learned_res_small_stn' in exp_name:
         return 'learned_res_small_stn'
     elif 'learned_res_small_film' in exp_name:

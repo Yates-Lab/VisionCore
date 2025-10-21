@@ -266,53 +266,6 @@ def validate_component_config(component_name: str, component_config: ConfigDict)
             )
 
 
-def load_multidataset_config(train_config_path: Union[str, Path]) -> Tuple[ConfigDict, List[ConfigDict]]:
-    """
-    Load a multidataset training configuration.
-
-    Args:
-        train_config_path: Path to the training configuration file
-
-    Returns:
-        Tuple of (model_config, list_of_dataset_configs)
-
-    Raises:
-        FileNotFoundError: If any config file doesn't exist
-        ValueError: If the configuration is invalid
-    """
-    train_config_path = Path(train_config_path)
-
-    # Load the training config
-    with open(train_config_path, 'r') as f:
-        train_config = yaml.safe_load(f)
-
-    # Validate training config structure
-    if 'training_type' not in train_config:
-        raise ValueError("Missing 'training_type' in training config")
-    if train_config['training_type'] != 'v1multi':
-        raise ValueError(f"Expected training_type 'v1multi', got '{train_config['training_type']}'")
-    if 'model_config' not in train_config:
-        raise ValueError("Missing 'model_config' path in training config")
-    if 'datasets' not in train_config:
-        raise ValueError("Missing 'datasets' list in training config")
-
-    # Load model config
-    model_config_path = Path(train_config['model_config'])
-    if not model_config_path.is_absolute():
-        # Make relative paths relative to the training config directory
-        model_config_path = train_config_path.parent / model_config_path
-
-    model_config = load_config(model_config_path)
-
-    # Validate that model config is v1multi type
-    if model_config.get('model_type') != 'v1multi':
-        raise ValueError(f"Model config must have model_type 'v1multi', got '{model_config.get('model_type')}'")
-
-    dataset_configs = load_dataset_configs(train_config['datasets'], train_config_path.parent)
-
-    return model_config, dataset_configs
-
-
 def validate_dataset_config_for_multidataset(dataset_config: ConfigDict) -> None:
     """
     Validate that a dataset config is compatible with multidataset training.

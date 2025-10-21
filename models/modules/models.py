@@ -25,7 +25,7 @@ class ModularV1Model(nn.Module):
                                                 concat (or FiLM) along channel dim
                                                     (B,C_mod,T,H,W)
                                                             ▼
-                                                        ConvGRU/LSTM
+                                                        ConvGRU
                                                         (B,C_rec, T, H, W)
                                                             ▼
                                                         readout (factorised Gaussian or linear)
@@ -148,20 +148,11 @@ class ModularV1Model(nn.Module):
         if self.modulator is not None and modulator_dim > 0:
             # For concat modulators, add the modulator output channels
             # For FiLM modulators, channel count stays the same
-            # For STN modulators, channel count stays the same
-            # For PC modulators, use the modulator's output dimension
             modulator_type = modulator_config.get('type', 'none')
             if modulator_type == 'concat':
                 current_channels += modulator_dim
-            elif modulator_type in ['film', 'stn']:
-                # FiLM and STN don't change channel count
-                pass
-            elif modulator_type in ['pc', 'convgru']:
-                # PC and ConvGRU modulators output their own dimension
-                # modulator_dim already contains the correct output dimension
-                current_channels = modulator_dim
             else:
-                raise ValueError(f"Unknown modulator type: {modulator_type}")
+                pass
 
         # create recurrent
         if verbose:
@@ -236,14 +227,8 @@ class ModularV1Model(nn.Module):
         # Process through recurrent
         x_recurrent = self.recurrent(feats)
 
-        # Handle list outputs (Polar-V1)
-        if isinstance(x_recurrent, list):
-            readout_input = x_recurrent
-        else:
-            readout_input = x_recurrent
-
         # Process through readout
-        output = self.readout(readout_input)
+        output = self.readout(x_recurrent)
 
         # Apply activation function
         output = self.activation(output)
@@ -454,19 +439,12 @@ class MultiDatasetV1Model(ModularV1Model):
             Tensor: Model predictions with shape (N, n_units_for_dataset)
         """
         # Check if this is a modulator-only model (convnet=none and stimulus=None)
-        if (isinstance(self.convnet, nn.Identity) and
-            self.modulator is not None and
-            stimulus is None and
-            behavior is not None):
+        if stimulus is None:
             # Modulator-only mode: create minimal features for modulator
             B = behavior.shape[0]
             device = next(self.parameters()).device
-            x_conv = torch.ones(B, 1, 1, 1, 1, device=device, dtype=behavior.dtype)
+            feats = torch.ones(B, 1, 1, 1, 1, device=device, dtype=behavior.dtype)
         else:
-            # Normal vision pipeline
-            if stimulus is None:
-                raise ValueError("stimulus cannot be None for vision models")
-
             # Route through appropriate adapter
             x = self.adapters[dataset_idx](stimulus)
 
@@ -474,21 +452,11 @@ class MultiDatasetV1Model(ModularV1Model):
             x = self.frontend(x)
 
             # Process through shared convnet
-            x_conv = self.convnet(x)
-
-        # Handle tuple outputs (Polar-V1)
-        if isinstance(x_conv, tuple):
-            feats = x_conv
-        else:
-            feats = x_conv
+            feats = self.convnet(x)
 
         # Process through shared modulator
         if self.modulator is not None and behavior is not None:
             feats = self.modulator(feats, behavior)
-
-        # Set modulator reference for recurrent (Polar-V1)
-        if hasattr(self.recurrent, 'set_modulator'):
-            self.recurrent.set_modulator(self.modulator)
 
         # Process through shared recurrent
         x_recurrent = self.recurrent(feats)

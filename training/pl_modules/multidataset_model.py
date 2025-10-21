@@ -13,7 +13,35 @@ import pytorch_lightning as pl
 from models.losses import MaskedLoss, PoissonBPSAggregator, MaskedZIPNLLLoss
 from training.regularizers import create_regularizers, get_excluded_params_for_weight_decay
 from training.schedulers import LinearWarmupCosineAnnealingLR
+from schedulefree import AdamWScheduleFree
 
+def _adamw_param_groups_named(named_params, wd, excluded_names, core_keys=("frontend","convnet","modulator"),
+                              core_lr=None, head_lr=1e-3):
+
+    core_lr = core_lr if core_lr is not None else head_lr
+
+    core_wd, core_no, head_wd, head_no = [], [], [], []
+    for n, p in named_params:
+        if not p.requires_grad:
+            continue
+
+        # Only decay true "weights": tensor dims > 1 AND name endswith(".weight"),
+        # and not in your custom excluded set from YAML regs
+        apply_wd = (n not in excluded_names) and n.endswith(".weight") and (p.ndim > 1)
+
+        is_core = any(k in n for k in core_keys)
+
+        if is_core:
+            (core_wd if apply_wd else core_no).append(p)
+        else:
+            (head_wd if apply_wd else head_no).append(p)
+
+    param_groups = []
+    if core_wd: param_groups.append({"params": core_wd, "lr": core_lr, "weight_decay": wd})
+    if core_no: param_groups.append({"params": core_no, "lr": core_lr, "weight_decay": 0.0})
+    if head_wd: param_groups.append({"params": head_wd, "lr": head_lr,             "weight_decay": wd})
+    if head_no: param_groups.append({"params": head_no, "lr": head_lr,             "weight_decay": 0.0})
+    return param_groups
 
 class MultiDatasetModel(pl.LightningModule):
     """
@@ -276,6 +304,13 @@ class MultiDatasetModel(pl.LightningModule):
 
         return None
 
+    def on_train_epoch_start(self):
+        """Set up for training epoch."""
+        super().on_train_epoch_start()
+        optimizer = self.optimizers()
+        if isinstance(optimizer, AdamWScheduleFree):
+            optimizer.train()
+
     def forward(self, stim, ds_idx, beh=None):
         """
         Forward pass through the model.
@@ -488,7 +523,7 @@ class MultiDatasetModel(pl.LightningModule):
         self.log("val_bps_overall", overall, prog_bar=True, sync_dist=True, rank_zero_only=False)
 
         torch.cuda.empty_cache()
-
+        
     def configure_optimizers(self):
         """
         Configure optimizer and learning rate scheduler.
@@ -498,48 +533,25 @@ class MultiDatasetModel(pl.LightningModule):
         optimizer or dict
             Optimizer (and optionally scheduler configuration)
         """
-        # Get parameters that should be excluded from weight decay due to regularization conflicts
-        excluded_param_names = set(get_excluded_params_for_weight_decay(self.reg_terms))
+        # ----- exclusions from your YAML regularizers -----
+        excluded_names = set(get_excluded_params_for_weight_decay(self.reg_terms))  # already in your code
+        head_lr = self.head_lr
+        core_lr = self.core_lr_scale
 
-        # Split params into "core" vs "head" with different learning rates
-        # Also separate params with/without weight decay
-        core_params_wd, core_params_no_wd = [], []
-        head_params_wd, head_params_no_wd = [], []
+        # ----- build groups: WD only on true weights -----
+        pg = _adamw_param_groups_named(
+            list(self.named_parameters()),
+            wd=self.hparams.wd,
+            excluded_names=excluded_names,
+            core_lr=core_lr,
+            head_lr=head_lr,
+        )
 
-        for n, p in self.named_parameters():
-            # Determine if this param should have weight decay
-            apply_wd = n not in excluded_param_names
-
-            # heuristics – adjust to your model structure if needed
-            if any(key in n for key in ["frontend", "convnet", "modulator"]):
-                if apply_wd:
-                    core_params_wd.append(p)
-                else:
-                    core_params_no_wd.append(p)
-            else:
-                if apply_wd:
-                    head_params_wd.append(p)
-                else:
-                    head_params_no_wd.append(p)
-
-        # Create parameter groups with appropriate weight decay settings
-        param_groups = []
-        if core_params_wd:
-            param_groups.append({"params": core_params_wd, "lr": self.core_lr_scale, "weight_decay": self.hparams.wd})
-        if core_params_no_wd:
-            param_groups.append({"params": core_params_no_wd, "lr": self.core_lr_scale, "weight_decay": 0.0})
-        if head_params_wd:
-            param_groups.append({"params": head_params_wd, "lr": self.head_lr, "weight_decay": self.hparams.wd})
-        if head_params_no_wd:
-            param_groups.append({"params": head_params_no_wd, "lr": self.head_lr, "weight_decay": 0.0})
-
-        # Use optimized AdamW betas for better generalization
-        # beta2=0.95 (instead of default 0.999) helps with noisy multi-dataset gradients
-        optim = torch.optim.AdamW(param_groups, betas=(0.9, 0.95), eps=1e-8)
+        optim = torch.optim.AdamW(pg, betas=(0.9, 0.999), eps=1e-8)
 
         # Log regularization info
-        if excluded_param_names and self.global_rank == 0:
-            print(f"[regularization] Excluded {len(excluded_param_names)} parameters from weight decay: {excluded_param_names}")
+        if excluded_names and self.global_rank == 0:
+            print(f"[regularization] Excluded {len(excluded_names)} parameters from weight decay: {excluded_names}")
 
         # Learning rate scheduler
         sched_type = self.hparams.get("lr_scheduler", "none")
@@ -581,6 +593,88 @@ class MultiDatasetModel(pl.LightningModule):
             }
         else:
             return [optim], [scheduler]
+    # def configure_optimizers(self):
+    #     # Get parameters that should be excluded from weight decay due to regularization conflicts
+    #     excluded_param_names = set(get_excluded_params_for_weight_decay(self.reg_terms))
+
+    #     # -------- split params into "core" vs "head" with different learning rates ------------------------
+    #     # Also separate params with/without weight decay
+    #     core_params_wd, core_params_no_wd = [], []
+    #     head_params_wd, head_params_no_wd = [], []
+
+    #     for n, p in self.named_parameters():
+    #         # Determine if this param should have weight decay
+    #         apply_wd = n not in excluded_param_names
+
+    #         # heuristics – adjust to your model structure if needed
+    #         if any(key in n for key in ["frontend", "convnet", "modulator"]):
+    #             if apply_wd:
+    #                 core_params_wd.append(p)
+    #             else:
+    #                 core_params_no_wd.append(p)
+    #         else:
+    #             if apply_wd:
+    #                 head_params_wd.append(p)
+    #             else:
+    #                 head_params_no_wd.append(p)
+
+    #     # Create parameter groups with appropriate weight decay settings
+    #     param_groups = []
+    #     if core_params_wd:
+    #         param_groups.append({"params": core_params_wd, "lr": self.core_lr_scale, "weight_decay": self.hparams.wd})
+    #     if core_params_no_wd:
+    #         param_groups.append({"params": core_params_no_wd, "lr": self.core_lr_scale, "weight_decay": 0.0})
+    #     if head_params_wd:
+    #         param_groups.append({"params": head_params_wd, "lr": self.head_lr, "weight_decay": self.hparams.wd})
+    #     if head_params_no_wd:
+    #         param_groups.append({"params": head_params_no_wd, "lr": self.head_lr, "weight_decay": 0.0})
+
+    #     optim = torch.optim.AdamW(param_groups)
+
+    #     # Log regularization info
+    #     if excluded_param_names and self.global_rank == 0:
+    #         print(f"[regularization] Excluded {len(excluded_param_names)} parameters from weight decay: {excluded_param_names}")
+
+    #     # -------- learning rate scheduler ------------------------
+    #     sched_type = self.hparams.get("lr_scheduler", "none")
+    #     if sched_type == "none":
+    #         return optim
+
+    #     if sched_type == "step":
+    #         scheduler = torch.optim.lr_scheduler.StepLR(
+    #             optim, step_size=30, gamma=0.5)
+    #     elif sched_type == "plateau":
+    #         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+    #             optim, mode="min", factor=0.5, patience=3, verbose=True)
+    #     elif sched_type == "cosine":
+    #         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+    #             optim, T_max=self.trainer.max_epochs)
+    #     elif sched_type == "cosine_warmup":
+    #         # Use a simple linear warmup followed by cosine annealing
+    #         warmup_epochs = self.hparams.get("warmup_epochs", 5)
+    #         scheduler = LinearWarmupCosineAnnealingLR(
+    #             optim,
+    #             warmup_epochs=warmup_epochs,
+    #             max_epochs=self.trainer.max_epochs,
+    #             warmup_start_lr=0.0,
+    #             eta_min=0.0
+    #         )
+    #     else:
+    #         raise ValueError(f"Unknown scheduler {sched_type}")
+
+    #     # Lightning expects a dict if the scheduler needs a monitored metric
+    #     if sched_type == "plateau":
+    #         return {
+    #             "optimizer": optim,
+    #             "lr_scheduler": {
+    #                 "scheduler": scheduler,
+    #                 "monitor": "val_loss",
+    #                 "interval": "epoch",
+    #                 "frequency": 1,
+    #             },
+    #         }
+    #     else:
+    #         return [optim], [scheduler]
 
     def optimizer_step(self, epoch, batch_idx, optimizer, optimizer_closure):
         """

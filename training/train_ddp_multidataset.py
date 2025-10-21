@@ -262,7 +262,7 @@ def main():
         logger=logger,
         
         # UI
-        enable_progress_bar=True
+        enable_progress_bar=False
     )
 
     # -------------------------------------------------------------------------

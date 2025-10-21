@@ -7,10 +7,6 @@ import torch.nn as nn
 from typing import Dict, Any, List
 from .utils.general import ensure_tensor
 
-from .factory import (
-    create_frontend, create_convnet, create_recurrent,
-    create_modulator, create_readout
-)
 from .modules.models import ModularV1Model, MultiDatasetV1Model
 
 __all__ = ['build_model', 'initialize_model_components', 'get_name_from_config']
@@ -24,23 +20,6 @@ def build_model(config: ConfigDict, dataset_configs: List[ConfigDict] = None) ->
 
     This is the main entry point for creating models. It accepts a configuration
     dictionary that specifies the model architecture and parameters.
-
-    Args:
-        config: Dictionary containing model configuration
-            - model_type: Type of model to build ('v1' or 'v1multi')
-            - frontend_type: Type of frontend ('da', 'conv', 'adapter', 'none')
-            - convnet_type: Type of convnet ('densenet', 'conv', 'none')
-            - recurrent_type: Type of recurrent layer ('convlstm', 'convgru', 'none')
-            - modulator_type: Type of modulator ('lstm', 'linear', 'none')
-            - readout_type: Type of readout ('gaussian', 'linear')
-            - frontend_params: Parameters for frontend
-            - convnet_params: Parameters for convnet
-            - recurrent_params: Parameters for recurrent layer
-            - modulator_params: Parameters for modulator
-            - readout_params: Parameters for readout
-            - output_activation: Activation function to apply to output
-            - init_rates: Initial firing rates for readout bias initialization
-        dataset_configs: List of dataset configurations (required for v1multi)
 
     Returns:
         nn.Module: Constructed model

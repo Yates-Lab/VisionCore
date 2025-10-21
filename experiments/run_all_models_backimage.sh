@@ -36,33 +36,41 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:128
 BATCH_SIZE=256          # Optimal batch size per GPU
 MAX_DATASETS=30        # Scale to all datasets (28 if removed the two bad sessions)
 LEARNING_RATE=1e-3    # standard learning rate
-CORE_LR_SCALE=1.0
+CORE_LR_SCALE=.5
 LR_SCHEDULER="cosine_warmup"  # Use cosine annealing with warmup
-WARMUP_EPOCHS=10        # Number of warmup epochs
-WEIGHT_DECAY=1e-5
-MAX_EPOCHS=50        # Long training run with early stopping protection
+WARMUP_EPOCHS=5        # Number of warmup epochs
+WEIGHT_DECAY=1e-4
+MAX_EPOCHS=100        # Long training run with early stopping protection
 PRECISION="bf16-mixed"
-DSET_DTYPE="bfloat16"  # Dataset storage dtype: uint8 (1x), bfloat16 (2x), float32 (4x memory)
 NUM_GPUS=2             # Use both RTX 6000 Ada GPUs
 NUM_WORKERS=16         # Optimized for 64 CPU cores
 STEPS_PER_EPOCH=1024    # Number of steps per epoch
+DSET_DTYPE="bfloat16"
 
-# Loss function configuration
-USE_ZIP_LOSS=true     # Set to 'true' to use Zero-Inflated Poisson loss instead of standard Poisson
+# Loss function configuration   
+USE_ZIP_LOSS=false     # Set to 'true' to use Zero-Inflated Poisson loss instead of standard Poisson
 
 # Project and data paths
 PROJECT_NAME="multidataset_backimage_120"
 
 DATASET_CONFIGS_PATH="/home/jake/repos/VisionCore/experiments/dataset_configs/multi_basic_120_backimage_all.yaml"
-CHECKPOINT_DIR="/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage/checkpoints"
+CHECKPOINT_DIR="/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage_4/checkpoints"
 
 # Create checkpoint directory
 mkdir -p $CHECKPOINT_DIR
 
 # Array of model configurations to run
 MODEL_CONFIGS=(
-    "experiments/model_configs/pyramid_stem_resnet.yaml"
+    # "experiments/model_configs/res_small_gru.yaml"
+    "experiments/model_configs/learned_res_small_gru.yaml"
+    # "experiments/model_configs/learned_res_split_gru.yaml"
+    # "experiments/model_configs/pyramid_stem_resnet_time.yaml"
+    # "experiments/model_configs/learned_res_small_gru.yaml"
+    # "experiments/model_configs/learned_res_small_none_gru.yaml"
+    # "experiments/model_configs/modulator_only_convgru.yaml"
     # "experiments/model_configs/learned_res_small_gru_optimized_aa.yaml"
+
+
     # "experiments/model_configs/learned_res_small_film.yaml"
     # "experiments/model_configs/vivit_small.yaml"
     # 
@@ -141,10 +149,10 @@ run_training() {
         --experiment_name \"$EXPERIMENT_NAME\" \
         --checkpoint_dir \"$CHECKPOINT_DIR\" \
         --accumulate_grad_batches 1 \
-        --gradient_clip_val 100.0 \
+        --gradient_clip_val 1.0 \
         --steps_per_epoch $STEPS_PER_EPOCH \
         --num_workers $NUM_WORKERS \
-        --early_stopping_patience 10 \
+        --early_stopping_patience 20 \
         --early_stopping_min_delta 0.0"
 
     # Add loss type flag if using ZIP loss

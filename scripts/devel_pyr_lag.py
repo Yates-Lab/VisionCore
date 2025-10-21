@@ -105,7 +105,7 @@ from einops import rearrange
 # train_loader, val_loader = create_multidataset_loaders(train_datasets, val_datasets, batch_size=2, num_workers=os.cpu_count()//2)
 
 #%% test one dataset
-batch_size = 256
+batch_size = 512
 dataset_id = 0
 
 ntrain = len(train_datasets[f'dataset_{dataset_id}'])
@@ -118,6 +118,8 @@ batch = {k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor
 
 #%%
 from plenoptic.simulate import LaplacianPyramid
+from plenoptic.tools.conv import upsample_blur, blur_downsample
+
 from einops import rearrange
 sys.path.append('..')
 from models.modules.conv_layers import StandardConv
@@ -177,6 +179,88 @@ print(y.shape)
 #     y = [chomp(L, (min_size, min_size)) for L in y]
 #     y = torch.concat(y, dim=1)
 #%%
+from plenoptic.tools.conv import upsample_blur, blur_downsample
+n_scales = 2
+x = rearrange(batch['stim'], "B C T H W -> (B T) C H W")
+y = []
+for scale in range(n_scales - 1):
+    odd = torch.as_tensor(x.shape)[2:4] % 2
+    x_down = blur_downsample(x, scale_filter=False)
+    x_up = upsample_blur(x_down, odd, scale_filter=False)
+    y.append(x - x_up)
+    x = x_down
+y.append(x)
+
+# Create animation over frames
+from matplotlib.animation import FuncAnimation, FFMpegWriter
+
+# Calculate number of frames for animation
+n_frames = batch_size - n_scales
+
+fig, axes = plt.subplots(2, n_scales, figsize=(20, 10))
+if n_scales == 1:
+    axes = axes.reshape(2, 1)
+
+# Initialize plots
+images = []
+for i in range(n_scales):
+    # Top row: scale images
+    im = axes[0, i].imshow(y[i][i, 0].detach().cpu().float(), animated=True)
+    axes[0, i].set_title(f"Scale {i}")
+    axes[0, i].axis('off')
+    images.append(im)
+
+    # Bottom row: differences (if applicable)
+    if i < n_scales - 1:
+        odd = torch.as_tensor(y[i].shape)[2:4] % 2
+        P = upsample_blur(y[i+1], odd)[i + 1, 0].detach().cpu().float()
+        I = y[i][i, 0].detach().cpu().float()
+        im_diff = axes[1, i].imshow(I - P, animated=True)
+        axes[1, i].set_title(f"Diff {i}")
+        axes[1, i].axis('off')
+        images.append(im_diff)
+    else:
+        axes[1, i].axis('off')
+
+def update(frame):
+    """Update function for animation"""
+    t = frame
+    img_idx = 0
+
+    for i in range(n_scales):
+        # Update top row: scale images
+        I = y[i][t + i, 0].detach().cpu().float()
+        images[img_idx].set_array(I)
+        img_idx += 1
+
+        # Update bottom row: differences
+        if i < n_scales - 1:
+            odd = torch.as_tensor(y[i].shape)[2:4] % 2
+            P = upsample_blur(y[i+1], odd)[t + i + 1, 0].detach().cpu().float()
+            images[img_idx].set_array(I - P)
+            img_idx += 1
+
+    return images
+
+# Create animation
+anim = FuncAnimation(fig, update, frames=n_frames, interval=50, blit=True)
+
+# Save as MP4
+writer = FFMpegWriter(fps=20, metadata=dict(artist='VisionCore'), bitrate=1800)
+anim.save('pyramid_animation.mp4', writer=writer)
+print(f"Animation saved to pyramid_animation.mp4 ({n_frames} frames)")
+
+plt.close(fig)
+    
+
+#%%
+lpyr = LaplacianPyramid(3)
+x = rearrange(batch['stim'], "B C T H W -> (B T) C H W")
+y = lpyr(x)
+y = [rearrange(L, "(B T) C H W -> B C T H W", B=batch_size) for L in y]
+
+plt.figure(figsize=(20,20))
+plot_frames(y[1].detach().cpu().float()[:100,0,[0]], nrow=20)
 
 #%%
 

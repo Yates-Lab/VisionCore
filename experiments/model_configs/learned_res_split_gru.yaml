@@ -14,15 +14,19 @@ adapter:
   params: {grid_size: 51, init_sigma: 1, transform: scale}
 
 frontend:
-  type: none
-  params: {}
+  type: learnable_temporal
+  params: {kernel_size: 16, num_channels: 4,
+        init_type: biphasic,
+        aa_signal: true,
+        split_MP: true,
+        causal: true, bias: false}
 
 # Convnet configuration - ResNet with per-layer block configs (same as learned_res_small_gru)
 convnet:
   type: resnet
   params:
     final_activation: softplus
-    channels: [8, 128, 128]
+    channels: [32, 256, 128]
     dim: 3
     checkpointing: false
     block_configs:
@@ -30,12 +34,14 @@ convnet:
       # Stage 0: keep full res, no pooling
       - conv_params:
           type: standard
-          kernel_size: [16, 5, 5]
+          kernel_size: [3, 11, 11]
           padding:    [1, 3, 3]
           stride:     2
+          aa_signal: true
+          aa_freq: true
         norm_type: rms
         act_type: silu
-        dropout: 0.1              # <-- leave off
+        dropout: 0.2
         pool_params: null
 
       # Stage 1: 
@@ -69,8 +75,7 @@ convnet:
           r: 16
           use_soft: true
           
-
-# Modulator configuration - ConvGRU
+# Modulator configuration - None (no behavioral modulation)
 modulator:
   type: convgru
   params:

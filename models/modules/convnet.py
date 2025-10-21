@@ -2,13 +2,12 @@
 import torch
 import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
-from typing import List, Dict, Any, Tuple, Union, Optional
+from typing import Dict, Any, Tuple
 from .common import chomp
 from .conv_blocks import ConvBlock, ResBlock
 from .norm_act_pool import get_activation_layer
-from .shifttcn import ShiftTCN
 
-__all__ = ['BaseConvNet', 'VanillaCNN', 'ResNet', 'DenseNet', 'ShiftTCN']
+__all__ = ['BaseConvNet', 'VanillaCNN', 'ResNet', 'DenseNet']
 
 def chomp_causal_spatial(tensor_to_crop: torch.Tensor, reference_tensor: torch.Tensor) -> torch.Tensor:
     """
@@ -44,18 +43,16 @@ class BaseConvNet(nn.Module):
         self.dim: int = config['dim']
         self.initial_channels: int = config['initial_channels']
         self.base_channels: int = config.get('base_channels', self.initial_channels)
-        self.use_checkpointing: bool = config.get('checkpointing', False)
         self.layers = nn.ModuleList()
         self._build_network()
         self.final_activation = get_activation_layer(config.get('final_activation', 'none'))
 
     def _build_network(self): raise NotImplementedError
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if hasattr(self, 'stem'): x = self.stem(x)
         for layer in self.layers:
-            if self.use_checkpointing and self.training and isinstance(layer, (ConvBlock, ResBlock)):
-                x = checkpoint(layer, x, use_reentrant=False)
-            else:
-                x = layer(x)
+            x = layer(x)
         return self.final_activation(x)
     
     def get_output_channels(self) -> int:
@@ -69,31 +66,77 @@ class BaseConvNet(nn.Module):
 
 
 class VanillaCNN(BaseConvNet):
-    """Sequential CNN built from ConvBlocks."""
-    def _build_network(self):
+    """Sequential CNN built from ConvBlocks (stem → stack of ConvBlocks)."""
+    def _build_network(self, verbose: bool = False):
         current_channels = self.initial_channels
+        self.layers = nn.ModuleList()
 
-        # Unified format only: channels list + block_config
-        if 'channels' not in self.config or 'block_config' not in self.config:
-            raise ValueError("VanillaCNN requires 'channels' list and 'block_config' in config. Legacy format is no longer supported.")
+        # Optional Stem (same behavior as ResNet/DenseNet)
+        if 'stem_config' in self.config:
+            self.stem, current_channels = _build_stem(
+                self.config['stem_config'], self.dim, self.initial_channels
+            )
+
+        # Unified format: channels + block_configs (one per block)
+        assert 'channels' in self.config, "VanillaCNN requires 'channels' list in config."
+        assert 'block_configs' in self.config, "VanillaCNN requires 'block_configs' list in config."
 
         channels = self.config['channels']
-        block_cfg_base = self.config['block_config'].copy()
-        block_cfg_base['dim'] = self.dim
+        block_configs = self.config['block_configs']
+        assert len(block_configs) == len(channels), (
+            f"Number of block_configs ({len(block_configs)}) must match number of channels ({len(channels)})"
+        )
 
-        for i, out_channels in enumerate(channels):
-            block = ConvBlock(
-                in_channels=current_channels,
-                out_channels=out_channels,
-                **block_cfg_base
-            )
+        # Prepare per-block configs
+        block_configs = [cfg.copy() for cfg in block_configs]
+        for cfg in block_configs:
+            cfg['dim'] = self.dim
+
+
+        # Build blocks
+        for i, (out_channels, cfg) in enumerate(zip(channels, block_configs)):
+            block = ConvBlock(in_channels=current_channels,
+                              out_channels=out_channels,
+                              **cfg)
             self.layers.append(block)
             current_channels = block.output_channels
+
+            if verbose:
+                print(f"[VanillaCNN] Block {i}: out={out_channels} (eff={block.output_channels}), "
+                      f"next_in={current_channels}")
+
+        self._final_out_channels = current_channels
+
+    def get_output_channels(self) -> int:
+        return getattr(self, "_final_out_channels", super().get_output_channels())
 
 # ResBlock helper moved to blocks.py for better organization if preferred,
 # but keeping it here is also fine if it's only used by ResNet.
 # Let's assume it's defined in blocks.py as per the previous update.
 # from .blocks import ResBlock
+
+def _build_stem(stem_config: Dict[str, Any], dim: int, current_channels: int) -> Tuple[nn.Module, int]:
+    """Build stem module for ResNet."""
+    stem_cfg = stem_config.copy()
+    stem_cfg['dim'] = dim
+    out_ch_stem = stem_cfg.pop('out_channels', None)
+
+    # Check for stem type (default to ConvBlock for backward compatibility)
+    stem_type = stem_cfg.pop('type', 'convblock')
+
+    if stem_type.lower() == 'pyramid':
+        # Use PyramidStem
+        from .conv_layers import PyramidStem
+        stem = PyramidStem(in_channels=current_channels, **stem_cfg)
+    elif stem_type.lower() in ['convblock', 'conv', 'standard']:
+        # Use ConvBlock (default)
+        if out_ch_stem is None:
+            raise ValueError("ConvBlock stem requires 'out_channels' in stem_config")
+        stem = ConvBlock(in_channels=current_channels, out_channels=out_ch_stem, **stem_cfg)
+    else:
+        raise ValueError(f"Unknown stem type: '{stem_type}'. Supported types: 'pyramid', 'convblock'")
+
+    return stem, stem.output_channels
 
 class ResNet(BaseConvNet):
     """ResNet built from ConvBlocks."""
@@ -102,57 +145,20 @@ class ResNet(BaseConvNet):
 
         # Optional Stem
         if 'stem_config' in self.config:
-            stem_cfg = self.config['stem_config'].copy()
-            stem_cfg['dim'] = self.dim
-            out_ch_stem = stem_cfg.pop('out_channels', None)
+            self.stem, current_channels = _build_stem(self.config['stem_config'], self.dim, self.initial_channels)
 
-            # Check for stem type (default to ConvBlock for backward compatibility)
-            stem_type = stem_cfg.pop('type', 'convblock')
-
-            if stem_type.lower() == 'pyramid':
-                # Use PyramidStem
-                from .conv_layers import PyramidStem
-                stem = PyramidStem(in_channels=current_channels, **stem_cfg)
-            elif stem_type.lower() in ['convblock', 'conv', 'standard']:
-                # Use ConvBlock (default)
-                if out_ch_stem is None:
-                    raise ValueError("ConvBlock stem requires 'out_channels' in stem_config")
-                stem = ConvBlock(in_channels=current_channels, out_channels=out_ch_stem, **stem_cfg)
-            else:
-                raise ValueError(f"Unknown stem type: '{stem_type}'. Supported types: 'pyramid', 'convblock'")
-
-            self.layers.append(stem)
-            current_channels = stem.output_channels
-
-        # Support both single block_config (backwards compatible) and list of block_configs
-        if 'channels' not in self.config:
-            raise ValueError("ResNet requires 'channels' list in config.")
-
-        # Check for block configuration - support both old and new formats
-        if 'block_config' in self.config and 'block_configs' in self.config:
-            raise ValueError("ResNet config cannot have both 'block_config' and 'block_configs'. Use one or the other.")
-
-        if 'block_config' not in self.config and 'block_configs' not in self.config:
-            raise ValueError("ResNet requires either 'block_config' (single config for all layers) or 'block_configs' (list of configs per layer).")
+        assert 'channels' in self.config, "ResNet requires 'channels' list in config."
+        assert 'block_configs' in self.config, "ResNet requires 'block_configs' list in config."
 
         channels = self.config['channels']
 
-        # Handle both single block_config and list of block_configs
-        if 'block_config' in self.config:
-            # Backwards compatible: single block config for all layers
-            block_cfg_base = self.config['block_config'].copy()
-            block_cfg_base['dim'] = self.dim
-            block_configs = [block_cfg_base.copy() for _ in channels]
-        else:
-            # New format: list of block configs, one per layer
-            block_configs = self.config['block_configs']
-            if len(block_configs) != len(channels):
-                raise ValueError(f"Number of block_configs ({len(block_configs)}) must match number of channel stages ({len(channels)})")
-
-            # Add dim to each config
-            block_configs = [cfg.copy() for cfg in block_configs]
-            for cfg in block_configs:
-                cfg['dim'] = self.dim
+        block_configs = self.config['block_configs']
+        assert len(block_configs) == len(channels), f"Number of block_configs ({len(block_configs)}) must match number of channel stages ({len(channels)})"
+        
+        # Add dim to each config
+        block_configs = [cfg.copy() for cfg in block_configs]
+        for cfg in block_configs:
+            cfg['dim'] = self.dim
 
         for i, (out_channels, block_cfg) in enumerate(zip(channels, block_configs)):
             # Remove out_channels from block config if present to avoid conflicts
@@ -223,121 +229,77 @@ class DenseNet(BaseConvNet):
     """
     DenseNet built from ConvBlocks.
 
-    In a DenseNet, each layer receives the feature maps from all preceding layers.
-    The number of input channels for each layer increases as we go deeper in the network.
+    Each block takes the concatenation of all previous features and
+    contributes `growth = block.output_channels` new channels.
     """
-    def _build_network(self, verbose=False):
-        # Initialize with the input channels
+    def _build_network(self, verbose: bool = False):
         current_channels = self.initial_channels
-        if verbose:
-            print(f"\nBuilding DenseNet with initial channels: {current_channels}")
+        self.layers = nn.ModuleList()
+        self.input_channels_per_block = []
 
-        # Unified format only: explicit channel list
-        if 'channels' not in self.config or 'block_config' not in self.config:
-            raise ValueError("DenseNet requires 'channels' list and 'block_config' in config. Legacy format is no longer supported.")
+        # Optional Stem
+        if 'stem_config' in self.config:
+            self.stem, current_channels = _build_stem(self.config['stem_config'], self.dim, self.initial_channels)
 
-        channels = self.config['channels']
-        num_blocks = len(channels)
-        if verbose:
-            print(f"Using channels format: {channels}")
+        assert 'channels' in self.config, "DenseNet requires a 'channels' list (growth per block)."
+        assert 'block_configs' in self.config, "DenseNet requires a 'block_configs' list."
 
-        block_cfg_base = self.config['block_config'].copy()
-        if verbose:
-            print(f"Base block config: {block_cfg_base}")
-        block_cfg_base['dim'] = self.dim
+        channels = self.config['channels']              # list of growth values (one per block)
+        block_configs = self.config['block_configs']
+        assert len(block_configs) == len(channels), (
+            f"Number of block_configs ({len(block_configs)}) must match number of channels ({len(channels)})"
+        )
 
-        # Check if we're using SplitReLU which would double the output channels
-        uses_split_relu = block_cfg_base.get('act_type', '') == 'splitrelu'
-        if uses_split_relu and verbose:
-            print(f"DenseNet using SplitReLU - output channels will be doubled")
+        # Prepare per-block configs
+        block_configs = [cfg.copy() for cfg in block_configs]
+        for cfg in block_configs:
+            cfg['dim'] = self.dim
+            cfg.pop('out_channels', None)       # we'll set it explicitly from `channels`
+            cfg.pop('channel_multiplier', None) # guard against stray keys
 
-        # Store channel counts for each layer for debugging and validation
-        self.input_channels_per_block = [current_channels]
+        # Build blocks
+        for i, (growth, cfg) in enumerate(zip(channels, block_configs)):
+            main_block = ConvBlock(in_channels=current_channels,
+                                   out_channels=growth,
+                                   **cfg)
+            self.layers.append(main_block)
 
-        # Create each block with the correct number of input channels
-        for i in range(num_blocks):
-            if verbose:
-                print(f"Creating DenseNet block {i} with input channels: {current_channels}")
-
-            # Create a block that takes all previous feature maps as input
-            block = ConvBlock(
-                in_channels=current_channels,
-                out_channels=channels[i],  # Use channels[i] instead of growth_rate
-                **block_cfg_base
-            )
-            self.layers.append(block)
-
-            # Check if this block uses SplitReLU
-            block_uses_split_relu = hasattr(block, '_is_split_relu') and block._is_split_relu
-
-            # Get the actual output channels from the block
-            block_output_channels = block.output_channels
-            
-
-            # Update the channel count for the next block
-            # The next block will receive all previous feature maps plus this block's output
-            current_channels += block_output_channels
-            if verbose:
-                print(f"  Block {i} output channels: {block_output_channels}")
-                print(f"  Block {i} uses SplitReLU: {block_uses_split_relu}")
-                print(f"  Total channels after block {i}: {current_channels}")
-
-            # Store the input channel count for the next block
             self.input_channels_per_block.append(current_channels)
 
-        # The final output channels is the sum of initial channels and all growth
+            growth_out = main_block.output_channels  # accounts for SplitRelu doubling, etc.
+            current_channels += growth_out           # dense concat grows channels
+
+            if verbose:
+                print(f"[DenseNet] Block {i}: growth={growth_out}, uses SplitReLU={main_block._is_split_relu}, "
+                      f"next_input_channels={current_channels}")
+
         self._final_out_channels = current_channels
         if verbose:
-            print(f"DenseNet final output channels: {self._final_out_channels}")
-
-    # We've moved the functionality of _run_one_block directly into the forward method
-    # to avoid issues with checkpointing
+            print(f"[DenseNet] final output channels: {self._final_out_channels}")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Efficient forward pass through the DenseNet with incremental cropping and concatenation.
+        # Initial feature map (stem or raw input)
+        x_cat = self.stem(x) if hasattr(self, 'stem') else x
 
-        Args:
-            x: Input tensor
-
-        Returns:
-            Output tensor with all feature maps concatenated
-        """
-        # Start with the input as our initial concatenated feature map
-        x_cat = x
-
-        # Process through each block
+        # Dense concatenation
         for block in self.layers:
-            # Run the block on the current concatenated features
-            if self.use_checkpointing and self.training:
-                block_out = checkpoint(
-                    block,
-                    x_cat,
-                    use_reentrant=False,
-                    preserve_rng_state=True
-                )
+            if x_cat.requires_grad and block.training:
+                out = checkpoint(block, x_cat)
             else:
-                block_out = block(x_cat)
+                out = block(x_cat)
 
-            # Crop the previous concatenated tensor to match the new output's shape
-            x_cat_chomped = chomp_causal_spatial(x_cat, block_out)
-
-            # Create the new concatenated tensor for the next iteration
-            x_cat = torch.cat([x_cat_chomped, block_out], dim=1)
+            x_cat = torch.cat([chomp_causal_spatial(x_cat, out), out], dim=1)
 
         return self.final_activation(x_cat)
 
     def get_output_channels(self) -> int:
-        """Get the number of output channels from the network."""
         return self._final_out_channels
 
 
 CONVNETS = {'vanilla': VanillaCNN,
             'cnn': VanillaCNN,
             'resnet': ResNet,
-            'densenet': DenseNet,
-            'shifttcn': ShiftTCN,
-            'vivit': None}  # ViViT handled separately in factory due to lazy import
+            'densenet': DenseNet}  # ViViT handled separately in factory due to lazy import
 
 def build_model(config: Dict[str, Any]) -> nn.Module:
     """Builds a CNN model based on config."""
@@ -345,13 +307,4 @@ def build_model(config: Dict[str, Any]) -> nn.Module:
     if model_type in ['vanilla', 'cnn']: return VanillaCNN(config)
     if model_type == 'resnet': return ResNet(config)
     if model_type == 'densenet': return DenseNet(config)
-    if model_type == 'shifttcn': return ShiftTCN(config)
-    if model_type in ['x3d', 'x3dnet']:
-        # Import X3DNet from x3d module
-        from .x3d import X3DNet
-        return X3DNet(config)
-    if model_type == 'vivit':
-        # Import ViViT from viT module (lazy import to avoid circular dependency)
-        from .viT import ViViT
-        return ViViT(config)
     raise ValueError(f"Unknown model type: '{model_type}'.")

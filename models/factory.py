@@ -11,11 +11,12 @@ import torch.nn as nn
 from typing import Dict, Any, Tuple, Optional
 
 from .modules import (
-    DAModel, ConvBlock, ConvLSTM, ConvGRU,
-    DynamicGaussianReadout, TemporalBasis, DynamicGaussianReadoutEI, DynamicGaussianSN, AffineAdapter,
+    DAModel, ConvBlock, ConvGRU,
+    TemporalBasis, AffineAdapter,
     LearnableTemporalConv
 )
-from .config import build_component_config
+
+from .modules import readout as readout_modules
 
 # Type aliases for clarity
 ConfigDict = Dict[str, Any]
@@ -105,7 +106,7 @@ def create_convnet(
     # 'none' is still allowed
     if convnet_type.lower() == "none":
         return nn.Identity(), in_channels
-
+    
     # aliases
     if convnet_type.lower() in {"conv", "cnn"}:
         convnet_type = "vanilla"
@@ -273,6 +274,13 @@ def create_modulator(
     # Return modulator and its output dimension
     return modulator, modulator.out_dim
 
+READOUTS = {
+    'gaussian': readout_modules.DynamicGaussianReadout,
+    'gaussianei': readout_modules.DynamicGaussianReadoutEI,
+    'gaussiansn': readout_modules.DynamicGaussianSN,
+    'linear': readout_modules.FlattenedLinearReadout,
+}
+
 def create_readout(
     readout_type: str,
     in_channels: int,
@@ -289,89 +297,5 @@ def create_readout(
     Returns:
         Readout module
     """
-    if readout_type == 'gaussian':
-        # Get default parameters and merge with provided parameters
-        config = build_component_config('readout', 'gaussian',
-                                       in_channels=in_channels,
-                                       **kwargs)
 
-        # Create the DynamicGaussianReadout
-        return DynamicGaussianReadout(**config)
-
-    elif readout_type == 'gaussianei':
-        # Get default parameters and merge with provided parameters
-        config = build_component_config('readout', 'gaussian_ei',
-                                       in_channels=in_channels,
-                                       **kwargs)
-
-        # Create the DynamicGaussianReadoutEI
-        return DynamicGaussianReadoutEI(**config)
-
-    elif readout_type == 'gaussiansn':
-        # Get default parameters and merge with provided parameters
-        config = build_component_config('readout', 'gaussian_sn',
-                                       in_channels=in_channels,
-                                       **kwargs)
-
-        # Create the DynamicGaussianSN
-        return DynamicGaussianSN(**config)
-
-    elif readout_type == 'linear':
-        # Get default parameters and merge with provided parameters
-        config = build_component_config('readout', 'linear',
-                                       in_channels=in_channels,
-                                       **kwargs)
-
-        # Create a custom linear readout that handles spatial dimensions
-        class FlattenedLinearReadout(nn.Module):
-            def __init__(self, in_channels, n_units, bias):
-                super().__init__()
-                self.in_channels = in_channels
-                self.n_units = n_units
-                self.adaptive_pool = nn.AdaptiveAvgPool2d((1,1))
-                self.fc = nn.Linear(in_channels, n_units, bias=bias)
-                self.bias = self.fc.bias if bias else None
-
-            def forward(self, x):
-                # Handle 5D input (N, C, S, H, W)
-                if x.dim() == 5:
-                    x = x[:, :, -1]  # Take last time step -> (N, C, H, W)
-
-                # Only pool if spatial dimensions are > 1x1
-                if x.shape[-2:] != (1, 1):
-                    x = self.adaptive_pool(x)  # -> (N, C, 1, 1)
-
-                x = torch.flatten(x, 1)    # -> (N, C)
-                return self.fc(x)
-
-        return FlattenedLinearReadout(
-            in_channels=config['in_channels'],
-            n_units=config['n_units'],
-            bias=config['bias']
-        )
-
-    elif readout_type == 'polar':
-        from .modules.polar_readout import PolarMultiLevelReadout
-        config = {
-            'n_units': kwargs.get('n_units', kwargs.get('n_neurons', 8))
-        }
-        config.update(kwargs)
-        return PolarMultiLevelReadout(config)
-
-    else:
-        raise ValueError(f"Unknown readout type: {readout_type}")
-
-def create_model_from_config(config: ConfigDict) -> nn.Module:
-    """
-    Create a model from a configuration dictionary.
-
-    This function delegates to the build_model function in the build module.
-
-    Args:
-        config: Configuration dictionary for the model
-
-    Returns:
-        Constructed model
-    """
-    from .build import build_model
-    return build_model(config)
+    return READOUTS[readout_type](in_channels=in_channels, **kwargs)

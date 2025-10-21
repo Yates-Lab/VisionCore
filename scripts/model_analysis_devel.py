@@ -37,9 +37,10 @@ device = get_free_device()
 
 #%% Discover Available Models
 print("Discovering available models...")
-checkpoint_dir = "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage/checkpoints"
+checkpoint_dir = "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage_4/checkpoints"
+
 # checkpoint_dir = '/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120/checkpoints'
-models_by_type = scan_checkpoints(checkpoint_dir)
+models_by_type = scan_checkpoints(checkpoint_dir, verbose=False)
 
 print(f"Found {len(models_by_type)} model types:")
 for model_type, models in models_by_type.items():
@@ -198,12 +199,15 @@ def model_pred(batch, model, dataset_idx, stage='pred', include_modulator=True, 
     
 
 #%% LOAD A MODEL
-
-model_type = 'vivit_small'
+import os
+checkpoint_path = None
+# checkpoint_path = '/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage/checkpoints/learned_res_small_gru_optimized_aa_ddp_bs256_ds30_lr1e-3_wd1e-3_corelrscale1.0_warmup5/last.ckpt'
+# checkpoint_path = os.path.join(checkpoint_dir, 'learned_res_small_film_ddp_bs256_ds30_lr1e-3_wd1e-5_corelrscale1.0_warmup10_zip/last.ckpt')
+model_type = 'res_small_gru'
 model, model_info = load_model(
         model_type=model_type,
         model_index=None, # none for best model
-        checkpoint_path=None,
+        checkpoint_path=checkpoint_path,
         checkpoint_dir=checkpoint_dir,
         device='cpu'
     )
@@ -214,9 +218,9 @@ model.model.convnet.use_checkpointing = False
 
 model = model.to(device)
 
-plt.plot(model.model.frontend.temporal_conv.weight.squeeze().detach().cpu().T)
+# plt.plot(model.model.frontend.temporal_conv.weight.squeeze().detach().cpu().T)
 #%% Run bps analysis to find good cells / get STA
-dataset_idx = 0
+dataset_idx = 8
 batch_size = 64 # keep small because things blow up fast!
 
 train_data, val_data, dataset_config = load_single_dataset(model, dataset_idx)
@@ -437,7 +441,7 @@ plt.imshow(batch['stim'][-1,0,-1].detach().cpu())
 print(start)
 #%%
 
-output = model_pred(batch, model, dataset_idx, stage='conv.0')
+output = model_pred(batch, model, dataset_idx, stage='conv.1')
 plot_output(output, use_imshow=True)
 
 del output
@@ -448,7 +452,7 @@ torch.cuda.empty_cache()
 import matplotlib.animation as animation
 
 # Get the conv.0 output and stimulus data
-output = model_pred(batch, model, dataset_idx, stage='conv.0')
+output = model_pred(batch, model, dataset_idx, stage='conv.1')
 stim_data = batch['stim']
 
 # Extract the data we need for animation
@@ -513,11 +517,11 @@ bind = np.arange(start, start+batch_size)
 
 batch = val_data[bind]
 batch = {k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)}
-
-model.model.convnet.layers[0].main_block.components.conv.conv.padding_mode = 'zeros'
+batch['stim'] = batch['stim'].unsqueeze(0)
+# model.model.convnet.layers[0].main_block.components.conv.conv.padding_mode = 'zeros'
 
 # define network as function of the stimulus only
-target = 'conv.0'
+target = 'pred'
 if target == 'pred':
     def net(x):
         batch['stim'] = x
@@ -545,6 +549,7 @@ transform = None
 # mu = val_data.dsets[0]['stim'].mean().item()
 sd = val_data.dsets[0]['stim'].std().item()
 
+#%%
 # init_image = torch.nn.functional.interpolate(torch.randn(1, 1, 3, 51, 51)*sd, size=(25, 51, 51), mode='nearest')
 init_image = torch.randn(1, 1, 25, 51, 51)*sd*2
 if precond is not None:

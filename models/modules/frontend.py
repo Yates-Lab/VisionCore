@@ -11,7 +11,10 @@ from functools import lru_cache
 import warnings
 import numpy as np
 import matplotlib.pyplot as plt
-
+import math
+from einops import rearrange
+from models.modules.conv_layers import StandardConv
+from plenoptic.tools.conv import upsample_blur, blur_downsample
 
 from DataYatesV1.utils.modeling.bases import make_raised_cosine_basis
 from ..utils.general import ensure_tensor
@@ -502,6 +505,11 @@ class AffineAdapter(nn.Module):
 
         return x
 
+def gamma_kernel(t, tau, n=2):
+    # g_n(t; tau) = t^(n-1) exp(-t/tau) / (tau^n Gamma(n)), for t>=0
+    t = torch.clamp(t, min=0.)
+    coef = 1.0 / (tau**n * math.gamma(n))
+    return coef * (t**(n-1)) * torch.exp(-t/tau)
 
 class LearnableTemporalConv(nn.Module):
     """
@@ -530,6 +538,7 @@ class LearnableTemporalConv(nn.Module):
                  num_channels=6,
                  init_type='gaussian_derivatives',
                  causal=True,
+                 split_MP=False,
                  bias=False,
                  **kwargs):
         super().__init__()
@@ -538,16 +547,18 @@ class LearnableTemporalConv(nn.Module):
         self.num_channels = num_channels
         self.causal = causal
         self.init_type = init_type
+        self.split_MP = split_MP
 
         # Create the temporal convolution layer
         # This will be applied to each spatial location independently
-        from .conv_layers import StandardConv
+        
         self.temporal_conv = StandardConv(
-            dim=1,
-            in_channels=1,  # Process each input channel separately
+            dim=3,
+            in_channels=2 if split_MP else 1,
             out_channels=num_channels,
-            kernel_size=self.kernel_size,
+            kernel_size=[self.kernel_size, 1, 1],
             bias=bias,
+            groups=2 if split_MP else 1,
             padding=0,  # Valid convolution for causal behavior
             **kwargs
         )
@@ -565,8 +576,27 @@ class LearnableTemporalConv(nn.Module):
                 pass
             elif self.init_type == 'identity':
                 self._init_identity()
+            elif self.init_type == 'biphasic':
+                self._init_biphasic()
             else:
                 raise ValueError(f"Unknown init_type: {self.init_type}")
+    def _init_biphasic(self):
+        """Initialize kernels with biphasic functions."""
+        kernel_size = self.kernel_size
+        num_channels = self.num_channels
+        t = torch.arange(kernel_size)/120
+        tau_fast = 0.008   # 8 ms
+        tau_slow = 0.022   # 22 ms
+        a = 0.9
+        n = 2
+        k = gamma_kernel(t, tau_fast, n) - a * gamma_kernel(t, tau_slow, n)
+        # Enforce ~zero-mean (remove DC) and scale positive lobe to 1
+        k = k - k.mean()
+        pos_sum = k.clamp_min(0).sum().clamp_min(1e-12)
+        k = k / pos_sum
+        kernel_tensor = k.repeat(num_channels, 1)
+        
+        self.temporal_conv.weight.data[:, 0, :, 0, 0] = kernel_tensor
 
     def _init_gaussian_derivatives(self):
         """Initialize kernels with Gaussian and its derivatives."""
@@ -601,8 +631,8 @@ class LearnableTemporalConv(nn.Module):
             kernels.append(kernel)
 
         # Stack kernels and assign to conv layer
-        kernel_tensor = torch.stack(kernels, dim=0).unsqueeze(1)  # [num_channels, 1, kernel_size]
-        self.temporal_conv.weight.data = kernel_tensor
+        kernel_tensor = torch.stack(kernels, dim=0)
+        self.temporal_conv.weight.data[:, 0, :, 0, 0] = kernel_tensor
 
     def _init_identity(self):
         """Initialize with identity-like kernels."""
@@ -618,9 +648,9 @@ class LearnableTemporalConv(nn.Module):
             kernel[peak_pos] = 1.0
             kernels.append(kernel)
 
-        kernel_tensor = torch.stack(kernels, dim=0).unsqueeze(1)
+        kernel_tensor = torch.stack(kernels, dim=0)
         # Access the underlying conv parameter, not the property
-        self.temporal_conv.conv.weight.data = kernel_tensor
+        self.temporal_conv.conv.weight.data[:, 0, :, 0, 0] = kernel_tensor
 
     def forward(self, x):
         """
@@ -633,33 +663,27 @@ class LearnableTemporalConv(nn.Module):
             Output tensor with shape (N, C*num_channels, T_out, H, W)
             where T_out = T - kernel_size + 1 (for valid convolution)
         """
+
         if x.dim() != 5:
             raise ValueError(f"Expected 5D input (N, C, T, H, W), got {x.dim()}D")
 
         batch_size, in_channels, seq_len, height, width = x.shape
 
+        if self.split_MP:
+            x = rearrange(x, "B C T H W -> (B T) C H W")
+
+            odd = torch.as_tensor(x.shape)[2:4] % 2
+            x_down = blur_downsample(x, scale_filter=False)
+            x_up = upsample_blur(x_down, odd, scale_filter=False)
+            x = rearrange(torch.concat([x - x_up, x_up], dim=1), "(B T) C H W -> B C T H W", B=batch_size)
+
         # Check that we have enough temporal samples for the kernel
         if seq_len < self.kernel_size:
             raise ValueError(f"Input sequence length {seq_len} is smaller than kernel_size {self.kernel_size}")
 
-        # Calculate output sequence length
-        output_seq_len = seq_len - self.kernel_size + 1
-
-        # Reshape for temporal convolution: (N*C*H*W, 1, T)
-        x_reshaped = x.permute(0, 1, 3, 4, 2).reshape(-1, 1, seq_len)
-
-        # Apply temporal convolution
-        # Output shape: (N*C*H*W, num_channels, T_out)
-        y = self.temporal_conv(x_reshaped)
-
-        # Reshape back to 5D: (N, C, H, W, num_channels, T_out)
-        y = y.reshape(batch_size, in_channels, height, width, self.num_channels, output_seq_len)
-
-        # Permute to (N, C*num_channels, T_out, H, W)
-        y = y.permute(0, 1, 4, 5, 2, 3).reshape(
-            batch_size, in_channels * self.num_channels, output_seq_len, height, width
-        )
-
+        # Apply convolution
+        y = self.temporal_conv(x)
+        
         return y
 
     def get_output_channels(self, input_channels=1):
@@ -677,7 +701,7 @@ class LearnableTemporalConv(nn.Module):
             fig = ax.figure
 
         for i in range(self.num_channels):
-            kernel = kernels[i, 0, :]  # [kernel_size]
+            kernel = kernels[i, 0, :].squeeze()  # [kernel_size]
             ax.plot(kernel, label=f'Channel {i+1}')
 
         ax.set_xlabel('Temporal Lag')
