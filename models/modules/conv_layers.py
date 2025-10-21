@@ -1,7 +1,16 @@
 """
-Convolutional network modules for DataYatesV1.
+Convolutional Layers.
 
-This module contains convolutional network components for feature extraction.
+Custom layers include
+- StandardConv: standard 3D convolution
+- DepthwiseConv: depthwise separable 3D convolution
+
+We always use 3D convolutions, even for 2D data. The first dimension is always time.
+
+Anti-aliasing is supported for both signal and frequency domains.
+Weight norm is supported for all layers.
+
+
 """
 import math
 import torch
@@ -9,574 +18,291 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import Union, Sequence, Tuple, Optional
-from torch.nn.utils.parametrizations import weight_norm
+from typing import Tuple, Optional
+
 from torch.nn.utils import parametrize
-from einops import rearrange
-from .common import chomp
 
-__all__ = ['StandardConv', 'DepthwiseConv', 'PyramidStem']
+__all__ = ['StandardConv', 'DepthwiseConv']
 
-'''
-Helpers for anti-aliasing convolutions
-'''
+# -------------
+# Windowing and WeightNorm
+# -------------
 
-def _get_window_fn(window_type: str, window_size: int, **window_kwargs):
+def _get_window(window_type: str, window_size: int, power: float = 1.0, **window_kwargs):
+    """Get a window function from torch.signal.windows."""
+    w = getattr(torch.signal.windows, window_type)(window_size, **window_kwargs).pow(power)
+    w = w / w.max().clamp_min(1e-12)
+    return w
+
+def _separable_mask_from_sizes(
+    kt: int, kh: int, kw: int, *,
+    window: str, window_kwargs: dict,
+    device, dtype
+) -> torch.Tensor:
     """
-    Get a window function from torch.signal.windows.
-
-    Args:
-        window_type (str): Name of the window function in torch.signal.windows
-        window_size (int): Size of the window
-        **window_kwargs: Additional keyword arguments to pass to the window function
-
-    Returns:
-        torch.Tensor: Window function values
+    Build a separable 3D window mask M of shape (1, 1, kt, kh, kw).
+    Apply a 1D window on axes with size >= 5; otherwise ones.
+    Each 1D window is peak-normalized so M.max() == 1.
     """
-    # Check if the window type exists in torch.signal.windows
-    assert hasattr(torch.signal.windows, window_type), f'Window type {window_type} not found in torch.signal.windows'
+    def win_or_ones(n: int):
+        if n >= 5:
+            return _get_window(window, n, **window_kwargs).to(device, dtype)
+        return torch.ones(n, device=device, dtype=dtype)
 
-    # Get the window function
-    window_function = getattr(torch.signal.windows, window_type)
+    wt = win_or_ones(kt).view(kt, 1, 1)  # (T,1,1)
+    wh = win_or_ones(kh).view(1, kh, 1)  # (1,H,1)
+    ww = win_or_ones(kw).view(1, 1, kw)  # (1,1,W)
 
-    # Create the window
-    window = window_function(window_size, **window_kwargs)
-
-    return window
-
-class AntiAliasedMixin:
-    # expects: self.aa_signal, self.aa_freq, self.aa_window, self.aa_window_kwargs,
-    #          self.aa_fft_pad, self.aa_double_time
-
-    def _get_cached_window(self, size: int, device, dtype) -> torch.Tensor:
-        """Get or create cached window function."""
-        cache_key = f'_aa_window_{size}'
-
-        # Check if cached window exists and matches device/dtype
-        if hasattr(self, cache_key):
-            cached = getattr(self, cache_key)
-            if cached.device == device and cached.dtype == dtype:
-                return cached
-
-        # Create and cache new window
-        w = _get_window_fn(self.aa_window, size, **(self.aa_window_kwargs or {}))
-        w = w / w.max().clamp_min(1e-8)  # Normalize
-        w = w.to(device=device, dtype=dtype)
-
-        # Register as buffer (moves with .to() calls, saved in state_dict)
-        self.register_buffer(cache_key, w, persistent=False)
-        return w
-
-    def _win1d(self, size, device, dtype):
-        return self._get_cached_window(size, device, dtype)
-
-    def _kernel_axes(self, dim):  # which axes are kernel dims in weight
-        return {1: (-1,), 2: (-2, -1), 3: (-3, -2, -1)}[dim]
-
-    def _apply_spacetime_window(self, w: torch.Tensor, dim: int) -> torch.Tensor:
-        axes = self._kernel_axes(dim)
-        win = torch.ones(1, device=w.device, dtype=w.dtype)
-
-        for ax in axes:
-            # Skip windowing for kernel dimensions <= 3
-            if w.shape[ax] <= 3:
-                continue
-            vec = self._win1d(w.shape[ax], w.device, w.dtype)
-            shape = [1]*w.ndim; shape[ax] = w.shape[ax]
-            win = win * vec.view(*shape)
-        return w * win
-
-    # 1D: rFFT + half-window (fast)
-    def _freq_aa_1d(self, w: torch.Tensor) -> torch.Tensor:
-        k = w.shape[-1]
-        # Skip frequency windowing for kernel dimensions <= 3
-        if k <= 3:
-            if self.aa_signal and self.aa_double_time:
-                return self._apply_spacetime_window(w, dim=1)
-            return w
-        Nfft = int(2**np.ceil(np.log2(k * self.aa_fft_pad)))
-        W = torch.fft.rfft(w, n=Nfft, dim=-1)
-        bins = W.shape[-1]
-        wf = self._win1d(2*bins - 2, w.device, w.dtype)  # full
-        half = wf[bins - 1:]                              # descending half (1→0 to Nyquist)
-        W = W * half.view(1, 1, -1)
-        out = torch.fft.irfft(W, n=Nfft, dim=-1)[..., :k]
-        if self.aa_signal and self.aa_double_time:
-            out = self._apply_spacetime_window(out, dim=1)
-        return out
-
-    # 2D/3D: FFTN + fftshift + separable per-axis windows
-    def _freq_aa_nd(self, w: torch.Tensor, dim: int) -> torch.Tensor:
-        axes = self._kernel_axes(dim)
-        kshape = [w.shape[a] for a in axes]
-
-        # Check if any dimension needs windowing (> 3)
-        needs_windowing = any(k > 3 for k in kshape)
-        if not needs_windowing:
-            if self.aa_signal and self.aa_double_time:
-                return self._apply_spacetime_window(w, dim=dim)
-            return w
-
-        s_fft = [int(2**np.ceil(np.log2(k * self.aa_fft_pad))) for k in kshape]
-
-        W = torch.fft.fftn(w, s=s_fft, dim=axes)
-        W = torch.fft.fftshift(W, dim=axes)
-
-        fw = 1.0
-        for ax, N, k in zip(axes, s_fft, kshape):
-            # Skip windowing for kernel dimensions <= 3
-            if k <= 3:
-                continue
-            v = self._win1d(N, w.device, w.dtype)
-            shape = [1]*W.ndim; shape[ax] = N
-            fw = fw * v.view(*shape)
-
-        W = W * fw
-        W = torch.fft.ifftshift(W, dim=axes)
-        wf = torch.fft.ifftn(W, s=s_fft, dim=axes).real
-
-        # center-crop back to original kernel support
-        slices = [slice(None), slice(None)]
-        for N, k in zip(s_fft, kshape):
-            start = (N - k) // 2
-            slices.append(slice(start, start + k))
-        out = wf[tuple(slices)]
-
-        if self.aa_signal and self.aa_double_time:
-            out = self._apply_spacetime_window(out, dim=dim)
-        return out
-
-    def _aa_weight(self, w: torch.Tensor, dim: int) -> torch.Tensor:
-        if self.aa_signal:
-            w = self._apply_spacetime_window(w, dim)
-        if self.aa_freq:
-            w = self._freq_aa_1d(w) if dim == 1 else self._freq_aa_nd(w, dim)
-        return w
+    M = wt * wh * ww                      # (T,H,W), peak ≤ 1 and =1 if all axes got windows with peak 1
+    return M.view(1, 1, kt, kh, kw)       # broadcast over (Cout, Cin/groups)
 
 
-class ConvBase(AntiAliasedMixin, nn.Module):
-    """Base class for convolution modules with weight plotting."""
-    def __init__(self,
-            aa_signal: bool = False, # signal domain weight windowing
-            aa_freq: bool = False, # frequency domain weight windowing
-            aa_window: str = 'hann',
-            aa_window_kwargs: Optional[dict] = None,
-            aa_fft_pad: int = 2,
-            aa_double_time: bool = False):
-
+class _WindowParam(nn.Module):
+    def __init__(self, mask):
         super().__init__()
-        self.aa_signal = aa_signal
-        self.aa_freq = aa_freq
-        self.aa_window = aa_window
-        self.aa_window_kwargs = aa_window_kwargs
-        self.aa_fft_pad = aa_fft_pad
-        self.aa_double_time = aa_double_time
+        self.register_buffer("mask", mask, persistent=False)
 
+    def forward(self, w):
+        return w * self.mask
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError
+class _WeightNorm(nn.Module):
+    def __init__(self, dim=0, keep_unit_norm=False, eps=1e-12):
+        super().__init__()
+        self.dim, self.eps, self._initd = dim, eps, False
+        self.keep_unit_norm = keep_unit_norm
+
+    def _lazy_init(self, w):
+        if self._initd: return
+        self.v = nn.Parameter(w.detach().clone())
+        red = tuple(d for d in range(w.ndim) if d != self.dim)
+        if self.keep_unit_norm:
+            g0 = torch.ones(w.size(self.dim), device=w.device, dtype=w.dtype)
+            self.g = nn.Parameter(g0, requires_grad=False)   # unit norm
+        else:
+            g0 = torch.linalg.vector_norm(w, dim=red)        # scale learnable
+            self.g = nn.Parameter(g0, requires_grad=True)
+
+        self.register_parameter("v", self.v)
+        self.register_parameter("g", self.g)
+        self._initd = True
+
+    def forward(self, w):
+        self._lazy_init(w)
+        red = tuple(d for d in range(self.v.ndim) if d != self.dim)
+        n = torch.linalg.vector_norm(self.v, dim=red, keepdim=True).clamp_min(self.eps)
+        shape = [1]*self.v.ndim; shape[self.dim] = self.g.shape[0]
+        return self.g.view(*shape) * (self.v / n)
+
+    
+# -------------
+# Base + plotting
+# -------------
+class ConvBase(nn.Module):
+    """
+    Base class: exposes effective weight and a plotting helper.
+    Subclasses must populate a conv module with .weight (after parametrizations).
+    """
+    def __init__(self):
+        super().__init__()
 
     @property
     def weight(self) -> torch.Tensor:
         raise NotImplementedError
 
-    def plot_weights(self, scale_globally=True) -> Tuple[Optional[plt.Figure], Optional[np.ndarray]]:
+    def plot_weights(self, scale_globally: bool = True):
         """
-        Plot convolution weights using torchvision.utils.make_grid for better visualization.
-
-        Args:
-            scale_globally (bool): If True, normalize all kernels with one global min/max.
-                                  If False, scale each kernel independently.
-
-        Returns:
-            Tuple of (figure, axes) or (None, None) if plotting is not possible
+        Visualize effective weights (after AA + WN) per input channel.
+        1D: [Cout, Cin, K]   → grids of [Cout,1,1,K]
+        2D: [Cout, Cin, H,W] → grids of [Cout,1,H,W]
+        3D: [Cout, Cin, D,H,W] → grids of [Cout*D,1,H,W] (depth tiled along batch)
         """
         try:
+            import math
+            import matplotlib.pyplot as plt
             import torchvision.utils as vutils
-            weights = self.weight.detach().cpu()
-        except (NotImplementedError, AttributeError, ImportError):
-            # print(f"Weight property not available for {self.__class__.__name__} or torchvision not installed. Cannot plot.")
-            return None, None # Simplified error handling
-
-        if weights.ndim not in [3, 4, 5]:
-            # print(f"Weight plotting not implemented for ndim {weights.ndim}.")
+        except Exception:
             return None, None
 
-        if weights.ndim == 5: # 3D conv
+        w = self.weight.detach().cpu()
+        assert w.ndim == 5, f"Expected 5D weight, got {w.shape}"
 
-            # Handle 3D convolution weights: [out_channels, in_channels, depth, height, width]
-            out_channels, in_channels, depth, height, width = weights.shape
+        Cout, Cin, D, H, W = w.shape
+        per_in = [w[:, i].reshape(Cout * D, 1, H, W) for i in range(Cin)]
+        if D == 1:
+            label = "2D"
+            nrow = int(math.ceil(Cout**0.5))
+        elif (H==1) & (W==1):
+            label = "1D"
+            nrow = D
+        else:
+            label = "3D"
+            nrow = D
 
-            # Create a figure with subplots for each input channel
-            n_in_cols = min(4, in_channels)  # Limit to 4 columns for readability
-            n_in_rows = int(np.ceil(in_channels / n_in_cols))
+        gmin = w.min().item() if scale_globally else None
+        gmax = w.max().item() if scale_globally else None
+        ncols = min(4, len(per_in))
+        nrows = (len(per_in) + ncols - 1) // ncols
 
-            fig, axs = plt.subplots(n_in_rows, n_in_cols,
-                                    figsize=(n_in_cols * 4, 4 * out_channels),
-                                    squeeze=False)
-            axs_flat = axs.flatten()
+        fig, axs = plt.subplots(nrows, ncols, figsize=(4 * ncols, 4 * nrows), squeeze=False)
+        for i, ax in enumerate(axs.flatten()):
+            if i >= len(per_in):
+                ax.axis("off"); continue
+            K = per_in[i]
 
-            # Global min/max for consistent scaling if requested
-            global_min = weights.min().item() if scale_globally else None
-            global_max = weights.max().item() if scale_globally else None
-
-            for i_in in range(in_channels):
-                if i_in < len(axs_flat):
-                    ax = axs_flat[i_in]
-                    ax.axis('off')
-
-                    # Extract weights for this input channel: [out_channels, depth, height, width]
-                    channel_weights = weights[:, i_in]
-
-                    # Reshape to [out_channels * depth, 1, height, width] for make_grid
-                    reshaped_weights = channel_weights.reshape(-1, 1, height, width)
-
-                    # Create grid with depth kernels per row (each row is one output channel)
-                    grid = vutils.make_grid(
-                        reshaped_weights,
-                        nrow=depth,
-                        normalize=True,
-                        scale_each=not scale_globally,
-                        padding=1,
-                        pad_value=0.5,  # Light gray padding
-                        value_range=(global_min, global_max) if scale_globally else None
-                    )
-
-                    # Display the grid
-                    ax.imshow(grid.permute(1, 2, 0).numpy(), interpolation='nearest')
-                    ax.set_title(f'Input Channel {i_in}', fontsize=10)
-
-            # Hide any unused subplots
-            for i in range(in_channels, len(axs_flat)):
-                axs_flat[i].axis('off')
-
-            fig.suptitle(f'{self.__class__.__name__} 3D Weights: {out_channels} Out-Channels, {in_channels} In-Channels, {depth} Depth',
-                         fontsize=12)
-            fig.tight_layout(rect=[0, 0, 1, 0.95])  # Adjust for suptitle
-
-        elif weights.ndim == 4: # 2D conv
-            
-            # Handle 2D convolution weights: [out_channels, in_channels, height, width]
-            out_channels, in_channels, height, width = weights.shape
-
-            # Create a figure with subplots for each input channel
-            n_in_cols = min(4, in_channels)  # Limit to 4 columns for readability
-            n_in_rows = int(np.ceil(in_channels / n_in_cols))
-
-            fig, axs = plt.subplots(n_in_rows, n_in_cols,
-                                    figsize=(n_in_cols * 5, n_in_rows * 5),
-                                    squeeze=False)
-            axs_flat = axs.flatten()
-
-            # Global min/max for consistent scaling if requested
-            global_min = weights.min().item() if scale_globally else None
-            global_max = weights.max().item() if scale_globally else None
-
-            for i_in in range(in_channels):
-                if i_in < len(axs_flat):
-                    ax = axs_flat[i_in]
-                    ax.axis('off')
-
-                    # Extract weights for this input channel: [out_channels, height, width]
-                    channel_weights = weights[:, i_in]
-
-                    # Reshape to [out_channels, 1, height, width] for make_grid
-                    reshaped_weights = channel_weights.unsqueeze(1)
-
-                    # Create grid with sqrt(out_channels) kernels per row
-                    nrow = int(np.ceil(np.sqrt(out_channels)))
-                    grid = vutils.make_grid(
-                        reshaped_weights,
-                        nrow=nrow,
-                        normalize=True,
-                        scale_each=not scale_globally,
-                        padding=1,
-                        pad_value=0.5,  # Light gray padding
-                        value_range=(global_min, global_max) if scale_globally else None
-                    )
-
-                    # Display the grid
-                    ax.imshow(grid.permute(1, 2, 0).numpy(), interpolation='nearest')
-                    ax.set_title(f'Input Channel {i_in}', fontsize=10)
-
-            # Hide any unused subplots
-            for i in range(in_channels, len(axs_flat)):
-                axs_flat[i].axis('off')
-
-            fig.suptitle(f'{self.__class__.__name__} 2D Weights: {out_channels} Out-Channels, {in_channels} In-Channels',
-                         fontsize=12)
-            fig.tight_layout(rect=[0, 0, 1, 0.95])  # Adjust for suptitle
-
-        elif weights.ndim == 3:  # 1D conv: [Cout, Cin, W]
-            out_channels, in_channels, width = weights.shape
-            weights_img = weights.unsqueeze(-2)  # -> [Cout, Cin, 1, W]
-            n_in_cols = min(4, in_channels)
-            n_in_rows = int(np.ceil(in_channels / n_in_cols))
-
-            fig, axs = plt.subplots(n_in_rows, n_in_cols,
-                                    figsize=(n_in_cols * 3, n_in_rows * 2.0),
-                                    squeeze=False)
-            axs_flat = axs.flatten()
-            global_min = weights.min().item() if scale_globally else None
-            global_max = weights.max().item() if scale_globally else None
-
-            import torchvision.utils as vutils
-            for i_in in range(in_channels):
-                if i_in >= len(axs_flat): break
-                ax = axs_flat[i_in]
-                ax.axis('off')
-                # [Cout, 1, 1, W] grid
-                reshaped = weights_img[:, i_in].unsqueeze(1)  # [Cout, 1, 1, W]
-                nrow = int(np.ceil(np.sqrt(out_channels)))
-                grid = vutils.make_grid(
-                    reshaped,
-                    nrow=nrow,
-                    normalize=True,
-                    scale_each=not scale_globally,
-                    padding=1,
-                    pad_value=0.5,
-                    value_range=(global_min, global_max) if scale_globally else None
-                )
-                ax.imshow(grid.permute(1, 2, 0).numpy(), interpolation='nearest')
-                ax.set_title(f'Input Channel {i_in}', fontsize=10)
-
-            for j in range(in_channels, len(axs_flat)):
-                axs_flat[j].axis('off')
-
-            fig.suptitle(f'{self.__class__.__name__} 1D Weights: {out_channels} Out-Channels, {in_channels} In-Channels',
-                        fontsize=12)
-            fig.tight_layout(rect=[0, 0, 1, 0.95])
-
+            grid = vutils.make_grid(
+                K, nrow=nrow, normalize=True, scale_each=not scale_globally,
+                padding=1, pad_value=0.5,
+                value_range=(gmin, gmax) if scale_globally else None
+            )
+            ax.imshow(grid.permute(1, 2, 0).numpy(), interpolation="nearest")
+            ax.set_axis_off()
+            ax.set_title(f"Input {i}", fontsize=10)
+        fig.suptitle(f"{self.__class__.__name__} Weights ({label})", fontsize=12)
+        fig.tight_layout()
         return fig, axs
 
-ConvNds = {1: nn.Conv1d, 2: nn.Conv2d, 3: nn.Conv3d}
-
+# -------------
+# Standard conv
+# -------------  
 class StandardConv(ConvBase):
-    """Standard N-Dimensional Convolution Wrapper (2D or 3D)."""
-    def __init__(self, dim: int, in_channels: int, out_channels: int, kernel_size: Union[int, Sequence[int]],
-                 stride: Union[int, Sequence[int]] = 1, padding: Union[int, Sequence[int]] = 0,
-                 dilation: Union[int, Sequence[int]] = 1, groups: int = 1, bias: bool = True,
-                 padding_mode: str = 'replicate', **kwargs):
-        super().__init__(**kwargs)
-        if dim not in [1, 2, 3]: raise ValueError(f"Unsupported dim for StandardConv: {dim}.")
-        self.dim = dim
-        ConvNd = ConvNds[dim]
-
-        self.conv = ConvNd(in_channels, out_channels, kernel_size, stride=stride,
-                           padding=padding, dilation=dilation, groups=groups,
-                           bias=bias, padding_mode=padding_mode)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        w = self.conv.weight
-        if self.aa_signal or self.aa_freq:
-            w = self._aa_weight(w, self.dim)
-        return self.conv._conv_forward(x, w, self.conv.bias)
-
-    def apply_weight_norm(self, dim: int = 0):
-        weight_norm(self.conv, name='weight', dim=dim)
-
-    def remove_weight_norm(self):
-        parametrize.remove_parametrizations(self.conv, 'weight')
-        
-    @property
-    def weight(self) -> torch.Tensor:
-        w = self.conv.weight
-        if self.aa_signal or self.aa_freq:
-            w = self._aa_weight(w, self.dim)
-        return w
-
-class DepthwiseConv(ConvBase):
-    """Depth-wise-separable conv (1-D, 2-D, or 3-D). Returns fused kernel for plotting."""
-    def __init__(self, dim: int, in_channels: int, out_channels: int,
-                 kernel_size: Union[int, Sequence[int]],
-                 stride: Union[int, Sequence[int]] = 1,
-                 padding: Union[int, Sequence[int]] = 0,
-                 dilation: Union[int, Sequence[int]] = 1,
-                 bias: bool = True, padding_mode: str = "replicate", **kwargs):
-
-        super().__init__(**kwargs)
-        if dim not in (1, 2, 3):
-            raise ValueError(f"Unsupported dim {dim} for DepthwiseConv")
-
-        self.dim = dim
-        Conv = ConvNds[dim]
-
-        # depth-wise (groups = Cin)
-        self.depthwise = Conv(
-            in_channels, in_channels, kernel_size,
-            stride=stride, padding=padding, dilation=dilation,
-            groups=in_channels, bias=False, padding_mode=padding_mode
-        )
-        # point-wise 1×1(×1)
-        self.pointwise = Conv(in_channels, out_channels, 1, bias=bias)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Anti-alias only the spatial/temporal kernel (depthwise)
-        dw_weight = self.depthwise.weight
-        if self.aa_signal or self.aa_freq:
-            dw_weight = self._aa_weight(dw_weight, self.dim)
-
-        # Use AA'd depthwise kernels; pointwise is not windowed
-        x = self.depthwise._conv_forward(x, dw_weight, self.depthwise.bias)
-        return self.pointwise(x)
-
-    # -------- weight property for plotting (fused kernel) --------
-    def apply_weight_norm(self, dim: int = 0):
-        weight_norm(self.pointwise, name='weight', dim=dim)
-        weight_norm(self.depthwise, name='weight', dim=dim)
-
-    def remove_weight_norm(self):
-        parametrize.remove_parametrizations(self.pointwise, 'weight')
-        parametrize.remove_parametrizations(self.depthwise, 'weight')
-
-    @property
-    def weight(self) -> torch.Tensor:
-        """
-        Effective fused kernel of shape:
-          - 1D: (C_out, C_in, K)
-          - 2D: (C_out, C_in, H, W)
-          - 3D: (C_out, C_in, D, H, W)
-        """
-        dw = self.depthwise.weight
-        if self.aa_signal or self.aa_freq:
-            dw = self._aa_weight(dw, self.dim)
-
-        # Reorder depthwise to put Cin in the second dim for broadcasting with pointwise
-        if dw.dim() == 3:       # 1D: [Cin, 1, K] -> [1, Cin, K]
-            dw = dw.permute(1, 0, 2)
-        elif dw.dim() == 4:     # 2D: [Cin, 1, H, W] -> [1, Cin, H, W]
-            dw = dw.permute(1, 0, 2, 3)
-        elif dw.dim() == 5:     # 3D: [Cin, 1, D, H, W] -> [1, Cin, D, H, W]
-            dw = dw.permute(1, 0, 2, 3, 4)
-        else:
-            raise RuntimeError(f"Unexpected depthwise weight ndim: {dw.dim()}")
-
-        pw = self.pointwise.weight  # shapes:
-        # 1D: (C_out, C_in, 1)
-        # 2D: (C_out, C_in, 1, 1)
-        # 3D: (C_out, C_in, 1, 1, 1)
-
-        # Broadcasting multiply to get fused (C_out, C_in, K/HW/DHW)
-        eff = pw * dw
-        return eff
-
-
-class PyramidStem(nn.Module):
     """
-    Laplacian Pyramid Stem for ResNet.
+    Standard convolution implemented with Conv3d, always expecting input (B, C, T, H, W).
 
-    Decomposes input into Laplacian pyramid levels, applies convolution to each level,
-    and concatenates the results. Optionally computes amplitude normalization.
-
-    This stem is designed to work with 3D inputs (B, C, T, H, W) and processes
-    each time frame independently through the pyramid decomposition.
-
-    Args:
-        Nlevels: Number of pyramid levels
-        in_channels: Number of input channels
-        out_channels: Number of output channels per pyramid level
-        kernel_size: Kernel size for convolution
-        stride: Stride for convolution
-        padding: Padding for convolution (can be int or 'same')
-        bias: Whether to use bias in convolution
-        amplitude_cat: If True, concatenates amplitude information
-        aa_signal: Apply signal-domain anti-aliasing to conv weights
-        aa_freq: Apply frequency-domain anti-aliasing to conv weights
-        dim: Dimensionality (must be 3 for compatibility with ResNet) - optional for compatibility
+    - kernel_size, stride, padding, dilation MUST be 3-tuples (T,H,W).
+    - Windowing: separable per-axis window applied only on axes with size >= 5.
+    - WeightNorm: optional, applied AFTER windowing so it controls the effective weights.
+    - Causal/asymmetric padding should be handled by the caller (e.g., ConvBlock with F.pad).
     """
     def __init__(self,
-                 Nlevels: int = 3,
-                 in_channels: int = 1,
-                 out_channels: int = 64,
-                 kernel_size: int = 9,
-                 stride: int = 1,
-                 padding: Union[int, str] = 'same',
-                 bias: bool = False,
-                 amplitude_cat: bool = False,
-                 aa_signal: bool = True,
-                 aa_freq: bool = True,
-                 dim: int = 3,  # For compatibility with ResNet
-                 **kwargs):  # Accept extra kwargs for compatibility
-
+                 in_channels: int,
+                 out_channels: int,
+                 kernel_size: Tuple[int, int, int],
+                 stride: Tuple[int, int, int] = (1, 1, 1),
+                 padding: Tuple[int, int, int] = (0, 0, 0),
+                 dilation: Tuple[int, int, int] = (1, 1, 1),
+                 groups: int = 1,
+                 bias: bool = True,
+                 padding_mode: str = "replicate",
+                 *,
+                 # windowing
+                 aa_signal: bool = False,
+                 aa_window: str = "hann",
+                 aa_window_kwargs: Optional[dict] = None,
+                 # weight norm
+                 use_weight_norm: bool = False,
+                 keep_unit_norm: bool = False,
+                 weight_norm_dim: int = 0):
         super().__init__()
+        assert len(kernel_size) == 3 and len(stride) == 3 and len(padding) == 3 and len(dilation) == 3, \
+            "All size/step args must be 3-tuples (T,H,W)."
 
-        if dim != 3:
-            raise ValueError(f"PyramidStem requires dim=3 for 3D inputs (B,C,T,H,W), got dim={dim}")
-
-        # Import here to avoid requiring plenoptic as a hard dependency
-        try:
-            from plenoptic.simulate import LaplacianPyramid
-        except ImportError:
-            raise ImportError("PyramidStem requires plenoptic. Install with: pip install plenoptic")
-
-        self.Nlevels = Nlevels
-        self.amplitude_cat = amplitude_cat
-
-        # Laplacian pyramid operates on 2D images
-        self.lpyr = LaplacianPyramid(Nlevels)
-
-        # Convolution is 2D since we process each time frame independently
-        self.conv = StandardConv(
-            dim=2,
-            in_channels=in_channels,
-            out_channels=out_channels,
-            kernel_size=kernel_size,
-            stride=stride,
-            padding=padding,
-            bias=bias,
-            aa_signal=aa_signal,
-            aa_freq=aa_freq
+        self.conv = nn.Conv3d(
+            in_channels, out_channels,
+            kernel_size=kernel_size, stride=stride, padding=padding, dilation=dilation,
+            groups=groups, bias=bias, padding_mode=padding_mode
         )
 
-        # Apply weight normalization
-        # self.conv.apply_weight_norm(0)  # Disabled for now - may cause gradient instability
+        # Register WeightNorm
+        if use_weight_norm:
+            parametrize.register_parametrization(self.conv, "weight", _WeightNorm(dim=0, keep_unit_norm=keep_unit_norm))          # index 1
 
-        # Store for output_channels calculation
-        self._out_channels = out_channels
+        # Register anti-alias windowing as a parametrization (if enabled).
+        if aa_signal:
+            kt, kh, kw = kernel_size
+            mask = _separable_mask_from_sizes(
+                kt, kh, kw,
+                window=aa_window, window_kwargs=aa_window_kwargs or {},
+                device=self.conv.weight.device, dtype=self.conv.weight.dtype
+            )
+            parametrize.register_parametrization(self.conv, "weight", _WindowParam(mask))
 
-    def forward(self, x):
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x is expected to be (B, C, T, H, W); causal/external padding handled by caller.
+        return self.conv(x)
 
-        batch_size = x.shape[0]
+    @property
+    def weight(self) -> torch.Tensor:
+        # Effective (windowed + weight-normed) weight as seen by the conv.
+        return self.conv.weight
+    
+# -------------
+# Depthwise conv
+# -------------  
+class DepthwiseConv(ConvBase):
+    """
+    Depth-wise separable conv using Conv3d:
+      depthwise: groups = in_channels, kernel=(kt,kh,kw)
+      pointwise: 1x1x1
+    Expects input (B, C, T, H, W). Causal/asymmetric padding stays external.
+    """
+    def __init__(self,
+                 in_channels: int,
+                 out_channels: int,
+                 kernel_size: Tuple[int, int, int],
+                 stride: Tuple[int, int, int] = (1, 1, 1),
+                 padding: Tuple[int, int, int] = (0, 0, 0),
+                 dilation: Tuple[int, int, int] = (1, 1, 1),
+                 *,
+                 bias: bool = True,
+                 padding_mode: str = "replicate",
+                 # windowing
+                 aa_signal: bool = False,
+                 aa_window: str = "hann",
+                 aa_window_kwargs: Optional[dict] = None,
+                 # weight norm
+                 use_weight_norm: bool = False,
+                 keep_unit_norm: bool = False,
+                 weight_norm_dim: int = 0):
+        super().__init__()
+        assert len(kernel_size) == 3 and len(stride) == 3 and len(padding) == 3 and len(dilation) == 3, \
+            "All size/step args must be 3-tuples (T,H,W)."
 
-        # Ensure lpyr is on the same device as input
-        if not hasattr(self.lpyr, '_device') or self.lpyr._device != x.device:
-            self.lpyr = self.lpyr.to(x.device)
-            self.lpyr._device = x.device
+        # Depthwise conv (groups = Cin)
+        self.depthwise = nn.Conv3d(
+            in_channels, in_channels,
+            kernel_size=kernel_size, stride=stride, padding=padding, dilation=dilation,
+            groups=in_channels, bias=False, padding_mode=padding_mode
+        )
 
-        x = rearrange(x, "B C T H W -> (B T) C H W")
-        y = self.lpyr(x)
-        y = [self.conv(L) for L in y]
-        y = [rearrange(L, "(B T) C H W -> B C T H W", B=batch_size) for L in y]
-        min_size = min([L.shape[-1] for L in y])
-        y = [chomp(L, (min_size, min_size)) for L in y]
-        y = torch.concat(y, dim=1)
-        if self.amplitude_cat:
-            A = (y[:,::2]**2 + y[:,1::2,:,:,]**2).pow(.5)
-            # Clamp amplitude to prevent division by very small numbers
-            # This prevents NaN in forward and gradient explosion in backward
-            A_safe = torch.clamp(A, min=1e-4)
-            y[:,::2] /= A_safe
-            y[:,1::2] /= A_safe
-            y = torch.concat([A, y], dim=1)
+        # Pointwise 1×1×1
+        self.pointwise = nn.Conv3d(
+            in_channels, out_channels,
+            kernel_size=1, bias=bias
+        )
+
+        if use_weight_norm:
+            parametrize.register_parametrization(self.depthwise, "weight", _WeightNorm(dim=weight_norm_dim, keep_unit_norm=keep_unit_norm))
+            parametrize.register_parametrization(self.pointwise, "weight", _WeightNorm(dim=0, keep_unit_norm=keep_unit_norm))
+
+        # Anti-alias window on depthwise only (computed once)
+        if aa_signal:
+            kt, kh, kw = kernel_size
+            mask = _separable_mask_from_sizes(
+                kt, kh, kw,
+                window=aa_window, window_kwargs=aa_window_kwargs or {},
+                device=self.depthwise.weight.device, dtype=self.depthwise.weight.dtype
+            )
+            parametrize.register_parametrization(self.depthwise, "weight", _WindowParam(mask))
+
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (B,C,T,H,W); any causal/asymmetric padding already applied by caller
+        y = self.depthwise(x)
+        y = self.pointwise(y)
         return y
 
     @property
-    def output_channels(self) -> int:
+    def weight(self) -> torch.Tensor:
         """
-        Returns the number of output channels.
-
-        This is required for compatibility with ResNet's stem interface.
+        Effective fused kernel for plotting:
+          returns [C_out, C_in, kt, kh, kw]
         """
-        # Each pyramid level contributes out_channels
-        total_channels = self._out_channels * self.Nlevels
-
-        # If amplitude_cat is enabled, we add amplitude channels
-        # Amplitude is computed from pairs of channels (real/imaginary)
-        # So we add total_channels / 2 amplitude channels
-        if self.amplitude_cat:
-            total_channels += total_channels // 2
-
-        return total_channels
+        pw = self.pointwise.weight         # [C_out, C_in, 1, 1, 1]
+        dw = self.depthwise.weight         # [C_in, 1, kt, kh, kw] (already AA’d / WN’d if enabled)
+        # Broadcast depthwise as (1, C_in, kt, kh, kw)
+        dw_bc = dw.view(dw.shape[0], 1, *dw.shape[2:]).permute(1, 0, 2, 3, 4)
+        return pw * dw_bc                  # [C_out, C_in, kt, kh, kw]
 
 
 CONV_LAYER_MAP = {

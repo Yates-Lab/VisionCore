@@ -6,7 +6,7 @@ from torch.nn.utils.parametrizations import weight_norm
 from typing import Sequence, Optional, Dict, Any
 
 from .common import get_padding, SplitRelu, chomp
-from .conv_layers import CONV_LAYER_MAP, ConvBase, StandardConv, DepthwiseConv
+from .conv_layers import CONV_LAYER_MAP, ConvBase
 from .norm_act_pool import get_norm_layer, get_activation_layer, get_pooling_layer
 
 __all__ = ['ConvBlock', 'ResBlock']
