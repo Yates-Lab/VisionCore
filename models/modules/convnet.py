@@ -40,7 +40,6 @@ class BaseConvNet(nn.Module):
     def __init__(self, config: Dict[str, Any]):
         super().__init__()
         self.config = config
-        self.dim: int = config['dim']
         self.initial_channels: int = config['initial_channels']
         self.base_channels: int = config.get('base_channels', self.initial_channels)
         self.layers = nn.ModuleList()
@@ -74,7 +73,7 @@ class VanillaCNN(BaseConvNet):
         # Optional Stem (same behavior as ResNet/DenseNet)
         if 'stem_config' in self.config:
             self.stem, current_channels = _build_stem(
-                self.config['stem_config'], self.dim, self.initial_channels
+                self.config['stem_config'], self.initial_channels
             )
 
         # Unified format: channels + block_configs (one per block)
@@ -87,11 +86,8 @@ class VanillaCNN(BaseConvNet):
             f"Number of block_configs ({len(block_configs)}) must match number of channels ({len(channels)})"
         )
 
-        # Prepare per-block configs
+        # Prepare per-block configs (no need to add dim - inferred from kernel_size)
         block_configs = [cfg.copy() for cfg in block_configs]
-        for cfg in block_configs:
-            cfg['dim'] = self.dim
-
 
         # Build blocks
         for i, (out_channels, cfg) in enumerate(zip(channels, block_configs)):
@@ -115,26 +111,16 @@ class VanillaCNN(BaseConvNet):
 # Let's assume it's defined in blocks.py as per the previous update.
 # from .blocks import ResBlock
 
-def _build_stem(stem_config: Dict[str, Any], dim: int, current_channels: int) -> Tuple[nn.Module, int]:
-    """Build stem module for ResNet."""
+def _build_stem(stem_config: Dict[str, Any], current_channels: int) -> Tuple[nn.Module, int]:
+    """Build stem module for convnets."""
     stem_cfg = stem_config.copy()
-    stem_cfg['dim'] = dim
     out_ch_stem = stem_cfg.pop('out_channels', None)
 
-    # Check for stem type (default to ConvBlock for backward compatibility)
-    stem_type = stem_cfg.pop('type', 'convblock')
+    if out_ch_stem is None:
+        raise ValueError("ConvBlock stem requires 'out_channels' in stem_config")
 
-    if stem_type.lower() == 'pyramid':
-        # Use PyramidStem
-        from .conv_layers import PyramidStem
-        stem = PyramidStem(in_channels=current_channels, **stem_cfg)
-    elif stem_type.lower() in ['convblock', 'conv', 'standard']:
-        # Use ConvBlock (default)
-        if out_ch_stem is None:
-            raise ValueError("ConvBlock stem requires 'out_channels' in stem_config")
-        stem = ConvBlock(in_channels=current_channels, out_channels=out_ch_stem, **stem_cfg)
-    else:
-        raise ValueError(f"Unknown stem type: '{stem_type}'. Supported types: 'pyramid', 'convblock'")
+    # ConvBlock infers dimensionality from kernel_size
+    stem = ConvBlock(in_channels=current_channels, out_channels=out_ch_stem, **stem_cfg)
 
     return stem, stem.output_channels
 
@@ -145,7 +131,7 @@ class ResNet(BaseConvNet):
 
         # Optional Stem
         if 'stem_config' in self.config:
-            self.stem, current_channels = _build_stem(self.config['stem_config'], self.dim, self.initial_channels)
+            self.stem, current_channels = _build_stem(self.config['stem_config'], self.initial_channels)
 
         assert 'channels' in self.config, "ResNet requires 'channels' list in config."
         assert 'block_configs' in self.config, "ResNet requires 'block_configs' list in config."
@@ -154,11 +140,9 @@ class ResNet(BaseConvNet):
 
         block_configs = self.config['block_configs']
         assert len(block_configs) == len(channels), f"Number of block_configs ({len(block_configs)}) must match number of channel stages ({len(channels)})"
-        
-        # Add dim to each config
+
+        # Prepare per-block configs (no need to add dim - inferred from kernel_size)
         block_configs = [cfg.copy() for cfg in block_configs]
-        for cfg in block_configs:
-            cfg['dim'] = self.dim
 
         for i, (out_channels, block_cfg) in enumerate(zip(channels, block_configs)):
             # Remove out_channels from block config if present to avoid conflicts
@@ -209,9 +193,8 @@ class ResNet(BaseConvNet):
             needs_stride_projection = total_stride > 1
 
         if needs_projection or needs_stride_projection:
-            # Simple 1x1 conv projection (linear, no normalization or activation)
-            Conv = nn.Conv2d if self.dim == 2 else nn.Conv3d
-            shortcut = Conv(
+            # Simple 1x1x1 conv projection (linear, no normalization or activation)
+            shortcut = nn.Conv3d(
                 current_channels,
                 main_block_out_ch,
                 kernel_size=1,
@@ -239,7 +222,7 @@ class DenseNet(BaseConvNet):
 
         # Optional Stem
         if 'stem_config' in self.config:
-            self.stem, current_channels = _build_stem(self.config['stem_config'], self.dim, self.initial_channels)
+            self.stem, current_channels = _build_stem(self.config['stem_config'], self.initial_channels)
 
         assert 'channels' in self.config, "DenseNet requires a 'channels' list (growth per block)."
         assert 'block_configs' in self.config, "DenseNet requires a 'block_configs' list."
@@ -250,10 +233,9 @@ class DenseNet(BaseConvNet):
             f"Number of block_configs ({len(block_configs)}) must match number of channels ({len(channels)})"
         )
 
-        # Prepare per-block configs
+        # Prepare per-block configs (no need to add dim - inferred from kernel_size)
         block_configs = [cfg.copy() for cfg in block_configs]
         for cfg in block_configs:
-            cfg['dim'] = self.dim
             cfg.pop('out_channels', None)       # we'll set it explicitly from `channels`
             cfg.pop('channel_multiplier', None) # guard against stray keys
 

@@ -551,15 +551,15 @@ class LearnableTemporalConv(nn.Module):
 
         # Create the temporal convolution layer
         # This will be applied to each spatial location independently
-        
+        # StandardConv no longer takes dim - it's always 3D, inferred from kernel_size
+
         self.temporal_conv = StandardConv(
-            dim=3,
             in_channels=2 if split_MP else 1,
             out_channels=num_channels,
-            kernel_size=[self.kernel_size, 1, 1],
+            kernel_size=(self.kernel_size, 1, 1),
             bias=bias,
             groups=2 if split_MP else 1,
-            padding=0,  # Valid convolution for causal behavior
+            padding=(0, 0, 0),  # Valid convolution for causal behavior
             **kwargs
         )
 

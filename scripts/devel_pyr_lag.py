@@ -140,10 +140,22 @@ class PyramidStem(nn.Module):
         self.lpyr = LaplacianPyramid(Nlevels)
         self.amplitude_cat = amplitude_cat
 
-        self.conv = StandardConv(dim=2, in_channels=in_channels,
+        # StandardConv no longer takes dim - it's always 3D, inferred from kernel_size
+        # For 2D conv, use kernel_size=(1, H, W)
+        if isinstance(kernel_size, int):
+            kernel_size = (1, kernel_size, kernel_size)
+        if isinstance(stride, int):
+            stride = (1, stride, stride)
+        if isinstance(padding, (int, str)):
+            if padding == 'same':
+                padding = (0, kernel_size[1]//2, kernel_size[2]//2)
+            else:
+                padding = (0, padding, padding)
+
+        self.conv = StandardConv(in_channels=in_channels,
             out_channels=out_channels, kernel_size=kernel_size, stride=stride,
             padding=padding, bias=bias,
-            aa_signal=aa_signal, aa_freq=aa_freq)
+            aa_signal=aa_signal)
 
         # self.conv.apply_weight_norm(0)
 

@@ -13,11 +13,11 @@ __all__ = ['ConvBlock', 'ResBlock']
 
 class ConvBlock(nn.Module):
     """
-    Configurable convolutional block (2D or 3D).
+    Configurable convolutional block (always 3D).
+    Conv layers are always 3D convolutions - dimensionality is inferred from kernel_size.
     Order: [Pad] -> Conv -> [WeightNorm] -> Norm -> Activation -> [Dropout] -> [Pool]
     """
     def __init__(self,
-                 dim: int, # Dimensionality of the convolution (2 or 3)
                  in_channels: int,
                  out_channels: int, # Output channels for the nn.ConvNd layer
                  conv_params: Dict[str, Any],
@@ -27,12 +27,10 @@ class ConvBlock(nn.Module):
                  act_params: Optional[Dict[str, Any]] = None, # Params for activation
                  pool_params: Optional[Dict[str, Any]] = None,
                  dropout: float = 0.0,
-                 use_weight_norm: bool = False,
-                 causal: bool = True, # If True and dim=3, applies causal temporal padding
+                 causal: bool = True, # If True, applies causal temporal padding
                  order: Sequence[str] = ('pad', 'conv', 'norm', 'act', 'dropout', 'pool')
                  ):
         super().__init__()
-        self.dim = dim
         self.in_channels = in_channels
         self._out_channels_conv = out_channels # Channels directly out of nn.ConvNd
         self.causal = causal
@@ -44,12 +42,25 @@ class ConvBlock(nn.Module):
         if act_type in [None, 'none']: act_params = {}
         if pool_params is None or (isinstance(pool_params, str) and pool_params.lower() == 'none'):
             pool_params = {}
-        
+
         _conv_params = conv_params.copy()
         _norm_params = (norm_params or {}).copy()
         _act_params = (act_params or {}).copy()
         _pool_params = (pool_params or {}).copy()
 
+        # --- Infer dimensionality from kernel_size ---
+        kernel_size = _conv_params.get('kernel_size')
+        if kernel_size is None:
+            raise ValueError("conv_params must contain 'kernel_size'")
+
+        # Kernel size should be a 3-tuple (T, H, W)
+        if isinstance(kernel_size, int):
+            kernel_size = (kernel_size, kernel_size, kernel_size)
+        elif len(kernel_size) != 3:
+            raise ValueError(f"kernel_size must be a 3-tuple (T, H, W), got {kernel_size}")
+
+        # Infer dim from kernel_size: if T=1, it's effectively 2D; otherwise 3D
+        self.dim = 3 if kernel_size[0] > 1 else 2
 
         # --- Padding Handling ---
         # This padding is applied via F.pad if `causal` is True or 'pad' in order.
@@ -82,21 +93,7 @@ class ConvBlock(nn.Module):
 
         _conv_params.setdefault('bias', norm_type in ['none', None]) # Bias if no norm
 
-        # Add dim parameter for conv types that need it
-        _conv_params['dim'] = self.dim
-
         conv_layer = ConvClass(in_channels=self.in_channels, out_channels=self._out_channels_conv, **_conv_params)
-
-        # Apply weight normalization only to layers that have a direct 'weight' parameter
-        # DepthwiseConv and other composite layers don't have a direct 'weight' attribute
-        if use_weight_norm:
-            if hasattr(conv_layer, 'apply_weight_norm'):
-                conv_layer.apply_weight_norm(_conv_params.get('weight_norm_dim', 0))
-            else:
-                # For composite layers like DepthwiseConv, skip weight norm or apply to sub-layers
-                # For now, we'll just skip it with a warning
-                import warnings
-                warnings.warn(f"Weight normalization requested but {conv_type} conv doesn't have a direct 'apply_weight_norm' method. Skipping.")
 
         self.components['conv'] = conv_layer
 

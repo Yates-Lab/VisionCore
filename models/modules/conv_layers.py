@@ -25,6 +25,11 @@ from torch.nn.utils import parametrize
 __all__ = ['StandardConv', 'DepthwiseConv']
 
 # -------------
+# Helper functions
+# -------------
+def _triple(x): return (x, x, x)
+
+# -------------
 # Windowing and WeightNorm
 # -------------
 
@@ -193,8 +198,12 @@ class StandardConv(ConvBase):
                  keep_unit_norm: bool = False,
                  weight_norm_dim: int = 0):
         super().__init__()
-        assert len(kernel_size) == 3 and len(stride) == 3 and len(padding) == 3 and len(dilation) == 3, \
-            "All size/step args must be 3-tuples (T,H,W)."
+        if isinstance(kernel_size, int): kernel_size = _triple(kernel_size)
+        if isinstance(stride, int): stride = _triple(stride)
+        if isinstance(padding, int): padding = _triple(padding)
+        if isinstance(dilation, int): dilation = _triple(dilation)
+
+        assert len(kernel_size) == 3 and len(stride) == 3 and len(padding) == 3 and len(dilation) == 3, "All size/step args must be 3-tuples (T,H,W)."
 
         self.conv = nn.Conv3d(
             in_channels, out_channels,
@@ -255,6 +264,12 @@ class DepthwiseConv(ConvBase):
                  keep_unit_norm: bool = False,
                  weight_norm_dim: int = 0):
         super().__init__()
+        
+        if isinstance(kernel_size, int): kernel_size = _triple(kernel_size)
+        if isinstance(stride, int): stride = _triple(stride)
+        if isinstance(padding, int): padding = _triple(padding)
+        if isinstance(dilation, int): dilation = _triple(dilation)
+
         assert len(kernel_size) == 3 and len(stride) == 3 and len(padding) == 3 and len(dilation) == 3, \
             "All size/step args must be 3-tuples (T,H,W)."
 

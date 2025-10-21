@@ -11,7 +11,7 @@ import torch.nn as nn
 from typing import Dict, Any, Tuple, Optional
 
 from .modules import (
-    DAModel, ConvBlock, ConvGRU,
+    DAModel, ConvBlock, ConvGRU, RecurrentWrapper,
     TemporalBasis, AffineAdapter,
     LearnableTemporalConv
 )
@@ -62,8 +62,8 @@ def create_frontend(
 
     elif frontend_type == 'conv':
 
-        # Create the ConvBlock
-        frontend = ConvBlock(dim=3, in_channels=in_channels, **kwargs)
+        # Create the ConvBlock (dim inferred from kernel_size in kwargs)
+        frontend = ConvBlock(in_channels=in_channels, **kwargs)
 
         out_channels = frontend.output_channels
 
@@ -116,30 +116,6 @@ def create_convnet(
                initial_channels=in_channels,
                **kwargs)                # kwargs come straight from YAML
 
-    # Handle X3D separately since it's in its own module
-    if convnet_type.lower() in ['x3d', 'x3dnet']:
-        from .modules.x3d import X3DNet
-        core = X3DNet(cfg)
-        return core, core.get_output_channels()
-    
-    # Handle pyramid conv separately since it's in its own module
-    if 'pyr' in convnet_type.lower():
-        from .modules.pyrConv import PyrNet
-        core = PyrNet(cfg)
-        return core, core.get_output_channels()
-
-    # Handle polar convnet separately since it's in its own module
-    if convnet_type.lower() == 'polar':
-        from .modules.polar_convnet import PolarConvNet
-        core = PolarConvNet(cfg)
-        return core, core.get_output_channels()
-
-    # Handle ViViT separately since it's in its own module
-    if convnet_type.lower() == 'vivit':
-        from .modules.viT import ViViT
-        core = ViViT(cfg)
-        return core, core.get_output_channels()
-
     # Handle other convnets
     from .modules.convnet import CONVNETS
     # build the network
@@ -160,57 +136,38 @@ def create_recurrent(
 ) -> Tuple[nn.Module, int]:
     """
     Returns (module, output_channels)
-    `input_dim` is interpreted as **channel-dim** when the type is convolutional.
+
+    All recurrent modules follow VisionCore interface:
+    - Input: (B, C, T, H, W)
+    - Output: (B, C_hidden, T, H, W) for ConvGRU or (B, C_hidden, T, 1, 1) for GRU/LSTM
+
+    `input_dim` is interpreted as **channel-dim** for ConvGRU.
+    For GRU/LSTM, it will be flattened to C*H*W internally by RecurrentWrapper.
     """
     r = recurrent_type.lower()
     if r == "none":
         return nn.Identity(), input_dim
 
     if r == "convgru":
-        # Filter kwargs to only include parameters that ConvGRU accepts
-        convgru_kwargs = {k: v for k, v in kwargs.items() if k in ['fast_phase']}
-        layer = ConvGRU(input_dim, hidden_dim, kernel_size, **convgru_kwargs)
-        # Calculate output channels: hidden_dim + input_dim if fast_phase=True
-        fast_phase = kwargs.get('fast_phase', False)
-        output_channels = (input_dim + hidden_dim) if fast_phase else hidden_dim
-        return layer, output_channels
-
-    if r == "convlstm":
-        # Filter kwargs to only include parameters that ConvLSTM accepts
-        convlstm_kwargs = {k: v for k, v in kwargs.items() if k in ['fast_phase']}
-        layer = ConvLSTM(input_dim, hidden_dim, kernel_size, **convlstm_kwargs)
-        # Calculate output channels: hidden_dim + input_dim if fast_phase=True
-        fast_phase = kwargs.get('fast_phase', False)
-        output_channels = (input_dim + hidden_dim) if fast_phase else hidden_dim
-        return layer, output_channels
-
-    if r == "gru":
-        layer = nn.GRU(input_dim, hidden_dim, batch_first=True, **kwargs)
-        return layer, hidden_dim
-    
-    if r == "lstm":
-        layer = nn.LSTM(input_dim, hidden_dim, batch_first=True, **kwargs)
+        # ConvGRU handles (B, C, T, H, W) natively
+        layer = ConvGRU(input_dim, hidden_dim, kernel_size, **kwargs)
         return layer, hidden_dim
 
-    if r == "polar":
-        from .modules.polar_recurrent import PolarRecurrent
-        # input_dim should be (n_pairs, n_levels) for Polar
-        if isinstance(input_dim, tuple):
-            config = {
-                'n_pairs': input_dim[0],
-                'n_levels': input_dim[1],
-            }
-        else:
-            raise ValueError("Polar recurrent requires input_dim as (n_pairs, n_levels)")
+    elif r == "gru":
+        # Wrap nn.GRU to handle (B, C, T, H, W) → (B, hidden_size, T, 1, 1)
+        # RNN will be created lazily on first forward pass
+        layer = RecurrentWrapper('gru', hidden_dim, input_channels=input_dim, **kwargs)
+        return layer, hidden_dim
 
-        config.update(kwargs)
-        layer = PolarRecurrent(config)
+    elif r == "lstm":
+        # Wrap nn.LSTM to handle (B, C, T, H, W) → (B, hidden_size, T, 1, 1)
+        # RNN will be created lazily on first forward pass
+        layer = RecurrentWrapper('lstm', hidden_dim, input_channels=input_dim, **kwargs)
+        return layer, hidden_dim
 
-        # Output channels: 5 summaries per pair per level
-        output_channels = 5 * config['n_pairs']
-        return layer, output_channels
+    else:
+        raise ValueError(f"Unknown recurrent type: {recurrent_type}")
 
-    raise ValueError(f"Unknown recurrent_type '{recurrent_type}'")
 
 
 def create_modulator(
@@ -276,8 +233,6 @@ def create_modulator(
 
 READOUTS = {
     'gaussian': readout_modules.DynamicGaussianReadout,
-    'gaussianei': readout_modules.DynamicGaussianReadoutEI,
-    'gaussiansn': readout_modules.DynamicGaussianSN,
     'linear': readout_modules.FlattenedLinearReadout,
 }
 
