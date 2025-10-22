@@ -124,7 +124,6 @@ run_training() {
         --gradient_clip_val 1.0 \
         --steps_per_epoch $STEPS_PER_EPOCH \
         --num_workers $NUM_WORKERS \
-        --compile \
         --early_stopping_patience 20 \
         --early_stopping_min_delta 0.0"
 
@@ -135,6 +134,7 @@ run_training() {
 
     # Launch training
     eval $TRAINING_CMD
+        # --compile \
         # --enable_curriculum
         # --limit_val_batches 20 \
     

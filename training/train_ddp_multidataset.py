@@ -53,6 +53,8 @@ from training.callbacks import EpochHeartbeat, CurriculumCallback
 # Set PyTorch matmul precision
 torch.set_float32_matmul_precision('medium')
 
+# Set dynamo config to avoid recompilation errors -- we need to debug this because of the multidataset changing size of readouts.
+# torch._dynamo.config.force_parameter_static_shapes = False
 
 def main():
     """Main training function."""

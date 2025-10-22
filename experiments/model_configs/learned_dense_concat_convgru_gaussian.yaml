@@ -18,11 +18,16 @@ frontend:
   params:
     kernel_size: 16
     num_channels: 4
-    init_type: gaussian_derivatives
+    init_type: biphasic
     split_MP: False
-    aa_signal: false
+    aa_signal: true
+    aa_window: hann
+    aa_window_kwargs:
+      power: .25
+    use_weight_norm: true
+    keep_unit_norm: true
     causal: true
-    bias: false
+    bias: true
 
 # Convnet configuration - DenseNet
 convnet:
@@ -34,7 +39,7 @@ convnet:
       out_channels: 8
       conv_params:
         type: standard
-        kernel_size: [1, 5, 5]
+        kernel_size: [1, 7, 7]
         padding: [0, 0, 0]
         stride: 1
         dilation: [1, 1, 1]

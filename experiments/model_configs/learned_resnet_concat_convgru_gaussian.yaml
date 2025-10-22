@@ -19,8 +19,13 @@ frontend:
     kernel_size: 16
     num_channels: 4
     init_type: gaussian_derivatives
-    split_MP: true
-    aa_signal: false
+    split_MP: False
+    aa_signal: true
+    aa_window: hann
+    aa_window_kwargs:
+      power: .25
+    use_weight_norm: false
+    keep_unit_norm: false
     causal: true
     bias: false
 
@@ -34,7 +39,7 @@ convnet:
       out_channels: 8
       conv_params:
         type: standard
-        kernel_size: [1, 5, 5]
+        kernel_size: [1, 7, 7]
         padding: [0, 0, 0]
         stride: 1
         dilation: [1, 1, 1]
