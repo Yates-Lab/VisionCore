@@ -54,31 +54,14 @@ USE_ZIP_LOSS=false     # Set to 'true' to use Zero-Inflated Poisson loss instead
 PROJECT_NAME="multidataset_backimage_120"
 
 DATASET_CONFIGS_PATH="/home/jake/repos/VisionCore/experiments/dataset_configs/multi_basic_120_backimage_all.yaml"
-CHECKPOINT_DIR="/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage_4/checkpoints"
+CHECKPOINT_DIR="/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage_5/checkpoints"
 
 # Create checkpoint directory
 mkdir -p $CHECKPOINT_DIR
 
 # Array of model configurations to run
 MODEL_CONFIGS=(
-    # "experiments/model_configs/res_small_gru.yaml"
-    "experiments/model_configs/learned_res_small_gru.yaml"
-    # "experiments/model_configs/learned_res_split_gru.yaml"
-    # "experiments/model_configs/pyramid_stem_resnet_time.yaml"
-    # "experiments/model_configs/learned_res_small_gru.yaml"
-    # "experiments/model_configs/learned_res_small_none_gru.yaml"
-    # "experiments/model_configs/modulator_only_convgru.yaml"
-    # "experiments/model_configs/learned_res_small_gru_optimized_aa.yaml"
-
-
-    # "experiments/model_configs/learned_res_small_film.yaml"
-    # "experiments/model_configs/vivit_small.yaml"
-    # 
-    # "experiments/model_configs/learned_res_small_gru_optimized.yaml"
-    
-    # "experiments/model_configs/learned_res_optimized_gru.yaml"
-    # "experiments/model_configs/res_small_gru.yaml"
-    # "configs_multi/modulator_only_convgru.yaml"  # Test the new modulator-only model   
+    "experiments/model_configs/learned_resnet_concat_convgru_gaussian.yaml"
 )
 
 # Function to run training for a single model config
@@ -118,17 +101,6 @@ run_training() {
     echo "Dataset configs: $DATASET_CONFIGS_PATH"
     echo "Checkpoint dir: $CHECKPOINT_DIR"
     echo "============================================================"
-    
-    # python training/train_ddp_multidataset.py \
-    #     --model_config "$MODEL_CONFIG" \
-    #     --dataset_configs_path "$DATASET_CONFIGS_PATH" \
-    #     --num_gpus 2             \
-    #     --num_workers 0          \
-    #     --max_datasets 2         \
-    #     --steps_per_epoch 10     \
-    #     --batch_size 8           \
-    #     --precision 32           \
-    #     --project_name debug2gpu
 
     # Build training command with optional ZIP loss flag
     local TRAINING_CMD="python training/train_ddp_multidataset.py \

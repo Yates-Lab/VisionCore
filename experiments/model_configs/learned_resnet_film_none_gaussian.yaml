@@ -1,0 +1,102 @@
+# V1 model configuration with ResNet convnet, FiLM modulator, no recurrent stage
+model_type: v1multi
+
+# Model dimensions
+initial_input_channels: 1
+
+# Adapter configuration
+adapter:
+  type: adapter
+  params:
+    init_sigma: 1.0
+    grid_size: 51
+    transform: scale
+
+# Frontend configuration
+frontend:
+  type: learnable_temporal
+  params:
+    kernel_size: 16
+    num_channels: 4
+    init_type: gaussian_derivatives
+    split_MP: true
+    aa_signal: false
+    causal: true
+    bias: false
+
+# Convnet configuration - ResNet
+convnet:
+  type: resnet
+  params:
+    channels: [16, 32]
+    checkpointing: false
+    stem_config:
+      out_channels: 8
+      conv_params:
+        type: standard
+        kernel_size: [1, 5, 5]
+        padding: [0, 0, 0]
+        stride: 1
+        dilation: [1, 1, 1]
+        aa_signal: true
+        weight_norm_dim: 0
+        use_weight_norm: true
+        keep_unit_norm: true
+      norm_type: rms
+      act_type: splitrelu
+      pool_params: null
+      dropout: 0.0
+      order: [pad, conv, norm, act]
+    block_configs:
+      - conv_params:
+          type: standard
+          kernel_size: [3, 9, 9]
+          aa_signal: true
+          aa_window: hann
+          aa_window_kwargs:
+            power: 1.0
+          use_weight_norm: true
+          keep_unit_norm: true
+          padding: [0, 0, 0]
+        norm_type: grn
+        act_type: splitrelu
+        dropout: 0.0
+        pool_params:
+          type: max
+          kernel_size: 2
+          stride: 2
+      - conv_params:
+          type: standard
+          kernel_size: [3, 5, 5]
+          use_weight_norm: true
+          keep_unit_norm: true
+          aa_signal: true
+          padding: [0, 0, 0]
+        norm_type: grn
+        act_type: splitrelu
+        dropout: 0.0
+        pool_params: null
+
+# Modulator configuration - FiLM
+modulator:
+  type: film
+  params:
+    behavior_dim: 42
+    feature_dim: 16
+
+# Recurrent configuration - None
+recurrent:
+  type: none
+  params: {}
+
+# Readout configuration
+readout:
+  type: gaussian
+  params:
+    n_units: 8
+    bias: true
+    initial_std: 0.5
+    initial_mean_scale: 0.1
+
+output_activation: softplus
+

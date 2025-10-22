@@ -45,13 +45,33 @@ config = {
         'type': 'learnable_temporal',
         'params': {'kernel_size': 16, 'num_channels': 4, 'init_type': 'gaussian_derivatives',
                 'split_MP': True,
+                'aa_signal': False,
                 'causal': True, 'bias': False}
     },
     'convnet': {
         'type': 'densenet',
         'params': {
-            'channels': [8, 16],
+            'channels': [16, 32],
             'checkpointing': False,
+            'stem_config': {
+                'out_channels': 8,
+                'conv_params':
+                    {'type': 'standard',
+                     'kernel_size': [1, 5, 5],
+                     'padding': 0,
+                     'stride': 1,
+                     'dilation': 1,
+                     'aa_signal': True,
+                     'weight_norm_dim': 0,
+                     'use_weight_norm': True,
+                     'keep_unit_norm': True},
+                 'norm_type': 'rms',
+                 'act_type': 'splitrelu',
+                 'pool_params': None,
+                 'dropout': 0.0,
+                 'order': ('pad', 'conv', 'norm', 'act')
+                
+            },
             'block_configs': [
                 {
                     'conv_params': {
@@ -97,7 +117,7 @@ config = {
 
     'recurrent': {
         'type': 'convgru',
-        'params': {'n_layers': 1, 'hidden_dim': 16, 'kernel_size': 3}
+        'params': {'n_layers': 1, 'hidden_dim': 128, 'kernel_size': 3}
     },
 
     'readout': {
@@ -125,9 +145,17 @@ behavior = torch.randn(batch_size, behavior_dim).to(device)
 
 with torch.no_grad():
     x = model.adapter(stim)
+    print(f"Adapter output shape: {x.shape}")
     x = model.frontend(x)
+    print(f"Frontend output shape: {x.shape}")
     x = model.convnet(x)
-    print(x.shape)
+    print(f"Convnet output shape: {x.shape}")
+    x = model.modulator(x, behavior)
+    print(f"Modulator output shape: {x.shape}")
+    x = model.recurrent(x)
+    print(f"Recurrent output shape: {x.shape}")
+    x = model.readout(x)
+    print(f"Readout output shape: {x.shape}")
 
 with torch.no_grad():
     output = model(stim, behavior)
@@ -136,3 +164,5 @@ with torch.no_grad():
 # %%
 
 _ = plt.plot(output.detach().cpu().numpy())
+
+# %%

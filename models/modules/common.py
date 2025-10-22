@@ -80,60 +80,68 @@ def chomp(tensor: torch.Tensor, target_spatial_shape: Tuple[int, int]) -> torch.
 
 def get_padding(kernel_size: Union[int, Sequence[int]],
                 dilation: Union[int, Sequence[int]] = 1,
-                dim: int = 2,
-                causal: bool = False,
+                causal: bool = True,
                 padding_config: Union[int, Sequence[int], None] = None) -> Tuple[int, ...]:
     """
-    Calculates padding:
-    - For 3D causal: Causal padding for the first dimension (Time/Depth), config padding for spatial dims.
-    - Otherwise: All zero padding.
+    Calculates padding for 3D convolutions (always NCTHW format).
+
+    Rules:
+    - Always assumes 3D convolutions with dimensions (T, H, W)
+    - Any dimension with kernel_size=1 gets padding=0 (overrides padding_config)
+    - For causal mode: applies causal padding on T dimension (unless kernel_size[0]=1)
+    - For non-causal: applies symmetric padding from padding_config
 
     Args:
-        padding_config: Padding configuration from conv_params. Can be:
+        kernel_size: Kernel size as int or 3-tuple (T, H, W)
+        dilation: Dilation as int or 3-tuple (T, H, W)
+        causal: If True, apply causal padding on temporal dimension
+        padding_config: Padding configuration. Can be:
                        - None: Use zero padding
                        - int: Same padding for all dimensions
-                       - sequence: Per-dimension padding (for 3D causal, spatial part is extracted)
+                       - sequence: Per-dimension padding (T, H, W)
+
+    Returns:
+        Padding tuple in F.pad format: (W_left, W_right, H_left, H_right, T_left, T_right)
     """
-    if isinstance(kernel_size, int): kernel_size = (kernel_size,) * dim
-    if isinstance(dilation, int): dilation = (dilation,) * dim
+    if isinstance(kernel_size, int):
+        kernel_size = (kernel_size, kernel_size, kernel_size)
+    if isinstance(dilation, int):
+        dilation = (dilation, dilation, dilation)
 
-    if not all(len(param) == dim for param in [kernel_size, dilation]): # type: ignore
-         raise ValueError(f"kernel_size and dilation must have length {dim}")
+    if len(kernel_size) != 3 or len(dilation) != 3:
+        raise ValueError(f"kernel_size and dilation must have length 3, got {len(kernel_size)} and {len(dilation)}")
 
-    # Parse spatial padding from padding_config
+    # Parse padding_config into 3D padding (T, H, W)
     if padding_config is None:
-        spatial_padding = (0,) * (dim - 1) if dim > 1 else ()
+        config_padding = (0, 0, 0)
     elif isinstance(padding_config, int):
-        spatial_padding = (padding_config,) * (dim - 1) if dim > 1 else ()
+        config_padding = (padding_config, padding_config, padding_config)
     elif isinstance(padding_config, (list, tuple)):
-        if dim == 3 and len(padding_config) == 3:
-            # For 3D: extract spatial part [temporal, height, width] -> [height, width]
-            spatial_padding = padding_config[1:]
-        elif len(padding_config) == dim - 1:
-            # Already spatial-only padding
-            spatial_padding = padding_config
-        elif len(padding_config) == dim:
-            # Full padding provided, extract spatial part
-            spatial_padding = padding_config[1:] if dim == 3 else padding_config
+        if len(padding_config) == 3:
+            config_padding = tuple(padding_config)
+        elif len(padding_config) == 2:
+            # Assume spatial-only (H, W), set T=0
+            config_padding = (0, padding_config[0], padding_config[1])
         else:
-            raise ValueError(f"padding_config length {len(padding_config)} doesn't match expected dimensions")
+            raise ValueError(f"padding_config must be int, 2-tuple (H,W), or 3-tuple (T,H,W), got length {len(padding_config)}")
     else:
-        spatial_padding = (0,) * (dim - 1) if dim > 1 else ()
+        config_padding = (0, 0, 0)
 
+    # Build padding in F.pad format: (W_left, W_right, H_left, H_right, T_left, T_right)
     padding_list = []
-    # Iterate dims in reverse order (W, H, [D]) for F.pad format
-    spatial_idx = 0
-    for i in range(dim - 1, -1, -1):
-        if dim == 3 and causal and i == 0: # First dim (Depth/Time) of a 3D causal convolution
-            # Causal padding: (kernel_size - 1) * dilation on the left/past
-            total_padding = dilation[i] * (kernel_size[i] - 1) # type: ignore
+
+    # Iterate dimensions in reverse order (W, H, T) for F.pad format
+    for i in range(2, -1, -1):  # i = 2 (W), 1 (H), 0 (T)
+        # Rule: if kernel_size[i] == 1, padding must be 0
+        if kernel_size[i] == 1:
+            padding_list.extend([0, 0])
+        elif causal and i == 0:  # Temporal dimension with causal padding
+            # Causal padding: (kernel_size - 1) * dilation on the left/past, 0 on right/future
+            total_padding = dilation[i] * (kernel_size[i] - 1)
             padding_list.extend([total_padding, 0])
         else:
-            # Use spatial_padding for spatial dimensions
-            if spatial_padding and spatial_idx < len(spatial_padding):
-                pad_val = spatial_padding[-(spatial_idx + 1)]  # Reverse order for F.pad
-                padding_list.extend([pad_val, pad_val])
-                spatial_idx += 1
-            else:
-                padding_list.extend([0, 0])
+            # Symmetric padding from config
+            pad_val = config_padding[i]
+            padding_list.extend([pad_val, pad_val])
+
     return tuple(padding_list)

@@ -72,12 +72,12 @@ class ConvBlock(nn.Module):
         if self.causal and self.dim == 3: # Only apply get_padding for 3D causal
             dilation = _conv_params.get('dilation', 1)
             kernel_size_for_pad = _conv_params['kernel_size']
-            self.padding_amount = get_padding(kernel_size_for_pad, dilation, self.dim, self.causal, conv_native_padding)
+            self.padding_amount = get_padding(kernel_size_for_pad, dilation, self.causal, conv_native_padding)
             _conv_params['padding'] = 0 # External padding will be used
         elif 'pad' in self.order: # General external padding (rarely used with current get_padding)
             dilation = _conv_params.get('dilation', 1)
             kernel_size_for_pad = _conv_params['kernel_size']
-            self.padding_amount = get_padding(kernel_size_for_pad, dilation, self.dim, self.causal)
+            self.padding_amount = get_padding(kernel_size_for_pad, dilation, self.causal)
             _conv_params['padding'] = 0
         else: # Use nn.ConvNd's own padding parameter
             _conv_params['padding'] = conv_native_padding
