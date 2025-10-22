@@ -37,7 +37,7 @@ device = get_free_device()
 
 #%% Discover Available Models
 print("Discovering available models...")
-checkpoint_dir = "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage_4/checkpoints"
+checkpoint_dir = "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage_5/checkpoints"
 
 # checkpoint_dir = '/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120/checkpoints'
 models_by_type = scan_checkpoints(checkpoint_dir, verbose=False)
@@ -203,7 +203,7 @@ import os
 checkpoint_path = None
 # checkpoint_path = '/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage/checkpoints/learned_res_small_gru_optimized_aa_ddp_bs256_ds30_lr1e-3_wd1e-3_corelrscale1.0_warmup5/last.ckpt'
 # checkpoint_path = os.path.join(checkpoint_dir, 'learned_res_small_film_ddp_bs256_ds30_lr1e-3_wd1e-5_corelrscale1.0_warmup10_zip/last.ckpt')
-model_type = 'res_small_gru'
+model_type = 'resnet'
 model, model_info = load_model(
         model_type=model_type,
         model_index=None, # none for best model
@@ -218,7 +218,20 @@ model.model.convnet.use_checkpointing = False
 
 model = model.to(device)
 
-# plt.plot(model.model.frontend.temporal_conv.weight.squeeze().detach().cpu().T)
+#%%
+plt.plot(model.model.frontend.temporal_conv.weight.squeeze().detach().cpu().T)
+model.model.convnet.stem.components.conv.plot_weights()
+
+#%%
+for layer in model.model.convnet.layers:
+    layer.main_block.components.conv.plot_weights(nrow=20)
+
+#%% plot readouts
+for readout in model.model.readouts[:1]:
+    # run dummy input through readout
+    readout(torch.randn(1, readout.features.in_channels, 1, 15, 15).to(device))
+    readout.plot_weights(ellipse=False)
+
 #%% Run bps analysis to find good cells / get STA
 dataset_idx = 8
 batch_size = 64 # keep small because things blow up fast!
@@ -368,7 +381,7 @@ dset_idx = np.unique(stim_indices[:,0]).item()
 # eyevel = data.dsets[dset_idx]['behavior'][data.inds[:,1]][:,18:22].sum(1)
 #%% get stas 
 
-sta_dict = get_sta_ste((train_data, val_data, dataset_config), gaborium_robs, gaborium_rhat, lags=list(range(16)), fixations_only=False, combine_train_test=True, whiten=True, device=model.device)
+sta_dict = get_sta_ste((train_data, val_data, dataset_config), gaborium_robs, gaborium_rhat, lags=list(range(16)), fixations_only=True, combine_train_test=True, whiten=True, device=model.device)
 
 #%%
 for key, val in sta_dict.items():
@@ -378,7 +391,17 @@ for key, val in sta_dict.items():
         print(key)
 
 #%%
-plot_stas(sta_dict, lag=None, normalize=True, sort_by='modulation_index_rhat')
+NC = sta_dict['Z_STA_robs'].shape[-1]
+sx = int(np.sqrt(NC))
+sy = int(np.ceil(NC / sx))
+fig, axs = plt.subplots(sx, sy, figsize=(2*sx, 2*sy), sharex=True, sharey=True)
+for cc in range(NC):
+    axs.flatten()[cc].plot(sta_dict['Z_STE_robs'].std( (1,2))[:,cc])
+    axs.flatten()[cc].twinx().plot(sta_dict['Z_STA_robs'].std( (1,2))[:,cc], 'r')
+    axs.flatten()[cc].axvline(sta_dict['peak_lag'][cc], color='k', linestyle='--')
+    axs.flatten()[cc].set_title(f'{cc}')
+#%%
+plot_stas(sta_dict, lag=None, normalize=True, sort_by=None) #'modulation_index_rhat')
 
 #%%
 

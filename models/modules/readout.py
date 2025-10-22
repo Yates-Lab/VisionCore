@@ -86,9 +86,8 @@ class BaseFactorizedReadout(nn.Module):
                   feature_weights = feature_weights.reshape(-1, 1) # (N_units, 1)
 
 
-        fig, axs = plt.subplots(2, 1, figsize=(max(8, self.n_units * 0.6), 10), squeeze=False)
+        fig, axs = plt.subplots(1, 1, figsize=(10, 10), squeeze=False)
         axs = axs.ravel()
-
 
         # Plot feature weights
         if feature_weights.ndim == 2:
@@ -110,7 +109,7 @@ class BaseFactorizedReadout(nn.Module):
 
         # Create a new figure for spatial weights if needed, or use axs[1]
         # For simplicity, we create a grid in axs[1]
-        axs[1].clear() # Clear previous content if any
+        # axs[1].clear() # Clear previous content if any
 
         # Create subplots for each unit's spatial weight
         if H > 0 and W > 0:
@@ -132,6 +131,7 @@ class BaseFactorizedReadout(nn.Module):
                     ax_sp = axs_spatial_grid[r, c]
                     if i < n_units_spatial: # Check if spatial weight exists for this unit
                         ax_sp.imshow(spatial_weights[i], cmap='coolwarm',
+                                     interpolation='none',
                                     vmin=-spatial_max_val if spatial_max_val > 0 else -1,
                                     vmax=spatial_max_val if spatial_max_val > 0 else 1)
                         ax_sp.set_title(f'Unit {i}')
@@ -143,11 +143,11 @@ class BaseFactorizedReadout(nn.Module):
 
             fig_spatial.tight_layout(rect=[0, 0, 1, 0.96]) # Adjust for suptitle
 
-            plot_type = "ellipse contours" if ellipse else "spatial masks"
-            axs[1].text(0.5, 0.5, f"Spatial readouts plotted as {plot_type} in separate figure.", ha='center', va='center')
+            # plot_type = "ellipse contours" if ellipse else "spatial masks"
+            
 
-        else:
-            axs[1].text(0.5, 0.5, "Spatial weights H or W is 0, cannot plot.", ha='center', va='center')
+        # else:
+        #     axs[1].text(0.5, 0.5, "Spatial weights H or W is 0, cannot plot.", ha='center', va='center')
         
         fig.tight_layout()
         return fig, axs # Potentially return fig_spatial as well, or handle display outside

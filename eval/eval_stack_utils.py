@@ -179,6 +179,10 @@ def extract_model_type(exp_name):
         return 'core_res_modulator'
     elif 'core_res' in exp_name:
         return 'core_res'
+    elif 'learned_resnet_concat_convgru_gaussian' in exp_name:
+        return 'learned_resnet_concat_convgru_gaussian'
+    elif 'learned_resnet_film_none_gaussian' in exp_name:
+        return 'learned_resnet_film_none_gaussian'
     elif 'learned_res_split_gru' in exp_name:
         return 'learned_res_split_gru'
     elif 'learned_res_small_stn' in exp_name:

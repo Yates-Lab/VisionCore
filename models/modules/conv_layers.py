@@ -114,7 +114,7 @@ class ConvBase(nn.Module):
     def weight(self) -> torch.Tensor:
         raise NotImplementedError
 
-    def plot_weights(self, scale_globally: bool = True):
+    def plot_weights(self, scale_globally: bool = True, nrow: int = None):
         """
         Visualize effective weights (after AA + WN) per input channel.
         1D: [Cout, Cin, K]   → grids of [Cout,1,1,K]
@@ -135,13 +135,16 @@ class ConvBase(nn.Module):
         per_in = [w[:, i].reshape(Cout * D, 1, H, W) for i in range(Cin)]
         if D == 1:
             label = "2D"
-            nrow = int(math.ceil(Cout**0.5))
+            if nrow is None:
+                nrow = int(math.ceil(Cout**0.5))
         elif (H==1) & (W==1):
             label = "1D"
-            nrow = D
+            if nrow is None:
+                nrow = D
         else:
             label = "3D"
-            nrow = D
+            if nrow is None:
+                nrow = D
 
         gmin = w.min().item() if scale_globally else None
         gmax = w.max().item() if scale_globally else None
