@@ -8,29 +8,67 @@
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate yatesfv
 
-# Set environment variables for optimal performance
-export CUDA_VISIBLE_DEVICES=0,1
+# ---------- DDP / NCCL (2x PCIe, no NVLink) ----------
 export NCCL_DEBUG=ERROR
-export PYTHONPATH="${PYTHONPATH}:$(pwd)"
-
-# NCCL settings that fixed the DDP hang
-export NCCL_SOCKET_IFNAME=lo
-export NCCL_P2P_DISABLE=1 
+export NCCL_SOCKET_IFNAME=lo          # local loopback only
+export NCCL_IB_DISABLE=1              # no InfiniBand
+export NCCL_P2P_DISABLE=1             # no NVLink P2P
+export NCCL_ALGO=Ring                 # simple & stable for 2 GPUs
+export NCCL_PROTO=Simple              # avoids LL128 quirks on some PCIe setups
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 
-# set up lcuda for compilation
-mkdir -p $HOME/.local/lib          # or another dir you control
-ln -s /lib/x86_64-linux-gnu/libcuda.so.1 $HOME/.local/lib/libcuda.so
+# Optional: if you still see intermittent stalls, try:
+# export NCCL_SHM_DISABLE=1
 
+# Cap autotune sweep sizes (big wins on compile time)
+export TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_TRIALS=10
+export TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE_TRIALS=5
+
+# Make kernel scheduling a bit more predictable (often helps throughput)
+export CUDA_DEVICE_MAX_CONNECTIONS=1
+
+# ---------- cuDNN / TF32 ----------
+export CUDNN_BENCHMARK=1              # let cuDNN pick fastest kernels
+export NVIDIA_TF32_OVERRIDE=1         # allow TF32 on Ampere+ (friendly with bf16)
+
+# ---------- Python / Torch QoL ----------
+export PYTHONPATH="${PYTHONPATH}:$(pwd)"
+export PYTHONFAULTHANDLER=1
+export TORCH_SHOW_CPP_STACKTRACES=1
+export CUDA_LAUNCH_BLOCKING=0
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:128
+
+# ---------- libcuda workaround (idempotent) ----------
+mkdir -p "$HOME/.local/lib"
+if [ ! -e "$HOME/.local/lib/libcuda.so" ]; then
+  ln -s /lib/x86_64-linux-gnu/libcuda.so.1 "$HOME/.local/lib/libcuda.so"
+fi
 export LIBRARY_PATH="$HOME/.local/lib:$LIBRARY_PATH"
 export LD_LIBRARY_PATH="$HOME/.local/lib:$LD_LIBRARY_PATH"
 
-# export TORCH_DISTRIBUTED_DEBUG=DETAIL
-# export NCCL_DEBUG=INFO
-export PYTHONFAULTHANDLER=1
-export CUDA_LAUNCH_BLOCKING=0
-export TORCH_SHOW_CPP_STACKTRACES=1
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:128
+# # Set environment variables for optimal performance
+# export CUDA_VISIBLE_DEVICES=0,1
+# export NCCL_DEBUG=ERROR
+# export PYTHONPATH="${PYTHONPATH}:$(pwd)"
+
+# # NCCL settings that fixed the DDP hang
+# export NCCL_SOCKET_IFNAME=lo
+# export NCCL_P2P_DISABLE=1 
+# export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
+
+# # set up lcuda for compilation
+# mkdir -p $HOME/.local/lib          # or another dir you control
+# ln -s /lib/x86_64-linux-gnu/libcuda.so.1 $HOME/.local/lib/libcuda.so
+
+# export LIBRARY_PATH="$HOME/.local/lib:$LIBRARY_PATH"
+# export LD_LIBRARY_PATH="$HOME/.local/lib:$LD_LIBRARY_PATH"
+
+# # export TORCH_DISTRIBUTED_DEBUG=DETAIL
+# # export NCCL_DEBUG=INFO
+# export PYTHONFAULTHANDLER=1
+# export CUDA_LAUNCH_BLOCKING=0
+# export TORCH_SHOW_CPP_STACKTRACES=1
+# export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:128
 
 # Training configuration
 BATCH_SIZE=256          # Optimal batch size per GPU
@@ -42,19 +80,20 @@ WARMUP_EPOCHS=5        # Number of warmup epochs
 WEIGHT_DECAY=1e-4
 MAX_EPOCHS=100        # Long training run with early stopping protection
 PRECISION="bf16-mixed"
-NUM_GPUS=2             # Use both RTX 6000 Ada GPUs
-NUM_WORKERS=16         # Optimized for 64 CPU cores
-STEPS_PER_EPOCH=1024    # Number of steps per epoch
 DSET_DTYPE="bfloat16"
+NUM_GPUS=2             # Use both RTX 6000 Ada GPUs
+NUM_WORKERS=32         # Optimized for 64 CPU cores
+STEPS_PER_EPOCH=1024    # Number of steps per epoch
 
 # Loss function configuration   
 USE_ZIP_LOSS=false     # Set to 'true' to use Zero-Inflated Poisson loss instead of standard Poisson
+COMPILE_MODEL=false # THIS ONLY SLOWS THINGS DOWN
 
 # Project and data paths
 PROJECT_NAME="multidataset_backimage_120"
 
 DATASET_CONFIGS_PATH="/home/jake/repos/VisionCore/experiments/dataset_configs/multi_basic_120_backimage_all.yaml"
-CHECKPOINT_DIR="/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage_5/checkpoints"
+CHECKPOINT_DIR="/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage_6/checkpoints"
 
 # Create checkpoint directory
 mkdir -p $CHECKPOINT_DIR
@@ -62,6 +101,7 @@ mkdir -p $CHECKPOINT_DIR
 # Array of model configurations to run
 MODEL_CONFIGS=(
     "experiments/model_configs/learned_resnet_concat_convgru_gaussian.yaml"
+    "experiments/model_configs/learned_dense_concat_convgru_gaussian.yaml"
 )
 
 # Function to run training for a single model config
@@ -131,10 +171,13 @@ run_training() {
     if [ "$USE_ZIP_LOSS" = true ]; then
         TRAINING_CMD="$TRAINING_CMD --loss_type zip"
     fi
+    
+    if [ "$COMPILE_MODEL" = true ]; then
+        TRAINING_CMD="$TRAINING_CMD --compile"
+    fi
 
     # Launch training
     eval $TRAINING_CMD
-        # --compile \
         # --enable_curriculum
         # --limit_val_batches 20 \
     

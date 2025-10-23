@@ -24,8 +24,8 @@ frontend:
     aa_window: hann
     aa_window_kwargs:
       power: .25
-    use_weight_norm: true
-    keep_unit_norm: true
+    use_weight_norm: false
+    keep_unit_norm: false
     causal: true
     bias: true
 
@@ -47,7 +47,7 @@ convnet:
         weight_norm_dim: 0
         use_weight_norm: true
         keep_unit_norm: true
-      norm_type: rms
+      norm_type: grn
       act_type: splitrelu
       pool_params: null
       dropout: 0.0
@@ -87,7 +87,7 @@ modulator:
   type: concat
   params:
     behavior_dim: 42
-    feature_dim: 16
+    feature_dim: 32
 
 # Recurrent configuration - ConvGRU
 recurrent:
