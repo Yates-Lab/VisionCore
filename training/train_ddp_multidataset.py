@@ -241,6 +241,7 @@ def main():
         max_epochs=args.max_epochs,
         limit_train_batches=args.steps_per_epoch,
         limit_val_batches=0.05,  # Use 5% of validation data
+        num_sanity_val_steps=0,
         
         # Hardware
         accelerator="gpu",

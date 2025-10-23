@@ -42,7 +42,7 @@ def create_frontend(
         Tuple of (frontend module, output channels)
     """
     if frontend_type == 'none':
-        return nn.Identity(), in_channels
+        return lambda x: x, in_channels
 
     elif frontend_type == 'da':
         assert in_channels == 1, "DA frontend only supports 1 input channel right now."

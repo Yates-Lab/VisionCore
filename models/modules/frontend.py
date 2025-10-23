@@ -472,6 +472,9 @@ class AffineAdapter(nn.Module):
         • channels-last memory layout for faster CUDA kernels
         • blur skipped if analytically not required
         """
+        if x is None:
+            return x
+        
         seq = x.dim() == 5
         if seq:
             B, C, S, H, W = x.shape

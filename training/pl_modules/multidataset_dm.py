@@ -272,8 +272,8 @@ class MultiDatasetDM(pl.LightningDataModule):
             self.contrast_scores[dataset_name] = self.contrast_scores[dataset_name] / global_median
 
         elapsed = time.time() - start_time
-        print(f"✓ Computed contrast for {total_frames:,} frames in {elapsed:.2f} seconds")
-        print(f"✓ Global median contrast: {global_median:.3f}, normalized to 1.0")
+        print(f"Computed contrast for {total_frames:,} frames in {elapsed:.2f} seconds")
+        print(f"Global median contrast: {global_median:.3f}, normalized to 1.0")
 
     def _mk_loader(self, dsets: Dict[str, Dataset], shuffle: bool):
         """
@@ -339,6 +339,7 @@ class MultiDatasetDM(pl.LightningDataModule):
             cat,
             batch_size=self.batch,
             sampler=sampler,
+            shuffle=(sampler is None and shuffle),
             num_workers=self.workers,
             pin_memory=True,
             drop_last=True,
@@ -352,5 +353,5 @@ class MultiDatasetDM(pl.LightningDataModule):
 
     def val_dataloader(self):
         """Create validation dataloader."""
-        return self._mk_loader(self.val_dsets, shuffle=True)
+        return self._mk_loader(self.val_dsets, shuffle=False)
 

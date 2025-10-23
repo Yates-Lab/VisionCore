@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 from typing import Dict, Any, List
 from .norm_act_pool import get_activation_layer
+import torch._dynamo as dynamo
 
 # Type aliases for clarity
 ConfigDict = Dict[str, Any]
@@ -190,6 +191,22 @@ class ModularV1Model(nn.Module):
             self.baseline = None
             self.baseline_activation = None
 
+    def core_forward(self, x, behavior=None):
+
+        # Process through frontend
+        x = self.frontend(x)
+
+        # Process through convnet
+        feats = self.convnet(x)
+
+        # Process through modulator
+        if self.modulator is not None and behavior is not None:
+            feats = self.modulator(feats, behavior)
+
+        # Process through recurrent
+        feats = self.recurrent(feats)
+        return feats
+
     def forward(self, stimulus, behavior=None):
         """
         Forward pass through the model.
@@ -204,31 +221,16 @@ class ModularV1Model(nn.Module):
         # Process through adapter
         x = self.adapter(stimulus)
 
-        # Process through frontend
-        x = self.frontend(x)
+        # if x is not None:
+        #     dynamo.mark_dynamic(x, 0)  # batch
+        
+        # if behavior is not None:
+        #     dynamo.mark_dynamic(behavior, 0)
 
-        # Process through convnet
-        x_conv = self.convnet(x)
-
-        # Handle tuple outputs (Polar-V1)
-        if isinstance(x_conv, tuple):
-            feats = x_conv
-        else:
-            feats = x_conv
-
-        # Process through modulator
-        if self.modulator is not None and behavior is not None:
-            feats = self.modulator(feats, behavior)
-
-        # Set modulator reference for recurrent (Polar-V1)
-        if hasattr(self.recurrent, 'set_modulator'):
-            self.recurrent.set_modulator(self.modulator)
-
-        # Process through recurrent
-        x_recurrent = self.recurrent(feats)
+        x_core = self.core_forward(x, behavior)
 
         # Process through readout
-        output = self.readout(x_recurrent)
+        output = self.readout(x_core)
 
         # Apply activation function
         output = self.activation(output)
@@ -425,6 +427,24 @@ class MultiDatasetV1Model(ModularV1Model):
         else:
             self.baselines = None
             self.baseline_activation = None
+
+
+    def core_forward(self, stimulus=None, behavior=None):
+
+        # route through frontend
+        feats = self.frontend(stimulus)
+
+        # Process through shared convnet
+        feats = self.convnet(feats)
+
+        # Process through shared modulator
+        if self.modulator is not None and behavior is not None:
+            feats = self.modulator(feats, behavior)
+
+        # Process through shared recurrent
+        x_recurrent = self.recurrent(feats)
+
+        return x_recurrent
     
     def forward(self, stimulus=None, dataset_idx: int = 0, behavior=None):
         """
@@ -438,37 +458,24 @@ class MultiDatasetV1Model(ModularV1Model):
         Returns:
             Tensor: Model predictions with shape (N, n_units_for_dataset)
         """
-        # Check if this is a modulator-only model (convnet=none and stimulus=None)
-        if stimulus is None:
+        x = self.adapters[dataset_idx](stimulus)
+
+        if x is None:
             # Modulator-only mode: create minimal features for modulator
             B = behavior.shape[0]
             device = next(self.parameters()).device
-            feats = torch.ones(B, 1, 1, 1, 1, device=device, dtype=behavior.dtype)
-        else:
-            # Route through appropriate adapter
-            x = self.adapters[dataset_idx](stimulus)
+            x = torch.ones(B, 1, 1, 1, 1, device=device, dtype=behavior.dtype)
+        
+        # if x is not None:
+        #     dynamo.mark_dynamic(x, 0)  # batch
+        
+        # if behavior is not None:
+        #     dynamo.mark_dynamic(behavior, 0)
 
-            # Route through appropriate frontend
-            x = self.frontend(x)
-
-            # Process through shared convnet
-            feats = self.convnet(x)
-
-        # Process through shared modulator
-        if self.modulator is not None and behavior is not None:
-            feats = self.modulator(feats, behavior)
-
-        # Process through shared recurrent
-        x_recurrent = self.recurrent(feats)
-
-        # Handle list outputs (Polar-V1)
-        if isinstance(x_recurrent, list):
-            readout_input = x_recurrent
-        else:
-            readout_input = x_recurrent
+        x = self.core_forward(x, behavior)
 
         # Route through appropriate readout
-        output = self.readouts[dataset_idx](readout_input)
+        output = self.readouts[dataset_idx](x)
 
         # Apply activation function
         output = self.activation(output)

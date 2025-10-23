@@ -106,12 +106,28 @@ class MultiDatasetModel(pl.LightningModule):
     def __init__(self, model_cfg: str, cfg_dir: str, lr: float, wd: float,
                  max_ds: int, pretrained_checkpoint: str = None,
                  freeze_vision: bool = False, compile_model: bool = False,
-                 loss_type: str = None):
+                 loss_type: str = None, model_config_dict: dict = None):
         super().__init__()
-        self.save_hyperparameters()
 
         from models.config_loader import load_dataset_configs, load_config
         from models import build_model
+
+        # Load model config
+        # If model_config_dict is provided (from checkpoint), use it
+        # Otherwise load from model_cfg path
+        if model_config_dict is not None:
+            self.model_config = model_config_dict
+            print(f"Loading model from saved config dict (checkpoint is self-contained)")
+        else:
+            self.model_config = load_config(model_cfg)
+            print(f"Loading model config from: {model_cfg}")
+
+        # Save hyperparameters - this will save all __init__ arguments
+        self.save_hyperparameters()
+
+        # Override model_config_dict in hparams with the actual config
+        # This ensures checkpoints are self-contained
+        self.hparams.model_config_dict = self.model_config
 
         # Load dataset configurations from parent config
         # cfg_dir should now point to a parent config file (e.g., multi_basic_120_backimage_all.yaml)
@@ -125,8 +141,7 @@ class MultiDatasetModel(pl.LightningModule):
         for c, n in zip(self.cfgs, self.names):
             c["_dataset_name"] = n
 
-        # Load model config and build model
-        self.model_config = load_config(model_cfg)
+        # Build model using the loaded config
         base_model = build_model(self.model_config, self.cfgs)
 
         # Detect modulator-only models (no vision processing)
@@ -144,15 +159,17 @@ class MultiDatasetModel(pl.LightningModule):
         # Apply torch.compile if requested
         if compile_model:
             try:
-                self.model = torch.compile(base_model)
+                base_model.core_forward = torch.compile(
+                base_model.core_forward,
+                backend="inductor",
+                dynamic=False,      # shapes are fixed; fewer guards, better cudagraph capture
+                fullgraph=True      # try to keep it one fused graph (falls back if it can’t)
+            )
                 print("Model compiled successfully")
             except Exception as e:
                 print(f"torch.compile failed: {e}")
-                print("Falling back to uncompiled model")
-                self.model = base_model
-        else:
-            print("torch.compile disabled")
-            self.model = base_model
+
+        self.model = base_model
 
         # Load pretrained vision components if specified
         if pretrained_checkpoint is not None:
@@ -162,7 +179,7 @@ class MultiDatasetModel(pl.LightningModule):
         named_params = list(self.model.named_parameters())
         self.reg_terms = create_regularizers(self.model_config, named_params)
 
-        self.core_lr_scale = lr * self.hparams.get("core_lr_scale", 1.0)
+        self.core_lr_scaled = lr * self.hparams.get("core_lr_scale", 1.0)
         self.head_lr = lr  # unchanged for dataset heads
         self.log_input = isinstance(self.model.activation, nn.Identity)
 
@@ -184,19 +201,6 @@ class MultiDatasetModel(pl.LightningModule):
 
         self.bps_aggs = [PoissonBPSAggregator() for _ in self.names]
         self.val_losses = []
-
-        # Check for PC modulator and log configuration
-        if hasattr(self.model, 'modulator') and self.model.modulator is not None:
-            modulator_type = type(self.model.modulator).__name__
-            print(f"Detected modulator: {modulator_type}")
-            if 'PredictiveCoding' in modulator_type:
-                lambda_pred = self.model_config.get('lambda_pred', 0.1)
-                print(f"  PC modulator detected with lambda_pred={lambda_pred}")
-                print(f"  Auxiliary loss will be computed and logged to wandb as 'aux_loss'")
-            else:
-                print(f"  Non-PC modulator detected: {modulator_type}")
-        else:
-            print("  No modulator detected in model")
 
     def _load_pretrained_components(self, pretrained_checkpoint: str, freeze_vision: bool = False):
         """
@@ -333,7 +337,7 @@ class MultiDatasetModel(pl.LightningModule):
         if self.is_modulator_only:
             y = self.model(stimulus=None, dataset_idx=ds_idx, behavior=beh)
         else:
-            y = self.model(stim, ds_idx, beh)
+            y = self.model(stimulus=stim, dataset_idx=ds_idx, behavior=beh)
         return torch.clamp(y, min=-20 if self.log_input else 1e-8)
 
     def _step(self, batch_list, tag: str):
@@ -436,8 +440,9 @@ class MultiDatasetModel(pl.LightningModule):
             total_loss = total_loss + aux_loss
             # Log auxiliary loss to wandb
             if self.global_rank == 0:
+                bs = sum(b["robs"].shape[0] for b in bl)
                 self.log('aux_loss', aux_loss.item(),
-                        batch_size=sum(len(b) for b in bl),
+                        batch_size=bs,
                         on_step=True, on_epoch=True, prog_bar=False, sync_dist=False)
 
         # Add regularization penalties
@@ -445,7 +450,7 @@ class MultiDatasetModel(pl.LightningModule):
 
         for reg in self.reg_terms:
             reg_loss = reg.loss(epoch)
-            if reg_loss != 0.0:
+            if torch.isfinite(reg_loss) and reg_loss.abs() > 0:
                 total_loss = total_loss + reg_loss
                 # Log individual regularization losses
                 if self.global_rank == 0:
@@ -536,7 +541,7 @@ class MultiDatasetModel(pl.LightningModule):
         # ----- exclusions from your YAML regularizers -----
         excluded_names = set(get_excluded_params_for_weight_decay(self.reg_terms))  # already in your code
         head_lr = self.head_lr
-        core_lr = self.core_lr_scale
+        core_lr = self.core_lr_scaled
 
         # ----- build groups: WD only on true weights -----
         pg = _adamw_param_groups_named(
@@ -593,88 +598,6 @@ class MultiDatasetModel(pl.LightningModule):
             }
         else:
             return [optim], [scheduler]
-    # def configure_optimizers(self):
-    #     # Get parameters that should be excluded from weight decay due to regularization conflicts
-    #     excluded_param_names = set(get_excluded_params_for_weight_decay(self.reg_terms))
-
-    #     # -------- split params into "core" vs "head" with different learning rates ------------------------
-    #     # Also separate params with/without weight decay
-    #     core_params_wd, core_params_no_wd = [], []
-    #     head_params_wd, head_params_no_wd = [], []
-
-    #     for n, p in self.named_parameters():
-    #         # Determine if this param should have weight decay
-    #         apply_wd = n not in excluded_param_names
-
-    #         # heuristics – adjust to your model structure if needed
-    #         if any(key in n for key in ["frontend", "convnet", "modulator"]):
-    #             if apply_wd:
-    #                 core_params_wd.append(p)
-    #             else:
-    #                 core_params_no_wd.append(p)
-    #         else:
-    #             if apply_wd:
-    #                 head_params_wd.append(p)
-    #             else:
-    #                 head_params_no_wd.append(p)
-
-    #     # Create parameter groups with appropriate weight decay settings
-    #     param_groups = []
-    #     if core_params_wd:
-    #         param_groups.append({"params": core_params_wd, "lr": self.core_lr_scale, "weight_decay": self.hparams.wd})
-    #     if core_params_no_wd:
-    #         param_groups.append({"params": core_params_no_wd, "lr": self.core_lr_scale, "weight_decay": 0.0})
-    #     if head_params_wd:
-    #         param_groups.append({"params": head_params_wd, "lr": self.head_lr, "weight_decay": self.hparams.wd})
-    #     if head_params_no_wd:
-    #         param_groups.append({"params": head_params_no_wd, "lr": self.head_lr, "weight_decay": 0.0})
-
-    #     optim = torch.optim.AdamW(param_groups)
-
-    #     # Log regularization info
-    #     if excluded_param_names and self.global_rank == 0:
-    #         print(f"[regularization] Excluded {len(excluded_param_names)} parameters from weight decay: {excluded_param_names}")
-
-    #     # -------- learning rate scheduler ------------------------
-    #     sched_type = self.hparams.get("lr_scheduler", "none")
-    #     if sched_type == "none":
-    #         return optim
-
-    #     if sched_type == "step":
-    #         scheduler = torch.optim.lr_scheduler.StepLR(
-    #             optim, step_size=30, gamma=0.5)
-    #     elif sched_type == "plateau":
-    #         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-    #             optim, mode="min", factor=0.5, patience=3, verbose=True)
-    #     elif sched_type == "cosine":
-    #         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-    #             optim, T_max=self.trainer.max_epochs)
-    #     elif sched_type == "cosine_warmup":
-    #         # Use a simple linear warmup followed by cosine annealing
-    #         warmup_epochs = self.hparams.get("warmup_epochs", 5)
-    #         scheduler = LinearWarmupCosineAnnealingLR(
-    #             optim,
-    #             warmup_epochs=warmup_epochs,
-    #             max_epochs=self.trainer.max_epochs,
-    #             warmup_start_lr=0.0,
-    #             eta_min=0.0
-    #         )
-    #     else:
-    #         raise ValueError(f"Unknown scheduler {sched_type}")
-
-    #     # Lightning expects a dict if the scheduler needs a monitored metric
-    #     if sched_type == "plateau":
-    #         return {
-    #             "optimizer": optim,
-    #             "lr_scheduler": {
-    #                 "scheduler": scheduler,
-    #                 "monitor": "val_loss",
-    #                 "interval": "epoch",
-    #                 "frequency": 1,
-    #             },
-    #         }
-    #     else:
-    #         return [optim], [scheduler]
 
     def optimizer_step(self, epoch, batch_idx, optimizer, optimizer_closure):
         """

@@ -12,8 +12,9 @@ import torch.nn.functional as F
 from typing import Dict, Any
 
 from .mlp import MLP
+from .recurrent import ConvGRU
 
-__all__ = ['ConcatModulator', 'FiLMModulator', 'BaseModulator', 'MODULATORS']
+__all__ = ['ConcatModulator', 'FiLMModulator', 'ConvGRUModulator', 'BaseModulator', 'MODULATORS']
 
 
 class BaseModulator(nn.Module):
@@ -208,10 +209,97 @@ class FiLMModulator(BaseModulator):
         return scale * feats + shift
 
 
+class ConvGRUModulator(BaseModulator):
+    """
+    ConvGRU modulator that processes features and behavior through a ConvGRU.
+
+    This modulator concatenates convnet features with embedded behavior and
+    processes them through a ConvGRU. Unlike the PC modulator, it does not
+    perform prediction or compute error - it simply outputs the GRU result.
+
+    The logic is:
+    1. Take features (N, C, T, H, W) and behavior (N, behavior_dim)
+    2. Embed behavior spatially and concatenate with all T frames
+    3. Use ConvGRU to process the concatenated sequence
+    4. Output the final GRU hidden state
+    """
+
+    def _build_modulator(self):
+        """Build the behavior embedding and ConvGRU processor."""
+        cfg = self.config
+        self.feature_dim = cfg['feature_dim']
+        self.behavior_dim = cfg['behavior_dim']
+        self.hidden_dim = cfg.get('hidden_dim', self.feature_dim)
+        self.beh_emb_dim = cfg.get('beh_emb_dim', 16)
+        self.kernel_size = cfg.get('kernel_size', 3)
+
+        # Behavior embedding
+        self.beh_emb = nn.Linear(self.behavior_dim, self.beh_emb_dim)
+
+        # ConvGRU processor (using current VisionCore interface)
+        # Input = features + embedded behavior
+        self.gru = ConvGRU(
+            input_size=self.feature_dim + self.beh_emb_dim,
+            hidden_sizes=self.hidden_dim,
+            kernel_sizes=self.kernel_size,
+            n_layers=1
+        )
+
+        # Output projection to remove tanh clipping
+        self.output_proj = nn.Conv2d(self.hidden_dim, self.hidden_dim, 1)
+
+        # Set output dimension to hidden_dim
+        self.out_dim = self.hidden_dim
+
+    def forward(self, feats: torch.Tensor, beh: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass for ConvGRU modulator.
+
+        Args:
+            feats: Convnet features with shape (N, C, T, H, W)
+            beh: Behavior data with shape (N, behavior_dim) or (N, T, behavior_dim)
+
+        Returns:
+            Modulated features with shape (N, hidden_dim, 1, H, W)
+        """
+        N, C, T, H, W = feats.shape
+
+        # Validate that feature dimensions match config
+        if C != self.feature_dim:
+            raise ValueError(f"Feature dimension mismatch: expected {self.feature_dim}, got {C}")
+
+        # Handle behavior input: if (N, T, behavior_dim), take mean across time
+        if beh.ndim == 3:
+            beh = beh.mean(dim=1)  # (N, T, behavior_dim) -> (N, behavior_dim)
+
+        # Embed & broadcast behavior spatially
+        beh_encoded = self.beh_emb(beh)  # (N, beh_emb_dim)
+        beh_spatial = beh_encoded[:, :, None, None].expand(-1, -1, H, W)  # (N, beh_emb_dim, H, W)
+        beh_spatial = beh_spatial[:, :, None].expand(-1, -1, T, -1, -1)  # (N, beh_emb_dim, T, H, W)
+
+        # Concatenate with all frames
+        gru_input = torch.cat([feats, beh_spatial], dim=1)  # (N, C+beh_emb_dim, T, H, W)
+
+        # Process through ConvGRU - returns (N, hidden_dim, T, H, W)
+        gru_output_seq = self.gru(gru_input)  # (N, hidden_dim, T, H, W)
+
+        # Extract last timestep
+        gru_output = gru_output_seq[:, :, -1]  # (N, hidden_dim, H, W)
+
+        # Apply output projection to remove tanh clipping
+        output = self.output_proj(gru_output)  # (N, hidden_dim, H, W)
+
+        # Add singleton time dimension to match expected output format
+        output = output.unsqueeze(2)  # (N, hidden_dim, 1, H, W)
+
+        return output
+
+
 # Dictionary mapping modulator types to their classes
 MODULATORS = {
     'concat': ConcatModulator,
     'film': FiLMModulator,
+    'convgru': ConvGRUModulator,
 }
 
 
