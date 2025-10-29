@@ -107,6 +107,8 @@ for i, dataset_config in enumerate(dataset_configs):
     print(f"Dataset {i}: {len(train_dset)} train, {len(val_dset)} val samples")
 # %%
 
+train_datasets['dataset_1'].dsets[0].metadata['sess']
+
 robs = train_datasets['dataset_1'].dsets[0]['robs'].to(torch.float32)
 r_true = autocov_fft(robs, max_lag=40)
 
@@ -133,7 +135,7 @@ plt.tight_layout()
 plt.show()
 
 #%%
-plt.figure(figsize=(2, 20))
+# plt.figure(figsize=(2, 20))
 _ = plt.plot(r_diff/r_diff[0][None,:] + .5*torch.arange(r_diff.shape[1])[None,:])
 
 # %%
@@ -144,5 +146,30 @@ f, Sxx = psd_periodogram(Rc, Δt)   # Sxx units: (spikes/s)^2 / Hz
 # %%
 
 plt.plot(f, Sxx)
+
+# %%
+cc += 1
+plt.plot(np.arange(r_diff.shape[0])/240*1000, r_diff[:,cc])
+plt.plot(np.arange(r_diff.shape[0])/240*1000, r_true[:,cc])
+
+# %%
+batch_size = 1256
+inds = np.random.randint(0, robs.shape[0]-batch_size, size=1)
+inds = inds + np.arange(batch_size)
+r_true = autocov_fft(robs[inds], max_lag=40)
+
+
+plt.plot(robs[inds,:].mean(1))
+
+#%%
+
+plt.subplot(1,2,1)
+plt.imshow((robs[inds,:]-robs[inds,:].mean(1, keepdim=True)).T, aspect='auto', cmap='gray_r', interpolation='none')
+plt.subplot(1,2,2)
+_ = plt.plot(r_true[1:])
+
+#%%
+
+
 
 # %%

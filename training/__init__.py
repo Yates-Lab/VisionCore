@@ -5,7 +5,7 @@ Training utilities and modules for VisionCore.
 from .pl_modules import MultiDatasetModel, MultiDatasetDM
 from .callbacks import Heartbeat, EpochHeartbeat, CurriculumCallback
 from .samplers import ContrastWeightedSampler
-from .schedulers import LinearWarmupCosineAnnealingLR
+from .schedulers import LinearWarmupCosineAnnealingLR, LinearWarmupCosineAnnealingWarmRestartsLR
 from .utils import cast_stim, Float32View, group_collate
 
 __all__ = [
@@ -20,6 +20,7 @@ __all__ = [
     'ContrastWeightedSampler',
     # Schedulers
     'LinearWarmupCosineAnnealingLR',
+    'LinearWarmupCosineAnnealingWarmRestartsLR',
     # Utils
     'cast_stim',
     'Float32View',

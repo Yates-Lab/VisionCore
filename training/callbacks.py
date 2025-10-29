@@ -134,10 +134,12 @@ class CurriculumCallback(pl.Callback):
     """
     
     def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
-        """Update sampler with current training step."""
-        # Update sampler with current step for curriculum
+        """Update sampler or batch_sampler with current training step."""
         if hasattr(trainer, 'datamodule') and hasattr(trainer.datamodule, 'train_dataloader'):
             train_loader = trainer.train_dataloader
+            # Support both Sampler and BatchSampler
             if hasattr(train_loader, 'sampler') and hasattr(train_loader.sampler, 'set_step'):
                 train_loader.sampler.set_step(trainer.global_step)
+            elif hasattr(train_loader, 'batch_sampler') and hasattr(train_loader.batch_sampler, 'set_step'):
+                train_loader.batch_sampler.set_step(trainer.global_step)
 

@@ -10,14 +10,14 @@ from torch.utils.data import Sampler
 class ContrastWeightedSampler(Sampler):
     """
     Distributed sampler with contrast-weighted curriculum learning.
-    
+
     This sampler implements a curriculum learning strategy where:
     - **Early training:** Emphasizes high-contrast samples (easier to learn)
     - **Late training:** Returns to unbiased uniform sampling
-    
+
     The transition from contrast-weighted to uniform sampling happens
     gradually over `warmup_steps` training steps.
-    
+
     Parameters
     ----------
     dataset : torch.utils.data.ConcatDataset
@@ -40,7 +40,7 @@ class ContrastWeightedSampler(Sampler):
         Whether to drop the last incomplete batch (default: False)
     warmup_steps : int, optional
         Number of training steps for curriculum warmup (default: 8000)
-        
+
     Example
     -------
     >>> contrast_scores = {
@@ -54,14 +54,14 @@ class ContrastWeightedSampler(Sampler):
     ...     warmup_steps=8000
     ... )
     >>> dataloader = DataLoader(dataset, sampler=sampler, ...)
-    
+
     Notes
     -----
     - Requires torch.distributed to be available for distributed training
     - Contrast scores should be pre-computed and normalized
     - Use with CurriculumCallback to update step counter during training
     """
-    
+
     def __init__(self, dataset, contrast_scores_dict, dataset_name_to_idx,
                  num_replicas=None, rank=None, shuffle=True, seed=0,
                  drop_last=False, warmup_steps=8000):
@@ -102,7 +102,7 @@ class ContrastWeightedSampler(Sampler):
     def _build_contrast_mapping_from_cache(self):
         """
         Build mapping from ConcatDataset indices to cached contrast scores.
-        
+
         Returns
         -------
         torch.Tensor
@@ -146,12 +146,12 @@ class ContrastWeightedSampler(Sampler):
     def _compute_weights_vectorized(self, step):
         """
         Compute curriculum weights using vectorized operations.
-        
+
         Parameters
         ----------
         step : int
             Current training step
-            
+
         Returns
         -------
         torch.Tensor
@@ -168,7 +168,7 @@ class ContrastWeightedSampler(Sampler):
     def set_epoch(self, epoch):
         """
         Set epoch for distributed training.
-        
+
         Parameters
         ----------
         epoch : int
@@ -179,10 +179,10 @@ class ContrastWeightedSampler(Sampler):
     def set_step(self, step):
         """
         Set current training step for curriculum learning.
-        
+
         This should be called at each training step to update the
         curriculum schedule. Use CurriculumCallback to automate this.
-        
+
         Parameters
         ----------
         step : int
@@ -234,3 +234,144 @@ class ContrastWeightedSampler(Sampler):
         """Return the number of samples for this rank."""
         return self.num_samples
 
+
+
+
+class ByDatasetBatchSampler(Sampler):
+    """
+    BatchSampler that yields batches containing samples from exactly one dataset.
+
+    Works on a ConcatDataset of Tag-wrapped datasets (each Tag carries .idx that
+    matches name2idx[name]). Optionally applies a simple curriculum schedule that
+    weights samples within each dataset by precomputed contrast scores, blending
+    from contrast-weighted (early) to uniform (late) over warmup_steps.
+
+    Parameters
+    ----------
+    cat : torch.utils.data.ConcatDataset
+        Concatenated dataset built from Tag-wrapped per-dataset datasets
+    name2idx : dict[str, int]
+        Mapping from dataset name to dataset_idx used in Tag
+    batch_size : int
+        Number of samples per batch
+    contrast_scores : dict[str, torch.Tensor] | None
+        Optional per-dataset contrast score vectors (length == len(dataset))
+    warmup_steps : int
+        Number of steps to ramp alpha from 0.5 -> 1.0 (then uniform)
+    shuffle : bool
+        Whether to shuffle dataset choice and within-dataset sampling
+    drop_last : bool
+        Whether to drop last incomplete batch
+    seed : int
+        RNG seed
+    """
+
+    def __init__(self, cat, name2idx, batch_size, contrast_scores=None,
+                 warmup_steps=8000, shuffle=True, drop_last=True, seed=0):
+        super().__init__(cat)
+        self.cat = cat
+        self.batch_size = int(batch_size)
+        self.shuffle = bool(shuffle)
+        self.drop_last = bool(drop_last)
+        self.seed = int(seed)
+        self.warmup_steps = int(warmup_steps)
+        self.contrast_scores = contrast_scores or {}
+
+        # Reverse map idx->name to resolve contrast by dataset
+        self.idx2name = {v: k for k, v in name2idx.items()}
+
+        # Build per-subdataset [start, end) global index ranges
+        self._ranges = []  # list of (start, end, dataset_idx, dataset_name)
+        cumulative = self.cat.cumulative_sizes
+        start = 0
+        for j, end in enumerate(cumulative):
+            tag_ds = self.cat.datasets[j]
+            ds_idx = getattr(tag_ds, 'idx', None)
+            ds_name = self.idx2name.get(ds_idx, None)
+            self._ranges.append((start, end, ds_idx, ds_name))
+            start = end
+
+        # Pre-cache per-subdataset contrast vectors aligned to local indices
+        self._local_contrasts = []
+        for (start, end, ds_idx, ds_name) in self._ranges:
+            size = end - start
+            vec = None
+            if ds_name is not None and ds_name in self.contrast_scores:
+                cs = self.contrast_scores[ds_name]
+                if isinstance(cs, torch.Tensor) and cs.numel() >= size:
+                    vec = cs[:size].to(dtype=torch.float32)
+            if vec is None:
+                vec = torch.ones(size, dtype=torch.float32)
+            self._local_contrasts.append(vec)
+
+        # Dataset-level sizes and probabilities for choosing which dataset to draw next batch from
+        self._sizes = torch.tensor([end - start for (start, end, *_rest) in self._ranges], dtype=torch.float64)
+        total = float(self._sizes.sum()) if len(self._sizes) > 0 else 1.0
+        self._dataset_probs = (self._sizes / total).to(dtype=torch.float64)
+
+        # Internal step counter for curriculum; updated by CurriculumCallback via set_step
+        self._step = 0
+
+    def set_step(self, step: int):
+        self._step = int(step)
+
+    def _alpha(self) -> float:
+        # Blend coefficient from 0.5 to 1.0 across warmup_steps
+        if self._step >= self.warmup_steps:
+            return 1.0
+        return 0.5 + 0.5 * (float(self._step) / float(self.warmup_steps))
+
+    def __iter__(self):
+        # RNG for reproducibility across epochs (no epoch hook here; simple seed)
+        g = torch.Generator()
+        g.manual_seed(self.seed + self._step)
+
+        # Choose dataset order for this epoch (size-proportional or uniform when not shuffle)
+        dataset_indices = torch.arange(len(self._ranges))
+        if self.shuffle and len(self._ranges) > 0:
+            # Sample dataset indices with replacement proportional to dataset sizes
+            # Number of batches approximated by floor(total_size / batch_size)
+            num_batches = len(self)
+            probs = self._dataset_probs
+            ds_seq = torch.multinomial(probs, num_batches, replacement=True, generator=g)
+        else:
+            # Round-robin across datasets
+            num_batches = len(self)
+            if len(dataset_indices) == 0:
+                ds_seq = torch.empty(0, dtype=torch.long)
+            else:
+                ds_seq = dataset_indices.repeat((num_batches + len(dataset_indices) - 1) // len(dataset_indices))[:num_batches]
+
+        alpha = self._alpha()
+
+        for k in range(len(ds_seq)):
+            dsj = int(ds_seq[k].item()) if ds_seq.numel() > 0 else 0
+            start, end, _ds_idx, _ds_name = self._ranges[dsj]
+            size = end - start
+            if size == 0:
+                continue
+            local_weights = self._local_contrasts[dsj]
+            # Blend toward uniform via clamping
+            weights = torch.clamp(alpha * local_weights, max=1.0)
+
+            if self.shuffle:
+                # Sample local indices (with replacement when needed)
+                if self.batch_size <= size:
+                    # Weighted without replacement is tricky; approximate by shuffle of multinomial sample
+                    sample = torch.multinomial(weights, self.batch_size, replacement=False, generator=g)
+                else:
+                    sample = torch.multinomial(weights, self.batch_size, replacement=True, generator=g)
+            else:
+                sample = torch.arange(min(self.batch_size, size))
+
+            # Map to global indices and yield
+            global_idx = (sample + start).tolist()
+            yield global_idx
+
+    def __len__(self) -> int:
+        total = sum(end - start for (start, end, *_rest) in self._ranges)
+        if self.drop_last:
+            return max(total // self.batch_size, 0)
+        else:
+            # ceil division
+            return (total + self.batch_size - 1) // self.batch_size

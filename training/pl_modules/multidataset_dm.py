@@ -13,7 +13,7 @@ import pytorch_lightning as pl
 from torch.utils.data import Dataset, DataLoader
 
 from training.utils import Float32View, group_collate
-from training.samplers import ContrastWeightedSampler
+from training.samplers import ContrastWeightedSampler, ByDatasetBatchSampler
 
 
 class MultiDatasetDM(pl.LightningDataModule):
@@ -78,7 +78,8 @@ class MultiDatasetDM(pl.LightningDataModule):
     
     def __init__(self, cfg_dir: str, max_ds: int, batch: int,
                  workers: int, steps_per_epoch: int, enable_curriculum: bool = False,
-                 dset_dtype: str = 'uint8'):
+                 dset_dtype: str = 'uint8', homogeneous_batches: bool = False,
+                 persistent_workers: Optional[bool] = None, prefetch_factor: Optional[int] = None):
         super().__init__()
         self.cfg_dir = cfg_dir
         self.max_ds = max_ds
@@ -89,6 +90,17 @@ class MultiDatasetDM(pl.LightningDataModule):
         self.dset_dtype = dset_dtype
         self.contrast_scores = None
         self.name2idx = None
+        self.homogeneous_batches = bool(homogeneous_batches)
+
+        # Loader performance knobs (sane defaults for single-GPU throughput)
+        if persistent_workers is None:
+            self.persistent_workers = (self.workers > 0)
+        else:
+            self.persistent_workers = bool(persistent_workers)
+        if prefetch_factor is None:
+            self.prefetch_factor = 4 if self.persistent_workers else None
+        else:
+            self.prefetch_factor = int(prefetch_factor)
 
         # Validate dset_dtype
         if dset_dtype not in ['uint8', 'bfloat16', 'float32']:
@@ -278,14 +290,14 @@ class MultiDatasetDM(pl.LightningDataModule):
     def _mk_loader(self, dsets: Dict[str, Dataset], shuffle: bool):
         """
         Create a DataLoader for the given datasets.
-        
+
         Parameters
         ----------
         dsets : dict
             Dictionary of datasets keyed by name
         shuffle : bool
             Whether to shuffle the data
-            
+
         Returns
         -------
         DataLoader
@@ -296,10 +308,10 @@ class MultiDatasetDM(pl.LightningDataModule):
             def __init__(self, ds, idx):
                 self.ds = ds
                 self.idx = idx
-                
+
             def __len__(self):
                 return len(self.ds)
-            
+
             def __getitem__(self, i):
                 it = self.ds[i]
                 it["dataset_idx"] = self.idx
@@ -309,10 +321,11 @@ class MultiDatasetDM(pl.LightningDataModule):
         tagd = [Tag(ds, self.name2idx[n]) for n, ds in dsets.items()]
         cat = torch.utils.data.ConcatDataset(tagd)
 
-        # Create appropriate sampler for distributed training
+        # Distributed path (unchanged)
         if torch.distributed.is_initialized():
             if shuffle and self.enable_curriculum and self.contrast_scores is not None:
-                # Use contrast-weighted sampler for training
+                from torch.utils.data.distributed import DistributedSampler
+                # Keep DistributedSampler for sharding; curriculum weighting handled inside ContrastWeightedSampler
                 sampler = ContrastWeightedSampler(
                     cat,
                     self.contrast_scores,
@@ -321,31 +334,76 @@ class MultiDatasetDM(pl.LightningDataModule):
                     rank=torch.distributed.get_rank(),
                     shuffle=True,
                     drop_last=True,
-                    warmup_steps=8000
+                    warmup_steps=8000,
+                )
+                return DataLoader(
+                    cat,
+                    batch_size=self.batch,
+                    sampler=sampler,
+                    shuffle=False,
+                    num_workers=self.workers,
+                    pin_memory=True,
+                    drop_last=True,
+                    persistent_workers=self.persistent_workers,
+                    prefetch_factor=self.prefetch_factor,
+                    collate_fn=group_collate,
                 )
             else:
-                # Use standard distributed sampler
                 from torch.utils.data.distributed import DistributedSampler
                 sampler = DistributedSampler(
                     cat,
                     shuffle=shuffle,
                     drop_last=True,
                 )
-        else:
-            # Single-GPU debug run
-            sampler = None
+                return DataLoader(
+                    cat,
+                    batch_size=self.batch,
+                    sampler=sampler,
+                    shuffle=False,
+                    num_workers=self.workers,
+                    pin_memory=True,
+                    drop_last=True,
+                    persistent_workers=self.persistent_workers,
+                    prefetch_factor=self.prefetch_factor,
+                    collate_fn=group_collate,
+                )
 
-        return DataLoader(
-            cat,
-            batch_size=self.batch,
-            sampler=sampler,
-            shuffle=(sampler is None and shuffle),
-            num_workers=self.workers,
-            pin_memory=True,
-            drop_last=True,
-            persistent_workers=False,  # Match old code - persistent workers can cause stale state
-            collate_fn=group_collate
-        )
+        # Single-GPU path
+        if self.homogeneous_batches:
+            # Homogeneous batches per dataset; enable curriculum if available
+            batch_sampler = ByDatasetBatchSampler(
+                cat,
+                self.name2idx,
+                self.batch,
+                contrast_scores=(self.contrast_scores if (shuffle and self.enable_curriculum and self.contrast_scores is not None) else None),
+                warmup_steps=8000,
+                shuffle=shuffle,
+                drop_last=True,
+                seed=0,
+            )
+            return DataLoader(
+                cat,
+                batch_sampler=batch_sampler,
+                num_workers=self.workers,
+                pin_memory=True,
+                persistent_workers=self.persistent_workers,
+                prefetch_factor=self.prefetch_factor,
+                collate_fn=None,
+            )
+        else:
+            # Mixed batches (legacy behavior), no curriculum on 1 GPU
+            return DataLoader(
+                cat,
+                batch_size=self.batch,
+                sampler=None,
+                shuffle=shuffle,
+                num_workers=self.workers,
+                pin_memory=True,
+                drop_last=True,
+                persistent_workers=self.persistent_workers,
+                prefetch_factor=self.prefetch_factor,
+                collate_fn=group_collate,
+            )
 
     def train_dataloader(self):
         """Create training dataloader."""

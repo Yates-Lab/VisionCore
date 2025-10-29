@@ -37,7 +37,8 @@ device = get_free_device()
 
 #%% Discover Available Models
 print("Discovering available models...")
-checkpoint_dir = "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage_5/checkpoints"
+# checkpoint_dir = "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage_6/checkpoints"
+checkpoint_dir = "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_240_backimage/checkpoints"
 
 # checkpoint_dir = '/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120/checkpoints'
 models_by_type = scan_checkpoints(checkpoint_dir, verbose=False)
@@ -54,6 +55,32 @@ for model_type, models in models_by_type.items():
     else:
         print(f"  {model_type}: 0 models")
 
+#%%
+#%% LOAD A MODEL
+import os
+checkpoint_path = None
+# checkpoint_path = '/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage/checkpoints/learned_res_small_gru_optimized_aa_ddp_bs256_ds30_lr1e-3_wd1e-3_corelrscale1.0_warmup5/last.ckpt'
+# checkpoint_path = os.path.join(checkpoint_dir, 'learned_res_small_film_ddp_bs256_ds30_lr1e-3_wd1e-5_corelrscale1.0_warmup10_zip/last.ckpt')
+# model_type = 'resnet'
+
+model_type = 'learned_dense_concat_convgru_gaussian_ddp_bs256_ds30_lr5e-4_wd1e-4_corelrscale2.0_warmup5'
+# model_type = 'learned_dense_concat_convgru_gaussian_ddp_bs256_ds30_lr1e-3_wd1e-4_corelrscale.5_warmup5'
+model, model_info = load_model(
+        model_type=model_type,
+        model_index=0, # none for best model
+        checkpoint_path=checkpoint_path,
+        checkpoint_dir=checkpoint_dir,
+        device='cpu'
+    )
+
+
+model.model.eval()
+model.model.convnet.use_checkpointing = False 
+
+model = model.to(device)
+
+plt.plot(model.model.frontend.temporal_conv.weight.squeeze().detach().cpu().T)
+model.model.convnet.stem.components.conv.plot_weights()
 
 #%% Utilities for evaluation
 from tqdm import tqdm
@@ -198,33 +225,12 @@ def model_pred(batch, model, dataset_idx, stage='pred', include_modulator=True, 
         return x
     
 
-#%% LOAD A MODEL
-import os
-checkpoint_path = None
-# checkpoint_path = '/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage/checkpoints/learned_res_small_gru_optimized_aa_ddp_bs256_ds30_lr1e-3_wd1e-3_corelrscale1.0_warmup5/last.ckpt'
-# checkpoint_path = os.path.join(checkpoint_dir, 'learned_res_small_film_ddp_bs256_ds30_lr1e-3_wd1e-5_corelrscale1.0_warmup10_zip/last.ckpt')
-model_type = 'resnet'
-model, model_info = load_model(
-        model_type=model_type,
-        model_index=None, # none for best model
-        checkpoint_path=checkpoint_path,
-        checkpoint_dir=checkpoint_dir,
-        device='cpu'
-    )
-
-
-model.model.eval()
-model.model.convnet.use_checkpointing = False 
-
-model = model.to(device)
-
-#%%
-plt.plot(model.model.frontend.temporal_conv.weight.squeeze().detach().cpu().T)
-model.model.convnet.stem.components.conv.plot_weights()
-
 #%%
 for layer in model.model.convnet.layers:
-    layer.main_block.components.conv.plot_weights(nrow=20)
+    if hasattr(layer, 'components'):
+        layer.components.conv.plot_weights(nrow=20)
+    else:
+        layer.main_block.components.conv.plot_weights(nrow=20)
 
 #%% plot readouts
 for readout in model.model.readouts[:1]:
@@ -464,7 +470,7 @@ plt.imshow(batch['stim'][-1,0,-1].detach().cpu())
 print(start)
 #%%
 
-output = model_pred(batch, model, dataset_idx, stage='conv.1')
+output = model_pred(batch, model, dataset_idx, stage='pred')
 plot_output(output, use_imshow=True)
 
 del output

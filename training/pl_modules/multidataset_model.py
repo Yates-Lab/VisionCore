@@ -12,7 +12,7 @@ import pytorch_lightning as pl
 
 from models.losses import MaskedLoss, PoissonBPSAggregator, MaskedZIPNLLLoss
 from training.regularizers import create_regularizers, get_excluded_params_for_weight_decay
-from training.schedulers import LinearWarmupCosineAnnealingLR
+from training.schedulers import LinearWarmupCosineAnnealingLR, LinearWarmupCosineAnnealingWarmRestartsLR
 from schedulefree import AdamWScheduleFree
 
 def _adamw_param_groups_named(named_params, wd, excluded_names, core_keys=("frontend","convnet","modulator"),
@@ -420,8 +420,9 @@ class MultiDatasetModel(pl.LightningModule):
 
         Parameters
         ----------
-        bl : list of dict
-            Batch list
+        bl : dict or list of dict
+            Batch (single dataset dict when homogeneous batching with default_collate,
+            otherwise list of dicts when using group_collate)
         _ : int
             Batch index (unused)
 
@@ -430,8 +431,11 @@ class MultiDatasetModel(pl.LightningModule):
         torch.Tensor
             Total loss (base + auxiliary + regularization)
         """
+        # Normalize batch input to a list of dicts for internal processing
+        bl_list = [bl] if isinstance(bl, dict) else bl
+
         # Get base loss from datasets
-        base_loss = self._step(bl, "train")
+        base_loss = self._step(bl_list, "train")
 
         # Add auxiliary loss for PC modulator if present
         aux_loss = self._compute_auxiliary_loss()
@@ -440,7 +444,7 @@ class MultiDatasetModel(pl.LightningModule):
             total_loss = total_loss + aux_loss
             # Log auxiliary loss to wandb
             if self.global_rank == 0:
-                bs = sum(b["robs"].shape[0] for b in bl)
+                bs = sum(b["robs"].shape[0] for b in bl_list)
                 self.log('aux_loss', aux_loss.item(),
                         batch_size=bs,
                         on_step=True, on_epoch=True, prog_bar=False, sync_dist=False)
@@ -460,8 +464,9 @@ class MultiDatasetModel(pl.LightningModule):
         return total_loss
 
     def validation_step(self, bl, _):
-        """Validation step."""
-        self._step(bl, "val")
+        """Validation step supporting dict or list batches."""
+        bl_list = [bl] if isinstance(bl, dict) else bl
+        self._step(bl_list, "val")
 
     def on_validation_epoch_start(self):
         """Reset BPS aggregators at the start of validation."""
@@ -579,6 +584,18 @@ class MultiDatasetModel(pl.LightningModule):
                 optim,
                 warmup_epochs=warmup_epochs,
                 max_epochs=self.trainer.max_epochs,
+                warmup_start_lr=0.0,
+                eta_min=0.0
+            )
+        elif sched_type == "cosine_warmup_restart":
+            # Use linear warmup followed by cosine annealing with warm restarts
+            warmup_epochs = self.hparams.get("warmup_epochs", 5)
+            restart_period = self.hparams.get("restart_period", None)
+            scheduler = LinearWarmupCosineAnnealingWarmRestartsLR(
+                optim,
+                warmup_epochs=warmup_epochs,
+                max_epochs=self.trainer.max_epochs,
+                restart_period=restart_period,
                 warmup_start_lr=0.0,
                 eta_min=0.0
             )

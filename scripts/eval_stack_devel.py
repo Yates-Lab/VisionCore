@@ -37,8 +37,8 @@ device = get_free_device()
 
 #%% Discover Available Models
 print("Discovering available models...")
-# checkpoint_dir = "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage_6/checkpoints"
-checkpoint_dir="/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_240_backimage/checkpoints"
+checkpoint_dir = "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage_6/checkpoints"
+# checkpoint_dir="/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_240_backimage/checkpoints"
 # checkpoint_dir = '/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120/checkpoints'
 models_by_type = scan_checkpoints(checkpoint_dir, verbose=False)
 
@@ -63,7 +63,7 @@ checkpoint_path = None
 model_type = 'dense_concat_convgru'
 model, model_info = load_model(
         model_type=model_type,
-        model_index=2, # none for best model
+        model_index=3, # none for best model
         checkpoint_path=checkpoint_path,
         checkpoint_dir=checkpoint_dir,
         device='cpu'
@@ -89,6 +89,9 @@ results = eval_stack_single_dataset(
 )
 
 #%%
+cc = 0
+s = 0
+#%%
 cc += 1
 r = results['saccade']['backimage']['robs'][:,:,cc]
 win = results['saccade']['backimage']['win']
@@ -98,7 +101,9 @@ plt.xlim(0, .25)
 
 #%%
 s += 1 
-plt.imshow(results['saccade']['backimage']['robs'][s].T, cmap='gray_r', interpolation='none', aspect='auto')
+robs = results['saccade']['backimage']['robs'][s].T
+rhat = results['saccade']['backimage']['rhat'][s].T
+plt.imshow(np.concatenate([robs, rhat], 0), cmap='gray_r', interpolation='none', aspect='auto')
 
 #%%
 # Access results
@@ -134,7 +139,11 @@ robs_trial, rhat_trial, dfs_trial = get_fixrsvp_trials(
             model, results['bps'], 0, train_data, val_data)
         
 # %%
-robs_trial
+cc += 1
+if cc >= robs_trial.shape[2]:
+    cc = 0
+_ = plt.plot(np.nanmean(robs_trial, (0))[:,cc])
+_ = plt.plot(np.nanmean(rhat_trial, (0))[:,cc])
 # %%
 robs = results['bps']['fixrsvp']['robs']
 rhat = results['bps']['fixrsvp']['rhat']

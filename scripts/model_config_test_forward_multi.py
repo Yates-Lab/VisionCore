@@ -45,7 +45,7 @@ AMP_BF16 = lambda: torch.autocast(device_type="cuda", dtype=torch.bfloat16)
 from models.config_loader import load_dataset_configs
 import os
 # 
-config_path = Path("/home/jake/repos/VisionCore/experiments/model_configs/learned_res_split_gru.yaml")
+config_path = Path("/home/jake/repos/VisionCore/experiments/model_configs/learned_resnet_concat_convgru_gaussian.yaml")
 
 dataset_configs_path = "/home/jake/repos/VisionCore/experiments/dataset_configs/multi_basic_120_backimage_all.yaml"
 dataset_configs = load_dataset_configs(dataset_configs_path)
@@ -53,6 +53,8 @@ dataset_configs = load_dataset_configs(dataset_configs_path)
 #%% Initialize model
 config = load_config(config_path)
 model = build_model(config, dataset_configs).to(device)
+
+model.core_forward = torch.compile(model.core_forward)
 
 # # run model readout forward with dummy input
 # with torch.no_grad():

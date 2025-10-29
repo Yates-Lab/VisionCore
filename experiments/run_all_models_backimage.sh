@@ -71,14 +71,14 @@ export LD_LIBRARY_PATH="$HOME/.local/lib:$LD_LIBRARY_PATH"
 # export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:128
 
 # Training configuration
-BATCH_SIZE=256          # Optimal batch size per GPU
+BATCH_SIZE=64          # Optimal batch size per GPU
 MAX_DATASETS=30        # Scale to all datasets (28 if removed the two bad sessions)
 LEARNING_RATE=1e-3    # standard learning rate
 CORE_LR_SCALE=.5
-LR_SCHEDULER="cosine_warmup"  # Use cosine annealing with warmup
+LR_SCHEDULER="cosine_warmup_restart"  # Use cosine annealing with warmup
 WARMUP_EPOCHS=5        # Number of warmup epochs
 WEIGHT_DECAY=1e-4
-MAX_EPOCHS=100        # Long training run with early stopping protection
+MAX_EPOCHS=150        # Long training run with early stopping protection
 PRECISION="bf16-mixed"
 DSET_DTYPE="bfloat16"
 NUM_GPUS=2             # Use both RTX 6000 Ada GPUs
