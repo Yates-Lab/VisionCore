@@ -163,8 +163,8 @@ def extract_model_type(exp_name):
         return 'resnet_modulator'
     elif 'x3d_modulator' in exp_name:
         return 'x3d_modulator'
-    elif 'densenet_modulator' in exp_name:
-        return 'densenet_modulator'
+    elif 'dense_concat_convgru' in exp_name:
+        return 'dense_concat_convgru'
     elif 'pyramid_stem_resnet_gru' in exp_name:
         return 'pyramid_stem_resnet_gru'
     elif 'pyramid_stem_resnet' in exp_name:

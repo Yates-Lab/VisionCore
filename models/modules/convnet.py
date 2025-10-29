@@ -265,11 +265,7 @@ class DenseNet(BaseConvNet):
 
         # Dense concatenation
         for block in self.layers:
-            if x_cat.requires_grad and block.training:
-                out = checkpoint(block, x_cat)
-            else:
-                out = block(x_cat)
-
+            out = block(x_cat)
             x_cat = torch.cat([chomp_causal_spatial(x_cat, out), out], dim=1)
 
         return self.final_activation(x_cat)

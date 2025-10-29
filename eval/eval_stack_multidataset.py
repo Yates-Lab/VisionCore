@@ -18,7 +18,6 @@ Author: Built from model_load_eval_stack_multidataset.py
 
 import os
 from pathlib import Path
-from pprint import pprint
 
 import numpy as np
 import torch
@@ -26,7 +25,6 @@ import yaml
 from tqdm import tqdm
 
 # DataYatesV1 package imports
-from models.data import prepare_data
 from DataYatesV1 import get_session
 from models.losses import PoissonBPSAggregator
 
@@ -112,7 +110,7 @@ def load_model(model_type=None, model_index=None, checkpoint_path=None,
 
     try:
         # Change to the multidataset_ddp directory where configs are located
-        multidataset_dir = Path(__file__).parent.parent #/ 'jake' / 'multidataset_ddp'
+        multidataset_dir = Path(__file__).parent.parent
         os.chdir(multidataset_dir)
 
         # Load model with proper checkpoint handling
@@ -395,8 +393,9 @@ def evaluate_model_multidataset(model_type='learned_res',
             if dataset_idx in missing_analyses['bps'] or recalc:
                 print("Running BPS analysis...")
                 bps_results = run_bps_analysis(
-                    model, train_data, val_data, dataset_idx, model_name,
-                    save_dir, recalc, batch_size, rescale
+                    model, train_data, val_data, dataset_idx,
+                    model_name=model_name, save_dir=save_dir, recalc=recalc,
+                    batch_size=batch_size, rescale=rescale
                 )
             else:
                 print("Loading BPS analysis from cache...")
@@ -433,8 +432,9 @@ def evaluate_model_multidataset(model_type='learned_res',
                 else:
                     print("Running CCNORM analysis...")
                     ccnorm_results = run_ccnorm_analysis(
-                        model, train_data, val_data, dataset_idx, bps_results if 'bps' in analyses else None,
-                        model_name, save_dir, recalc, rescale
+                        model, train_data, val_data, dataset_idx,
+                        bps_results=bps_results if 'bps' in analyses else None,
+                        model_name=model_name, save_dir=save_dir, recalc=recalc, rescale=rescale
                     )
             else:
                 print("Loading CCNORM analysis from cache...")
@@ -469,8 +469,10 @@ def evaluate_model_multidataset(model_type='learned_res',
                 else:
                     print("Running Saccade analysis...")
                     saccade_results = run_saccade_analysis(
-                        model, train_data, val_data, dataset_idx, bps_results if 'bps' in analyses else None,
-                        model_name, save_dir, recalc, rescale, sac_win
+                        model, train_data, val_data, dataset_idx,
+                        bps_results=bps_results if 'bps' in analyses else None,
+                        model_name=model_name, save_dir=save_dir, recalc=recalc,
+                        rescale=rescale, sac_win=sac_win
                     )
             else:
                 print("Loading Saccade analysis from cache...")
@@ -513,8 +515,9 @@ def evaluate_model_multidataset(model_type='learned_res',
             if dataset_idx in missing_analyses.get('sta', []) or recalc:
                 print("🔍 Running STA analysis...")
                 sta_results = run_sta_analysis(
-                    model, train_data, val_data, dataset_idx, bps_results if 'bps' in analyses else None,
-                    model_name, save_dir, recalc, rescale
+                    model, train_data, val_data, dataset_idx,
+                    bps_results=bps_results if 'bps' in analyses else None,
+                    model_name=model_name, save_dir=save_dir, recalc=recalc, rescale=rescale
                 )
             else:
                 print("📁 Loading STA analysis from cache...")
@@ -547,7 +550,8 @@ def evaluate_model_multidataset(model_type='learned_res',
             if dataset_idx in missing_analyses['qc'] or recalc:
                 print("🔍 Running QC analysis...")
                 qc_results = run_qc_analysis(
-                    dataset_name, dataset_cids, dataset_idx, model_name, save_dir, recalc
+                    dataset_name, dataset_cids, dataset_idx,
+                    model_name=model_name, save_dir=save_dir, recalc=recalc
                 )
             else:
                 print("📁 Loading QC analysis from cache...")
@@ -586,7 +590,7 @@ def evaluate_model_multidataset(model_type='learned_res',
     return results
 
 
-def run_bps_analysis(model, train_data, val_data, dataset_idx, model_name, save_dir, recalc, batch_size, rescale=False):
+def run_bps_analysis(model, train_data, val_data, dataset_idx, model_name=None, save_dir=None, recalc=False, batch_size=64, rescale=False):
     """
     Run BPS analysis for a single dataset, using existing cache if available.
 
@@ -598,34 +602,38 @@ def run_bps_analysis(model, train_data, val_data, dataset_idx, model_name, save_
         Training and validation datasets
     dataset_idx : int
         Index of the dataset
-    model_name : str
-        Name of the model for caching
-    save_dir : Path
-        Directory to save caches
-    recalc : bool
-        Whether to recalculate
-    batch_size : int
-        Batch size for evaluation
+    model_name : str, optional
+        Name of the model for caching (default: None, no caching)
+    save_dir : Path, optional
+        Directory to save caches (default: None, no caching)
+    recalc : bool, optional
+        Whether to recalculate (default: False)
+    batch_size : int, optional
+        Batch size for evaluation (default: 64)
     rescale : bool, optional
-        Whether to apply affine rescaling (affects cache naming)
+        Whether to apply affine rescaling (affects cache naming) (default: False)
 
     Returns
     -------
     dict
         BPS results for all stimulus types
     """
-    rescale_suffix = '_rescaled' if rescale else ''
-    cache_file = save_dir / f'{model_name}_dataset{dataset_idx}_bps{rescale_suffix}_cache.pt'
+    # Only use caching if both model_name and save_dir are provided
+    use_cache = (model_name is not None) and (save_dir is not None)
 
-    # Try to load from cache
-    if not recalc and cache_file.exists():
-        print(f'Loading BPS cache from {cache_file}')
-        return torch.load(cache_file, weights_only=False)
+    if use_cache:
+        rescale_suffix = '_rescaled' if rescale else ''
+        cache_file = save_dir / f'{model_name}_dataset{dataset_idx}_bps{rescale_suffix}_cache.pt'
+
+        # Try to load from cache
+        if not recalc and cache_file.exists():
+            print(f'Loading BPS cache from {cache_file}')
+            return torch.load(cache_file, weights_only=False)
 
 
 
     # Calculate from scratch
-    print(f'No BPS cache found. Evaluating from scratch...')
+    print(f'Not using BPS cache. Evaluating from scratch...')
 
     # Check which stimulus types are available in this dataset
     stim_types_in_dataset = [d.metadata['name'] for d in train_data.dsets]
@@ -695,13 +703,16 @@ def run_bps_analysis(model, train_data, val_data, dataset_idx, model_name, save_
         'val': val_bps,
         'cids': train_data.dsets[0].metadata['cids']
     }
-    torch.save(bps_results, cache_file)
-    print(f'BPS cache saved to {cache_file}')
+
+    # Only save if caching is enabled
+    if use_cache:
+        torch.save(bps_results, cache_file)
+        print(f'BPS cache saved to {cache_file}')
 
     return bps_results
 
 
-def run_ccnorm_analysis(model, train_data, val_data, dataset_idx, bps_results, model_name, save_dir, recalc, rescale=False):
+def run_ccnorm_analysis(model, train_data, val_data, dataset_idx, bps_results=None, model_name=None, save_dir=None, recalc=False, rescale=False):
     """
     Run CCNORM analysis for FixRSVP stimuli.
 
@@ -713,28 +724,32 @@ def run_ccnorm_analysis(model, train_data, val_data, dataset_idx, bps_results, m
         Training and validation datasets
     dataset_idx : int
         Index of the dataset
-    bps_results : dict or None
-        BPS results if available, otherwise will load/calculate
-    model_name : str
-        Name of the model for caching
-    save_dir : Path
-        Directory to save caches
-    recalc : bool
-        Whether to recalculate
+    bps_results : dict or None, optional
+        BPS results if available, otherwise will load/calculate (default: None)
+    model_name : str, optional
+        Name of the model for caching (default: None, no caching)
+    save_dir : Path, optional
+        Directory to save caches (default: None, no caching)
+    recalc : bool, optional
+        Whether to recalculate (default: False)
     rescale : bool, optional
-        Whether to use rescaled BPS results (affects cache naming)
+        Whether to use rescaled BPS results (affects cache naming) (default: False)
 
     Returns
     -------
     dict or None
         CCNORM results or None if failed
     """
-    rescale_suffix = '_rescaled' if rescale else ''
-    cache_file = save_dir / f'{model_name}_dataset{dataset_idx}_ccnorm{rescale_suffix}_cache.pt'
+    # Only use caching if both model_name and save_dir are provided
+    use_cache = (model_name is not None) and (save_dir is not None)
 
-    if not recalc and cache_file.exists():
-        print(f'Loading CCNORM cache from {cache_file}')
-        return torch.load(cache_file, weights_only=False)
+    if use_cache:
+        rescale_suffix = '_rescaled' if rescale else ''
+        cache_file = save_dir / f'{model_name}_dataset{dataset_idx}_ccnorm{rescale_suffix}_cache.pt'
+
+        if not recalc and cache_file.exists():
+            print(f'Loading CCNORM cache from {cache_file}')
+            return torch.load(cache_file, weights_only=False)
 
     try:
         print(f'Calculating CCNORM for dataset {dataset_idx}...')
@@ -761,15 +776,16 @@ def run_ccnorm_analysis(model, train_data, val_data, dataset_idx, bps_results, m
                 'cids': train_data.dsets[0].metadata['cids']
             }
 
-            # Save to cache
-            torch.save(ccnorm_results, cache_file)
-            print(f'CCNORM NaN placeholders saved to {cache_file}')
+            # Save to cache only if caching is enabled
+            if use_cache:
+                torch.save(ccnorm_results, cache_file)
+                print(f'CCNORM NaN placeholders saved to {cache_file}')
 
             return ccnorm_results
 
         # Get BPS results if not provided
         if bps_results is None:
-            bps_results = run_bps_analysis(model, train_data, val_data, dataset_idx, model_name, save_dir, False, 64, rescale)
+            bps_results = run_bps_analysis(model, train_data, val_data, dataset_idx, model_name=model_name, save_dir=save_dir, recalc=False, batch_size=64, rescale=rescale)
 
         # Get trial-aligned FixRSVP data
         robs_trial, rhat_trial, dfs_trial = get_fixrsvp_trials(
@@ -799,9 +815,10 @@ def run_ccnorm_analysis(model, train_data, val_data, dataset_idx, bps_results, m
             'cids': train_data.dsets[0].metadata['cids']
         }
 
-        # Save to cache
-        torch.save(ccnorm_results, cache_file)
-        print(f'CCNORM cache saved to {cache_file}')
+        # Save to cache only if caching is enabled
+        if use_cache:
+            torch.save(ccnorm_results, cache_file)
+            print(f'CCNORM cache saved to {cache_file}')
 
         return ccnorm_results
 
@@ -810,7 +827,7 @@ def run_ccnorm_analysis(model, train_data, val_data, dataset_idx, bps_results, m
         return None
 
 
-def run_saccade_analysis(model, train_data, val_data, dataset_idx, bps_results, model_name, save_dir, recalc, rescale=False, sac_win=(-10, 100)):
+def run_saccade_analysis(model, train_data, val_data, dataset_idx, bps_results=None, model_name=None, save_dir=None, recalc=False, rescale=False, sac_win=(-10, 100)):
     """
     Run saccade-triggered analysis for all stimulus types.
 
@@ -822,16 +839,16 @@ def run_saccade_analysis(model, train_data, val_data, dataset_idx, bps_results, 
         Training and validation datasets
     dataset_idx : int
         Index of the dataset
-    bps_results : dict or None
-        BPS results if available, otherwise will load/calculate
-    model_name : str
-        Name of the model for caching
-    save_dir : Path
-        Directory to save caches
-    recalc : bool
-        Whether to recalculate
+    bps_results : dict or None, optional
+        BPS results if available, otherwise will load/calculate (default: None)
+    model_name : str, optional
+        Name of the model for caching (default: None, no caching)
+    save_dir : Path, optional
+        Directory to save caches (default: None, no caching)
+    recalc : bool, optional
+        Whether to recalculate (default: False)
     rescale : bool, optional
-        Whether to use rescaled BPS results (affects cache naming)
+        Whether to use rescaled BPS results (affects cache naming) (default: False)
     sac_win : tuple, optional
         Saccade window in milliseconds (default: (-10, 100))
 
@@ -840,19 +857,23 @@ def run_saccade_analysis(model, train_data, val_data, dataset_idx, bps_results, 
     dict or None
         Saccade analysis results or None if failed
     """
-    rescale_suffix = '_rescaled' if rescale else ''
-    cache_file = save_dir / f'{model_name}_dataset{dataset_idx}_saccade{rescale_suffix}_cache.pt'
+    # Only use caching if both model_name and save_dir are provided
+    use_cache = (model_name is not None) and (save_dir is not None)
 
-    if not recalc and cache_file.exists():
-        print(f'Loading saccade cache from {cache_file}')
-        return torch.load(cache_file, weights_only=False)
+    if use_cache:
+        rescale_suffix = '_rescaled' if rescale else ''
+        cache_file = save_dir / f'{model_name}_dataset{dataset_idx}_saccade{rescale_suffix}_cache.pt'
+
+        if not recalc and cache_file.exists():
+            print(f'Loading saccade cache from {cache_file}')
+            return torch.load(cache_file, weights_only=False)
 
     try:
         print(f'Calculating saccade analysis for dataset {dataset_idx}...')
 
         # Get BPS results if not provided
         if bps_results is None:
-            bps_results = run_bps_analysis(model, train_data, val_data, dataset_idx, model_name, save_dir, False, 64, rescale)
+            bps_results = run_bps_analysis(model, train_data, val_data, dataset_idx, model_name=model_name, save_dir=save_dir, recalc=False, batch_size=64, rescale=rescale)
 
         # Get session and detect saccades
         dataset_name = model.names[dataset_idx]
@@ -911,9 +932,10 @@ def run_saccade_analysis(model, train_data, val_data, dataset_idx, bps_results, 
         # Add CIDs to results
         saccade_results['cids'] = train_data.dsets[0].metadata['cids']
 
-        # Save to cache
-        torch.save(saccade_results, cache_file)
-        print(f'Saccade cache saved to {cache_file}')
+        # Save to cache only if caching is enabled
+        if use_cache:
+            torch.save(saccade_results, cache_file)
+            print(f'Saccade cache saved to {cache_file}')
 
         return saccade_results
 
@@ -922,7 +944,7 @@ def run_saccade_analysis(model, train_data, val_data, dataset_idx, bps_results, 
         return None
 
 
-def run_sta_analysis(model, train_data, val_data, dataset_idx, bps_results, model_name, save_dir, recalc, rescale=False, lags=list(range(16))):
+def run_sta_analysis(model, train_data, val_data, dataset_idx, bps_results=None, model_name=None, save_dir=None, recalc=False, rescale=False, lags=list(range(16))):
     """
     Run STA (Spike-Triggered Average) and STE (Spike-Triggered Ensemble) analysis.
 
@@ -934,30 +956,34 @@ def run_sta_analysis(model, train_data, val_data, dataset_idx, bps_results, mode
         Training and validation datasets
     dataset_idx : int
         Index of the dataset to analyze
-    bps_results : dict
-        BPS analysis results containing robs and rhat
-    model_name : str
-        Name of the model for caching
-    save_dir : Path
-        Directory to save cache files
-    recalc : bool
-        Whether to recalculate even if cache exists
+    bps_results : dict or None, optional
+        BPS analysis results containing robs and rhat (default: None)
+    model_name : str, optional
+        Name of the model for caching (default: None, no caching)
+    save_dir : Path, optional
+        Directory to save cache files (default: None, no caching)
+    recalc : bool, optional
+        Whether to recalculate even if cache exists (default: False)
     rescale : bool, optional
-        Whether to use rescaled BPS results (affects cache naming)
-    lags : list
-        List of lag values to compute STA for
+        Whether to use rescaled BPS results (affects cache naming) (default: False)
+    lags : list, optional
+        List of lag values to compute STA for (default: list(range(16)))
 
     Returns
     -------
     dict
         STA analysis results with keys: sta_robs, ste_robs, sta_rhat, ste_rhat, norm_dfs, norm_robs, norm_rhat
     """
-    rescale_suffix = '_rescaled' if rescale else ''
-    cache_file = save_dir / f'{model_name}_dataset{dataset_idx}_sta{rescale_suffix}_cache.pt'
+    # Only use caching if both model_name and save_dir are provided
+    use_cache = (model_name is not None) and (save_dir is not None)
 
-    if not recalc and cache_file.exists():
-        print(f'Loading STA cache from {cache_file}')
-        return torch.load(cache_file, weights_only=False)
+    if use_cache:
+        rescale_suffix = '_rescaled' if rescale else ''
+        cache_file = save_dir / f'{model_name}_dataset{dataset_idx}_sta{rescale_suffix}_cache.pt'
+
+        if not recalc and cache_file.exists():
+            print(f'Loading STA cache from {cache_file}')
+            return torch.load(cache_file, weights_only=False)
 
     try:
         print(f'Calculating STA analysis for dataset {dataset_idx}...')
@@ -983,15 +1009,16 @@ def run_sta_analysis(model, train_data, val_data, dataset_idx, bps_results, mode
                 'norm_rhat': np.full(n_cids, np.nan)
             }
 
-            # Save to cache
-            torch.save(sta_results, cache_file)
-            print(f'STA NaN placeholders saved to {cache_file}')
+            # Save to cache only if caching is enabled
+            if use_cache:
+                torch.save(sta_results, cache_file)
+                print(f'STA NaN placeholders saved to {cache_file}')
 
             return sta_results
 
         # Get BPS results if not provided
         if bps_results is None:
-            bps_results = run_bps_analysis(model, train_data, val_data, dataset_idx, model_name, save_dir, False, 64)
+            bps_results = run_bps_analysis(model, train_data, val_data, dataset_idx, model_name=model_name, save_dir=save_dir, recalc=False, batch_size=64, rescale=rescale)
 
         # Extract gaborium data from BPS results
         robs = bps_results['gaborium']['robs']  # (n_samples, n_cids)
@@ -1062,9 +1089,10 @@ def run_sta_analysis(model, train_data, val_data, dataset_idx, bps_results, mode
             'norm_rhat': norm_rhat.numpy()
         }
 
-        # Save to cache
-        torch.save(sta_results, cache_file)
-        print(f'STA cache saved to {cache_file}')
+        # Save to cache only if caching is enabled
+        if use_cache:
+            torch.save(sta_results, cache_file)
+            print(f'STA cache saved to {cache_file}')
 
         return sta_results
 
@@ -1073,7 +1101,7 @@ def run_sta_analysis(model, train_data, val_data, dataset_idx, bps_results, mode
         return None
 
 
-def run_qc_analysis(dataset_name, dataset_cids, dataset_idx, model_name, save_dir, recalc):
+def run_qc_analysis(dataset_name, dataset_cids, dataset_idx, model_name=None, save_dir=None, recalc=False):
     """
     Run QC analysis for a dataset.
 
@@ -1085,23 +1113,27 @@ def run_qc_analysis(dataset_name, dataset_cids, dataset_idx, model_name, save_di
         List of cell IDs for this dataset
     dataset_idx : int
         Index of the dataset
-    model_name : str
-        Name of the model for caching
-    save_dir : Path
-        Directory to save caches
-    recalc : bool
-        Whether to recalculate
+    model_name : str, optional
+        Name of the model for caching (default: None, no caching)
+    save_dir : Path, optional
+        Directory to save caches (default: None, no caching)
+    recalc : bool, optional
+        Whether to recalculate (default: False)
 
     Returns
     -------
     dict or None
         QC results or None if failed
     """
-    cache_file = save_dir / f'{model_name}_dataset{dataset_idx}_qc_cache.pt'
+    # Only use caching if both model_name and save_dir are provided
+    use_cache = (model_name is not None) and (save_dir is not None)
 
-    if not recalc and cache_file.exists():
-        print(f'Loading QC cache from {cache_file}')
-        return torch.load(cache_file, weights_only=False)
+    if use_cache:
+        cache_file = save_dir / f'{model_name}_dataset{dataset_idx}_qc_cache.pt'
+
+        if not recalc and cache_file.exists():
+            print(f'Loading QC cache from {cache_file}')
+            return torch.load(cache_file, weights_only=False)
 
     try:
         print(f'Loading QC data for {dataset_name}...')
@@ -1113,9 +1145,10 @@ def run_qc_analysis(dataset_name, dataset_cids, dataset_idx, model_name, save_di
         # Add cids to the cache
         qc_data['cids'] = dataset_cids
 
-        # Save to cache
-        torch.save(qc_data, cache_file)
-        print(f'QC cache saved to {cache_file}')
+        # Save to cache only if caching is enabled
+        if use_cache:
+            torch.save(qc_data, cache_file)
+            print(f'QC cache saved to {cache_file}')
 
         return qc_data
 
@@ -1133,11 +1166,121 @@ def run_qc_analysis(dataset_name, dataset_cids, dataset_idx, model_name, save_di
             'cids': dataset_cids
         }
 
-        # Save failed result to cache to avoid repeated failures
-        torch.save(qc_data, cache_file)
-        print(f'QC cache (with NaNs) saved to {cache_file}')
+        # Save failed result to cache to avoid repeated failures (only if caching is enabled)
+        if use_cache:
+            torch.save(qc_data, cache_file)
+            print(f'QC cache (with NaNs) saved to {cache_file}')
 
         return qc_data
+
+
+def eval_stack_single_dataset(model, dataset_idx, analyses=['bps'], batch_size=64, rescale=False):
+    """
+    Evaluate a single dataset during training (no caching, no model loading).
+
+    This function is designed to be called during training to evaluate model performance
+    on a specific dataset. It loads the dataset, runs the specified analyses, and returns
+    the results without saving to cache.
+
+    Parameters
+    ----------
+    model : MultiDatasetModel
+        The already-loaded trained model
+    dataset_idx : int
+        Index of the dataset to evaluate
+    analyses : list, optional
+        List of analyses to run: ['bps', 'ccnorm', 'saccade', 'sta', 'qc'] (default: ['bps'])
+    batch_size : int, optional
+        Batch size for evaluation (default: 64)
+    rescale : bool, optional
+        Whether to apply affine rescaling to rhat after BPS analysis (default: False)
+
+    Returns
+    -------
+    dict
+        Evaluation results with structure:
+        {
+            'bps': {...},
+            'ccnorm': {...},
+            'saccade': {...},
+            'sta': {...},
+            'qc': {...}
+        }
+
+    Example
+    -------
+    >>> # During training
+    >>> results = eval_stack_single_dataset(model, dataset_idx=0, analyses=['bps', 'ccnorm'])
+    >>> bps_val = results['bps']['val']  # Validation BPS
+    >>> ccnorm = results['ccnorm']['ccnorm']  # CCNORM values
+    """
+    dataset_name = model.names[dataset_idx]
+    print(f"\n{'='*60}")
+    print(f"Evaluating dataset {dataset_idx}: {dataset_name}")
+    print(f"Analyses: {analyses}")
+    print(f"{'='*60}")
+
+    # Load dataset
+    train_data, val_data, dataset_config = load_single_dataset(model, dataset_idx)
+    dataset_cids = dataset_config.get('cids', [])
+
+    # Initialize results structure
+    results = {
+        'dataset_name': dataset_name,
+        'dataset_idx': dataset_idx,
+        'cids': dataset_cids
+    }
+
+    # Run BPS analysis if requested
+    bps_results = None
+    if 'bps' in analyses:
+        print("Running BPS analysis...")
+        bps_results = run_bps_analysis(
+            model, train_data, val_data, dataset_idx,
+            batch_size=batch_size, rescale=rescale
+        )
+        results['bps'] = bps_results
+
+    # Run CCNORM analysis if requested
+    if 'ccnorm' in analyses:
+        print("Running CCNORM analysis...")
+        ccnorm_results = run_ccnorm_analysis(
+            model, train_data, val_data, dataset_idx,
+            bps_results=bps_results, rescale=rescale
+        )
+        results['ccnorm'] = ccnorm_results
+
+    # Run saccade analysis if requested
+    if 'saccade' in analyses:
+        print("Running Saccade analysis...")
+        saccade_results = run_saccade_analysis(
+            model, train_data, val_data, dataset_idx,
+            bps_results=bps_results, rescale=rescale
+        )
+        results['saccade'] = saccade_results
+
+    # Run STA analysis if requested
+    if 'sta' in analyses:
+        print("Running STA analysis...")
+        sta_results = run_sta_analysis(
+            model, train_data, val_data, dataset_idx,
+            bps_results=bps_results, rescale=rescale
+        )
+        results['sta'] = sta_results
+
+    # Run QC analysis if requested
+    if 'qc' in analyses:
+        print("Running QC analysis...")
+        qc_results = run_qc_analysis(
+            dataset_name, dataset_cids, dataset_idx
+        )
+        results['qc'] = qc_results
+
+    print(f"\n✅ Evaluation complete for dataset {dataset_idx}: {dataset_name}")
+    print(f"   Total cells: {len(dataset_cids)}")
+    print(f"   Analyses completed: {analyses}")
+
+    return results
 
 
 # Example usage
