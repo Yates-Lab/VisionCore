@@ -974,6 +974,9 @@ def run_sta_analysis(model, train_data, val_data, dataset_idx, bps_results=None,
     dict
         STA analysis results with keys: sta_robs, ste_robs, sta_rhat, ste_rhat, norm_dfs, norm_robs, norm_rhat
     """
+
+    from eval.gaborium_analysis import get_sta_ste
+
     # Only use caching if both model_name and save_dir are provided
     use_cache = (model_name is not None) and (save_dir is not None)
 
@@ -988,107 +991,24 @@ def run_sta_analysis(model, train_data, val_data, dataset_idx, bps_results=None,
     try:
         print(f'Calculating STA analysis for dataset {dataset_idx}...')
 
-        # Check if gaborium is available (STA typically uses gaborium)
-        stim_types_in_dataset = [d.metadata['name'] for d in train_data.dsets]
-        n_cids = len(train_data.dsets[0].metadata['cids'])
+        # Recompute BPS results on train/test combined
+        gaborium_inds = torch.concatenate([
+            train_data.get_dataset_inds('gaborium'),
+            val_data.get_dataset_inds('gaborium')
+        ], dim=0)
 
-        if 'gaborium' not in stim_types_in_dataset:
-            print(f"Gaborium not available for dataset {dataset_idx}, creating NaN placeholders")
+        dataset = train_data.shallow_copy()
+        # set indices to be the gaborium inds
+        dataset.inds = gaborium_inds
 
-            # Create NaN placeholders with appropriate shapes
-            n_lags = len(lags)
-            H, W = 51, 51  # Typical stimulus dimensions
+        gaborium_eval = evaluate_dataset(
+            model, dataset, gaborium_inds, dataset_idx, 64, "Gaborium"
+        )
 
-            sta_results = {
-                'sta_robs': np.full((n_lags, H, W, n_cids), np.nan),
-                'ste_robs': np.full((n_lags, H, W, n_cids), np.nan),
-                'sta_rhat': np.full((n_lags, H, W, n_cids), np.nan),
-                'ste_rhat': np.full((n_lags, H, W, n_cids), np.nan),
-                'norm_dfs': np.full(n_cids, np.nan),
-                'norm_robs': np.full(n_cids, np.nan),
-                'norm_rhat': np.full(n_cids, np.nan)
-            }
+        dataset_config = model.model.dataset_configs[dataset_idx].copy()
 
-            # Save to cache only if caching is enabled
-            if use_cache:
-                torch.save(sta_results, cache_file)
-                print(f'STA NaN placeholders saved to {cache_file}')
-
-            return sta_results
-
-        # Get BPS results if not provided
-        if bps_results is None:
-            bps_results = run_bps_analysis(model, train_data, val_data, dataset_idx, model_name=model_name, save_dir=save_dir, recalc=False, batch_size=64, rescale=rescale)
-
-        # Extract gaborium data from BPS results
-        robs = bps_results['gaborium']['robs']  # (n_samples, n_cids)
-        rhat = bps_results['gaborium']['rhat']  # (n_samples, n_cids)
-
-        # Prepare dataset config for STA analysis (based on your exact code)
-        if hasattr(model, 'dataset_configs'):
-            dataset_config = model.dataset_configs[dataset_idx].copy()
-        else:
-            # Fallback to loading from file
-            config_path = model.hparams.cfg_dir
-            dataset_name = model.names[dataset_idx]
-            dataset_config_path = Path(config_path) / f"{dataset_name}.yaml"
-            with open(dataset_config_path, 'r') as f:
-                dataset_config = yaml.safe_load(f)
-        dataset_config['transforms']['stim'] = {
-            'source': 'stim',
-            'ops': [{'pixelnorm': {}}],
-            'expose_as': 'stim'
-        }
-        dataset_config['keys_lags']['stim'] = list(range(25))
-        dataset_config['types'] = ['gaborium']
-
-        # Load data with modified config
-        from models.data import prepare_data
-        from .eval_stack_utils import get_stim_inds
-
-        train_data_sta, val_data_sta, dataset_config = prepare_data(dataset_config, strict=False)
-        stim_indices = get_stim_inds('gaborium', train_data_sta, val_data_sta)
-
-        # Shallow copy the dataset
-        data = val_data_sta.shallow_copy()
-        data.inds = stim_indices
-
-        dset_idx = np.unique(stim_indices[:,0]).item()
-
-        # Confirm indices match
-        assert torch.all(robs == data.dsets[dset_idx]['robs'][data.inds[:,1]]), 'robs mismatch'
-
-        dfs = data.dsets[dset_idx]['dfs'][data.inds[:,1]]
-        norm_dfs = dfs.sum(0)  # if forward
-        norm_robs = (robs * dfs).sum(0)  # if reverse
-        norm_rhat = (rhat * dfs).sum(0)  # if reverse
-
-        n_cells = robs.shape[1]
-        n_lags = len(lags)
-        H, W = data.dsets[dset_idx]['stim'].shape[1:3]
-
-        sta_robs = torch.zeros((n_lags, H, W, n_cells))
-        ste_robs = torch.zeros((n_lags, H, W, n_cells))
-        sta_rhat = torch.zeros((n_lags, H, W, n_cells))
-        ste_rhat = torch.zeros((n_lags, H, W, n_cells))
-
-        for lag in tqdm(lags, desc="Computing STA"):
-            stim = data.dsets[dset_idx]['stim'][data.inds[:,1]-lag]
-            sta_robs[lag] = torch.einsum('thw, tc->hwc', stim, robs*dfs)
-            ste_robs[lag] = torch.einsum('thw, tc->hwc', stim.pow(2), robs*dfs)
-            sta_rhat[lag] = torch.einsum('thw, tc->hwc', stim, rhat*dfs)
-            ste_rhat[lag] = torch.einsum('thw, tc->hwc', stim.pow(2), rhat*dfs)
-
-        sta_results = {
-            'sta_robs': sta_robs.numpy(),
-            'ste_robs': ste_robs.numpy(),
-            'sta_rhat': sta_rhat.numpy(),
-            'ste_rhat': ste_rhat.numpy(),
-            'norm_dfs': norm_dfs.numpy(),
-            'norm_robs': norm_robs.numpy(),
-            'norm_rhat': norm_rhat.numpy()
-        }
-
+        sta_results = get_sta_ste(dataset_config, gaborium_eval['robs'], gaborium_eval['rhat'], lags=lags, fixations_only=True, combine_train_test=True, whiten=True, device=model.device)
+        
         # Save to cache only if caching is enabled
         if use_cache:
             torch.save(sta_results, cache_file)

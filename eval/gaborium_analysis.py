@@ -3,6 +3,7 @@
 import torch
 import numpy as np
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 from models.data import prepare_data
 from .eval_stack_utils import get_stim_inds
 from pathlib import Path
@@ -455,3 +456,47 @@ def run_gaborium_analysis(all_results, checkpoint_dir, save_dir, recalc=False, b
                 all_results[model_type]['sta'][analysis].append(analysis_result[analysis])
 
     return all_results
+
+def plot_stas(sta, lag = None, normalize=True, sort_by=None):
+
+    n_cells = sta['Z_STA_robs'].shape[-1]
+    sx = np.floor(np.sqrt(n_cells)).astype(int)
+    sy = np.ceil(n_cells / sx).astype(int)
+    fig, axs = plt.subplots(sy, sx, figsize=(16, 16))
+    
+    
+    # H = sta['Z_STA_robs'].shape[1]
+
+    if sort_by is not None:
+        if sort_by == 'modulation_index':
+            order = np.argsort(sta['modulation_index_robs'])
+            order = order[:n_cells]
+        elif sort_by == 'modulation_index_rhat':
+            order = np.argsort(sta['modulation_index_rhat'])
+            order = order[:n_cells]
+        else:
+            order = np.arange(n_cells)
+    else:
+        order = np.arange(n_cells)
+    
+    for i, cc in enumerate(order):
+        if lag is None:
+            this_lag = sta['peak_lag'][cc]
+        else:
+            this_lag = lag
+
+        ax = axs.flatten()[i]
+        v = sta['Z_STA_robs'][this_lag,:,:,cc].abs().max()
+        Irhat = sta['Z_STA_rhat'][this_lag,:,:,cc]
+        if normalize:
+            vrhat = Irhat.abs().max()
+            Irhat = Irhat / vrhat * v
+            
+        I = torch.concat([sta['Z_STA_robs'][this_lag,:,:,cc], torch.ones(H,1), Irhat], 1)
+        
+        ax.imshow(I, cmap='gray_r', interpolation='none', vmin=-v, vmax=v)
+        ax.set_title(f'{cc}: {sta['modulation_index_robs'][cc]:.2f}')
+        ax.axis('off')
+
+    plt.tight_layout()
+    plt.show()
