@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 import pytorch_lightning as pl
 
-from models.losses import MaskedLoss, PoissonBPSAggregator, MaskedZIPNLLLoss
+from models.losses import MaskedLoss, PoissonBPSAggregator
 from training.regularizers import create_regularizers, get_excluded_params_for_weight_decay
 from training.schedulers import LinearWarmupCosineAnnealingLR, LinearWarmupCosineAnnealingWarmRestartsLR
 from schedulefree import AdamWScheduleFree
@@ -106,7 +106,7 @@ class MultiDatasetModel(pl.LightningModule):
     def __init__(self, model_cfg: str, cfg_dir: str, lr: float, wd: float,
                  max_ds: int, pretrained_checkpoint: str = None,
                  freeze_vision: bool = False, compile_model: bool = False,
-                 loss_type: str = None, model_config_dict: dict = None):
+                 model_config_dict: dict = None):
         super().__init__()
 
         from models.config_loader import load_dataset_configs, load_config
@@ -183,21 +183,9 @@ class MultiDatasetModel(pl.LightningModule):
         self.head_lr = lr  # unchanged for dataset heads
         self.log_input = isinstance(self.model.activation, nn.Identity)
 
-        # Initialize loss function based on config
-        # Command-line argument overrides model config
-        if loss_type is not None:
-            effective_loss_type = loss_type
-        else:
-            effective_loss_type = self.model_config.get('loss_type', 'poisson')
-
-        if effective_loss_type == 'zip' or effective_loss_type == 'zero_inflated_poisson':
-            self.loss_fn = MaskedZIPNLLLoss(log_input=self.log_input)
-            print(f"Using Zero-Inflated Poisson loss (log_input={self.log_input})")
-        elif effective_loss_type == 'poisson':
-            self.loss_fn = MaskedLoss(nn.PoissonNLLLoss(log_input=self.log_input, reduction="none"))
-            print(f"Using standard Poisson loss (log_input={self.log_input})")
-        else:
-            raise ValueError(f"Unknown loss_type: {effective_loss_type}. Must be 'poisson' or 'zip'")
+        # Initialize loss function
+        self.loss_fn = MaskedLoss(nn.PoissonNLLLoss(log_input=self.log_input, reduction="none"))
+        print(f"Using Poisson loss (log_input={self.log_input})")
 
         self.bps_aggs = [PoissonBPSAggregator() for _ in self.names]
         self.val_losses = []

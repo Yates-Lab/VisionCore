@@ -108,7 +108,7 @@ def _register(name):
     return wrap
 
 @_register("fftwhitening")
-def _make_fftwhitening(cfg):
+def _make_fftwhitening(cfg, dataset_config=None):
     """
     Create a spatiotemporal whitening transform.
 
@@ -146,13 +146,13 @@ def _make_fftwhitening(cfg):
     return fftwhitening
 
 @_register("pixelnorm")
-def _make_pixelnorm(cfg):
+def _make_pixelnorm(cfg, dataset_config=None):
     def pixelnorm(x: torch.Tensor):
         return (x.float() - 127) / 255
     return pixelnorm
 
 @_register("diff")
-def _make_diff(cfg):
+def _make_diff(cfg, dataset_config=None):
     axis = cfg.get("axis", 0)
     def diff(x: torch.Tensor):
         # prepend first slice to keep length constant
@@ -161,13 +161,13 @@ def _make_diff(cfg):
     return diff
 
 @_register("mul")
-def _make_mul(cfg):
+def _make_mul(cfg, dataset_config=None):
     factor = cfg if isinstance(cfg, (int,float)) else cfg.get("factor", 1.0)
     def mul(x): return x * factor
     return mul
 
 @_register("temporal_basis")
-def _make_basis(cfg):
+def _make_basis(cfg, dataset_config=None):
     from DataYatesV1.models.modules import TemporalBasis
     basis = TemporalBasis(**cfg)
     def tb(x):                         # x (T, …)  or (B,T, …)
@@ -192,24 +192,24 @@ def _make_basis(cfg):
     return tb
 
 @_register("splitrelu")
-def _make_splitrelu(cfg):
+def _make_splitrelu(cfg, dataset_config=None):
     from DataYatesV1.models.modules import SplitRelu
     return SplitRelu(**cfg)
 
 @_register("symlog")
-def _make_symlog(cfg):
+def _make_symlog(cfg, dataset_config=None):
     def symlog(x):
         return torch.sign(x) * torch.log1p(torch.abs(x))
     return symlog
 
 @_register("maxnorm")
-def _make_maxnorm(cfg):
+def _make_maxnorm(cfg, dataset_config=None):
     def maxnorm(x):
         return x / torch.max(torch.abs(x))
     return maxnorm
 
 @_register("dacones")
-def _make_dacones(cfg):
+def _make_dacones(cfg, dataset_config=None):
     from DataYatesV1.models.modules import DAModel
     def dacones(x):
         cones = DAModel(**cfg)
@@ -227,14 +227,14 @@ def _make_dacones(cfg):
     return dacones
 
 @_register("unsqueeze")
-def _make_unsqueeze(cfg):
+def _make_unsqueeze(cfg, dataset_config=None):
     axis = cfg if isinstance(cfg, int) else cfg.get("axis", 0)
     def unsqueeze(x):
         return x.unsqueeze(axis)
     return unsqueeze
 
 @_register("cast")
-def _make_cast(cfg):
+def _make_cast(cfg, dataset_config=None):
     """
     Transform to convert tensor to a different dtype.
 
@@ -271,8 +271,52 @@ def _make_cast(cfg):
     return to_dtype
 
 
+@_register("select_units")
+def _make_select_units(cfg, dataset_config=None):
+    """
+    Create a transform that selects a subset of units along the last dimension.
+
+    This is useful for filtering neural data (e.g., robs, history) to a specific
+    subset of units (cids) after other transforms have been applied.
+
+    Args:
+        cfg: Dict with parameters:
+            - indices: Can be either:
+                - 'cids': Use the cids from dataset_config
+                - list: Explicit list of unit indices to select
+        dataset_config: Optional dataset config dict (needed if indices='cids')
+
+    Example:
+        select_units: {indices: 'cids'}  # Use cids from dataset config
+        select_units: {indices: [0, 1, 2, 5, 10]}  # Explicit indices
+
+    Returns:
+        A function that selects the specified units along the last dimension.
+    """
+    indices = cfg.get("indices")
+    if indices is None:
+        raise ValueError("select_units requires 'indices' parameter")
+
+    # Handle 'cids' special case
+    if indices == 'cids':
+        if dataset_config is None:
+            raise ValueError("select_units with indices='cids' requires dataset_config to be passed")
+        indices = dataset_config.get('cids')
+        if indices is None:
+            raise ValueError("dataset_config does not contain 'cids'")
+
+    # Convert to tensor for indexing
+    indices_tensor = torch.tensor(indices, dtype=torch.long)
+
+    def select_units(x: torch.Tensor) -> torch.Tensor:
+        """Select units along the last dimension."""
+        return x[..., indices_tensor]
+
+    return select_units
+
+
 @_register("smooth")
-def _make_smooth(cfg):
+def _make_smooth(cfg, dataset_config=None):
     """
     Transform to apply smoothing along the temporal (0th) dimension using F.conv1d.
 
@@ -375,13 +419,24 @@ def _make_smooth(cfg):
 # ──────────────────────────────────────────────────────────────────────────────
 # 2.  Build a composite transform pipeline
 # ──────────────────────────────────────────────────────────────────────────────
-def make_pipeline(op_list: List[Dict[str, Any]]) -> TransformFn:
+def make_pipeline(op_list: List[Dict[str, Any]], dataset_config: Dict[str, Any] = None) -> TransformFn:
+    """
+    Build a composite transform pipeline from a list of operations.
+
+    Args:
+        op_list: List of operation dictionaries
+        dataset_config: Optional dataset configuration (for transforms that need access to config like cids)
+
+    Returns:
+        A function that applies all transforms in sequence
+    """
     fns: List[TransformFn] = []
     for op_dict in op_list:
         name, cfg = next(iter(op_dict.items()))
         if name not in TRANSFORM_REGISTRY:
             raise ValueError(f"Unknown transform '{name}'")
-        fns.append(TRANSFORM_REGISTRY[name](cfg))
+        # Pass dataset_config to the transform factory if it needs it
+        fns.append(TRANSFORM_REGISTRY[name](cfg, dataset_config))
 
     def pipeline(x):
         for fn in fns:

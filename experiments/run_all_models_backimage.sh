@@ -85,8 +85,7 @@ NUM_GPUS=2             # Use both RTX 6000 Ada GPUs
 NUM_WORKERS=32         # Optimized for 64 CPU cores
 STEPS_PER_EPOCH=1024    # Number of steps per epoch
 
-# Loss function configuration   
-USE_ZIP_LOSS=false     # Set to 'true' to use Zero-Inflated Poisson loss instead of standard Poisson
+# Model compilation configuration
 COMPILE_MODEL=false # THIS ONLY SLOWS THINGS DOWN
 
 # Project and data paths
@@ -109,14 +108,7 @@ run_training() {
     local MODEL_CONFIG=$1
     local MODEL_CONFIG_NAME=$(basename "$MODEL_CONFIG" .yaml)
 
-    # Add ZIP suffix to experiment name if using ZIP loss
-    if [ "$USE_ZIP_LOSS" = true ]; then
-        local LOSS_SUFFIX="_zip"
-    else
-        local LOSS_SUFFIX=""
-    fi
-
-    local EXPERIMENT_NAME="${MODEL_CONFIG_NAME}_ddp_bs${BATCH_SIZE}_ds${MAX_DATASETS}_lr${LEARNING_RATE}_wd${WEIGHT_DECAY}_corelrscale${CORE_LR_SCALE}_warmup${WARMUP_EPOCHS}${LOSS_SUFFIX}"
+    local EXPERIMENT_NAME="${MODEL_CONFIG_NAME}_ddp_bs${BATCH_SIZE}_ds${MAX_DATASETS}_lr${LEARNING_RATE}_wd${WEIGHT_DECAY}_corelrscale${CORE_LR_SCALE}_warmup${WARMUP_EPOCHS}"
 
     echo ""
     echo "============================================================"
@@ -135,14 +127,13 @@ run_training() {
     echo "Max epochs: $MAX_EPOCHS"
     echo "Precision: $PRECISION"
     echo "Dataset dtype: $DSET_DTYPE"
-    echo "Loss type: $([ "$USE_ZIP_LOSS" = true ] && echo "Zero-Inflated Poisson" || echo "Poisson")"
     echo "GPUs: $NUM_GPUS"
     echo "Workers: $NUM_WORKERS"
     echo "Dataset configs: $DATASET_CONFIGS_PATH"
     echo "Checkpoint dir: $CHECKPOINT_DIR"
     echo "============================================================"
 
-    # Build training command with optional ZIP loss flag
+    # Build training command
     local TRAINING_CMD="python training/train_ddp_multidataset.py \
         --model_config \"$MODEL_CONFIG\" \
         --dataset_configs_path \"$DATASET_CONFIGS_PATH\" \
@@ -167,11 +158,6 @@ run_training() {
         --early_stopping_patience 20 \
         --early_stopping_min_delta 0.0"
 
-    # Add loss type flag if using ZIP loss
-    if [ "$USE_ZIP_LOSS" = true ]; then
-        TRAINING_CMD="$TRAINING_CMD --loss_type zip"
-    fi
-    
     if [ "$COMPILE_MODEL" = true ]; then
         TRAINING_CMD="$TRAINING_CMD --compile"
     fi

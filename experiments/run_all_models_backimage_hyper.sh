@@ -53,8 +53,7 @@ NUM_GPUS=2
 NUM_WORKERS=16
 STEPS_PER_EPOCH=1024    # OPTIMIZED: 2x more steps (was 512)
 
-# Loss function configuration
-USE_ZIP_LOSS=true
+
 
 # Project and data paths
 PROJECT_NAME="multidataset_backimage_120_hyper"
@@ -76,14 +75,7 @@ run_training() {
     local MODEL_CONFIG=$1
     local MODEL_CONFIG_NAME=$(basename "$MODEL_CONFIG" .yaml)
 
-    # Add ZIP suffix to experiment name if using ZIP loss
-    if [ "$USE_ZIP_LOSS" = true ]; then
-        local LOSS_SUFFIX="_zip"
-    else
-        local LOSS_SUFFIX=""
-    fi
-
-    local EXPERIMENT_NAME="${MODEL_CONFIG_NAME}_ddp_bs${BATCH_SIZE}_ds${MAX_DATASETS}_lr${LEARNING_RATE}_wd${WEIGHT_DECAY}_corelrscale${CORE_LR_SCALE}_warmup${WARMUP_EPOCHS}${LOSS_SUFFIX}"
+    local EXPERIMENT_NAME="${MODEL_CONFIG_NAME}_ddp_bs${BATCH_SIZE}_ds${MAX_DATASETS}_lr${LEARNING_RATE}_wd${WEIGHT_DECAY}_corelrscale${CORE_LR_SCALE}_warmup${WARMUP_EPOCHS}"
 
     echo ""
     echo "============================================================"
@@ -102,7 +94,6 @@ run_training() {
     echo "Max epochs: $MAX_EPOCHS"
     echo "Precision: $PRECISION"
     echo "Dataset dtype: $DSET_DTYPE"
-    echo "Loss type: $([ "$USE_ZIP_LOSS" = true ] && echo "Zero-Inflated Poisson" || echo "Poisson")"
     echo "GPUs: $NUM_GPUS"
     echo "Workers: $NUM_WORKERS"
     echo "Steps per epoch: $STEPS_PER_EPOCH"
@@ -126,7 +117,7 @@ run_training() {
     echo "  ✓ Proper initialization for SiLU"
     echo "============================================================"
 
-    # Build training command with optional ZIP loss flag
+    # Build training command
     local TRAINING_CMD="python training/train_ddp_multidataset.py \
         --model_config \"$MODEL_CONFIG\" \
         --dataset_configs_path \"$DATASET_CONFIGS_PATH\" \
@@ -150,11 +141,6 @@ run_training() {
         --num_workers $NUM_WORKERS \
         --early_stopping_patience 50 \
         --early_stopping_min_delta 0.0"
-
-    # Add loss type flag if using ZIP loss
-    if [ "$USE_ZIP_LOSS" = true ]; then
-        TRAINING_CMD="$TRAINING_CMD --loss_type zip"
-    fi
 
     # Launch training
     eval $TRAINING_CMD

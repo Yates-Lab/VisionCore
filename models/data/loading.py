@@ -83,7 +83,7 @@ def get_embedded_datasets(sess, types=None, keys_lags=None, train_val_split=None
 
         # Apply preprocessing
         dset = pre_func(dset)
-        
+
         # Filter by cell IDs if specified
         if cids is not None:
             dset.metadata['cids'] = cids
@@ -91,7 +91,7 @@ def get_embedded_datasets(sess, types=None, keys_lags=None, train_val_split=None
             if 'dfs' in dset and dset['dfs'].ndim == 2:
                 if (dset['dfs'].shape[1] > 1) and (dset['dfs'].shape[1] != len(cids)):
                     dset['dfs'] = dset['dfs'][:,cids]
-                    
+
         dsets.append(dset)
 
     # Get indices of valid frames for each dataset
@@ -414,7 +414,7 @@ def prepare_data(dataset_config: Dict[str, Any], strict: bool = True):
     # -------------------------------------------------------------------------
     transform_specs = {}
     for var_name, spec in transforms.items():
-        pipeline = make_pipeline(spec.get("ops", []))
+        pipeline = make_pipeline(spec.get("ops", []), dataset_config)
         transform_specs[var_name] = dict(
             source      = spec.get("source", var_name),
             pipeline    = pipeline,
@@ -522,7 +522,7 @@ def prepare_data(dataset_config: Dict[str, Any], strict: bool = True):
                         dset[expose_as] = var_list[0]
                     else:
                         # Multiple variables, concatenate along last dimension
-                        
+
                         concatenated = torch.cat(var_list, dim=-1)
                         dset[expose_as] = concatenated
                         # print(f"Concatenated {len(var_list)} variables for {expose_as}, final shape: {concatenated.shape}")

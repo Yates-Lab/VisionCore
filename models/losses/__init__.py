@@ -8,7 +8,5 @@ from .poisson import (
     MaskedLoss,
     PoissonBPSAggregator,
     calc_poisson_bits_per_spike,
-    MaskedPoissonNLLLoss,
-    ZeroInflatedPoissonNLLLoss,
-    MaskedZIPNLLLoss
+    MaskedPoissonNLLLoss
 )

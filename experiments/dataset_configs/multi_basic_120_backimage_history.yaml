@@ -19,8 +19,9 @@ transforms:
       - unsqueeze: 1
     expose_as: stim
   
-  robs:
+  history:
     source: robs
+    ops: [{select_units: {indices: "cids"}}]
     expose_as: history
   #   source: robs
   #   ops:

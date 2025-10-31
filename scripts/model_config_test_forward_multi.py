@@ -44,17 +44,25 @@ AMP_BF16 = lambda: torch.autocast(device_type="cuda", dtype=torch.bfloat16)
 #%%
 from models.config_loader import load_dataset_configs
 import os
-# 
-config_path = Path("/home/jake/repos/VisionCore/experiments/model_configs/learned_resnet_concat_convgru_gaussian.yaml")
 
-dataset_configs_path = "/home/jake/repos/VisionCore/experiments/dataset_configs/multi_basic_120_backimage_all.yaml"
+config_path = Path("/home/jake/repos/VisionCore/experiments/model_configs/learned_dense_concat_convgru_gaussian_history.yaml")
+
+dataset_configs_path = "/home/jake/repos/VisionCore/experiments/dataset_configs/multi_basic_120_backimage_history.yaml"
 dataset_configs = load_dataset_configs(dataset_configs_path)
 
 #%% Initialize model
 config = load_config(config_path)
 model = build_model(config, dataset_configs).to(device)
 
-model.core_forward = torch.compile(model.core_forward)
+#%%
+for i in range(len(model.readouts)):
+    n_units = model.readouts[i].n_units
+    n_units_history = model.spike_history[i].mlp[-1].weight.shape[0]
+    
+    print(f"readout {i} has {n_units} units, history has {n_units_history} units")
+    
+    
+# model.core_forward = torch.compile(model.core_forward)
 
 # # run model readout forward with dummy input
 # with torch.no_grad():
@@ -106,7 +114,20 @@ batch = {k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor
 # batch["stim"] = batch["stim"].to(torch.bfloat16)          # ! reduce mem
 
 #%%
-                        # convert to rates
+                
+print(f"dataset_id being used: {dataset_id}")
+print(f"batch['history'].shape: {batch['history'].shape}")
+if batch['history'].dim() == 3:
+    B, num_lags, n_units_in_batch = batch['history'].shape
+    print(f"  -> {n_units_in_batch} units in history tensor")
+    print(f"  -> {num_lags} lags")
+    
+print(f"\nModel expects for dataset {dataset_id}:")
+print(f"  n_units: {model.readouts[dataset_id].n_units}")
+print(f"  MLP input_dim: {model.spike_history[dataset_id].input_dim}")
+print(f"  MLP output_dim: {model.spike_history[dataset_id].output_dim}")
+#%%
+                # convert to rates
 
 
 dtype = torch.bfloat16
@@ -124,19 +145,19 @@ with AMP_BF16():
 
 
 #%%
-with AMP_BF16():    
-    x = model.adapters[dataset_id](batch['stim'])
-    y = model.frontend(x)
-    z = model.convnet(y)
-    # w = model.recurrent(z)
-    # print(f"Convnet output shape: {z.shape}")
-    # w = model.modulator(z, batch['behavior'])
-print(z.shape)
+# with AMP_BF16():    
+#     x = model.adapters[dataset_id](batch['stim'])
+#     y = model.frontend(x)
+#     z = model.convnet(y)
+#     # w = model.recurrent(z)
+#     # print(f"Convnet output shape: {z.shape}")
+#     # w = model.modulator(z, batch['behavior'])
+# print(z.shape)
 
 
 #%% Run full model
 with AMP_BF16():                                          # <-- new
-    output = model(batch["stim"], dataset_id, batch["behavior"])         # predict log-rates
+    output = model(batch["stim"], dataset_id, batch["behavior"], batch["history"])         # predict log-rates
 
 output = torch.exp(output)    
 
