@@ -22,7 +22,7 @@ frontend:
     split_MP: False
     aa_signal: false
     causal: true
-    bias: false
+    bias: true
 
 # Convnet configuration - DenseNet
 convnet:
@@ -34,7 +34,7 @@ convnet:
       out_channels: 8
       conv_params:
         type: standard
-        kernel_size: [1, 5, 5]
+        kernel_size: [1, 7, 7]
         padding: [0, 0, 0]
         stride: 1
         dilation: [1, 1, 1]
@@ -42,7 +42,7 @@ convnet:
         weight_norm_dim: 0
         use_weight_norm: true
         keep_unit_norm: true
-      norm_type: rms
+      norm_type: grn
       act_type: splitrelu
       pool_params: null
       dropout: 0.0
@@ -95,8 +95,32 @@ readout:
   params:
     n_units: 8
     bias: true
-    initial_std: 0.5
+    initial_std: 5.0
     initial_mean_scale: 0.1
 
 output_activation: softplus
+
+regularization:
+  - name: readout_sparsity
+    type: l1
+    lambda: 1.0e-7
+    apply_to: ["readouts/features"]
+    schedule:
+      kind: warmup
+      start_epoch: 90
+  # - name: decay_readout_std
+  #   type: proximal_clamp_positive
+  #   lambda: 1.5  # final max std value
+  #   apply_to: ["readouts/std"]  # matches readouts.X.std_*
+  #   schedule:
+  #     kind: linear_decay
+  #     start_epoch: 0
+  #     end_epoch: 50
+  #     start_lambda: 10.0  # initial max 
+  # - name: exclude_means_from_wd
+  #   type: l2
+  #   lambda: 0.0  # No penalty, but excludes from weight decay
+  #   apply_to: ["readouts/mean"]
+  #   schedule:
+  #     kind: constant
 

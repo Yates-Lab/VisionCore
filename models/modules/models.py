@@ -13,7 +13,6 @@ import torch._dynamo as dynamo
 # Type aliases for clarity
 ConfigDict = Dict[str, Any]
 
-
 class ModularV1Model(nn.Module):
     """
     A modular V1 model architecture that allows easy swapping of components.
@@ -446,7 +445,7 @@ class MultiDatasetV1Model(ModularV1Model):
 
         return x_recurrent
     
-    def forward(self, stimulus=None, dataset_idx: int = 0, behavior=None):
+    def forward(self, stimulus=None, dataset_idx: int = 0, behavior=None, history=None):
         """
         Forward pass through the model for a specific dataset.
 
@@ -454,6 +453,7 @@ class MultiDatasetV1Model(ModularV1Model):
             stimulus: Visual stimulus tensor with shape (N, C, T, H, W) or None for modulator-only models
             dataset_idx: Index of the dataset (determines frontend/readout)
             behavior: Optional behavioral data with shape (N, n_vars)
+            history: Optional spike history tensor (unused in base class, used in subclasses)
 
         Returns:
             Tensor: Model predictions with shape (N, n_units_for_dataset)
@@ -465,17 +465,96 @@ class MultiDatasetV1Model(ModularV1Model):
             B = behavior.shape[0]
             device = next(self.parameters()).device
             x = torch.ones(B, 1, 1, 1, 1, device=device, dtype=behavior.dtype)
-        
-        # if x is not None:
-        #     dynamo.mark_dynamic(x, 0)  # batch
-        
-        # if behavior is not None:
-        #     dynamo.mark_dynamic(behavior, 0)
 
         x = self.core_forward(x, behavior)
 
         # Route through appropriate readout
         output = self.readouts[dataset_idx](x)
+
+        # Apply activation function
+        output = self.activation(output)
+
+        # Add baseline if enabled
+        if self.baseline_enabled:
+            baseline_output = self.baseline_activation(self.baselines[dataset_idx])
+            output = output + baseline_output
+
+        return output
+
+class MultiDatasetV1ModelSpikeHistory(MultiDatasetV1Model):
+    """
+    Multi-dataset V1 model with spike history processing.
+
+    This model extends MultiDatasetV1Model by adding per-dataset MLPs that process
+    recent spike history and modulate the output. The history MLPs can use spectral
+    normalization to prevent instability during simulation.
+    """
+
+    def __init__(self, model_config: ConfigDict, dataset_configs: List[ConfigDict]):
+        super().__init__(model_config, dataset_configs)
+        from models.modules.mlp import MLP
+
+        # Configure MLP for processing spike history
+        # This will be an MLP that takes in the num_lags x n_units input and pushes it
+        # through an MLP with a bottleneck and then projects to n_units output to combine
+        # with the readout output
+        self.spike_history = nn.ModuleList()
+        self.history_config = model_config.get('history_encoder', {
+            'type': 'mlp',
+            'params': {
+                'num_lags': 5,
+                'hidden_dims': [32, 10],
+                'act_type': 'relu',
+                'spectral_norm': False
+            }
+        })
+
+        for dataset_idx in range(len(self.readouts)):
+            n_units = self.readouts[dataset_idx].n_units
+
+            # Create a copy of params to avoid mutation
+            config = self.history_config['params'].copy()
+            num_lags = config.pop('num_lags', 5)
+            config['input_dim'] = num_lags * n_units
+            config['output_dim'] = n_units
+
+            self.spike_history.append(MLP(**config))
+
+    def forward(self, stimulus=None, dataset_idx: int = 0, behavior=None, history=None):
+        """
+        Forward pass with spike history processing.
+
+        Args:
+            stimulus: Visual stimulus tensor with shape (N, C, T, H, W) or None
+            dataset_idx: Index of the dataset (determines adapter/readout)
+            behavior: Optional behavioral data with shape (N, n_vars)
+            history: Spike history tensor with shape (N, num_lags, n_units) or (N, num_lags * n_units)
+
+        Returns:
+            Tensor: Model predictions with shape (N, n_units_for_dataset)
+        """
+        x = self.adapters[dataset_idx](stimulus)
+
+        if x is None:
+            # Modulator-only mode: create minimal features for modulator
+            B = behavior.shape[0]
+            device = next(self.parameters()).device
+            x = torch.ones(B, 1, 1, 1, 1, device=device, dtype=behavior.dtype)
+
+        x = self.core_forward(x, behavior)
+
+        # Route through appropriate readout
+        output = self.readouts[dataset_idx](x)
+
+        # Process history through MLP
+        # Flatten history if needed: (B, num_lags, n_units) -> (B, num_lags * n_units)
+        if history is not None:
+            if history.dim() == 3:
+                B, num_lags, n_units = history.shape
+                history = history.reshape(B, num_lags * n_units)
+            history_output = self.spike_history[dataset_idx](history)
+            # Combine with readout output
+            output = output + history_output
 
         # Apply activation function
         output = self.activation(output)

@@ -7,7 +7,7 @@ import torch.nn as nn
 from typing import Dict, Any, List
 from .utils.general import ensure_tensor
 
-from .modules.models import ModularV1Model, MultiDatasetV1Model
+from .modules.models import ModularV1Model, MultiDatasetV1Model, MultiDatasetV1ModelSpikeHistory
 
 __all__ = ['build_model', 'initialize_model_components', 'get_name_from_config']
 
@@ -32,6 +32,10 @@ def build_model(config: ConfigDict, dataset_configs: List[ConfigDict] = None) ->
         if dataset_configs is None:
             raise ValueError("dataset_configs is required for v1multi model type")
         return MultiDatasetV1Model(config, dataset_configs)
+    elif model_type == 'v1multi_history':
+        if dataset_configs is None:
+            raise ValueError("dataset_configs is required for v1multi_history model type")
+        return MultiDatasetV1ModelSpikeHistory(config, dataset_configs)
     else:
         raise ValueError(f"Unknown model type: {model_type}")
 

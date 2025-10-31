@@ -315,7 +315,7 @@ class MultiDatasetModel(pl.LightningModule):
         if isinstance(optimizer, AdamWScheduleFree):
             optimizer.train()
 
-    def forward(self, stim, ds_idx, beh=None):
+    def forward(self, stim, ds_idx, beh=None, history=None):
         """
         Forward pass through the model.
 
@@ -327,6 +327,8 @@ class MultiDatasetModel(pl.LightningModule):
             Dataset index
         beh : torch.Tensor, optional
             Behavior tensor
+        history : torch.Tensor, optional
+            Spike history tensor (for spike history models)
 
         Returns
         -------
@@ -335,9 +337,9 @@ class MultiDatasetModel(pl.LightningModule):
         """
         # Check if this is a modulator-only model (no vision processing)
         if self.is_modulator_only:
-            y = self.model(stimulus=None, dataset_idx=ds_idx, behavior=beh)
+            y = self.model(stimulus=None, dataset_idx=ds_idx, behavior=beh, history=history)
         else:
-            y = self.model(stimulus=stim, dataset_idx=ds_idx, behavior=beh)
+            y = self.model(stimulus=stim, dataset_idx=ds_idx, behavior=beh, history=history)
         return torch.clamp(y, min=-20 if self.log_input else 1e-8)
 
     def _step(self, batch_list, tag: str):
@@ -373,7 +375,7 @@ class MultiDatasetModel(pl.LightningModule):
             with torch.no_grad() if tag == "val" else contextlib.nullcontext():
                 # Pass stimulus or None based on model type
                 stimulus = None if self.is_modulator_only else b["stim"]
-                rhat = self(stimulus, b["dataset_idx"][0], b.get("behavior"))
+                rhat = self(stimulus, b["dataset_idx"][0], b.get("behavior"), b.get("history"))
 
             batch_loss = {
                 'rhat': rhat.float(),

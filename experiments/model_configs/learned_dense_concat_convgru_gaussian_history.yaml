@@ -1,5 +1,5 @@
-# V1 model configuration with DenseNet convnet, concat modulator, and ConvGRU recurrent stage
-model_type: v1multi
+# V1 model configuration with DenseNet convnet, concat modulator, ConvGRU recurrent stage, and spike history processing
+model_type: v1multi_history
 
 # Model dimensions
 initial_input_channels: 1
@@ -65,7 +65,7 @@ convnet:
           padding: [0, 0, 0]
         norm_type: grn
         act_type: splitrelu
-        dropout: 0.0
+        dropout: 0.1
         pool_params:
           type: max
           kernel_size: 2
@@ -79,7 +79,7 @@ convnet:
           padding: [0, 0, 0]
         norm_type: grn
         act_type: splitrelu
-        dropout: 0.0
+        dropout: 0.1
         pool_params: null
 
 # Modulator configuration - Concat
@@ -106,6 +106,18 @@ readout:
     initial_std: 5.0
     initial_mean_scale: 0.1
 
+# Spike history encoder configuration
+history_encoder:
+  type: mlp
+  params:
+    num_lags: 5  # Number of spike history lags to use
+    hidden_dims: [32, 10]  # Bottleneck architecture
+    act_type: relu
+    spectral_norm: true  # Use spectral normalization for stability during simulation
+    bias: true
+    dropout: 0.0
+    output_activation: false
+
 output_activation: softplus
 
 regularization:
@@ -131,3 +143,4 @@ regularization:
   #   apply_to: ["readouts/mean"]
   #   schedule:
   #     kind: constant
+
