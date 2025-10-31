@@ -38,7 +38,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import from modular training package
 from training.pl_modules import MultiDatasetModel, MultiDatasetDM
-from training.callbacks import EpochHeartbeat, CurriculumCallback
+from training.callbacks import EpochHeartbeat, CurriculumCallback, ModelLoggingCallback
 from training.utils import group_collate
 
 # Set PyTorch matmul precision
@@ -142,6 +142,16 @@ def main():
     p.add_argument("--early_stopping_min_delta", type=float, default=0.0,
                    help="Minimum change to qualify as improvement")
 
+    # Model logging
+    p.add_argument("--enable_logging", action="store_true", default=False,
+                   help="Enable periodic model logging (kernels + eval stack)")
+    p.add_argument("--fast_log_interval", type=int, default=5,
+                   help="Interval for fast logging (kernel visualizations)")
+    p.add_argument("--slow_log_interval", type=int, default=10,
+                   help="Interval for slow logging (evaluation stack)")
+    p.add_argument("--log_dataset_indices", type=int, nargs="+", default=[0],
+                   help="Dataset indices to evaluate during slow logging")
+
     args = p.parse_args()
 
     # ---------------------------------------------------------------------
@@ -221,6 +231,19 @@ def main():
     # Add curriculum callback if enabled (no‑op unless sampler supports set_step)
     if args.enable_curriculum:
         callbacks.append(CurriculumCallback())
+
+    # Add model logging callback if enabled
+    if args.enable_logging:
+        callbacks.append(
+            ModelLoggingCallback(
+                fast_interval=args.fast_log_interval,
+                slow_interval=args.slow_log_interval,
+                eval_dataset_indices=args.log_dataset_indices,
+                eval_analyses=['bps', 'ccnorm', 'saccade', 'sta'],
+                batch_size=64,
+                rescale=True
+            )
+        )
 
     # ---------------------------------------------------------------------
     # Logger

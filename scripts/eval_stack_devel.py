@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
 """
-Clean extraction functions for cross-model analysis.
+This script is used to develop the new logging code for model fits.
 
-Functions to extract BPS, saccade, CCNORM, and QC data from evaluation results.
+There are two logging functions that need to result: fast logging and slow logging
+1) fast logging (every 5 epochs):
+- tracks the kernels in the model. the frontend, stem, convolutional kernels, and readout
+
+2) slow logging (every 10 epochs):
+- Use the eval stack to evaluate the model on the datasets
+for BPS, CCNORM, Saccade, STA
+then plot the results
 """
 
 #%% Setup and Imports
@@ -35,11 +42,9 @@ enable_autoreload()
 
 device = get_free_device()
 
-#%% Discover Available Models
+#%% Load an example model (this will be provided in the logging)
 print("Discovering available models...")
 checkpoint_dir = "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage_6/checkpoints"
-# checkpoint_dir="/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_240_backimage/checkpoints"
-# checkpoint_dir = '/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120/checkpoints'
 models_by_type = scan_checkpoints(checkpoint_dir, verbose=False)
 
 print(f"Found {len(models_by_type)} model types:")
@@ -54,17 +59,12 @@ for model_type, models in models_by_type.items():
     else:
         print(f"  {model_type}: 0 models")
 
-#%% LOAD A MODEL
-import os
-checkpoint_path = None
-# checkpoint_path = '/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage/checkpoints/learned_res_small_gru_optimized_aa_ddp_bs256_ds30_lr1e-3_wd1e-3_corelrscale1.0_warmup5/last.ckpt'
-# checkpoint_path = os.path.join(checkpoint_dir, 'learned_res_small_film_ddp_bs256_ds30_lr1e-3_wd1e-5_corelrscale1.0_warmup10_zip/last.ckpt')
-# model_type = 'resnet'
+# LOAD A MODEL
 model_type = 'dense_concat_convgru'
 model, model_info = load_model(
         model_type=model_type,
         model_index=0, # none for best model
-        checkpoint_path=checkpoint_path,
+        checkpoint_path=None,
         checkpoint_dir=checkpoint_dir,
         device='cpu'
     )
@@ -74,12 +74,16 @@ model.model.convnet.use_checkpointing = False
 
 model = model.to(device)
 
-fig_frontend = plt.plot(model.model.frontend.temporal_conv.weight.squeeze().detach().cpu().T)
+#%% Fast Logging code
+if hasattr(model.model, 'frontend') and hasattr(model.model.frontend, 'temporal_conv'):
+    fig_frontend = plt.plot(model.model.frontend.temporal_conv.weight.squeeze().detach().cpu().T)
+    plt.title('Frontend Kernels')
 
 if hasattr(model.model.convnet, 'stem'):
     fig_stem = model.model.convnet.stem.components.conv.plot_weights()
+    plt.title('Stem Kernels')
 
-#%%
+# plot the kernels in each layer of the convnet
 layer_figs = []
 for layer in model.model.convnet.layers:
     if hasattr(layer, 'components'):
@@ -87,15 +91,13 @@ for layer in model.model.convnet.layers:
     else:
         layer_figs.append(layer.main_block.components.conv.plot_weights(nrow=20))
 
-
-
-#%% plot readouts
+# plot readouts
 for readout in model.model.readouts[:1]:
     # run dummy input through readout
     readout(torch.randn(1, readout.features.in_channels, 1, 15, 15).to(device))
     fig_readout = readout.plot_weights(ellipse=False)
 
-#%%
+#%% SLOW LOGGING (takes substantially longer)
 
 from eval.eval_stack_multidataset import eval_stack_single_dataset
 
@@ -109,7 +111,7 @@ results = eval_stack_single_dataset(
 
 
 
-#%%
+#%% PLOT STAS
 from torchvision.utils import make_grid
 sta_dict = results['sta']
 N = len(sta_dict['peak_lag'])
@@ -150,6 +152,7 @@ log_grid_peak_lag = make_grid(torch.stack(rf_pairs), nrow=int(np.sqrt(N)), norma
 plt.figure(figsize=(20, 20))
 plt.imshow(log_grid_peak_lag.detach().cpu().permute(1, 2, 0).numpy())
 
+# these can be logged as images because they use make_grid
 
 #%% Plot BPS per stimulus
 bps = []
@@ -199,156 +202,21 @@ win = results['saccade']['backimage']['win']
 N = rbar.shape[1]
 sx = int(np.sqrt(N))
 sy = int(np.ceil(N / sx))
-fig, axs = plt.subplots(sy, sx, figsize=(2*sx, 2*sy), sharex=True, sharey=False)
+fig_saccade, axs = plt.subplots(sy, sx, figsize=(2*sx, 2*sy), sharex=True, sharey=False)
+time_axis = np.arange(win[0], win[1])
 for i in range(sx*sy):
     if i >= N:
         axs.flatten()[i].axis('off')
         continue
-    axs.flatten()[i].plot(rbar[:,i], 'k')
-    axs.flatten()[i].axhline(rbar[:,i].mean(), linestyle='--', color='k')
-    axs.flatten()[i].plot(rhat[:,i], 'r')
+    axs.flatten()[i].plot(time_axis, rbar[:,i], 'k')
+    m = rbar[:,i].mean()
+    axs.flatten()[i].axhline(m, linestyle='--', color='k')
+    axs.flatten()[i].axvline(0, linestyle='--', color='k')
+    axs.flatten()[i].plot(time_axis, rhat[:,i], 'r')
+    axs.flatten()[i].plot([0, 10], [m, m], 'k', linewidth=2)
     axs.flatten()[i].set_xlim(win[0], win[1]//2)
     axs.flatten()[i].set_title(f'{i}')
     # turn off
     axs.flatten()[i].axis('off')
     axs.flatten()[i].set_title(f'{i}')
-
-
-
-#%%
-
-rbar = results['ccnorm']['rbar']
-rhat_bar = results['ccnorm']['rbarhat']
-robs_trial = results['ccnorm']['robs_trial']
-rhat_trial = results['ccnorm']['rhat_trial']
-
-cc += 1
-plt.figure(figsize=(5,5))
-plt.subplot(2,1,2)
-# _ = plt.plot(np.arange(rbar.shape[0]), rbar[:,cc], 'k')
-# _ = plt.plot(np.arange(rbar.shape[0]), rhat_bar[:,cc], 'r')
-x = np.nanmean(robs_trial[:,:,cc], 0)/120*1000
-y = np.nanmean(rhat_trial[:,:,cc], 0)/120*1000
-plt.plot(x, 'k')
-plt.plot(y, 'r')
-plt.xlim(0, 180)
-rho = np.corrcoef(x[35:], y[35:])[0,1]
-plt.title(f'rho={rho:.2f}')
-
-m = np.nanmean(np.isfinite(robs_trial), axis=2)>0
-last = m.shape[1]-1 - np.argmax(m[:, ::-1], axis=1)
-last[~m.any(1)] = -1   # rows with no finite values -> -1
-ind = np.argsort(last)
-
-ind = ind[int(sum(last==-1)):]
-plt.subplot(2,1,1)
-plt.imshow(robs_trial[ind,:, cc], cmap='gray_r', interpolation='none', origin='lower')
-plt.xlim(0, 180)
-
-# plt.bar(bps)
-# plt.plot(results['bps']['backimage']['bps'], '.')
-
-#%%
-cc = 0
-s = 0
-#%%
-cc += 1
-r = results['saccade']['backimage']['robs'][:,:,cc]
-win = results['saccade']['backimage']['win']
-dt = 1/240
-plt.imshow(r, cmap='gray_r', interpolation='none', aspect='auto', extent=[win[0]*dt, win[1]*dt, 0, r.shape[0]])
-plt.xlim(0, .25)
-
-#%%
-s += 1 
-robs = results['saccade']['backimage']['robs'][s].T
-rhat = results['saccade']['backimage']['rhat'][s].T
-plt.imshow(np.concatenate([robs, rhat], 0), cmap='gray_r', interpolation='none', aspect='auto')
-
-#%%
-# Access results
-val_bps = results['bps']['val']
-ccnorm = results['ccnorm']['ccnorm']
-#%%
-
-ccnorm
-
-#%%
-train_data, val_data, dataset_config = load_single_dataset(model, 0)
-stim_types_in_dataset = [d.metadata['name'] for d in train_data.dsets]
-
-#%%
-
-plt.imshow(results['bps']['fixrsvp']['rhat'].T, cmap='gray_r', interpolation='none', aspect='auto')
-
-stim_indices = get_stim_inds('fixrsvp', train_data, val_data)
-data = val_data.shallow_copy()
-data.inds = stim_indices
-
-dset_idx = np.unique(stim_indices[:,0]).item()
-time_inds = data.dsets[dset_idx]['psth_inds'].numpy()
-trial_inds = data.dsets[dset_idx]['trial_inds'].numpy()
-
-[plt.axvline(x, color='r', linestyle='--') for x in np.where(time_inds==0)[0]]
-plt.xlim(0, 1000)
-
-
-# %%
-from eval.eval_stack_utils import get_fixrsvp_trials
-robs_trial, rhat_trial, dfs_trial = get_fixrsvp_trials(
-            model, results['bps'], 0, train_data, val_data)
-        
-# %%
-cc += 1
-if cc >= robs_trial.shape[2]:
-    cc = 0
-_ = plt.plot(np.nanmean(robs_trial, (0))[:,cc])
-_ = plt.plot(np.nanmean(rhat_trial, (0))[:,cc])
-# %%
-robs = results['bps']['fixrsvp']['robs']
-rhat = results['bps']['fixrsvp']['rhat']
-stim_indices = get_stim_inds('fixrsvp', train_data, val_data)
-
-#%%
-data = val_data.shallow_copy()
-data.inds = stim_indices
-
-dset_idx = np.unique(stim_indices[:,0]).item()
-time_inds = data.dsets[dset_idx]['psth_inds'].numpy()
-trial_inds = data.dsets[dset_idx]['trial_inds'].numpy()
-unique_trials = np.unique(trial_inds)
-
-#%%
-n_trials = len(unique_trials)
-n_time = np.max(time_inds).item()+1
-n_units = data.dsets[dset_idx]['robs'].shape[1]
-robs_trial = np.nan*np.zeros((n_trials, n_time, n_units))
-rhat_trial = np.nan*np.zeros((n_trials, n_time, n_units))
-dfs_trial = np.nan*np.zeros((n_trials, n_time, n_units))
-
-for itrial in range(n_trials):
-    print(f"Trial {itrial}/{n_trials}")
-
-    trial_idx = np.where(trial_inds == unique_trials[itrial])[0]
-    eval_inds = np.where(np.isin(stim_indices[:,1], trial_idx))[0]
-    data_inds = trial_idx[np.where(np.isin(trial_idx, stim_indices[:,1]))[0]]
-
-    assert torch.all(robs[eval_inds] == data.dsets[dset_idx]['robs'][data_inds]).item(), 'robs mismatch'
-
-    robs_trial[itrial, time_inds[data_inds]] = robs[eval_inds]
-    rhat_trial[itrial, time_inds[data_inds]] = rhat[eval_inds]
-    dfs_trial[itrial, time_inds[data_inds]] = data.dsets[dset_idx]['dfs'][data_inds]
-
-    # return robs_trial, rhat_trial, dfs_trial
-# %%
-# cc += 1
-np.isfinite(robs_trial[:,:,0])
-plt.imshow(robs_trial[:,:150,cc], cmap='gray_r', interpolation='none')
-# %%
-m = np.nanmean(np.isfinite(robs_trial), axis=2)>0
-last = m.shape[1]-1 - np.argmax(m[:, ::-1], axis=1)
-last[~m.any(1)] = -1   # rows with no finite values -> -1
-
-# %%
-plt.imshow(robs_trial[last,:150,cc], cmap='gray_r', interpolation='none')
 # %%

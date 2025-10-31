@@ -144,13 +144,9 @@ class BaseFactorizedReadout(nn.Module):
             fig_spatial.tight_layout(rect=[0, 0, 1, 0.96]) # Adjust for suptitle
 
             # plot_type = "ellipse contours" if ellipse else "spatial masks"
-            
-
-        # else:
-        #     axs[1].text(0.5, 0.5, "Spatial weights H or W is 0, cannot plot.", ha='center', va='center')
         
         fig.tight_layout()
-        return fig, axs # Potentially return fig_spatial as well, or handle display outside
+        return fig, fig_spatial # Potentially return fig_spatial as well, or handle display outside
 
     def _plot_ellipses(self, axs_spatial_grid, n_cols_spatial, H, W):
         """
