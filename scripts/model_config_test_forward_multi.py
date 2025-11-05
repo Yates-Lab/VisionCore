@@ -45,7 +45,7 @@ AMP_BF16 = lambda: torch.autocast(device_type="cuda", dtype=torch.bfloat16)
 from models.config_loader import load_dataset_configs
 import os
 
-config_path = Path("/home/jake/repos/VisionCore/experiments/model_configs/learned_dense_concat_convgru_gaussian_history.yaml")
+config_path = Path("/home/jake/repos/VisionCore/experiments/model_configs/learned_dense_film_none_gaussian.yaml")
 
 dataset_configs_path = "/home/jake/repos/VisionCore/experiments/dataset_configs/multi_basic_120_backimage_history.yaml"
 dataset_configs = load_dataset_configs(dataset_configs_path)
@@ -55,11 +55,12 @@ config = load_config(config_path)
 model = build_model(config, dataset_configs).to(device)
 
 #%%
-for i in range(len(model.readouts)):
-    n_units = model.readouts[i].n_units
-    n_units_history = model.spike_history[i].mlp[-1].weight.shape[0]
-    
-    print(f"readout {i} has {n_units} units, history has {n_units_history} units")
+if hasattr(model, 'spike_history'):
+    for i in range(len(model.readouts)):
+        n_units = model.readouts[i].n_units
+        n_units_history = model.spike_history[i].mlp[-1].weight.shape[0]
+        
+        print(f"readout {i} has {n_units} units, history has {n_units_history} units")
     
     
 # model.core_forward = torch.compile(model.core_forward)
@@ -112,20 +113,6 @@ batch = train_datasets[f'dataset_{dataset_id}'][inds]
 
 batch = {k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)}
 # batch["stim"] = batch["stim"].to(torch.bfloat16)          # ! reduce mem
-
-#%%
-                
-print(f"dataset_id being used: {dataset_id}")
-print(f"batch['history'].shape: {batch['history'].shape}")
-if batch['history'].dim() == 3:
-    B, num_lags, n_units_in_batch = batch['history'].shape
-    print(f"  -> {n_units_in_batch} units in history tensor")
-    print(f"  -> {num_lags} lags")
-    
-print(f"\nModel expects for dataset {dataset_id}:")
-print(f"  n_units: {model.readouts[dataset_id].n_units}")
-print(f"  MLP input_dim: {model.spike_history[dataset_id].input_dim}")
-print(f"  MLP output_dim: {model.spike_history[dataset_id].output_dim}")
 #%%
                 # convert to rates
 

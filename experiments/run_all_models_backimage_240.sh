@@ -63,6 +63,7 @@ STEPS_PER_EPOCH=1024    # Number of steps per epoch
 
 # Model compilation configuration
 COMPILE_MODEL=false # THIS ONLY SLOWS THINGS DOWN
+ENABLE_LOGGING=true
 
 # Project and data paths
 PROJECT_NAME="multidataset_backimage_240"
@@ -136,6 +137,10 @@ run_training() {
 
     if [ "$COMPILE_MODEL" = true ]; then
         TRAINING_CMD="$TRAINING_CMD --compile"
+    fi
+
+    if [ "$ENABLE_LOGGING" = true ]; then
+        TRAINING_CMD="$TRAINING_CMD --enable_logging"
     fi
 
     # Launch training

@@ -43,7 +43,7 @@ class MultiDatasetDM(pl.LightningDataModule):
         (default: False)
     dset_dtype : str, optional
         Dataset storage dtype in CPU RAM (default: 'uint8')
-        - 'uint8': Store as uint8, normalize on GPU (only supports pixelnorm)
+        - 'uint8': Store as uint8, normalize on GPU (only supports pixelnorm and unsqueeze)
         - 'bfloat16': Apply all transforms, store as bfloat16 (2x memory)
         - 'float32': Apply all transforms, store as float32 (4x memory)
 
@@ -108,7 +108,11 @@ class MultiDatasetDM(pl.LightningDataModule):
 
     def _check_for_non_pixelnorm_transforms(self, cfg: Dict) -> bool:
         """
-        Check if config has transforms other than pixelnorm.
+        Check if config has transforms other than pixelnorm and unsqueeze.
+
+        When using uint8 storage, only pixelnorm and unsqueeze transforms are allowed
+        on the stim data. Other transforms (dacones, temporal_basis, etc.) require
+        float data and are incompatible with uint8 storage.
 
         Parameters
         ----------
@@ -118,22 +122,31 @@ class MultiDatasetDM(pl.LightningDataModule):
         Returns
         -------
         bool
-            True if there are transforms other than pixelnorm
+            True if there are transforms other than pixelnorm/unsqueeze
         """
         if 'transforms' not in cfg:
             return False
 
+        # Transforms that are safe to use with uint8 storage
+        # - pixelnorm: will be removed and applied on-the-fly during serving
+        # - unsqueeze: just adds a dimension, doesn't modify data
+        ALLOWED_TRANSFORMS = {'pixelnorm', 'unsqueeze'}
+
         transforms = cfg['transforms']
         for transform_key, transform_spec in transforms.items():
-            if 'ops' in transform_spec:
+            # Only check transforms that operate on stim data
+            if transform_spec.get('source') == 'stim' and 'ops' in transform_spec:
                 for op in transform_spec['ops']:
                     if isinstance(op, dict):
-                        # Check if this op is NOT pixelnorm
-                        if 'pixelnorm' not in op:
+                        # Check if this op is NOT in the allowed set
+                        op_name = next(iter(op.keys()))
+                        if op_name not in ALLOWED_TRANSFORMS:
                             return True
                     else:
-                        # Non-dict ops are not pixelnorm
-                        return True
+                        # Non-dict ops (e.g., string-only ops) are not allowed
+                        # unless they're in the allowed set
+                        if op not in ALLOWED_TRANSFORMS:
+                            return True
         return False
 
     def setup(self, stage: Optional[str] = None):
@@ -167,11 +180,11 @@ class MultiDatasetDM(pl.LightningDataModule):
 
             if self.dset_dtype == 'uint8':
                 # Path 1: uint8 storage (current behavior)
-                # Check for non-pixelnorm transforms
+                # Check for non-pixelnorm/unsqueeze transforms
                 if self._check_for_non_pixelnorm_transforms(cfg):
                     raise ValueError(
-                        f"Dataset '{name}' has transforms other than pixelnorm, "
-                        f"but dset_dtype='uint8' only supports pixelnorm. "
+                        f"Dataset '{name}' has transforms other than pixelnorm/unsqueeze, "
+                        f"but dset_dtype='uint8' only supports pixelnorm and unsqueeze. "
                         f"Use dset_dtype='bfloat16' or 'float32' to enable other transforms."
                     )
 

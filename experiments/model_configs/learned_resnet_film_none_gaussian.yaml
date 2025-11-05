@@ -20,7 +20,7 @@ frontend:
     num_channels: 4
     init_type: gaussian_derivatives
     split_MP: true
-    aa_signal: false
+    aa_signal: true
     causal: true
     bias: false
 

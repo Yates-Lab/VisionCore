@@ -148,8 +148,8 @@ def main():
                    help="Interval for fast logging (kernel visualizations)")
     p.add_argument("--slow_log_interval", type=int, default=10,
                    help="Interval for slow logging (evaluation stack)")
-    p.add_argument("--log_dataset_indices", type=int, nargs="+", default=[0],
-                   help="Dataset indices to evaluate during slow logging")
+    p.add_argument("--log_dataset_idx", type=int, default=7,
+                   help="Dataset index to evaluate during slow logging")
 
     args = p.parse_args()
 
@@ -234,8 +234,7 @@ def main():
             ModelLoggingCallback(
                 fast_interval=args.fast_log_interval,
                 slow_interval=args.slow_log_interval,
-                eval_dataset_indices=args.log_dataset_indices,
-                eval_analyses=['bps', 'ccnorm', 'saccade', 'sta'],
+                eval_dataset_idx=args.log_dataset_idx,
                 batch_size=64,
                 rescale=True
             )

@@ -162,10 +162,8 @@ class ModelLoggingCallback(pl.Callback):
         Interval for fast logging (kernel visualizations), by default 5
     slow_interval : int, optional
         Interval for slow logging (evaluation stack), by default 10
-    eval_dataset_indices : list of int, optional
-        Dataset indices to evaluate during slow logging, by default [0]
-    eval_analyses : list of str, optional
-        Analyses to run during slow logging, by default ['bps', 'ccnorm', 'saccade', 'sta']
+    eval_dataset_idx : int, optional
+        Dataset index to evaluate during slow logging, by default 7
     batch_size : int, optional
         Batch size for evaluation, by default 64
     rescale : bool, optional
@@ -176,8 +174,7 @@ class ModelLoggingCallback(pl.Callback):
     >>> callback = ModelLoggingCallback(
     ...     fast_interval=5,
     ...     slow_interval=10,
-    ...     eval_dataset_indices=[0, 7],
-    ...     eval_analyses=['bps', 'ccnorm', 'saccade', 'sta']
+    ...     eval_dataset_idx=7
     ... )
     >>> trainer = pl.Trainer(callbacks=[callback])
     """
@@ -186,16 +183,15 @@ class ModelLoggingCallback(pl.Callback):
         self,
         fast_interval: int = 5,
         slow_interval: int = 10,
-        eval_dataset_indices: list = None,
-        eval_analyses: list = None,
+        eval_dataset_idx: int = 7,
         batch_size: int = 64,
         rescale: bool = True
     ):
         super().__init__()
         self.fast_interval = fast_interval
         self.slow_interval = slow_interval
-        self.eval_dataset_indices = eval_dataset_indices or [0]
-        self.eval_analyses = eval_analyses or ['bps', 'ccnorm', 'saccade', 'sta']
+        self.eval_dataset_idx = eval_dataset_idx
+        self.eval_analyses = ['bps', 'ccnorm', 'saccade', 'sta', 'qc']
         self.batch_size = batch_size
         self.rescale = rescale
 
@@ -236,7 +232,6 @@ class ModelLoggingCallback(pl.Callback):
 
         try:
             model = pl_module.model  # Access the wrapped model
-            logger = trainer.logger.experiment  # WandB run object
             log_dict = {}
 
             # 1. Frontend temporal kernels
@@ -254,7 +249,7 @@ class ModelLoggingCallback(pl.Callback):
             if hasattr(model, 'convnet') and hasattr(model.convnet, 'stem'):
                 if hasattr(model.convnet.stem, 'components') and hasattr(model.convnet.stem.components, 'conv'):
                     if hasattr(model.convnet.stem.components.conv, 'plot_weights'):
-                        fig = model.convnet.stem.components.conv.plot_weights()
+                        fig, _ = model.convnet.stem.components.conv.plot_weights()
                         plt.title('Stem Kernels')
                         log_dict['kernels/stem'] = wandb.Image(fig)
                         plt.close(fig)
@@ -265,13 +260,13 @@ class ModelLoggingCallback(pl.Callback):
                     try:
                         if hasattr(layer, 'components') and hasattr(layer.components, 'conv'):
                             if hasattr(layer.components.conv, 'plot_weights'):
-                                fig = layer.components.conv.plot_weights(nrow=20)
+                                fig, _ = layer.components.conv.plot_weights(nrow=20)
                                 log_dict[f'kernels/layer_{i}'] = wandb.Image(fig)
                                 plt.close(fig)
                         elif hasattr(layer, 'main_block') and hasattr(layer.main_block, 'components'):
                             if hasattr(layer.main_block.components, 'conv'):
                                 if hasattr(layer.main_block.components.conv, 'plot_weights'):
-                                    fig = layer.main_block.components.conv.plot_weights(nrow=20)
+                                    fig, _ = layer.main_block.components.conv.plot_weights(nrow=20)
                                     log_dict[f'kernels/layer_{i}'] = wandb.Image(fig)
                                     plt.close(fig)
                     except Exception as e:
@@ -287,15 +282,22 @@ class ModelLoggingCallback(pl.Callback):
                         dummy_input = torch.randn(1, readout.features.in_channels, 1, 15, 15).to(device)
                         with torch.no_grad():
                             readout(dummy_input)
-                        fig = readout.plot_weights(ellipse=False)
-                        log_dict['kernels/readout_0'] = wandb.Image(fig)
-                        plt.close(fig)
+                        result = readout.plot_weights(ellipse=False)
+                        # plot_weights returns (fig, fig_spatial) or (None, None)
+                        if result is not None and result[0] is not None:
+                            fig, fig_spatial = result
+                            log_dict['kernels/readout_0_features'] = wandb.Image(fig)
+                            if fig_spatial is not None:
+                                log_dict['kernels/readout_0_spatial'] = wandb.Image(fig_spatial)
+                            plt.close(fig)
+                            if fig_spatial is not None:
+                                plt.close(fig_spatial)
                 except Exception as e:
                     print(f"Warning: Could not plot readout weights: {e}")
 
-            # Log all figures to wandb
+            # Log all figures to wandb in a single call
             if log_dict:
-                logger.log(log_dict, step=trainer.global_step)
+                pl_module.logger.experiment.log(log_dict, step=trainer.global_step)
                 print(f"  ✓ Logged {len(log_dict)} kernel visualizations")
 
             # Clean up
@@ -312,11 +314,7 @@ class ModelLoggingCallback(pl.Callback):
         """
         Slow logging: run full evaluation stack.
 
-        Logs:
-        - BPS metrics and plots
-        - CCNORM traces
-        - Saccade-triggered averages
-        - Spike-triggered averages (STAs)
+        Follows scripts/eval_stack_devel.py exactly.
         """
         import matplotlib.pyplot as plt
         import wandb
@@ -336,215 +334,160 @@ class ModelLoggingCallback(pl.Callback):
         pl_module.eval()
 
         try:
-            logger = trainer.logger.experiment  # WandB run object
+            # Evaluate dataset 7 (matching the script)
+            dataset_idx = self.eval_dataset_idx
+            if dataset_idx >= len(pl_module.names):
+                print(f"Warning: Dataset index {dataset_idx} out of range. Skipping slow logging.")
+                return
 
-            # Evaluate each dataset
-            for dataset_idx in self.eval_dataset_indices:
-                if dataset_idx >= len(pl_module.names):
-                    print(f"Warning: Dataset index {dataset_idx} out of range. Skipping.")
-                    continue
+            dataset_name = pl_module.names[dataset_idx]
+            print(f"  Evaluating dataset {dataset_idx}: {dataset_name}")
 
-                dataset_name = pl_module.names[dataset_idx]
-                print(f"  Evaluating dataset {dataset_idx}: {dataset_name}")
+            try:
+                # Run evaluation stack (matching line 106-111 of script)
+                results = eval_stack_single_dataset(
+                    model=pl_module,
+                    dataset_idx=dataset_idx,
+                    analyses=self.eval_analyses,
+                    batch_size=self.batch_size,
+                    rescale=self.rescale
+                )
 
-                try:
-                    # Run evaluation stack
-                    results = eval_stack_single_dataset(
-                        model=pl_module,
-                        dataset_idx=dataset_idx,
-                        analyses=self.eval_analyses,
-                        batch_size=self.batch_size,
-                        rescale=self.rescale
-                    )
+                # Accumulate all logging data
+                log_dict = {}
+                prefix = f"eval_ds{dataset_idx}"
 
-                    # Log results
-                    log_dict = {}
-                    prefix = f"eval_ds{dataset_idx}"
+                # 1. BPS plot (matching lines 158-166 of script)
+                if 'bps' in results:
+                    fig = plt.figure(figsize=(12, 6))
+                    for k in results['bps']:
+                        if k in ['val', 'cids']:
+                            continue
+                        plt.plot(np.arange(len(results['bps'][k]['bps'])),
+                                np.maximum(results['bps'][k]['bps'], -.1),
+                                label=k, alpha=0.5)
+                    plt.legend()
+                    plt.xlabel('Cell Index')
+                    plt.ylabel('BPS')
+                    plt.title(f'Bits Per Spike - {dataset_name}')
+                    log_dict[f'{prefix}/bps'] = wandb.Image(fig)
+                    plt.close(fig)
 
-                    # 1. BPS metrics and plots
-                    if 'bps' in results:
-                        bps_results = results['bps']
+                # 2. CCNORM plot (matching lines 172-196 of script)
+                if 'ccnorm' in results:
+                    rbar = results['ccnorm']['rbar']
+                    rhat_bar = results['ccnorm']['rbarhat']
 
-                        # Log scalar BPS values
-                        for stim_type, stim_data in bps_results.items():
-                            if stim_type in ['val', 'cids']:
-                                continue
-                            if isinstance(stim_data, dict) and 'bps' in stim_data:
-                                bps_values = stim_data['bps']
-                                mean_bps = np.nanmean(bps_values)
-                                log_dict[f'{prefix}/bps_{stim_type}_mean'] = mean_bps
+                    good_samples = np.sum(~np.isnan(rbar), 0)
+                    good_units = np.where(good_samples == good_samples.max())[0]
 
-                        # Create BPS plot
-                        fig = plt.figure(figsize=(12, 6))
-                        for stim_type, stim_data in bps_results.items():
-                            if stim_type in ['val', 'cids']:
-                                continue
-                            if isinstance(stim_data, dict) and 'bps' in stim_data:
-                                bps_values = np.maximum(stim_data['bps'], -0.1)
-                                plt.plot(np.arange(len(bps_values)), bps_values,
-                                        label=stim_type, alpha=0.7, marker='o', markersize=3)
-                        plt.xlabel('Cell Index')
-                        plt.ylabel('BPS')
-                        plt.title(f'Bits Per Spike - {dataset_name}')
-                        plt.legend()
-                        plt.grid(True, alpha=0.3)
-                        log_dict[f'{prefix}/bps_plot'] = wandb.Image(fig)
-                        plt.close(fig)
+                    NC = len(good_units)  # ALL good units, not limited
+                    sx = int(np.sqrt(NC))
+                    sy = int(np.ceil(NC / sx))
+                    fig, axs = plt.subplots(sy, sx, figsize=(2*sx, 2*sy), sharex=True, sharey=False)
+                    for i in range(sx*sy):
+                        if i >= NC:
+                            axs.flatten()[i].axis('off')
+                            continue
+                        cc = good_units[i]
+                        axs.flatten()[i].plot(rbar[:,cc], 'k')
+                        axs.flatten()[i].plot(rhat_bar[:,cc], 'r')
+                        axs.flatten()[i].set_title(f'{cc}')
+                        axs.flatten()[i].axis('off')
+                        axs.flatten()[i].set_title(f'{cc}')
+                    axs.flatten()[i].set_xlim(32, 150)
+                    plt.suptitle(f'CCNORM - {dataset_name}')
+                    plt.tight_layout()
+                    log_dict[f'{prefix}/ccnorm'] = wandb.Image(fig)
+                    plt.close(fig)
 
-                    # 2. CCNORM plots
-                    if 'ccnorm' in results:
-                        ccnorm_results = results['ccnorm']
-                        if 'rbar' in ccnorm_results and 'rbarhat' in ccnorm_results:
-                            rbar = ccnorm_results['rbar']
-                            rhat_bar = ccnorm_results['rbarhat']
+                # 3. Saccade-triggered averages - ONLY backimage (matching lines 198-223 of script)
+                if 'saccade' in results and 'backimage' in results['saccade']:
+                    rbar = results['saccade']['backimage']['rbar']
+                    rhat = results['saccade']['backimage']['rbarhat']
+                    win = results['saccade']['backimage']['win']
 
-                            # Find good units (complete data)
-                            good_samples = np.sum(~np.isnan(rbar), 0)
-                            good_units = np.where(good_samples == good_samples.max())[0]
+                    N = rbar.shape[1]
+                    sx = int(np.sqrt(N))
+                    sy = int(np.ceil(N / sx))
+                    fig_saccade, axs = plt.subplots(sy, sx, figsize=(2*sx, 2*sy), sharex=True, sharey=False)
+                    time_axis = np.arange(win[0], win[1])
+                    for i in range(sx*sy):
+                        if i >= N:
+                            axs.flatten()[i].axis('off')
+                            continue
+                        axs.flatten()[i].plot(time_axis, rbar[:,i], 'k')
+                        m = rbar[:,i].mean()
+                        axs.flatten()[i].axhline(m, linestyle='--', color='k')
+                        axs.flatten()[i].axvline(0, linestyle='--', color='k')
+                        axs.flatten()[i].plot(time_axis, rhat[:,i], 'r')
+                        axs.flatten()[i].plot([0, 10], [m, m], 'k', linewidth=2)
+                        axs.flatten()[i].set_xlim(win[0], win[1]//2)
+                        axs.flatten()[i].set_title(f'{i}')
+                        axs.flatten()[i].axis('off')
+                        axs.flatten()[i].set_title(f'{i}')
+                    plt.suptitle(f'Saccade-triggered - backimage - {dataset_name}')
+                    plt.tight_layout()
+                    log_dict[f'{prefix}/saccade_backimage'] = wandb.Image(fig_saccade)
+                    plt.close(fig_saccade)
 
-                            if len(good_units) > 0:
-                                NC = min(len(good_units), 16)  # Limit to 16 units
-                                sx = int(np.sqrt(NC))
-                                sy = int(np.ceil(NC / sx))
+                # 4. Spike-triggered averages (STAs) - ALL cells (matching lines 115-156 of script)
+                if 'sta' in results:
+                    sta_dict = results['sta']
+                    N = len(sta_dict['peak_lag'])
+                    num_lags = sta_dict['Z_STA_robs'].shape[0]
+                    rf_pairs_full = []
+                    rf_pairs = []
 
-                                fig, axs = plt.subplots(sy, sx, figsize=(2*sx, 2*sy),
-                                                       sharex=True, sharey=False)
-                                axs = np.atleast_1d(axs).flatten()
+                    for cc in range(N):  # ALL cells, not limited
+                        this_lag = sta_dict['peak_lag'][cc]
+                        sta_robs = sta_dict['Z_STA_robs'][:,:,:,cc]
+                        sta_rhat = sta_dict['Z_STA_rhat'][:,:,:,cc]
+                        # zscore each
+                        sta_robs = (sta_robs - sta_robs.mean((0,1))) / sta_robs.std((0,1))
+                        sta_rhat = (sta_rhat - sta_rhat.mean((0,1))) / sta_rhat.std((0,1))
+                        grid = make_grid(torch.concat([sta_robs, sta_rhat], 0).unsqueeze(1), nrow=num_lags, normalize=True, scale_each=False, padding=2, pad_value=1)
+                        grid = 0.2989 * grid[0:1,:,:] + 0.5870 * grid[1:2,:,:] + 0.1140 * grid[2:3,:,:] # convert to grayscale
+                        rf_pairs_full.append(grid)
 
-                                for i in range(sx*sy):
-                                    if i >= NC:
-                                        axs[i].axis('off')
-                                        continue
-                                    cc = good_units[i]
-                                    axs[i].plot(rbar[:, cc], 'k', label='Observed')
-                                    axs[i].plot(rhat_bar[:, cc], 'r', label='Predicted')
-                                    axs[i].set_title(f'Unit {cc}', fontsize=8)
-                                    axs[i].axis('off')
+                        # do the same for the peak lag
+                        sta_robs = sta_dict['Z_STA_robs'][this_lag,:,:,cc]
+                        sta_rhat = sta_dict['Z_STA_rhat'][this_lag,:,:,cc]
+                        # zscore each
+                        sta_robs = (sta_robs - sta_robs.mean()) / sta_robs.std()
+                        sta_rhat = (sta_rhat - sta_rhat.mean()) / sta_rhat.std()
+                        grid = torch.stack([sta_robs, sta_rhat], 0).unsqueeze(1)
+                        grid = make_grid(grid, nrow=2, normalize=True, scale_each=False, padding=2, pad_value=1)
+                        grid = 0.2989 * grid[0:1,:,:] + 0.5870 * grid[1:2,:,:] + 0.1140 * grid[2:3,:,:] # convert to grayscale
+                        rf_pairs.append(grid)
 
-                                plt.suptitle(f'CCNORM - {dataset_name}')
-                                plt.tight_layout()
-                                log_dict[f'{prefix}/ccnorm'] = wandb.Image(fig)
-                                plt.close(fig)
+                    # log the full spatio-temporal STAs for each Cell and model
+                    log_grid_full = make_grid(torch.stack(rf_pairs_full), nrow=3, normalize=True, scale_each=True, padding=2, pad_value=1)
+                    fig = plt.figure(figsize=(20, 20))
+                    plt.imshow(log_grid_full.detach().cpu().permute(1, 2, 0).numpy())
+                    plt.axis('off')
+                    plt.title(f'STAs (full temporal) - {dataset_name}')
+                    log_dict[f'{prefix}/sta_full'] = wandb.Image(fig)
+                    plt.close(fig)
 
-                    # 3. Saccade-triggered averages
-                    if 'saccade' in results:
-                        for stim_type, saccade_data in results['saccade'].items():
-                            if 'rbar' not in saccade_data or 'rbarhat' not in saccade_data:
-                                continue
+                    # log the peak lag STAs for each Cell and model
+                    log_grid_peak_lag = make_grid(torch.stack(rf_pairs), nrow=int(np.sqrt(N)), normalize=True, scale_each=True, padding=2, pad_value=1)
+                    fig = plt.figure(figsize=(20, 20))
+                    plt.imshow(log_grid_peak_lag.detach().cpu().permute(1, 2, 0).numpy())
+                    plt.axis('off')
+                    plt.title(f'STAs (peak lag) - {dataset_name}')
+                    log_dict[f'{prefix}/sta_peak'] = wandb.Image(fig)
+                    plt.close(fig)
 
-                            rbar = saccade_data['rbar']
-                            rhat = saccade_data['rbarhat']
-                            win = saccade_data.get('win', [-20, 40])
+                # Log all results in a single call
+                if log_dict:
+                    pl_module.logger.experiment.log(log_dict, step=trainer.global_step)
+                    print(f"  ✓ Logged {len(log_dict)} evaluation results to WandB")
 
-                            N = rbar.shape[1]
-                            NC = min(N, 16)  # Limit to 16 units
-                            sx = int(np.sqrt(NC))
-                            sy = int(np.ceil(NC / sx))
-
-                            fig, axs = plt.subplots(sy, sx, figsize=(2*sx, 2*sy),
-                                                   sharex=True, sharey=False)
-                            axs = np.atleast_1d(axs).flatten()
-
-                            time_axis = np.arange(win[0], win[1])
-                            for i in range(sx*sy):
-                                if i >= NC:
-                                    axs[i].axis('off')
-                                    continue
-                                axs[i].plot(time_axis, rbar[:, i], 'k', linewidth=1.5)
-                                m = rbar[:, i].mean()
-                                axs[i].axhline(m, linestyle='--', color='k', alpha=0.5)
-                                axs[i].axvline(0, linestyle='--', color='gray', alpha=0.5)
-                                axs[i].plot(time_axis, rhat[:, i], 'r', linewidth=1.5)
-                                axs[i].set_xlim(win[0], win[1]//2)
-                                axs[i].set_title(f'Unit {i}', fontsize=8)
-                                axs[i].axis('off')
-
-                            plt.suptitle(f'Saccade-triggered - {stim_type} - {dataset_name}')
-                            plt.tight_layout()
-                            log_dict[f'{prefix}/saccade_{stim_type}'] = wandb.Image(fig)
-                            plt.close(fig)
-
-                    # 4. Spike-triggered averages (STAs)
-                    if 'sta' in results:
-                        sta_dict = results['sta']
-                        if 'Z_STA_robs' in sta_dict and 'Z_STA_rhat' in sta_dict:
-                            N = len(sta_dict.get('peak_lag', []))
-                            num_lags = sta_dict['Z_STA_robs'].shape[0]
-
-                            # Create full spatio-temporal STAs
-                            rf_pairs_full = []
-                            rf_pairs_peak = []
-
-                            for cc in range(min(N, 20)):  # Limit to 20 cells
-                                this_lag = sta_dict['peak_lag'][cc]
-                                sta_robs = sta_dict['Z_STA_robs'][:, :, :, cc]
-                                sta_rhat = sta_dict['Z_STA_rhat'][:, :, :, cc]
-
-                                # Z-score each
-                                sta_robs = (sta_robs - sta_robs.mean((0, 1))) / (sta_robs.std((0, 1)) + 1e-8)
-                                sta_rhat = (sta_rhat - sta_rhat.mean((0, 1))) / (sta_rhat.std((0, 1)) + 1e-8)
-
-                                # Full temporal sequence
-                                grid = make_grid(
-                                    torch.concat([sta_robs, sta_rhat], 0).unsqueeze(1),
-                                    nrow=num_lags, normalize=True, scale_each=False,
-                                    padding=2, pad_value=1
-                                )
-                                # Convert to grayscale
-                                grid = 0.2989 * grid[0:1, :, :] + 0.5870 * grid[1:2, :, :] + 0.1140 * grid[2:3, :, :]
-                                rf_pairs_full.append(grid)
-
-                                # Peak lag only
-                                sta_robs_peak = sta_dict['Z_STA_robs'][this_lag, :, :, cc]
-                                sta_rhat_peak = sta_dict['Z_STA_rhat'][this_lag, :, :, cc]
-
-                                # Z-score
-                                sta_robs_peak = (sta_robs_peak - sta_robs_peak.mean()) / (sta_robs_peak.std() + 1e-8)
-                                sta_rhat_peak = (sta_rhat_peak - sta_rhat_peak.mean()) / (sta_rhat_peak.std() + 1e-8)
-
-                                grid = torch.stack([sta_robs_peak, sta_rhat_peak], 0).unsqueeze(1)
-                                grid = make_grid(grid, nrow=2, normalize=True, scale_each=False,
-                                               padding=2, pad_value=1)
-                                grid = 0.2989 * grid[0:1, :, :] + 0.5870 * grid[1:2, :, :] + 0.1140 * grid[2:3, :, :]
-                                rf_pairs_peak.append(grid)
-
-                            # Log full spatio-temporal STAs
-                            if rf_pairs_full:
-                                log_grid_full = make_grid(
-                                    torch.stack(rf_pairs_full), nrow=3,
-                                    normalize=True, scale_each=True, padding=2, pad_value=1
-                                )
-                                fig = plt.figure(figsize=(15, 15))
-                                plt.imshow(log_grid_full.detach().cpu().permute(1, 2, 0).numpy())
-                                plt.axis('off')
-                                plt.title(f'STAs (full temporal) - {dataset_name}')
-                                log_dict[f'{prefix}/sta_full'] = wandb.Image(fig)
-                                plt.close(fig)
-
-                            # Log peak lag STAs
-                            if rf_pairs_peak:
-                                n_cells = len(rf_pairs_peak)
-                                nrow = int(np.sqrt(n_cells))
-                                log_grid_peak = make_grid(
-                                    torch.stack(rf_pairs_peak), nrow=nrow,
-                                    normalize=True, scale_each=True, padding=2, pad_value=1
-                                )
-                                fig = plt.figure(figsize=(12, 12))
-                                plt.imshow(log_grid_peak.detach().cpu().permute(1, 2, 0).numpy())
-                                plt.axis('off')
-                                plt.title(f'STAs (peak lag) - {dataset_name}')
-                                log_dict[f'{prefix}/sta_peak'] = wandb.Image(fig)
-                                plt.close(fig)
-
-                    # Log all results for this dataset
-                    if log_dict:
-                        logger.log(log_dict, step=trainer.global_step)
-                        print(f"    ✓ Logged {len(log_dict)} evaluation results for {dataset_name}")
-
-                except Exception as e:
-                    print(f"  Error evaluating dataset {dataset_idx}: {e}")
-                    import traceback
-                    traceback.print_exc()
+            except Exception as e:
+                print(f"  Error evaluating dataset {dataset_idx}: {e}")
+                import traceback
+                traceback.print_exc()
 
             # Clean up
             plt.close('all')

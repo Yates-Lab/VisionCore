@@ -18,7 +18,7 @@ frontend:
   params:
     kernel_size: 16
     num_channels: 4
-    init_type: biphasic
+    init_type: gaussian_derivatives
     split_MP: False
     aa_signal: true
     aa_window: hann
@@ -115,19 +115,19 @@ regularization:
     apply_to: ["readouts/features"]
     schedule:
       kind: warmup
-      start_epoch: 90
-  # - name: decay_readout_std
-  #   type: proximal_clamp_positive
-  #   lambda: 1.5  # final max std value
-  #   apply_to: ["readouts/std"]  # matches readouts.X.std_*
-  #   schedule:
-  #     kind: linear_decay
-  #     start_epoch: 0
-  #     end_epoch: 50
-  #     start_lambda: 10.0  # initial max 
-  # - name: exclude_means_from_wd
-  #   type: l2
-  #   lambda: 0.0  # No penalty, but excludes from weight decay
-  #   apply_to: ["readouts/mean"]
-  #   schedule:
-  #     kind: constant
+      start_epoch: 30
+  - name: decay_readout_std
+    type: proximal_clamp_positive
+    lambda: 1.5  # final max std value
+    apply_to: ["readouts/std"]  # matches readouts.X.std_*
+    schedule:
+      kind: linear_decay
+      start_epoch: 0
+      end_epoch: 50
+      start_lambda: 10.0  # initial max 
+  - name: exclude_means_from_wd
+    type: l2
+    lambda: 0.0  # No penalty, but excludes from weight decay
+    apply_to: ["readouts/mean"]
+    schedule:
+      kind: constant

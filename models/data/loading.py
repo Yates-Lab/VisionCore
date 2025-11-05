@@ -527,6 +527,7 @@ def prepare_data(dataset_config: Dict[str, Any], strict: bool = True):
                         dset[expose_as] = concatenated
                         # print(f"Concatenated {len(var_list)} variables for {expose_as}, final shape: {concatenated.shape}")
 
+            print(f"stim shape: {dset.covariates['stim'].shape}")
             preprocessed_dsets.append(dset)
 
         except Exception as e:

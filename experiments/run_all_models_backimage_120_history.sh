@@ -47,7 +47,7 @@ export LIBRARY_PATH="$HOME/.local/lib:$LIBRARY_PATH"
 export LD_LIBRARY_PATH="$HOME/.local/lib:$LD_LIBRARY_PATH"
 
 # Training configuration
-BATCH_SIZE=128          # Optimal batch size per GPU
+BATCH_SIZE=64          # Optimal batch size per GPU
 MAX_DATASETS=30        # Scale to all datasets (28 if removed the two bad sessions)
 LEARNING_RATE=1e-3    # standard learning rate
 CORE_LR_SCALE=.5
@@ -63,6 +63,7 @@ STEPS_PER_EPOCH=1024    # Number of steps per epoch
 
 # Model compilation configuration
 COMPILE_MODEL=false # THIS ONLY SLOWS THINGS DOWN
+ENABLE_LOGGING=true
 
 # Project and data paths
 PROJECT_NAME="multidataset_backimage_120"
@@ -135,6 +136,10 @@ run_training() {
 
     if [ "$COMPILE_MODEL" = true ]; then
         TRAINING_CMD="$TRAINING_CMD --compile"
+    fi
+
+    if [ "$ENABLE_LOGGING" = true ]; then
+        TRAINING_CMD="$TRAINING_CMD --enable_logging"
     fi
 
     # Launch training

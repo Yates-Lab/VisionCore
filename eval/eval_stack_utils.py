@@ -161,6 +161,8 @@ def extract_model_type(exp_name):
     # Order matters - check more specific patterns first
     if 'resnet_modulator' in exp_name:
         return 'resnet_modulator'
+    elif 'learned_dense_film_none_gaussian' in exp_name:
+        return 'learned_dense_film_none_gaussian'
     elif 'x3d_modulator' in exp_name:
         return 'x3d_modulator'
     elif 'dense_concat_convgru' in exp_name:
@@ -277,28 +279,36 @@ def extract_epoch(filename):
 def load_single_dataset(model, dataset_idx):
     """
     Load a single dataset for evaluation.
-    
+
     Parameters
     ----------
     model : MultiDatasetModel
         The trained model containing dataset configurations
     dataset_idx : int
         Index of the dataset to load
-        
+
     Returns
     -------
     tuple
         (train_dset, val_dset, dataset_config)
     """
+    import copy
+
     if dataset_idx >= len(model.names):
         raise ValueError(f"Dataset index {dataset_idx} out of range. Model has {len(model.names)} datasets.")
-    
+
+    # Try to get dataset config from various possible locations
+    # Use deepcopy to avoid modifying the original config stored in the model
     if hasattr(model, 'dataset_configs'):
-        dataset_config = model.dataset_configs[dataset_idx].copy()
+        dataset_config = copy.deepcopy(model.dataset_configs[dataset_idx])
     elif hasattr(model.model, 'dataset_configs'):
-        dataset_config = model.model.dataset_configs[dataset_idx].copy()
+        dataset_config = copy.deepcopy(model.model.dataset_configs[dataset_idx])
+    elif hasattr(model, 'cfgs'):
+        # During training, MultiDatasetModel stores configs in self.cfgs
+        dataset_config = copy.deepcopy(model.cfgs[dataset_idx])
     else:
-        # combine dataset config path with dataset name + yaml extension
+        # Fallback: try to load from file
+        # This assumes cfg_dir points to a directory with individual dataset configs
         config_path = model.hparams.cfg_dir
         dataset_name = model.names[dataset_idx]
         dataset_config_path = Path(config_path) / f"{dataset_name}.yaml"
@@ -390,10 +400,16 @@ def run_model(model, batch, dataset_idx):
     with torch.no_grad():
         if hasattr(model, 'is_modulator_only') and model.is_modulator_only:
             output = model.model(None, dataset_idx, batch.get('behavior'))
+        elif hasattr(model.model, 'spike_history'):
+            output = model.model(batch['stim'], dataset_idx, batch.get('behavior', None), batch.get('history', None))
         else:
             output = model.model(batch['stim'], dataset_idx, batch.get('behavior'))
         # output = model.model(batch['stim'], dataset_idx, batch.get('behavior'))
     batch['rhat'] = output
+    
+    if model.log_input:
+        batch['rhat'] = torch.exp(batch['rhat'])
+
     return batch
 
 
@@ -433,8 +449,6 @@ def evaluate_dataset(model, dataset, indices, dataset_idx, batch_size=256, desc=
         for iB in tqdm(range(0, len(dataset), batch_size), desc=desc):
             batch = dataset[iB:iB+batch_size]
             batch = run_model(model, batch, dataset_idx)
-            if model.log_input:
-                batch['rhat'] = torch.exp(batch['rhat'])
 
             robs.append(batch['robs'].detach().cpu())  # Move to CPU immediately
             rhat.append(batch['rhat'].detach().cpu())  # Move to CPU immediately

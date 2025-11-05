@@ -395,9 +395,9 @@ def fit_sine(phases, spikes, omega=1.0, variance_source='observed_y'):
 
 
 #%% MAIN GRATINGS ANALYSIS FUNCTION
+from eval.eval_stack_utils import argmax_subpixel
 
-def gratings_analysis(robs, sf, ori, phases, dt, n_lags=20, n_phase_bins=8, min_spikes=50, inds=None, dfs=None, 
-                     peak_sf_idx=None, peak_ori_idx=None):
+def gratings_analysis(robs, sf, ori, phases, dt, n_lags=20, n_phase_bins=8, min_spikes=50, inds=None, dfs=None):
     """
     Perform complete gratings analysis for all units.
 
@@ -423,10 +423,6 @@ def gratings_analysis(robs, sf, ori, phases, dt, n_lags=20, n_phase_bins=8, min_
         Indices of frames to include in analysis (default: None, uses all frames)
     dfs : numpy.ndarray, optional (n_frames, n_units)
         Data filter array indicating valid frames (default: None, uses all frames)
-    peak_sf_idx : numpy.ndarray, optional
-        Indices of preferred spatial frequency for each unit. If provided, overrides automatic detection.
-    peak_ori_idx : numpy.ndarray, optional
-        Indices of preferred orientation for each unit. If provided, overrides automatic detection.
     
     Returns:
     --------
@@ -435,8 +431,8 @@ def gratings_analysis(robs, sf, ori, phases, dt, n_lags=20, n_phase_bins=8, min_
         - 'n_units': Number of units analyzed
         - 'sf_tuning': SF tuning curves for all units (n_units x n_sfs)
         - 'ori_tuning': Orientation tuning curves for all units (n_units x n_oris)
-        - 'peak_sf_idx': Index of preferred spatial frequency for each unit
-        - 'peak_ori_idx': Index of preferred orientation for each unit
+        - 'peak_sfx': Preferred spatial frequency for each unit
+        - 'peak_ori': Preferred orientation for each unit
         - 'peak_lag': Optimal time lag for each unit
         - 'sf_snr': Signal-to-noise ratio for SF tuning for each unit
         - 'ori_snr': Signal-to-noise ratio for orientation tuning for each unit
@@ -469,17 +465,17 @@ def gratings_analysis(robs, sf, ori, phases, dt, n_lags=20, n_phase_bins=8, min_
         ori_idx = np.where(oris == ori[i])[0][0]
         sf_ori_one_hot[i, sf_idx, ori_idx] = 1
 
-    # Calculate SF-only STA (summed across orientations)
-    # This gives us the temporal tuning profile for each spatial frequency
-    print("Computing spatial frequency STAs...")
-    sf_sta = calc_sta(sf_ori_one_hot.sum(2, keepdims=True), robs.astype(np.float64),
-                     n_lags, inds=inds, dfs=dfs, reverse_correlate=False, progress=True).numpy().squeeze() / dt
+    # calculate the full SF x Orientation STA
+    print("Computing full SF x Orientation STAs...")
+    gratings_sta = calc_sta(sf_ori_one_hot, robs.astype(np.float64),
+                           n_lags, inds=inds, dfs=dfs, reverse_correlate=False, progress=True).numpy() / dt
+    
 
     # Find optimal temporal lag for each unit
     print("Finding optimal temporal lags...")
-    temporal_tuning = np.linalg.norm(sf_sta, axis=2)  # (n_units, n_lags)
+    temporal_tuning = np.std(gratings_sta, axis=(2,3))  # (n_units, n_lags)
 
-    peak_lags = np.argmax(temporal_tuning, axis=1)  # (n_units,)
+    peak_lags = argmax_subpixel(temporal_tuning, axis=1)[0]  # (n_units,)
 
     # ========================================
     # STEP 2: SPATIAL FREQUENCY TUNING
@@ -487,49 +483,52 @@ def gratings_analysis(robs, sf, ori, phases, dt, n_lags=20, n_phase_bins=8, min_
 
     print("Analyzing spatial frequency tuning...")
     sf_tuning = np.zeros((n_units, len(sfs)))
-    # Initialize peak_sf_idx only if None
-    if peak_sf_idx is None:
-        peak_sf_idx = np.zeros(n_units, dtype=int)
-        auto_detect_sf = True
-    else:
-        auto_detect_sf = False
-    sf_snr = np.zeros(n_units)
+    
+    peak_sf = np.nan*np.ones(n_units, dtype=int)
+    sf_snr = np.nan*np.ones(n_units)
 
     for iU in range(n_units):
+        
+        if np.std(gratings_sta[iU]) < 1e-9:
+            continue
+
+        lag = int(np.round(peak_lags[iU]))
+        # auto-detect the preferred orientation and sf
+        sf, ori = np.where(np.max(gratings_sta[iU][lag])==gratings_sta[iU][lag])
+
         # Extract SF tuning at the optimal temporal lag
-        sf_tuning[iU] = sf_sta[iU, peak_lags[iU]]
+        sf_tuning[iU] = gratings_sta[iU, lag, :, ori]
         # Only find peak if auto-detecting
-        if auto_detect_sf:
-            peak_sf_idx[iU] = np.argmax(sf_tuning[iU])
+        peak_sf[iU] = argmax_subpixel(sf_tuning[iU])[0]
+        
         # Calculate signal-to-noise ratio as peak response / mean response
-        sf_snr[iU] = sf_tuning[iU, peak_sf_idx[iU]] / np.mean(sf_tuning[iU])
+        # sf_snr[iU] = sf_tuning[iU, peak_sf_idx[iU]] / np.mean(sf_tuning[iU])
+        sf_snr[iU] = np.std(sf_tuning[iU]) / np.mean(sf_tuning[iU]) # following Parker et al., 2024
 
     # ========================================
     # STEP 3: ORIENTATION TUNING
     # ========================================
 
-    print("Computing full SF x Orientation STAs...")
-    gratings_sta = calc_sta(sf_ori_one_hot, robs.astype(np.float64),
-                           n_lags, inds=inds, dfs=dfs, reverse_correlate=False, progress=True).numpy() / dt
-
     print("Analyzing orientation tuning...")
     ori_tuning = np.zeros((n_units, len(oris)))
-    # Initialize peak_ori_idx only if None
-    if peak_ori_idx is None:
-        peak_ori_idx = np.zeros(n_units, dtype=int)
-        auto_detect_ori = True
-    else:
-        auto_detect_ori = False
-    ori_snr = np.zeros(n_units)
+
+    peak_ori = np.nan*np.zeros(n_units, dtype=int)
+    ori_snr = np.nan*np.zeros(n_units)
 
     for iU in range(n_units):
+        if np.std(gratings_sta[iU]) < 1e-9:
+            continue
+
+        lag = int(np.round(peak_lags[iU]))
+        sf, ori = np.where(np.max(gratings_sta[iU][lag])==gratings_sta[iU][lag])
+
         # Extract orientation tuning at optimal lag and preferred SF
-        ori_tuning[iU] = gratings_sta[iU, peak_lags[iU], peak_sf_idx[iU]]
-        # Only find peak if auto-detecting
-        if auto_detect_ori:
-            peak_ori_idx[iU] = np.argmax(ori_tuning[iU])
+        ori_tuning[iU] = gratings_sta[iU, lag, sf]
+        
+        peak_ori[iU] = argmax_subpixel(ori_tuning[iU])[0]
         # Calculate signal-to-noise ratio
-        ori_snr[iU] = ori_tuning[iU, peak_ori_idx[iU]] / np.mean(ori_tuning[iU])
+        ori_snr[iU] = np.std(ori_tuning[iU]) / np.mean(ori_tuning[iU])
+        # ori_snr[iU] = ori_tuning[iU, peak_ori[iU]] / np.mean(ori_tuning[iU])
 
     # ========================================
     # STEP 4: PHASE RESPONSE EXTRACTION
@@ -540,10 +539,16 @@ def gratings_analysis(robs, sf, ori, phases, dt, n_lags=20, n_phase_bins=8, min_
     spikes_list = []
 
     for iU in tqdm(range(n_units), desc="Processing units for phase analysis"):
+        if np.std(gratings_sta[iU]) < 1e-9:
+            # append dummy arrays
+            phases_list.append(np.array([]))
+            spikes_list.append(np.array([]))
+            continue
+
         # Get optimal parameters for this unit
-        sf_idx = peak_sf_idx[iU]
-        ori_idx = peak_ori_idx[iU]
-        lag = peak_lags[iU]
+        sf_idx = int(np.round(peak_sf[iU]))
+        ori_idx = int(np.round(peak_ori[iU]))
+        lag = int(np.round(peak_lags[iU]))
 
         # Find frames with the preferred SF and orientation combination
         sf_ori_inds = np.where(sf_ori_one_hot[:, sf_idx, ori_idx] > 0)[0]
@@ -598,6 +603,9 @@ def gratings_analysis(robs, sf, ori, phases, dt, n_lags=20, n_phase_bins=8, min_
     phase_response_ste = np.zeros((n_units, n_phase_bins)) # Standard error per phase bin
 
     for iU in range(n_units):
+        if np.std(gratings_sta[iU]) < 1e-9:
+            continue
+
         unit_phases = phases_list[iU]
         unit_spikes = spikes_list[iU]
 
@@ -627,6 +635,10 @@ def gratings_analysis(robs, sf, ori, phases, dt, n_lags=20, n_phase_bins=8, min_
     n_spikes_total = np.zeros(n_units)
 
     for iU in range(n_units):
+        if np.std(gratings_sta[iU]) < 1e-9:
+            sine_fit_results.append(None)
+            continue
+
         unit_phases = phases_list[iU]
         unit_spikes = spikes_list[iU]
         total_spikes = np.sum(unit_spikes)
@@ -666,14 +678,21 @@ def gratings_analysis(robs, sf, ori, phases, dt, n_lags=20, n_phase_bins=8, min_
     # extract modulation index
     modulation_index = np.array([r['modulation_index'] if r is not None else np.nan for r in sine_fit_results])
 
+    # interpolate into 
+    peak_sf_cyc_per_deg = np.interp(peak_sf, np.arange(len(sfs)), sfs)
+    peak_ori_deg = np.interp(peak_ori, np.arange(len(oris)), oris)
+    peak_lag_ms = np.interp(peak_lags, np.arange(n_lags), np.arange(n_lags) * dt * 1000)
     return {
         'n_units': n_units,
         'gratings_sta': gratings_sta,
         'sf_tuning': sf_tuning,
         'ori_tuning': ori_tuning,
-        'peak_sf_idx': peak_sf_idx,
-        'peak_ori_idx': peak_ori_idx,
-        'peak_lags': peak_lags,
+        'peak_sf_idx': np.round(peak_sf).astype(int),
+        'peak_ori_idx': np.round(peak_ori).astype(int),
+        'peak_lag_idx': np.round(peak_lags).astype(int),
+        'peak_ori': peak_ori_deg,
+        'peak_sf': peak_sf_cyc_per_deg,
+        'peak_lag': peak_lag_ms,
         'sf_snr': sf_snr,
         'ori_snr': ori_snr,
         'phase_response': phase_response,
@@ -737,9 +756,11 @@ def gratings_comparison(robs, rhat, sf, ori, phases, dt, n_lags=20, n_phase_bins
         dfs=dfs
     )
     
-    # Extract peak indices from observed data
-    peak_sf_idx = results_robs['peak_sf_idx']
-    peak_ori_idx = results_robs['peak_ori_idx']
+    # Extract peak indices from observed data (Hmm, should re-introduce?)
+    # peak_sf_idx = results_robs['peak_sf_idx']
+    # peak_ori_idx = results_robs['peak_ori_idx']
+    #         peak_sf_idx=peak_sf_idx,  # Use peak SF indices from observed data
+    #     peak_ori_idx=peak_ori_idx  # Use peak orientation indices from observed data
     
     print("\nRunning gratings analysis on model predictions using observed data peak indices...")
     results_rhat = gratings_analysis(
@@ -753,8 +774,6 @@ def gratings_comparison(robs, rhat, sf, ori, phases, dt, n_lags=20, n_phase_bins
         min_spikes=min_spikes, 
         inds=inds, 
         dfs=dfs,
-        peak_sf_idx=peak_sf_idx,  # Use peak SF indices from observed data
-        peak_ori_idx=peak_ori_idx  # Use peak orientation indices from observed data
     )
     
     return {

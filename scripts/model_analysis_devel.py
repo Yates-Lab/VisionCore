@@ -37,8 +37,8 @@ device = get_free_device()
 
 #%% Discover Available Models
 print("Discovering available models...")
-# checkpoint_dir = "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage_6/checkpoints"
-checkpoint_dir = "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_240_backimage/checkpoints"
+checkpoint_dir = "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage_6/checkpoints"
+# checkpoint_dir = "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_240_backimage/checkpoints"
 
 # checkpoint_dir = '/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120/checkpoints'
 models_by_type = scan_checkpoints(checkpoint_dir, verbose=False)
@@ -63,7 +63,7 @@ checkpoint_path = None
 # checkpoint_path = os.path.join(checkpoint_dir, 'learned_res_small_film_ddp_bs256_ds30_lr1e-3_wd1e-5_corelrscale1.0_warmup10_zip/last.ckpt')
 # model_type = 'resnet'
 
-model_type = 'learned_dense_concat_convgru_gaussian_ddp_bs256_ds30_lr5e-4_wd1e-4_corelrscale2.0_warmup5'
+model_type = 'dense_concat_convgru'
 # model_type = 'learned_dense_concat_convgru_gaussian_ddp_bs256_ds30_lr1e-3_wd1e-4_corelrscale.5_warmup5'
 model, model_info = load_model(
         model_type=model_type,
@@ -79,6 +79,7 @@ model.model.convnet.use_checkpointing = False
 
 model = model.to(device)
 
+#%%
 plt.plot(model.model.frontend.temporal_conv.weight.squeeze().detach().cpu().T)
 model.model.convnet.stem.components.conv.plot_weights()
 
@@ -239,7 +240,7 @@ for readout in model.model.readouts[:1]:
     readout.plot_weights(ellipse=False)
 
 #%% Run bps analysis to find good cells / get STA
-dataset_idx = 8
+dataset_idx = 7
 batch_size = 64 # keep small because things blow up fast!
 
 train_data, val_data, dataset_config = load_single_dataset(model, dataset_idx)
@@ -259,49 +260,7 @@ dataset.inds = inds
 
 
 #%% Plot utilities
-from eval.gaborium_analysis import get_sta_ste
-
-def plot_stas(sta, lag = None, normalize=True, sort_by=None):
-
-    n_cells = sta['Z_STA_robs'].shape[-1]
-    sx = np.floor(np.sqrt(n_cells)).astype(int)
-    sy = np.ceil(n_cells / sx).astype(int)
-    fig, axs = plt.subplots(sy, sx, figsize=(16, 16))
-    
-    
-    H = sta['Z_STA_robs'].shape[1]
-
-    if sort_by is not None:
-        if sort_by == 'modulation_index':
-            order = np.argsort(sta['modulation_index_robs'])
-            order = order[:n_cells]
-        elif sort_by == 'modulation_index_rhat':
-            order = np.argsort(sta['modulation_index_rhat'])
-            order = order[:n_cells]
-        else:
-            order = np.arange(n_cells)
-    else:
-        order = np.arange(n_cells)
-    
-    for i, cc in enumerate(order):
-        if lag is None:
-            lag = sta['peak_lag'][cc]
-
-        ax = axs.flatten()[i]
-        v = sta['Z_STA_robs'][lag,:,:,cc].abs().max()
-        Irhat = sta['Z_STA_rhat'][lag,:,:,cc]
-        if normalize:
-            vrhat = Irhat.abs().max()
-            Irhat = Irhat / vrhat * v
-            
-        I = torch.concat([sta['Z_STA_robs'][lag,:,:,cc], torch.ones(H,1), Irhat], 1)
-        
-        ax.imshow(I, cmap='gray_r', interpolation='none', vmin=-v, vmax=v)
-        ax.set_title(f'{cc}: {sta['modulation_index_robs'][cc]:.2f}')
-        ax.axis('off')
-
-    plt.tight_layout()
-    plt.show()
+from eval.gaborium_analysis import get_sta_ste, plot_stas
 
 
 def plot_output(output, use_imshow=True):
@@ -397,6 +356,48 @@ for key, val in sta_dict.items():
         print(key)
 
 #%%
+from torchvision.utils import make_grid
+
+N = len(sta_dict['peak_lag'])
+num_lags = sta_dict['Z_STA_robs'].shape[0]
+H = sta_dict['Z_STA_robs'].shape[1]
+rf_pairs_full = []
+rf_pairs = []
+for cc in range(N):
+    this_lag = sta_dict['peak_lag'][cc]
+    sta_robs = sta_dict['Z_STA_robs'][:,:,:,cc]
+    sta_rhat = sta_dict['Z_STA_rhat'][:,:,:,cc]
+    # zscore each
+    sta_robs = (sta_robs - sta_robs.mean((0,1))) / sta_robs.std((0,1))
+    sta_rhat = (sta_rhat - sta_rhat.mean((0,1))) / sta_rhat.std((0,1))
+    grid = make_grid(torch.concat([sta_robs, sta_rhat], 0).unsqueeze(1), nrow=num_lags, normalize=True, scale_each=False, padding=2, pad_value=1)
+    grid = 0.2989 * grid[0:1,:,:] + 0.5870 * grid[1:2,:,:] + 0.1140 * grid[2:3,:,:] # convert to grayscale
+    rf_pairs_full.append(grid)
+
+    # do the same for the peak lag
+    sta_robs = sta_dict['Z_STA_robs'][this_lag,:,:,cc]
+    sta_rhat = sta_dict['Z_STA_rhat'][this_lag,:,:,cc]
+    # zscore each
+    sta_robs = (sta_robs - sta_robs.mean()) / sta_robs.std()
+    sta_rhat = (sta_rhat - sta_rhat.mean()) / sta_rhat.std()
+    grid = torch.stack([sta_robs, sta_rhat], 0).unsqueeze(1)
+    grid = make_grid(grid, nrow=2, normalize=True, scale_each=False, padding=2, pad_value=1)
+    grid = 0.2989 * grid[0:1,:,:] + 0.5870 * grid[1:2,:,:] + 0.1140 * grid[2:3,:,:] # convert to grayscale
+    rf_pairs.append(grid)
+
+
+# log the full spatio-temporal STAs for each Cell and model    
+log_grid_full = make_grid(torch.stack(rf_pairs_full), nrow=3, normalize=True, scale_each=True, padding=2, pad_value=1)
+plt.figure(figsize=(20, 20))
+plt.imshow(log_grid_full.detach().cpu().permute(1, 2, 0).numpy())
+
+# log the peak lag STAs for each Cell and model
+log_grid_peak_lag = make_grid(torch.stack(rf_pairs), nrow=int(np.sqrt(N)), normalize=True, scale_each=True, padding=2, pad_value=1)
+plt.figure(figsize=(20, 20))
+plt.imshow(log_grid_peak_lag.detach().cpu().permute(1, 2, 0).numpy())
+
+
+#%%
 NC = sta_dict['Z_STA_robs'].shape[-1]
 sx = int(np.sqrt(NC))
 sy = int(np.ceil(NC / sx))
@@ -407,6 +408,7 @@ for cc in range(NC):
     axs.flatten()[cc].axvline(sta_dict['peak_lag'][cc], color='k', linestyle='--')
     axs.flatten()[cc].set_title(f'{cc}')
 #%%
+
 plot_stas(sta_dict, lag=None, normalize=True, sort_by=None) #'modulation_index_rhat')
 
 #%%

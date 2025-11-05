@@ -18,10 +18,10 @@ transforms:
       - unsqueeze: 1
     expose_as: stim
   
-  robs:
-    source: robs
-    ops: [{smooth: {type: gaussian, params: 1.0}}]
-    expose_as: robs
+  # robs:
+  #   source: robs
+  #   ops: [{smooth: {type: gaussian, params: 1.0}}]
+  #   expose_as: robs
   #   source: robs
   #   ops:
   #     - smooth: 
