@@ -165,16 +165,12 @@ def extract_model_type(exp_name):
         return 'learned_dense_film_none_gaussian'
     elif 'x3d_modulator' in exp_name:
         return 'x3d_modulator'
-    elif 'dense_concat_convgru' in exp_name:
+    elif 'dense_concat_convgru_gaussian_history' in exp_name:
+        return 'dense_concat_convgru_history'
+    elif 'dense_concat_convgru_gaussian' in exp_name:
         return 'dense_concat_convgru'
-    elif 'pyramid_stem_resnet_gru' in exp_name:
-        return 'pyramid_stem_resnet_gru'
-    elif 'pyramid_stem_resnet' in exp_name:
-        return 'pyramid_stem_resnet'
-    elif 'resnet' in exp_name:
-        return 'resnet'
-    elif 'x3d' in exp_name:
-        return 'x3d'
+    elif 'dense_none_convgru_gaussian' in exp_name:
+        return 'dense_none_convgru'
     elif 'densenet' in exp_name:
         return 'densenet'
     elif 'core_res_modulator' in exp_name:
@@ -182,41 +178,13 @@ def extract_model_type(exp_name):
     elif 'core_res' in exp_name:
         return 'core_res'
     elif 'learned_resnet_concat_convgru_gaussian' in exp_name:
-        return 'learned_resnet_concat_convgru_gaussian'
+        return 'resnet_concat_convgru'
+    elif 'learned_resnet_none_convgru_gaussian' in exp_name:
+        return 'resnet_none_convgru'
     elif 'learned_resnet_film_none_gaussian' in exp_name:
-        return 'learned_resnet_film_none_gaussian'
-    elif 'learned_res_split_gru' in exp_name:
-        return 'learned_res_split_gru'
-    elif 'learned_res_small_stn' in exp_name:
-        return 'learned_res_small_stn'
-    elif 'learned_res_small_film' in exp_name:
-        return 'learned_res_small_film'
-    elif 'learned_res_small_pc' in exp_name:
-        return 'learned_res_small_pc'
-    elif 'learned_res_small_none_gru_none_pool' in exp_name:
-        return 'learned_res_small_none_gru_none_pool'
-    elif 'learned_res_small_gru_optimized' in exp_name:
-        return 'learned_res_small_gru_optimized'
-    elif 'learned_res_small_gru' in exp_name:
-        return 'learned_res_small_gru'
-    elif 'learned_res_small_none_gru' in exp_name:
-        return 'learned_res_small_none_gru'
-    elif 'learned_res2d_small_none_gru_none_pool' in exp_name:
-        return 'learned_res2d_small_none_gru_none_pool'
-    elif 'learned_res2d_small_none_pool' in exp_name:
-        return 'learned_res2d_small_none_pool'
-    elif 'learned_res2d_small' in exp_name:
-        return 'learned_res2d_small'
-    elif 'learned_res_small' in exp_name:
-        return 'learned_res_small'
-    elif 'learned_res_modulator_small' in exp_name:
-        return 'learned_res_modulator_small'
-    elif 'learned_res_modulator' in exp_name:
-        return 'learned_res_modulator'
-    elif 'learned_res' in exp_name:
-        return 'learned_res'
-    elif 'res_small_gru' in exp_name:
-        return 'res_small_gru'
+        return 'resnet_film_none_gaussian'
+    elif 'resnet' in exp_name:
+        return 'resnet'
     elif 'vivit_small' in exp_name:
         return 'vivit_small'
     elif 'modulator_only_convgru' in exp_name:

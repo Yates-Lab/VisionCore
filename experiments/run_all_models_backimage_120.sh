@@ -71,7 +71,7 @@ export LD_LIBRARY_PATH="$HOME/.local/lib:$LD_LIBRARY_PATH"
 # export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:128
 
 # Training configuration
-BATCH_SIZE=64          # Optimal batch size per GPU
+BATCH_SIZE=128          # Optimal batch size per GPU
 MAX_DATASETS=30        # Scale to all datasets (28 if removed the two bad sessions)
 LEARNING_RATE=1e-3    # standard learning rate
 CORE_LR_SCALE=.5
@@ -100,8 +100,11 @@ mkdir -p $CHECKPOINT_DIR
 
 # Array of model configurations to run
 MODEL_CONFIGS=(
-    "experiments/model_configs/learned_dense_concat_convgru_gaussian.yaml"
-    "experiments/model_configs/learned_resnet_concat_convgru_gaussian.yaml"
+    "experiments/model_configs/modulator_only_convgru.yaml"
+    "experiments/model_configs/learned_dense_none_convgru_gaussian.yaml"
+    "experiments/model_configs/learned_resnet_none_convgru_gaussian.yaml"
+    # "experiments/model_configs/learned_dense_concat_convgru_gaussian.yaml"
+    # "experiments/model_configs/learned_resnet_concat_convgru_gaussian.yaml"
     # "experiments/model_configs/learned_dense_film_none_gaussian.yaml"
 )
 

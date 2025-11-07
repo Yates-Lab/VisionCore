@@ -349,6 +349,7 @@ class MultiDatasetV1Model(ModularV1Model):
             modulator_type=modulator_type,
             **modulator_params
         )
+        print(f"Modulator output channels: {modulator_dim}")
         
         # Calculate channels after modulation
         current_channels = convnet_output_channels
@@ -365,6 +366,8 @@ class MultiDatasetV1Model(ModularV1Model):
             else:
                 raise ValueError(f"Unknown modulator type: {modulator_type}")
         
+        print(f"Channels after modulation: {current_channels}")
+
         # Build shared recurrent
         recurrent_config = self.model_config.get('recurrent', {'type': 'none', 'params': {}})
         recurrent_type = recurrent_config['type']
@@ -462,6 +465,7 @@ class MultiDatasetV1Model(ModularV1Model):
 
         if x is None:
             # Modulator-only mode: create minimal features for modulator
+            # Use 1 channel to match what convnet outputs during initialization
             B = behavior.shape[0]
             device = next(self.parameters()).device
             x = torch.ones(B, 1, 1, 1, 1, device=device, dtype=behavior.dtype)
@@ -537,9 +541,10 @@ class MultiDatasetV1ModelSpikeHistory(MultiDatasetV1Model):
 
         if x is None:
             # Modulator-only mode: create minimal features for modulator
+            # Use 0 channels so concat modulator only returns behavior embedding
             B = behavior.shape[0]
             device = next(self.parameters()).device
-            x = torch.ones(B, 1, 1, 1, 1, device=device, dtype=behavior.dtype)
+            x = torch.ones(B, 0, 1, 1, 1, device=device, dtype=behavior.dtype)
 
         x = self.core_forward(x, behavior)
 

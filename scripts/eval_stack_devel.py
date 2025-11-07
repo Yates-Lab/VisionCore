@@ -44,8 +44,8 @@ device = get_free_device()
 
 #%% Load an example model (this will be provided in the logging)
 print("Discovering available models...")
-checkpoint_dir = "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage_history/checkpoints"
-# checkpoint_dir = "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage_8/checkpoints"
+# checkpoint_dir = "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage_history/checkpoints"
+checkpoint_dir = "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage_8/checkpoints"
 models_by_type = scan_checkpoints(checkpoint_dir, verbose=False)
 
 print(f"Found {len(models_by_type)} model types:")
@@ -60,8 +60,8 @@ for model_type, models in models_by_type.items():
     else:
         print(f"  {model_type}: 0 models")
 
-# LOAD A MODEL
-model_type = 'dense_concat_convgru'
+#%% LOAD A MODEL
+model_type = 'resnet_none_convgru'
 model, model_info = load_model(
         model_type=model_type,
         model_index=0, # none for best model
@@ -101,7 +101,7 @@ for readout in model.model.readouts[:1]:
 #%% SLOW LOGGING (takes substantially longer)
 
 from eval.eval_stack_multidataset import eval_stack_single_dataset
-dataset_idx = 7
+dataset_idx = 10
 # During training - simple and clean!
 results = eval_stack_single_dataset(
     model=model,
@@ -192,7 +192,7 @@ for i in range(sx*sy):
     # turn off
     axs.flatten()[i].axis('off')
     axs.flatten()[i].set_title(f'{cc}')
-axs.flatten()[i].set_xlim(32, 150)
+axs.flatten()[i].set_xlim(32, 80)
 
 
 #%% Plot saccade triggered averages on BackImage
@@ -261,7 +261,7 @@ result['rhat_rescaled'], _ = rescale_rhat(result['robs'], result['rhat'], result
 
 #%%
 from eval.eval_stack_utils import bits_per_spike
-rhat = result['rhat'].numpy()
+rhat = result['rhat_rescaled'].numpy()
 # rhat = rhat**2
 grat_results = gratings_comparison(result['robs'].numpy(), rhat, sf, ori, phases, dt, n_lags=20, n_phase_bins=8, min_spikes=50)
 bps = bits_per_spike(torch.from_numpy(rhat), result['robs'], result['dfs'])
