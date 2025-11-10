@@ -1,4 +1,4 @@
-types: [backimage]
+types: [backimage, gaborium, gratings]
 session_dir: ./sessions
 sessions: [Allen_2022-02-16,  Allen_2022-03-04,  Allen_2022-04-08,  Allen_2022-06-10,  Logan_2020-02-29, Allen_2022-02-18,  Allen_2022-03-30,  Allen_2022-04-13,  Allen_2022-08-05,  Logan_2020-03-02, Allen_2022-02-24,  Allen_2022-04-01,  Allen_2022-04-15,  Logan_2019-12-20,  Logan_2020-03-04, Allen_2022-03-02,  Allen_2022-04-06,  Allen_2022-06-01,  Logan_2019-12-23,  Logan_2020-03-06]
 sampling:
@@ -53,7 +53,7 @@ transforms:
 
 datafilters:
   dfs:
-    ops: [{valid_nlags: {n_lags: 32}}, {missing_pct: {theshold: 45}}]
+    ops: [{valid_nlags: {n_lags: 48}}, {missing_pct: {theshold: 45}}]
     expose_as: dfs
     
 train_val_split: 0.8

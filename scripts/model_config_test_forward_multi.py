@@ -45,9 +45,9 @@ AMP_BF16 = lambda: torch.autocast(device_type="cuda", dtype=torch.bfloat16)
 from models.config_loader import load_dataset_configs
 import os
 
-config_path = Path("/home/jake/repos/VisionCore/experiments/model_configs/learned_dense_film_none_gaussian.yaml")
+config_path = Path("/home/jake/repos/VisionCore/experiments/model_configs/modulator_only_convgru.yaml")
 
-dataset_configs_path = "/home/jake/repos/VisionCore/experiments/dataset_configs/multi_basic_120_backimage_history.yaml"
+dataset_configs_path = "/home/jake/repos/VisionCore/experiments/dataset_configs/multi_basic_120_backimage_all.yaml"
 dataset_configs = load_dataset_configs(dataset_configs_path)
 
 #%% Initialize model
@@ -103,7 +103,7 @@ plt.plot(train_datasets['dataset_0'].dsets[0]['stim'][:1000,0,25,25].float().cpu
 # train_loader, val_loader = create_multidataset_loaders(train_datasets, val_datasets, batch_size=2, num_workers=os.cpu_count()//2)
 
 #%% test one dataset
-batch_size = 256
+batch_size = 64
 dataset_id = 0
 
 ntrain = len(train_datasets[f'dataset_{dataset_id}'])
@@ -132,11 +132,11 @@ with AMP_BF16():
 
 
 #%%
-# with AMP_BF16():    
-#     x = model.adapters[dataset_id](batch['stim'])
-#     y = model.frontend(x)
-#     z = model.convnet(y)
-#     # w = model.recurrent(z)
+with AMP_BF16():    
+    x = model.adapters[dataset_id](batch['stim'])
+    y = model.frontend(x)
+    z = model.convnet(y)
+    w = model.recurrent(z)
 #     # print(f"Convnet output shape: {z.shape}")
 #     # w = model.modulator(z, batch['behavior'])
 # print(z.shape)

@@ -368,7 +368,7 @@ def plot_fixation_trial(dataset, dset_idx, out_filtered, ifix, sess):
 
     # Extract data
     stim, robs, dfs, eyepos, dpi_pix, dpi_pix_fix, t_bins, trial = get_fixation_data(dataset, dset_idx, out_filtered, ifix)
-
+    
     # Plot with markers showing the boundaries
     fig = plt.figure(figsize=(12, 12))
     layout = fig.add_gridspec(4, 1, height_ratios=[3, 1, 1, 1], hspace=.2)
@@ -395,11 +395,99 @@ def plot_fixation_trial(dataset, dset_idx, out_filtered, ifix, sess):
     # plot spikes
     ax4 = fig.add_subplot(layout[3])
     ax4.imshow(robs.T, aspect='auto', cmap='gray_r', interpolation='none', extent=[0, t_bins[-1], 0, robs.shape[1]])
+    # ax4.imshow(torch.concat([robs, dfs], 1).T, aspect='auto', cmap='gray_r', interpolation='none', extent=[0, t_bins[-1], 0, robs.shape[1]*2])
     axoverlay = ax4.twinx()
-    axoverlay.plot(t_bins, robs.mean(1), 'r-')
-    axoverlay.plot(t_bins, dfs.mean(1)*np.max(robs.mean(1)), 'g-')
+    rbar = robs.mean(1)
+    axoverlay.plot(t_bins, rbar, 'r-')
+    axoverlay.plot(t_bins, dfs.mean(1)*rbar.max().item(), 'g-')
     ax4.set_xlabel('Time (s)')
     ax4.set_ylabel('Neurons')
+
+from scipy import signal
+
+def compute_fixation_power_spectra(rbar, fs, min_samples=128, nperseg=256, noverlap=None):
+    """
+    Compute power spectra for each fixation using Welch's method.
+
+    Parameters:
+    -----------
+    rbar : np.ndarray
+        Array of shape (n_fixations, max_duration) with NaNs for missing data
+    fs : float
+        Sampling frequency (Hz)
+    min_samples : int
+        Minimum number of samples required to compute spectrum
+    nperseg : int
+        Length of each segment for Welch's method
+    noverlap : int or None
+        Number of points to overlap between segments (default: nperseg // 2)
+
+    Returns:
+    --------
+    freqs : np.ndarray
+        Frequency bins
+    psd_mean : np.ndarray
+        Mean power spectral density across all valid fixations
+    psd_all : list
+        List of individual PSDs for each valid fixation
+    valid_indices : np.ndarray
+        Indices of fixations that were long enough to analyze
+    """
+    if noverlap is None:
+        noverlap = nperseg // 2
+
+    psd_all = []
+    valid_indices = []
+    freqs = None
+
+    for ifix in range(rbar.shape[0]):
+        # Get valid (non-NaN) samples for this fixation
+        row = rbar[ifix, :]
+        valid_mask = ~np.isnan(row)
+        valid_samples = row[valid_mask]
+
+        # Skip if too short
+        if len(valid_samples) < min_samples:
+            continue
+
+        # Demean the signal
+        valid_samples = valid_samples - np.mean(valid_samples)
+
+        # Adjust nperseg and noverlap for short segments
+        nperseg_adj = min(nperseg, len(valid_samples))
+        noverlap_adj = min(noverlap, nperseg_adj // 2)  # Ensure noverlap < nperseg
+
+        # Compute power spectral density using Welch's method
+        f, psd = signal.welch(
+            valid_samples,
+            fs=fs,
+            nperseg=nperseg_adj,
+            noverlap=noverlap_adj,
+            scaling='density',
+            window='hann'
+        )
+
+        psd_all.append(psd)
+        valid_indices.append(ifix)
+
+        if freqs is None:
+            freqs = f
+
+    valid_indices = np.array(valid_indices)
+
+    # Average across all valid fixations
+    if len(psd_all) > 0:
+        # Stack and compute mean (handling different lengths if necessary)
+        min_len = min(len(p) for p in psd_all)
+        psd_all = [p[:min_len] for p in psd_all]  # Truncate all to same length
+        psd_stack = np.array(psd_all)
+        psd_mean = np.mean(psd_stack, axis=0)
+        freqs = freqs[:min_len]
+    else:
+        psd_mean = np.array([])
+        freqs = np.array([])
+
+    return freqs, psd_mean, psd_all, valid_indices
 
 #%% Load a dataset 
 dataset_idx = 2
@@ -449,115 +537,6 @@ out_filtered = filter_physiological_events(
 print(f"Original: {len(out['sac_intervals'])} saccades, {len(out['fix_intervals'])} fixations")
 print(f"Filtered: {len(out_filtered['sac_intervals'])} saccades, {len(out_filtered['fix_intervals'])} fixations")
 
-#%%
-dset_idx = stim_indices[:,0].unique().item()
-trials = dataset.dsets[dset_idx].covariates['trial_inds'].unique().numpy()
-num_trials = len(trials)
-T = len(dataset.dsets[dset_idx]['trial_inds'])
-sac_onset_bins = np.unique(np.digitize(saccade_onsets, dataset.dsets[dset_idx]['t_bins']))[1:-1]
-sac_onset_bool = np.zeros(T, dtype=bool)
-sac_onset_bool[sac_onset_bins.flatten()] = True
-sac_offset_bins = np.unique(np.digitize(saccade_offsets, dataset.dsets[dset_idx]['t_bins']))[1:-1]
-sac_offset_bool = np.zeros(T, dtype=bool)
-sac_offset_bool[sac_offset_bins.flatten()] = True
-
-itrial = 0
-#%%
-itrial += 1
-
-this_trial = trials[itrial]
-
-ImTrial = BackImageTrial(sess.exp['D'][this_trial], sess.exp['S'])
-Im = ImTrial.get_image()**.8
-
-ix = dataset.dsets[dset_idx]['trial_inds']==this_trial
-
-print(f"Trial {itrial} has {len(dataset.dsets[dset_idx]['stim'][dataset.dsets[dset_idx]['trial_inds']==this_trial])} frames")
-
-stim = dataset.dsets[dset_idx]['stim'][ix]
-eyepos = dataset.dsets[dset_idx]['eyepos'][ix]
-eyepos_rhat = dataset.dsets[dset_idx]['dpi_pix'][ix]
-dpi_valid = dataset.dsets[dset_idx]['dpi_valid'][ix]
-dpi_valid = dpi_valid.numpy() > 0
-masked_eyepos = np.ma.array(eyepos_rhat.numpy(), mask=~np.tile(dpi_valid[:, None], (1, 2)))
-dfs = dataset.dsets[dset_idx]['dfs'][ix]
-sac_on = np.where(sac_onset_bool[ix]*dpi_valid)[0]
-sac_off = np.where(sac_offset_bool[ix]*dpi_valid)[0]
-
-if len(sac_on) < len(sac_off):
-    if sac_off[0] < sac_on[0]:
-        sac_off = sac_off[1:]
-    else:
-        sac_on = sac_on[:-1]
-
-if len(sac_on) > len(sac_off):
-    if sac_off[0] < sac_on[0]:
-        sac_on = sac_on[1:]
-    else:
-        sac_off = sac_off[:-1]
-
-sac_start_stop = np.concatenate([sac_on[:, None], sac_off[:, None]], axis=1)
-ds = sac_start_stop[:,1] - sac_start_stop[:,0]
-sac_start_stop = sac_start_stop[ds>0]
-
-Ttrial = eyepos_rhat.shape[0]
-fix_starts = np.concatenate([[0], sac_start_stop[:,1]+1])
-fix_ends = np.concatenate([sac_start_stop[:,0], [Ttrial-1]])
-fix_start_stop = np.concatenate([fix_starts[:, None], fix_ends[:, None]], axis=1)
-
-mask_fix = np.zeros(Ttrial, dtype=bool)
-for i in range(fix_start_stop.shape[0]):
-    mask_fix[fix_start_stop[i,0]:fix_start_stop[i,1]] = True
-mask_fix[~dpi_valid] = False
-masked_fixations = np.ma.array(eyepos_rhat.numpy(), mask=~np.tile(mask_fix[:, None], (1, 2)))
-
-mask_sac = np.zeros(Ttrial, dtype=bool)
-for i in range(sac_start_stop.shape[0]):
-    mask_sac[sac_start_stop[i,0]:sac_start_stop[i,1]] = True
-mask_sac[~dpi_valid] = False
-masked_saccades = np.ma.array(eyepos_rhat.numpy(), mask=~np.tile(mask_sac[:, None], (1, 2)))
-
-
-fig = plt.figure(figsize=(20, 20))
-from matplotlib.gridspec import GridSpec
-layout = GridSpec(2, 1, figure=fig, height_ratios=[1.5, 1.0])
-ax_top = fig.add_subplot(layout[0,0])
-ax_bot = fig.add_subplot(layout[1,0])
-
-ax_top.imshow(Im, cmap='gray', origin='upper')
-# ax_top.plot(masked_eyepos[:,1], masked_eyepos[:,0], 'r')
-ax_top.plot(masked_saccades[:,1], masked_saccades[:,0], 'b')
-ax_top.plot(masked_fixations[:,1], masked_fixations[:,0], 'r')
-
-
-grid = make_grid(stim, nrow=100, normalize=True, scale_each=False, padding=2, pad_value=1)
-ax_bot.imshow(grid.detach().cpu().permute(1, 2, 0).numpy(), aspect='auto', interpolation='none')
-
-#%%
-
-plt.figure(figsize=(10, 5))
-plt.subplot(2,1,1)
-plt.plot(masked_saccades[:,1], 'b')
-plt.plot(masked_fixations[:,1],'r')
-plt.axhline(Im.shape[1]/2, color='k', linestyle='--')
-
-plt.subplot(2,1,2)
-plt.plot(masked_saccades[:,0], 'b')
-plt.plot(masked_fixations[:,0],'r')
-plt.axhline(Im.shape[0]/2, color='k', linestyle='--')
-
-# plt.plot(stim[:,0,25,25].numpy())
-# _ = [plt.axvline(i, color='r') for i in sac_on]
-
-#%% Helper functions for finding fixations and saccades
-
-
-
-# %% detect all fixations
-
-
-
-
 # %%
 # Plot before and after filtering
 fig, axes = plt.subplots(1, 2, figsize=(12, 5))
@@ -599,12 +578,15 @@ eyepos = dataset.dsets[dset_idx]['eyepos'][s:e]
 
 plt.plot(eyepos)
 # %%
+ifix +=1
+stim, robs, dfs, eyepos, dpi_pix, dpi_pix_fix, t_bins, trial = get_fixation_data(dataset, dset_idx, out_filtered, ifix)
+dfs.shape
 
+#%%
 num_fix = len(out_filtered['fix_intervals'])
 fix_dur = np.array([e-s for s, e in out_filtered['fix_intervals']])
 zombies = np.where(fix_dur*dt > 1.0)[0]
 
-# ifix += 1
 for ifix in zombies:
     try:
         plot_fixation_trial(dataset, dset_idx, out_filtered, ifix, sess)
@@ -613,17 +595,19 @@ for ifix in zombies:
         print(f"Failed to plot fixation {ifix}: {e}")
 # %%
 ifix = np.where(fix_dur*dt > .35)[0][20]
-data = plot_fixation_trial(dataset, dset_idx, out_filtered, ifix, sess)
+plot_fixation_trial(dataset, dset_idx, out_filtered, ifix, sess)
 ifix = 15
-data2 = plot_fixation_trial(dataset, dset_idx, out_filtered, ifix, sess)
+plot_fixation_trial(dataset, dset_idx, out_filtered, ifix, sess)
 
 
+#%%
+stim, robs, dfs, eyepos, dpi_pix, dpi_pix_fix, t_bins, trial = get_fixation_data(dataset, dset_idx, out_filtered, ifix, include_saccades=False)
 
-x = data['eyepos'][20:-20,0]
+x = eyepos[:,0]
 f = np.fft.rfft(x-x.mean())
 F = np.fft.rfftfreq(len(x), dt)
 
-x2 = data2['eyepos'][20:-20,0]
+x2 = eyepos[:,1]
 f2 = np.fft.rfft(x2-x2.mean())
 F2 = np.fft.rfftfreq(len(x2), dt)
 # kill DC. plot
@@ -790,6 +774,7 @@ pdf_file = create_fixation_pdf(dataset, dset_idx, out_filtered, sess)
 # %%
 fix_dur = np.array([e-s for s, e in out_filtered['fix_intervals']])
 rbar = np.nan*np.zeros((num_fix, np.max(fix_dur).item()))
+eyepos = np.nan*np.zeros((num_fix, np.max(fix_dur).item(), 2))
 
 for ifix in range(len(out_filtered['fix_intervals'])):
     # Get fixation data
@@ -798,110 +783,21 @@ for ifix in range(len(out_filtered['fix_intervals'])):
     # Extract data
     stim = dataset.dsets[dset_idx]['stim'][fix_s:fix_e]
     robs = dataset.dsets[dset_idx]['robs'][fix_s:fix_e]
-    eyepos = dataset.dsets[dset_idx]['eyepos'][fix_s:fix_e]
+    eyepos_ = dataset.dsets[dset_idx]['eyepos'][fix_s:fix_e]
 
     rbar[ifix, :robs.shape[0]] = robs.mean(1)
+    eyepos[ifix, :eyepos_.shape[0]] = eyepos_
 
-#%%
-ind = np.argsort(fix_dur)
-
-plt.imshow(rbar[ind][:,:100] - np.nanmean(rbar[:,:100], 0), aspect='auto', cmap='viridis', interpolation='none')
 # %% loop over, window, compute the power and average
 
-from scipy import signal
-
-def compute_fixation_power_spectra(rbar, fs, min_samples=128, nperseg=256, noverlap=None):
-    """
-    Compute power spectra for each fixation using Welch's method.
-
-    Parameters:
-    -----------
-    rbar : np.ndarray
-        Array of shape (n_fixations, max_duration) with NaNs for missing data
-    fs : float
-        Sampling frequency (Hz)
-    min_samples : int
-        Minimum number of samples required to compute spectrum
-    nperseg : int
-        Length of each segment for Welch's method
-    noverlap : int or None
-        Number of points to overlap between segments (default: nperseg // 2)
-
-    Returns:
-    --------
-    freqs : np.ndarray
-        Frequency bins
-    psd_mean : np.ndarray
-        Mean power spectral density across all valid fixations
-    psd_all : list
-        List of individual PSDs for each valid fixation
-    valid_indices : np.ndarray
-        Indices of fixations that were long enough to analyze
-    """
-    if noverlap is None:
-        noverlap = nperseg // 2
-
-    psd_all = []
-    valid_indices = []
-    freqs = None
-
-    for ifix in range(rbar.shape[0]):
-        # Get valid (non-NaN) samples for this fixation
-        row = rbar[ifix, :]
-        valid_mask = ~np.isnan(row)
-        valid_samples = row[valid_mask]
-
-        # Skip if too short
-        if len(valid_samples) < min_samples:
-            continue
-
-        # Demean the signal
-        valid_samples = valid_samples - np.mean(valid_samples)
-
-        # Adjust nperseg and noverlap for short segments
-        nperseg_adj = min(nperseg, len(valid_samples))
-        noverlap_adj = min(noverlap, nperseg_adj // 2)  # Ensure noverlap < nperseg
-
-        # Compute power spectral density using Welch's method
-        f, psd = signal.welch(
-            valid_samples,
-            fs=fs,
-            nperseg=nperseg_adj,
-            noverlap=noverlap_adj,
-            scaling='density',
-            window='hann'
-        )
-
-        psd_all.append(psd)
-        valid_indices.append(ifix)
-
-        if freqs is None:
-            freqs = f
-
-    valid_indices = np.array(valid_indices)
-
-    # Average across all valid fixations
-    if len(psd_all) > 0:
-        # Stack and compute mean (handling different lengths if necessary)
-        min_len = min(len(p) for p in psd_all)
-        psd_all = [p[:min_len] for p in psd_all]  # Truncate all to same length
-        psd_stack = np.array(psd_all)
-        psd_mean = np.mean(psd_stack, axis=0)
-        freqs = freqs[:min_len]
-    else:
-        psd_mean = np.array([])
-        freqs = np.array([])
-
-    return freqs, psd_mean, psd_all, valid_indices
-
-# Compute power spectra
+# Compute power spectrum
 # Use min_samples=nperseg to ensure all fixations produce the same frequency resolution
 freqs, psd_mean, psd_all, valid_indices = compute_fixation_power_spectra(
-    (rbar[ind] - np.nanmean(rbar, 0))[:,50:-1],
+    eyepos[:,:,0],
     fs=fs,
-    min_samples=196,
-    nperseg=196,
-    noverlap=128//3
+    min_samples=128,
+    nperseg=128,
+    noverlap=128//2
 )
 
 print(f"Computed power spectra for {len(valid_indices)}/{rbar.shape[0]} fixations")
@@ -930,5 +826,22 @@ plt.xlim(0, 120)  # Show up to Nyquist frequency
 plt.legend()
 plt.tight_layout()
 plt.show()
+
+# %%
+
+plt.figure()
+for i in range(eyepos.shape[0]):
+    x = eyepos[i, :-10, 0]
+    valid = np.isfinite(x)
+    x = x[valid]
+    x = x-x.mean()
+    f = np.fft.rfft(x)
+    F = np.fft.rfftfreq(len(x), dt)
+    plt.subplot(1,2,1)
+    plt.plot(x)
+    plt.subplot(1,2,2)
+    plt.plot(F, np.abs(f), alpha=0.1, color='gray')
+
+# plt.show()
 
 # %%

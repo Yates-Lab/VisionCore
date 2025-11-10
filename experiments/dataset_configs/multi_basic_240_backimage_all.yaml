@@ -1,0 +1,63 @@
+types: [backimage]
+session_dir: ./sessions
+sessions: [Allen_2022-02-16,  Allen_2022-03-04,  Allen_2022-04-08,  Allen_2022-06-10,  Logan_2020-02-29, Allen_2022-02-18,  Allen_2022-03-30,  Allen_2022-04-13,  Allen_2022-08-05,  Logan_2020-03-02, Allen_2022-02-24,  Allen_2022-04-01,  Allen_2022-04-15,  Logan_2019-12-20,  Logan_2020-03-04, Allen_2022-03-02,  Allen_2022-04-06,  Allen_2022-06-01,  Logan_2019-12-23,  Logan_2020-03-06]
+sampling:
+  source_rate: 240
+  target_rate: 240
+keys_lags:
+  robs: 0
+  stim: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48]
+  behavior: 0 # will match the `expose_as` in `transforms`
+  dfs: 0
+
+transforms:
+  stim:
+    source: stim
+    ops:
+      - pixelnorm: {}
+      - unsqueeze: 1
+    expose_as: stim
+  # robs:
+  #   source: robs
+  #   ops:
+  #     - smooth: 
+  #        - type: gaussian
+  #        - params: 1.0
+  #   expose_as: robs
+  eye_vel:
+    source: eyepos          # raw key in DictDataset
+    ops:                    # ordered transform list
+      - diff: {axis: 0} # finite-difference velocity
+      # - mul: 240            # Hz → deg s⁻¹
+      - maxnorm: {}
+      - symlog: {}
+      - temporal_basis:     # acausal raised-cosine embedding
+          num_delta_funcs: 0
+          num_cosine_funcs: 10
+          history_bins: 50
+          causal: false
+          log_spacing: false
+          peak_range_ms: [30, 200]
+          normalize: true
+      - splitrelu:
+          split_dim: 1
+          trainable_gain: false
+    expose_as: behavior 
+    concatenate: true 
+  
+  eye_pos:
+    source: eyepos
+    ops: []  # No processing, just pass through
+    expose_as: behavior
+    concatenate: true    # place in batch["behavior"]
+
+datafilters:
+  dfs:
+    ops: [{valid_nlags: {n_lags: 48}}, {missing_pct: {theshold: 45}}]
+    expose_as: dfs
+    
+train_val_split: 0.8
+seed: 1002
+
+
+

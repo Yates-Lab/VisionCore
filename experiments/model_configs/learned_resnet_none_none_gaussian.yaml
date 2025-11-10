@@ -1,4 +1,4 @@
-# V1 model configuration with DenseNet convnet, concat modulator, and ConvGRU recurrent stage
+# V1 model configuration with ResNet convnet, concat modulator, and ConvGRU recurrent stage
 model_type: v1multi
 
 # Model dimensions
@@ -21,14 +21,19 @@ frontend:
     init_type: gaussian_derivatives
     split_MP: False
     aa_signal: true
+    aa_window: hann
+    aa_window_kwargs:
+      power: .25
+    use_weight_norm: false
+    keep_unit_norm: false
     causal: true
-    bias: true
+    bias: false
 
-# Convnet configuration - DenseNet
+# Convnet configuration - ResNet
 convnet:
-  type: densenet
+  type: resnet
   params:
-    channels: [64, 196]
+    channels: [64, 128]
     checkpointing: false
     stem_config:
       out_channels: 8
@@ -42,7 +47,7 @@ convnet:
         weight_norm_dim: 0
         use_weight_norm: true
         keep_unit_norm: true
-      norm_type: grn
+      norm_type: rms
       act_type: splitrelu
       pool_params: null
       dropout: 0.0
@@ -79,10 +84,8 @@ convnet:
 
 # Modulator configuration - Concat
 modulator:
-  type: film
-  params:
-    behavior_dim: 42
-    feature_dim: 32
+  type: none
+  params: {}
 
 # Recurrent configuration - ConvGRU
 recurrent:
@@ -95,7 +98,7 @@ readout:
   params:
     n_units: 8
     bias: true
-    initial_std: 5.0
+    initial_std: 0.5
     initial_mean_scale: 0.1
 
 output_activation: softplus
@@ -117,10 +120,9 @@ regularization:
       start_epoch: 0
       end_epoch: 50
       start_lambda: 10.0  # initial max 
-  # - name: exclude_means_from_wd
-  #   type: l2
-  #   lambda: 0.0  # No penalty, but excludes from weight decay
-  #   apply_to: ["readouts/mean"]
-  #   schedule:
-  #     kind: constant
-
+  - name: exclude_means_from_wd
+    type: l2
+    lambda: 0.0  # No penalty, but excludes from weight decay
+    apply_to: ["readouts/mean"]
+    schedule:
+      kind: constant

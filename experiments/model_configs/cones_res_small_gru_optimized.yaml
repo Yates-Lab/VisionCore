@@ -69,7 +69,7 @@ convnet:
         norm_params:
           affine: true  # NEW: Enable learnable gamma/beta
         act_type: silu
-        dropout: 0.1
+        dropout: 0.0
         pool_params:
           type: aablur
           stride: 2
@@ -87,7 +87,7 @@ convnet:
         norm_params:
           affine: true  # NEW: Enable learnable gamma/beta
         act_type: silu
-        dropout: 0.1
+        dropout: 0.0
         pool_params:
           type: aablur
           stride: 1  # ORIGINAL (not stride 2!)

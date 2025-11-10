@@ -93,7 +93,7 @@ ENABLE_LOGGING=true
 PROJECT_NAME="multidataset_backimage_120"
 
 DATASET_CONFIGS_PATH="/home/jake/repos/VisionCore/experiments/dataset_configs/multi_basic_120_backimage_long.yaml"
-CHECKPOINT_DIR="/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage_8/checkpoints"
+CHECKPOINT_DIR="/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_120_backimage/checkpoints"
 
 # Create checkpoint directory
 mkdir -p $CHECKPOINT_DIR
@@ -101,11 +101,11 @@ mkdir -p $CHECKPOINT_DIR
 # Array of model configurations to run
 MODEL_CONFIGS=(
     "experiments/model_configs/modulator_only_convgru.yaml"
-    "experiments/model_configs/learned_dense_none_convgru_gaussian.yaml"
+    "experiments/model_configs/learned_resnet_none_none_gaussian.yaml"
     "experiments/model_configs/learned_resnet_none_convgru_gaussian.yaml"
+    "experiments/model_configs/learned_resnet_concat_convgru_gaussian.yaml"
+        # "experiments/model_configs/learned_dense_none_convgru_gaussian.yaml"
     # "experiments/model_configs/learned_dense_concat_convgru_gaussian.yaml"
-    # "experiments/model_configs/learned_resnet_concat_convgru_gaussian.yaml"
-    # "experiments/model_configs/learned_dense_film_none_gaussian.yaml"
 )
 
 # Function to run training for a single model config
@@ -157,7 +157,7 @@ run_training() {
         --experiment_name \"$EXPERIMENT_NAME\" \
         --checkpoint_dir \"$CHECKPOINT_DIR\" \
         --accumulate_grad_batches 1 \
-        --gradient_clip_val 1.0 \
+        --gradient_clip_val 10.0 \
         --steps_per_epoch $STEPS_PER_EPOCH \
         --num_workers $NUM_WORKERS \
         --early_stopping_patience 50 \

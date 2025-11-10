@@ -46,32 +46,8 @@ fi
 export LIBRARY_PATH="$HOME/.local/lib:$LIBRARY_PATH"
 export LD_LIBRARY_PATH="$HOME/.local/lib:$LD_LIBRARY_PATH"
 
-# # Set environment variables for optimal performance
-# export CUDA_VISIBLE_DEVICES=0,1
-# export NCCL_DEBUG=ERROR
-# export PYTHONPATH="${PYTHONPATH}:$(pwd)"
-
-# # NCCL settings that fixed the DDP hang
-# export NCCL_SOCKET_IFNAME=lo
-# export NCCL_P2P_DISABLE=1 
-# export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
-
-# # set up lcuda for compilation
-# mkdir -p $HOME/.local/lib          # or another dir you control
-# ln -s /lib/x86_64-linux-gnu/libcuda.so.1 $HOME/.local/lib/libcuda.so
-
-# export LIBRARY_PATH="$HOME/.local/lib:$LIBRARY_PATH"
-# export LD_LIBRARY_PATH="$HOME/.local/lib:$LD_LIBRARY_PATH"
-
-# # export TORCH_DISTRIBUTED_DEBUG=DETAIL
-# # export NCCL_DEBUG=INFO
-# export PYTHONFAULTHANDLER=1
-# export CUDA_LAUNCH_BLOCKING=0
-# export TORCH_SHOW_CPP_STACKTRACES=1
-# export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:128
-
 # Training configuration
-BATCH_SIZE=64          # Optimal batch size per GPU
+BATCH_SIZE=128          # Optimal batch size per GPU
 MAX_DATASETS=30        # Scale to all datasets (28 if removed the two bad sessions)
 LEARNING_RATE=1e-3    # standard learning rate
 CORE_LR_SCALE=.5
@@ -83,24 +59,26 @@ PRECISION="bf16-mixed"
 DSET_DTYPE="bfloat16"
 NUM_GPUS=2             # Use both RTX 6000 Ada GPUs
 NUM_WORKERS=32         # Optimized for 64 CPU cores
-STEPS_PER_EPOCH=1024    # Number of steps per epoch
+STEPS_PER_EPOCH=256    # Number of steps per epoch
 
 # Model compilation configuration
 COMPILE_MODEL=false # THIS ONLY SLOWS THINGS DOWN
+ENABLE_LOGGING=false
 
 # Project and data paths
-PROJECT_NAME="multidataset_backimage_120"
+PROJECT_NAME="multidataset_backimage_240"
 
-DATASET_CONFIGS_PATH="/home/jake/repos/VisionCore/experiments/dataset_configs/multi_basic_120_backimage_all.yaml"
-CHECKPOINT_DIR="/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage_6/checkpoints"
+DATASET_CONFIGS_PATH="/home/jake/repos/VisionCore/experiments/dataset_configs/multi_basic_240_bgg_all.yaml"
+CHECKPOINT_DIR="/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_240/checkpoints"
 
 # Create checkpoint directory
 mkdir -p $CHECKPOINT_DIR
 
 # Array of model configurations to run
 MODEL_CONFIGS=(
-    # "experiments/model_configs/learned_resnet_concat_convgru_gaussian.yaml"
-    "experiments/model_configs/learned_dense_concat_convgru_gaussian.yaml"
+    "experiments/model_configs/learned_resnet_none_none_gaussian.yaml"
+    "experiments/model_configs/learned_resnet_concat_convgru_gaussian.yaml"
+    # "experiments/model_configs/learned_dense_concat_convgru_gaussian.yaml"
 )
 
 # Function to run training for a single model config
@@ -152,14 +130,18 @@ run_training() {
         --experiment_name \"$EXPERIMENT_NAME\" \
         --checkpoint_dir \"$CHECKPOINT_DIR\" \
         --accumulate_grad_batches 1 \
-        --gradient_clip_val 1.0 \
+        --gradient_clip_val 10.0 \
         --steps_per_epoch $STEPS_PER_EPOCH \
         --num_workers $NUM_WORKERS \
-        --early_stopping_patience 20 \
+        --early_stopping_patience 40 \
         --early_stopping_min_delta 0.0"
 
     if [ "$COMPILE_MODEL" = true ]; then
         TRAINING_CMD="$TRAINING_CMD --compile"
+    fi
+
+    if [ "$ENABLE_LOGGING" = true ]; then
+        TRAINING_CMD="$TRAINING_CMD --enable_logging"
     fi
 
     # Launch training

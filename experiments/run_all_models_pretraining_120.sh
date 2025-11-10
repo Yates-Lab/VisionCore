@@ -35,54 +35,41 @@ export TORCH_SHOW_CPP_STACKTRACES=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:128
 
 # Training configuration
-BATCH_SIZE=256          # Optimal batch size per GPU
+BATCH_SIZE=128          # Optimal batch size per GPU
 MAX_DATASETS=30        # Scale to all datasets (28 if removed the two bad sessions)
 LEARNING_RATE=1e-3     # Lower LR for pretraining fine-tuning
 CORE_LR_SCALE=0.5      # Much lower LR for pretrained components
-LR_SCHEDULER="cosine_warmup"  # Use cosine annealing with warmup
+LR_SCHEDULER="cosine_warmup_restart"  # Use cosine annealing with warmup
 WARMUP_EPOCHS=5        # Number of warmup epochs
 WEIGHT_DECAY=1e-4
-MAX_EPOCHS=200        # Long training run with early stopping protection
+MAX_EPOCHS=150        # Long training run with early stopping protection
 PRECISION="bf16-mixed"  
 NUM_GPUS=2             # Use both RTX 6000 Ada GPUs
 NUM_WORKERS=16         # Optimized for 64 CPU cores
-STEPS_PER_EPOCH=512   # Number of steps per epoch
+STEPS_PER_EPOCH=1024   # Number of steps per epoch
 
 # Pretraining configuration
-# PRETRAINED_MODEL_TYPE="learned_res2d_small"
-PRETRAINED_MODEL_TYPE="learned_res_small_30"
+PRETRAINED_MODEL_TYPE="learned_resnet_none_none_gaussian"
 FREEZE_VISION=false    # Set to true for frozen vision experiments
 ENABLE_COMPILE=false   # Set to true to enable torch.compile (disable for STN modulators)
 
-# Project and data paths
-# PROJECT_NAME="multidataset_pretraining_120"
-# DATASET_CONFIGS_PATH="/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset/dataset_basic_multi_120"
-# CHECKPOINT_DIR="/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120/checkpoints"
-# PRETRAINED_CHECKPOINT_DIR="/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120/checkpoints"
 
 PROJECT_NAME="multidataset_pretraining_30"
-DATASET_CONFIGS_PATH="/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset/dataset_basic_multi_30"
-CHECKPOINT_DIR="/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_30/checkpoints"
+DATASET_CONFIGS_PATH="/home/jake/repos/VisionCore/experiments/dataset_configs/multi_basic_120_backimage_long.yaml"
+CHECKPOINT_DIR="/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage_8/checkpoints"
 PRETRAINED_CHECKPOINT_DIR="/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_30/checkpoints"
+
+
 
 # Create checkpoint directory
 mkdir -p $CHECKPOINT_DIR
 
-# Array of model configurations to run with pretraining
+# Array of model configurations to run
 MODEL_CONFIGS=(
-    # "configs_multi/learned_res_small.yaml"
-    # "configs_multi/learned_res_small.yaml"     # Base model (will be trained from scratch if first)
-    # "configs_multi/learned_res_small_gru.yaml" # ConvGRU modulator
-    # "configs_multi/learned_res_small_none_gru_none_pool.yaml" # ConvGRU recurrent (no modulator)
-    # "configs_multi/learned_res2d_small.yaml" # 2D resnet no pooling
-    # "configs_multi/learned_res2d_small_none_gru_none_pool.yaml" # 2D resnet no pooling
-    "configs_multi/learned_res_small_30.yaml"     # Base model (trained first from scratch)
-    "configs_multi/learned_res_small_gru_30.yaml" # ConvGRU modulator
-    # "configs_multi/learned_res_small_none_gru.yaml" # ConvGRU recurrent (no modulator)
-    # "configs_multi/learned_res_tiny_pc.yaml" # Predictive Coding modulator
-    # "configs_multi/learned_res_tiny_film.yaml"      # FiLM modulator
-    # "configs_multi/learned_res_small_stn.yaml"  # Spatial Transformer Network modulator
-    # Add more modulator configs here as you create them
+    "experiments/model_configs/modulator_only_convgru.yaml"
+    "experiments/model_configs/learned_resnet_none_none_gaussian.yaml"
+    "experiments/model_configs/learned_resnet_none_convgru_gaussian.yaml"
+    "experiments/model_configs/learned_resnet_concat_convgru_gaussian.yaml"
 )
 
 # Function to find the best pretrained checkpoint

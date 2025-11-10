@@ -47,7 +47,7 @@ export LIBRARY_PATH="$HOME/.local/lib:$LIBRARY_PATH"
 export LD_LIBRARY_PATH="$HOME/.local/lib:$LD_LIBRARY_PATH"
 
 # Training configuration
-BATCH_SIZE=64          # Optimal batch size per GPU
+BATCH_SIZE=128          # Optimal batch size per GPU
 MAX_DATASETS=30        # Scale to all datasets (28 if removed the two bad sessions)
 LEARNING_RATE=1e-3    # standard learning rate
 CORE_LR_SCALE=.5
@@ -69,15 +69,16 @@ ENABLE_LOGGING=true
 PROJECT_NAME="multidataset_backimage_240"
 
 DATASET_CONFIGS_PATH="/home/jake/repos/VisionCore/experiments/dataset_configs/multi_basic_240_backimage_all.yaml"
-CHECKPOINT_DIR="/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_240_backimage/checkpoints"
+CHECKPOINT_DIR="/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_240/checkpoints"
 
 # Create checkpoint directory
 mkdir -p $CHECKPOINT_DIR
 
 # Array of model configurations to run
 MODEL_CONFIGS=(
-    # "experiments/model_configs/learned_resnet_concat_convgru_gaussian.yaml"
-    "experiments/model_configs/learned_dense_concat_convgru_gaussian.yaml"
+    "experiments/model_configs/learned_resnet_none_none_gaussian.yaml"
+    "experiments/model_configs/learned_resnet_concat_convgru_gaussian.yaml"
+    # "experiments/model_configs/learned_dense_concat_convgru_gaussian.yaml"
 )
 
 # Function to run training for a single model config
@@ -129,10 +130,10 @@ run_training() {
         --experiment_name \"$EXPERIMENT_NAME\" \
         --checkpoint_dir \"$CHECKPOINT_DIR\" \
         --accumulate_grad_batches 1 \
-        --gradient_clip_val 1.0 \
+        --gradient_clip_val 10.0 \
         --steps_per_epoch $STEPS_PER_EPOCH \
         --num_workers $NUM_WORKERS \
-        --early_stopping_patience 20 \
+        --early_stopping_patience 40 \
         --early_stopping_min_delta 0.0"
 
     if [ "$COMPILE_MODEL" = true ]; then
