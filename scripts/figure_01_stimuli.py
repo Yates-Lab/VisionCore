@@ -24,6 +24,16 @@ from DataYatesV1.exp.backimage import BackImageTrial
 import torch
 from torchvision.utils import make_grid
 
+import matplotlib as mpl
+
+# embed TrueType fonts in PDF/PS
+mpl.rcParams['pdf.fonttype'] = 42
+mpl.rcParams['ps.fonttype']  = 42
+
+# (optional) pick a clean sans‐serif
+mpl.rcParams['font.family'] = 'sans-serif'
+mpl.rcParams['font.sans-serif'] = ['Arial', 'Helvetica', 'DejaVu Sans']
+
 enable_autoreload()
 device = get_free_device()
 
