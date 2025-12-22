@@ -1472,47 +1472,6 @@ windows = [5, 10, 20, 40, 80, 100, 150]
 results, last_mats = analyzer.run_sweep(windows, t_hist_ms=5)
 
 #%%
-# build analyzer class object
-analyzer = DualWindowAnalysis(robs, eyepos, valid_mask, dt=1/240)
-
-# extract windows
-history_bins = 5
-count_bins = 10
-SpikeCounts, EyeTraj, T_idx, Trial_idx = analyzer._extract_windows_gpu(history_bins, count_bins)
-
-# calculate eye conditioned covariance
-MM, bin_centers, count_e = analyzer._calculate_second_moment(SpikeCounts, EyeTraj, T_idx, n_bins=25)
-Erate = torch.nanmean(SpikeCounts, 0).detach().cpu().numpy() # raw means
-Ceye = MM - Erate[:,None] * Erate[None,:] # raw rate covariances conditioned on eye trajectory
-
-# find intercept to get estimate of rate covariance whe eye distance is 0
-Crate = analyzer._fit_intercepts_vectorized(Ceye, count_e) # fit intercepts
-
-# NC = MM.shape[1]
-# Crate = np.zeros((NC, NC))
-# for ii in range(NC):
-#     for jj in range(NC):
-#         yhat, blocks = pava_nonincreasing_with_blocks(Ceye[:,ii,jj], count_e)
-#         Crate[ii,jj] = yhat[0]
-
-# total covariance and PSTH
-ix = np.isfinite(SpikeCounts.sum(1).detach().cpu().numpy())
-Ctotal = torch.cov(SpikeCounts[ix].T, correction=0).detach().cpu().numpy() # total covariance
-Cpsth, PSTH_A, PSTH_B = analyzer._split_half_psth_covariance(SpikeCounts, T_idx, min_trials_per_time=10, seed=0)
-
-# covariance due to fixational eye movements
-Cfem = Crate - Cpsth
-
-# noise covariance
-CnoiseU = Ctotal - Cpsth
-CnoiseC = Ctotal - Crate
-
-FF_uncorr = np.diag(CnoiseU) / Erate
-FF_corr = np.diag(CnoiseC) / Erate
-
-NoiseCorrU = cov_to_corr(CnoiseU)
-NoiseCorrC = cov_to_corr(CnoiseC)
-
 
 
 
@@ -1574,13 +1533,26 @@ windows = [5, 10, 20, 40, 80, 100, 150]
 results, last_mats = analyzer.run_sweep(windows, t_hist_ms=windows[0])
 
 #%%
+params_mixed['neuron_params']
+
+#%%
 for i in range(10):
     for j in range(10):
-        analyzer.inspect_neuron_pair(i, j, 5, ax=None, show=True)
+        analyzer.inspect_neuron_pair(i, j, 40, ax=None, show=True)
 
 #%%
 
-analyzer.inspect_neuron_pair(0, 0, 5, ax=None, show=True)
+NC = robs.shape[-1]
+sx = int(np.sqrt(NC))
+sy = int(np.ceil(NC / sx))
+fig, axs = plt.subplots(sy, sx, figsize=(5*sx, 5*sy), sharex=True, sharey=False)
+for i in range(sx*sy):
+    if i >= NC:
+        axs.flatten()[i].axis('off')
+        continue
+    analyzer.inspect_neuron_pair(i, i, 40, ax=axs.flatten()[i], show=False)
+# analyzer.inspect_neuron_pair(0, 0, 5, ax=None, show=True)
+plt.show()
 
 #%% 3. Plot Fano Factor Scaling
 window_ms = [results[i]['window_ms'] for i in range(len(results))]
