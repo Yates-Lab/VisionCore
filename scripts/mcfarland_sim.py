@@ -16,6 +16,11 @@ import matplotlib as mpl
 import torch
 import torch.nn.functional as F
 
+from scipy.optimize import curve_fit
+from tqdm import tqdm
+import time
+from scipy.signal import savgol_filter
+
 # embed TrueType fonts in PDF/PS
 mpl.rcParams['pdf.fonttype'] = 42
 mpl.rcParams['ps.fonttype']  = 42
@@ -25,16 +30,9 @@ mpl.rcParams['font.family'] = 'sans-serif'
 mpl.rcParams['font.sans-serif'] = ['Arial', 'Helvetica', 'DejaVu Sans']
 
 enable_autoreload()
-
-device = get_free_device()
-
-import torch
-
-enable_autoreload()
 device = get_free_device()
 
 #%% Utilities
-
 
 #-----------
 # Get Stimuli
@@ -477,7 +475,11 @@ def save_eye_movies(
     print(f"Saved ROI movie to {save_prefix}_roi.mp4")
 
 
-def build_temporal_kernel(kernel_size=16, dt=1/240, tau_fast=0.008, tau_slow=0.022, a=0.9, n=2):
+def build_temporal_kernel(kernel_size=16, 
+        dt=1/240, 
+        tau_fast=0.008, 
+        tau_slow=0.022, 
+        a=0.9, n=2):
     """
     Build biphasic temporal kernel using difference of gamma functions.
 
@@ -517,8 +519,362 @@ def build_temporal_kernel(kernel_size=16, dt=1/240, tau_fast=0.008, tau_slow=0.0
 
     return temporal_kernel
 
+# PyramidSimulator Class
+class PyramidSimulator:
+    """
+    Steerable Pyramid for simulating neural responses.
 
+    This class encapsulates a steerable pyramid and provides methods to:
+    - Compute RF properties (size, spatial frequency) for all units
+    - Simulate responses from movies with optional temporal filtering
+    - Visualize filters and RFs
+
+    The simulator computes responses for ALL levels, orientations, and spatial positions
+    in the pyramid. Units are indexed by (scale, orientation, y, x) tuples.
+
+    Parameters:
+    -----------
+    image_shape : tuple of int
+        (H, W) shape of input images
+    num_ori : int
+        Number of orientations
+    num_scales : int
+        Number of spatial scales
+    temporal_kernel : torch.Tensor, optional
+        Temporal filter kernel. If None, no temporal filtering is applied.
+        Use build_temporal_kernel() to create a biphasic temporal kernel.
+
+    Attributes:
+    -----------
+    pyr : SteerablePyramidFreq
+        The underlying steerable pyramid
+    rf_size : dict
+        RF size (sqrt of area in pixels) for each (scale, ori) key
+    rf_contour : dict
+        RF contour points for each (scale, ori) key
+    rf_center : dict
+        RF center position for each (scale, ori) key
+    filter_im : dict
+        Reconstructed filter image for each (scale, ori) key
+    freq_rad : dict
+        Preferred spatial frequency (cycles/pixel) for each (scale, ori) key
+
+    Example:
+    --------
+    >>> # Create simulator with temporal filtering
+    >>> temporal_kernel = build_temporal_kernel(kernel_size=16, dt=1/240)
+    >>> simulator = PyramidSimulator(
+    ...     image_shape=(51, 51),
+    ...     num_ori=8,
+    ...     num_scales=3,
+    ...     temporal_kernel=temporal_kernel
+    ... )
+    >>>
+    >>> # Visualize filters and RFs
+    >>> simulator.plot_filters(scales=[0, 1, 2])
+    >>> simulator.plot_rfs(scales=[0, 1, 2])
+    >>>
+    >>> # Query properties for a specific unit
+    >>> props = simulator.get_unit_properties(scale=1, ori=0)
+    >>> print(f"RF size: {props['rf_size']:.2f} pixels")
+    >>>
+    >>> # Simulate responses from a movie
+    >>> movie = torch.randn(100, 51, 51)  # 100 frames
+    >>> units = [(0, 0, 25, 25), (1, 0, 25, 25)]  # Two units
+    >>> responses = simulator.simulate(movie, units=units)
+    >>> print(responses.shape)  # (100, 2)
+    """
+
+    def __init__(self, image_shape=(51, 51), num_ori=8, num_scales=3, temporal_kernel=None):
+        from plenoptic.simulate import SteerablePyramidFreq
+
+        self.image_shape = image_shape
+        self.num_ori = num_ori
+        self.num_scales = num_scales
+        self.temporal_kernel = temporal_kernel
+
+        # Build steerable pyramid
+        order = num_ori - 1
+        self.pyr = SteerablePyramidFreq(
+            image_shape, order=order, height=num_scales, is_complex=True,
+            downsample=False, tight_frame=False
+        )
+
+        # Compute RF properties for all units
+        self._compute_rf_properties()
+
+    def _compute_rf_properties(self):
+        """Compute RF size and preferred spatial frequency for all scales and orientations."""
+        from DataYatesV1.utils.rf import get_contour
+
+        mid_y, mid_x = self.image_shape[0] // 2, self.image_shape[1] // 2
+
+        # Get RF size using impulse response
+        point = torch.zeros((1, 1, self.image_shape[0], self.image_shape[1]), dtype=torch.float32)
+        point[0, 0, mid_y, mid_x] = 1
+        pyr_coeffs = self.pyr.forward(point)
+
+        def minmax(x):
+            return (x - x.min()) / (x.max() - x.min())
+
+        # Store RF properties for each (scale, orientation, y, x)
+        self.rf_size = {}
+        self.rf_contour = {}
+        self.rf_center = {}
+
+        for ilevel in range(self.num_scales):
+            for iori in range(self.num_ori):
+                I_for_contour = np.abs(pyr_coeffs[(ilevel, iori)].squeeze())
+                I_for_contour = minmax(I_for_contour)
+                contour, area_, center = get_contour(I_for_contour.numpy(), 0.5)
+
+                self.rf_size[(ilevel, iori)] = np.sqrt(area_)
+                self.rf_contour[(ilevel, iori)] = contour
+                self.rf_center[(ilevel, iori)] = center
+
+        # Get RF spatial frequency using filter reconstruction
+        empty_image = torch.zeros((1, 1, self.image_shape[0], self.image_shape[1]), dtype=torch.float32)
+        pyr_coeffs = self.pyr(empty_image)
+
+        self.filter_im = {}
+        self.freq_rad = {}
+
+        for ilevel in range(self.num_scales):
+            for iori in range(self.num_ori):
+                # Set coefficient to 1 at center
+                pyr_coeffs[(ilevel, iori)][:, :, mid_y, mid_x] = 1
+                # Reconstruct filter
+                filter_im = self.pyr.recon_pyr(pyr_coeffs, [ilevel], [iori]).squeeze()
+                self.filter_im[(ilevel, iori)] = filter_im
+
+                # Get spatial frequency tuning
+                F = np.abs(np.fft.rfft2(filter_im.numpy()))
+                fy = np.fft.fftfreq(self.image_shape[0], d=1)
+                fx = np.fft.rfftfreq(self.image_shape[1], d=1)
+
+                ky, kx = np.unravel_index(np.argmax(F), F.shape)
+                self.freq_rad[(ilevel, iori)] = np.hypot(fy[ky], fx[kx])
+
+                # Reset coefficient
+                pyr_coeffs[(ilevel, iori)][:, :, mid_y, mid_x] = 0
+
+    def simulate(self, movie):
+        """
+        Simulate responses from a movie.
+
+        Parameters:
+        -----------
+        movie : torch.Tensor
+            Input movie of shape (T, H, W) or (T, 1, H, W)
+        
+        Returns:
+        --------
+        responses : torch.Tensor
+            Simulated responses of shape (T, n_units)
+        """
+        # Ensure movie has correct shape
+        if movie.dim() == 3:
+            movie = movie.unsqueeze(1)  # (T, 1, H, W)
+
+        T, C, H, W = movie.shape
+        
+        # Simulate with or without temporal filtering
+        responses = np.zeros((T, self.num_scales, self.num_ori, H, W))
+
+        # if self.temporal_kernel is not None:
+        #     L = len(self.temporal_kernel)
+        #     N = T-L+1
+        #     iix = np.arange(N)[:, None] + np.arange(L)
+        #     new_movie = torch.zeros((T, C, H, W), dtype=movie.dtype, device=movie.device)
+        #     print(movie[iix].shape)
+        #     tmp = (movie[iix] * self.temporal_kernel[None, :, None, None, None]).sum(1)
+        #     print(tmp.shape)
+        #     new_movie[L-1:] = tmp
+        #     movie = new_movie
+
+        # # No temporal filtering
+        # pyr_coeffs = self.pyr(movie)
+        # for ilevel in range(self.num_scales):
+        #     for iori in range(self.num_ori):
+        #         responses[:, ilevel, iori] = pyr_coeffs[(ilevel, iori)].squeeze()
+
+        # old (apply temporal kernel AFTER)
+        if self.temporal_kernel is not None:
+            L = len(self.temporal_kernel)
+            N = T-L+1
+            iix = np.arange(N)[:, None] + np.arange(L)
+            coefs = self.pyr(movie[iix].reshape(N*L, 1, H, W)) #.reshape(N, L, H, W)
+            
+            for ilevel in range(self.num_scales):
+                for iori in range(self.num_ori):
+                    co = coefs[(ilevel, iori)]
+                    responses[L-1:, ilevel, iori] = (co.reshape(N, L, H, W) * self.temporal_kernel[None, :, None, None]).sum(1)
+        else:
+            # No temporal filtering
+            pyr_coeffs = self.pyr(movie)
+            for ilevel in range(self.num_scales):
+                for iori in range(self.num_ori):
+                    responses[:, ilevel, iori] = pyr_coeffs[(ilevel, iori)].squeeze()
+        
+        return responses
+
+    def plot_filters(self, scales=None, orientations=None, figsize=None, save_path=None):
+        """
+        Plot the spatial filters for requested scales and orientations.
+
+        Parameters:
+        -----------
+        scales : list of int, optional
+            Which scales to plot. If None, plots all scales.
+        orientations : list of int, optional
+            Which orientations to plot. If None, plots all orientations.
+        figsize : tuple, optional
+            Figure size (width, height)
+        save_path : str, optional
+            Path to save figure
+
+        Returns:
+        --------
+        fig, axes : matplotlib figure and axes
+        """
+        if scales is None:
+            scales = list(range(self.num_scales))
+        if orientations is None:
+            orientations = list(range(self.num_ori))
+
+        n_scales = len(scales)
+        n_ori = len(orientations)
+
+        if figsize is None:
+            figsize = (3 * n_ori, 3 * n_scales)
+
+        fig, axes = plt.subplots(n_scales, n_ori, figsize=figsize)
+        if n_scales == 1 and n_ori == 1:
+            axes = np.array([[axes]])
+        elif n_scales == 1:
+            axes = axes[np.newaxis, :]
+        elif n_ori == 1:
+            axes = axes[:, np.newaxis]
+
+        for i, scale in enumerate(scales):
+            for j, ori in enumerate(orientations):
+                ax = axes[i, j]
+                filter_im = self.filter_im[(scale, ori)]
+                ax.imshow(filter_im.numpy(), cmap='gray_r', interpolation='none')
+                ax.set_title(f'Scale {scale}, Ori {ori}')
+                ax.axis('off')
+
+        plt.tight_layout()
+
+        if save_path is not None:
+            plt.savefig(save_path, bbox_inches='tight', dpi=300)
+
+        return fig, axes
+
+    def plot_rfs(self, scales=None, orientations=None, figsize=None, save_path=None):
+        """
+        Plot the receptive fields with contours for requested scales and orientations.
+
+        Parameters:
+        -----------
+        scales : list of int, optional
+            Which scales to plot. If None, plots all scales.
+        orientations : list of int, optional
+            Which orientations to plot. If None, plots all orientations.
+        figsize : tuple, optional
+            Figure size (width, height)
+        save_path : str, optional
+            Path to save figure
+
+        Returns:
+        --------
+        fig, axes : matplotlib figure and axes
+        """
+        from DataYatesV1.utils.rf import get_contour
+
+        if scales is None:
+            scales = list(range(self.num_scales))
+        if orientations is None:
+            orientations = list(range(self.num_ori))
+
+        n_scales = len(scales)
+        n_ori = len(orientations)
+
+        if figsize is None:
+            figsize = (3 * n_ori, 3 * n_scales)
+
+        fig, axes = plt.subplots(n_scales, n_ori, figsize=figsize)
+        if n_scales == 1 and n_ori == 1:
+            axes = np.array([[axes]])
+        elif n_scales == 1:
+            axes = axes[np.newaxis, :]
+        elif n_ori == 1:
+            axes = axes[:, np.newaxis]
+
+        # Get impulse response
+        mid_y, mid_x = self.image_shape[0] // 2, self.image_shape[1] // 2
+        point = torch.zeros((1, 1, self.image_shape[0], self.image_shape[1]), dtype=torch.float32)
+        point[0, 0, mid_y, mid_x] = 1
+        pyr_coeffs = self.pyr.forward(point)
+
+        def minmax(x):
+            return (x - x.min()) / (x.max() - x.min())
+
+        for i, scale in enumerate(scales):
+            for j, ori in enumerate(orientations):
+                ax = axes[i, j]
+                I_for_contour = np.abs(pyr_coeffs[(scale, ori)].squeeze())
+                I_for_contour = minmax(I_for_contour)
+
+                ax.imshow(I_for_contour.numpy(), cmap='gray_r', interpolation='none')
+
+                # Plot contour
+                contour = self.rf_contour[(scale, ori)]
+                ax.plot(contour[:, 1], contour[:, 0], 'r', linewidth=2)
+
+                rf_size = self.rf_size[(scale, ori)]
+                freq = self.freq_rad[(scale, ori)]
+                ax.set_title(f'S{scale},O{ori}\nRF={rf_size:.1f}px, f={freq:.3f}c/px')
+                ax.axis('off')
+
+        plt.tight_layout()
+
+        if save_path is not None:
+            plt.savefig(save_path, bbox_inches='tight', dpi=300)
+
+        return fig, axes
+
+    def get_unit_properties(self, scale, ori):
+        """
+        Get RF properties for a specific unit.
+
+        Parameters:
+        -----------
+        scale : int
+            Scale index
+        ori : int
+            Orientation index
+
+        Returns:
+        --------
+        dict with keys:
+            'rf_size': RF size (sqrt of area in pixels)
+            'freq_rad': Preferred spatial frequency (cycles per pixel)
+            'rf_center': RF center position (y, x)
+            'rf_contour': RF contour points
+        """
+        return {
+            'rf_size': self.rf_size[(scale, ori)],
+            'freq_rad': self.freq_rad[(scale, ori)],
+            'rf_center': self.rf_center[(scale, ori)],
+            'rf_contour': self.rf_contour[(scale, ori)],
+        }
+
+
+
+# Main simulation
 def simulate_responses(
+    pyr,
     n_trials=100,
     trial_duration=1.0,
     dt=1/240,
@@ -537,23 +893,6 @@ def simulate_responses(
     # Stimulus parameters
     stim_size=600,
     frames_per_im=8,
-
-    # Pyramid parameters
-    image_shape=(51, 51),
-    num_ori=8,
-    num_scales=3,
-
-    # Neuron sampling parameters
-    n_neurons=10,
-    scales=None,  # list of scale indices to sample from, None = all
-    orientations=None,  # list of orientation indices to sample from, None = all
-    spatial_scatter_pix=0.0,  # std dev of spatial scatter in pixels
-    nonlinearity='complex',  # 'complex' (abs), 'simple' (rectified real or imag), or fraction e.g. 0.5 = 50% complex, 50% simple
-    mean_firing_rate=15.0,  # spikes per second
-
-    # Temporal filtering
-    include_temporal_filter=True,
-    kernel_size=16,
 
     # Random seeds
     neuron_seed=42,
@@ -588,44 +927,6 @@ def simulate_responses(
         eye_seed = np.random.randint(0, 2**32 - 1)
     eye_rng = np.random.default_rng(eye_seed)
 
-    # Parse nonlinearity specification
-    if isinstance(nonlinearity, str):
-        if nonlinearity not in ['complex', 'simple']:
-            raise ValueError("nonlinearity must be 'complex', 'simple', or a float")
-        nonlinearity_types = [nonlinearity] * n_neurons
-        simple_phases = [None] * n_neurons  # not used for complex
-    elif isinstance(nonlinearity, (float, int)):
-        # Fraction of complex cells
-        frac_complex = float(nonlinearity)
-        if not 0 <= frac_complex <= 1:
-            raise ValueError("nonlinearity fraction must be between 0 and 1")
-        n_complex = int(np.round(frac_complex * n_neurons))
-        nonlinearity_types = ['complex'] * n_complex + ['simple'] * (n_neurons - n_complex)
-        # Shuffle to randomize order
-        neuron_rng.shuffle(nonlinearity_types)
-        simple_phases = [None] * n_neurons
-    else:
-        raise ValueError("nonlinearity must be str or float")
-
-    # For simple cells, randomly assign real or imaginary phase
-    for i in range(n_neurons):
-        if nonlinearity_types[i] == 'simple':
-            simple_phases[i] = neuron_rng.choice(['real', 'imag'])
-
-    # Build steerable pyramid
-    order = num_ori - 1
-    pyr = SteerablePyramidFreq(
-        image_shape, order=order, height=num_scales, is_complex=True,
-        downsample=False, tight_frame=False
-    )
-
-    # Build temporal kernel if needed
-    if include_temporal_filter:
-        temporal_kernel = build_temporal_kernel(kernel_size=kernel_size, dt=dt)
-    else:
-        temporal_kernel = None
-        kernel_size = 1
-
     # Get stimulus
     full_stack = get_fixrsvp_stack(full_size=stim_size, frames_per_im=frames_per_im)
     full_stack = torch.from_numpy(full_stack).float()
@@ -633,41 +934,8 @@ def simulate_responses(
     # Determine number of time bins per trial
     n_time_bins = int(trial_duration / dt)
 
-    # Sample neurons from pyramid
-    if scales is None:
-        scales = list(range(num_scales))
-    if orientations is None:
-        orientations = list(range(num_ori))
-
-    # Create list of all possible (scale, orientation, y, x) combinations
-    mid_y, mid_x = image_shape[0] // 2, image_shape[1] // 2
-    neuron_locations = []
-    for scale in scales:
-        for ori in orientations:
-            # Sample spatial locations with scatter
-            for _ in range(n_neurons * 2):  # oversample to ensure we get enough
-                if spatial_scatter_pix > 0:
-                    dy = neuron_rng.normal(0, spatial_scatter_pix)
-                    dx = neuron_rng.normal(0, spatial_scatter_pix)
-                    y = int(np.round(mid_y + dy))
-                    x = int(np.round(mid_x + dx))
-                    # Clamp to valid range
-                    y = np.clip(y, 0, image_shape[0] - 1)
-                    x = np.clip(x, 0, image_shape[1] - 1)
-                else:
-                    y, x = mid_y, mid_x
-                neuron_locations.append((scale, ori, y, x))
-
-    # Sample n_neurons without replacement
-    sampled_indices = neuron_rng.choice(len(neuron_locations), size=n_neurons, replace=False)
-    sampled_neurons = [neuron_locations[i] for i in sampled_indices]
-
-    if verbose:
-        print(f"Simulating {n_trials} trials with {n_neurons} neurons")
-        print(f"Neuron locations: {sampled_neurons}")
-
     # Initialize output arrays
-    robs = np.full((n_trials, n_time_bins, n_neurons), np.nan, dtype=float)
+    robs = np.full((n_trials, n_time_bins, pyr.num_scales, pyr.num_ori, pyr.image_shape[0], pyr.image_shape[1]), np.nan, dtype=float)
     eyepos = np.full((n_trials, n_time_bins, 2), np.nan, dtype=float)
 
     # Simulate each trial
@@ -720,7 +988,7 @@ def simulate_responses(
         eye_movie = shift_movie_with_eye(
             stim_for_trial,
             eye_norm,
-            out_size=image_shape,
+            out_size=pyr.image_shape,
             center=(0.0, 0.0),
             mode="bilinear"
         )  # (T_eye, H, W)
@@ -728,124 +996,15 @@ def simulate_responses(
         # Add channel dimension for pyramid
         eye_movie = eye_movie.unsqueeze(1)  # (T, 1, H, W)
 
-        # Get pyramid coefficients
-        if include_temporal_filter:
-            # Need to get lagged stimulus for temporal filtering
-            T_trial = eye_movie.shape[0]
-            pyr_responses = torch.zeros((T_trial, n_neurons), dtype=torch.float32)
+        # Simulate responses
+        robs_for_trial = pyr.simulate(eye_movie)
+        
+        robs[itrial, :T_eye] = robs_for_trial
+        eyepos[itrial, :T_eye] = pos
+           
+    return robs, eyepos
 
-            for t in range(kernel_size - 1, T_trial):
-                # Get lagged frames
-                stim_lagged = eye_movie[t - kernel_size + 1:t + 1]  # (kernel_size, 1, H, W)
-                pyr_coeffs = pyr(stim_lagged)
-
-                # Extract responses for each neuron
-                for ineuron, (scale, ori, y, x) in enumerate(sampled_neurons):
-                    coeff = pyr_coeffs[(scale, ori)][:, :, y, x].squeeze()  # (kernel_size,)
-                    # Apply nonlinearity based on neuron type
-                    nl_type = nonlinearity_types[ineuron]
-                    if nl_type == 'complex':
-                        coeff = torch.abs(coeff)
-                    elif nl_type == 'simple':
-                        # Rectified real or imaginary
-                        if simple_phases[ineuron] == 'real':
-                            coeff = torch.clamp(torch.real(coeff), min=0)
-                        else:  # 'imag'
-                            coeff = torch.clamp(torch.imag(coeff), min=0)
-                    # Apply temporal filter
-                    response = (coeff * temporal_kernel).sum()
-                    # Ensure non-negative (temporal filter can make it negative)
-                    pyr_responses[t, ineuron] = torch.clamp(response, min=0)
-        else:
-            # No temporal filtering
-            pyr_coeffs = pyr(eye_movie)
-            pyr_responses = torch.zeros((eye_movie.shape[0], n_neurons), dtype=torch.float32)
-
-            for ineuron, (scale, ori, y, x) in enumerate(sampled_neurons):
-                coeff = pyr_coeffs[(scale, ori)][:, :, y, x].squeeze()  # (T,)
-                # Apply nonlinearity based on neuron type
-                nl_type = nonlinearity_types[ineuron]
-                if nl_type == 'complex':
-                    coeff = torch.abs(coeff)
-                elif nl_type == 'simple':
-                    # Rectified real or imaginary
-                    if simple_phases[ineuron] == 'real':
-                        coeff = torch.clamp(torch.real(coeff), min=0)
-                    else:  # 'imag'
-                        coeff = torch.clamp(torch.imag(coeff), min=0)
-                pyr_responses[:, ineuron] = coeff
-
-        # Convert to firing rates and sample spikes
-        pyr_responses = pyr_responses.numpy()
-        for ineuron in range(n_neurons):
-            r = pyr_responses[:, ineuron]
-            # Ensure non-negative (should already be from nonlinearity, but double-check)
-            r = np.maximum(r, 0)
-            # Normalize to mean firing rate
-            mu = np.nanmean(r)
-            if mu > 0:
-                r = r / mu * mean_firing_rate * dt
-            # Sample Poisson spikes
-            valid = np.isfinite(r) & (r >= 0)
-            spikes = np.zeros_like(r)
-            if np.any(valid):
-                spikes[valid] = r[valid]
-            robs[itrial, :len(spikes), ineuron] = spikes
-
-    # Store parameters
-    params = {
-        'n_trials': n_trials,
-        'trial_duration': trial_duration,
-        'dt': dt,
-        'ppd': ppd,
-        'eye_params': {
-            'fix_dist': fix_dist,
-            'fix_mean': fix_mean,
-            'fix_spread': fix_spread,
-            'D': D,
-            'ms_dur_mean': ms_dur_mean,
-            'ms_dur_jitter': ms_dur_jitter,
-            'ms_amp_mean': ms_amp_mean,
-            'ms_amp_spread': ms_amp_spread,
-        },
-        'stim_params': {
-            'stim_size': stim_size,
-            'frames_per_im': frames_per_im,
-        },
-        'pyramid_params': {
-            'image_shape': image_shape,
-            'num_ori': num_ori,
-            'num_scales': num_scales,
-        },
-        'neuron_params': {
-            'n_neurons': n_neurons,
-            'scales': scales,
-            'orientations': orientations,
-            'spatial_scatter_pix': spatial_scatter_pix,
-            'nonlinearity': nonlinearity,
-            'nonlinearity_types': nonlinearity_types,  # 'complex' or 'simple' for each neuron
-            'simple_phases': simple_phases,  # 'real' or 'imag' for simple cells, None for complex
-            'mean_firing_rate': mean_firing_rate,
-            'sampled_neurons': sampled_neurons,
-        },
-        'temporal_params': {
-            'include_temporal_filter': include_temporal_filter,
-            'kernel_size': kernel_size,
-        },
-        'seeds': {
-            'neuron_seed': neuron_seed,
-            'eye_seed': eye_seed,
-        },
-    }
-
-    return robs, eyepos, params
-
-#%% Utility function for smoothing eye position
-import numpy as np
-import torch
-
-from scipy.signal import savgol_filter
-
+# Utility function for smoothing eye position
 def _savgol_1d_nan(y, window_length=15, polyorder=3):
     """
     Apply Savitzky–Golay to a 1D array with NaNs.
@@ -964,16 +1123,7 @@ def pava_nonincreasing_with_blocks(y, w, eps=1e-12):
     return yhat, blocks
 
 
-#%% Law of total covariance decomposition
-import numpy as np
-import matplotlib.pyplot as plt
-from scipy.optimize import curve_fit
-import torch
-from tqdm import tqdm
-import time
-from scipy.signal import savgol_filter
-
-    
+# Law of total covariance decomposition    
 class DualWindowAnalysis:
     """
     McFarland-style FEM covariance decomposition.
@@ -1242,8 +1392,8 @@ class DualWindowAnalysis:
             Ceye = MM - Erate[:,None] * Erate[None,:] # raw rate covariances conditioned on eye trajectory
 
             # find intercept to get estimate of rate covariance whe eye distance is 0
-            Crate = analyzer._fit_intercepts_vectorized(Ceye, count_e) # fit intercepts
-
+            # Crate = analyzer._fit_intercepts_vectorized(Ceye, count_e) # fit intercepts
+            Crate = Ceye[0]
             # total covariance and PSTH
             ix = np.isfinite(SpikeCounts.sum(1).detach().cpu().numpy())
             Ctotal = torch.cov(SpikeCounts[ix].T, correction=0).detach().cpu().numpy() # total covariance
@@ -1408,55 +1558,31 @@ save_eye_movies(
     trail_alpha=0.7
 )
 
-# %%
-# Simulate with mixed nonlinearities: 70% complex, 30% simple
-robs_mixed, eyepos_mixed, params_mixed = simulate_responses(
-    n_trials=100,
-    trial_duration=1.0,
-    dt=1/240,
-    ppd=60,
+# %% simulate responses
 
-    # Eye movement parameters
-    fix_mean=0.2,
-    fix_spread=0.45,
-    D=0.001,
-    ms_amp_mean=0.3,
-    ms_amp_spread=0.55,
 
-    # Neuron parameters
-    n_neurons=40,
-    scales=[0, 1, 2],
-    orientations=[0, 1, 2, 3],
-    spatial_scatter_pix=2.0,
-    nonlinearity=0.7,  # 70% complex, 30% simple
-    mean_firing_rate=15.0,
+temporal_kernel = build_temporal_kernel()
 
-    # Temporal filtering
-    include_temporal_filter=True,
-
-    # Seeds
-    neuron_seed=42,
-    eye_seed=123,
-
-    verbose=True,
+pyr = PyramidSimulator(
+    image_shape=(100, 100),
+    num_ori=8,
+    num_scales=3,
+    temporal_kernel=None #torch.flip(temporal_kernel, dims=[0])
 )
 
-print(f"Nonlinearity types: {params_mixed['neuron_params']['nonlinearity_types']}")
-print(f"Simple cell phases: {params_mixed['neuron_params']['simple_phases']}")
-# Count each type
-from collections import Counter
-print(f"Type counts: {Counter(params_mixed['neuron_params']['nonlinearity_types'])}")
-# Count simple cell phases
-simple_phases_only = [p for p in params_mixed['neuron_params']['simple_phases'] if p is not None]
-print(f"Simple phase counts: {Counter(simple_phases_only)}")
+robs_pyr, eyepos_sim = simulate_responses(pyr)
+#%%
 
-# %%
+robs = np.maximum(np.real(robs_pyr[:,16:,2,0,25,20:40]), 0)
+eyepos = eyepos_sim[:,16:].copy()
+eyepos[:,:,1] = 0
 
-plt.imshow(robs_mixed[:,:,14], cmap='gray_r')
-# %%
+cc = 18
+plt.imshow(robs[:,:,cc], aspect='auto', cmap='gray_r', interpolation='none')
 
-robs = robs_mixed
-eyepos = eyepos_mixed
+#%%
+
+
 
 # 1. Setup
 # Assuming 'robs', 'eyepos', 'valid_mask' are already loaded from your dataset code
@@ -1473,14 +1599,21 @@ results, last_mats = analyzer.run_sweep(windows, t_hist_ms=5)
 
 #%%
 
+window_idx = 4
+Ctotal = last_mats[window_idx]['Total']
+Cfem = last_mats[window_idx]['FEM']
+Cpsth = last_mats[window_idx]['PSTH']
+CnoiseU = last_mats[window_idx]['NoiseCorrU']
+CnoiseC = last_mats[window_idx]['NoiseCorrC']
+FF_uncorr = results[window_idx]['ff_uncorr']
+FF_corr = results[window_idx]['ff_corr']
 
-
-v = np.max(Ctotal.flatten())*.9
+v = np.max(Ctotal.flatten())
 plt.subplot(1,3,1)
 plt.imshow(Ctotal, vmin=-v, vmax=v)
 plt.title('Total')
 plt.subplot(1,3,2)
-plt.imshow(Crate, vmin=-v, vmax=v)
+plt.imshow(Cfem, vmin=-v, vmax=v)
 plt.title('Eye')
 plt.subplot(1,3,3)
 plt.imshow(Cpsth, vmin=-v, vmax=v)
@@ -1488,10 +1621,12 @@ plt.title('PSTH')
 
 plt.figure()
 plt.subplot(1,2,1)
-plt.imshow(CnoiseU, vmin=-v, vmax=v)
+plt.imshow(CnoiseU, vmin=-1, vmax=1)
+plt.colorbar()
 plt.title('Noise (Uncorrected))')
 plt.subplot(1,2,2)
-plt.imshow(CnoiseC, vmin=-v, vmax=v)
+plt.imshow(CnoiseC, vmin=-1, vmax=1)
+plt.colorbar()
 plt.title('Noise (Corrected) ')
 
 
@@ -1506,19 +1641,9 @@ plt.title('Fano Factor vs Window Size')
 
 
 #%%
-ii = 25
-jj = 29
-
-yhat, blocks = pava_nonincreasing_with_blocks(Ceye[:,ii,jj], count_e)
-
-plt.plot(bin_centers, Ceye[:,ii,jj], 'o')
-plt.plot(bin_centers, yhat, 'r-')
-
-k = 1
-intercept = float(np.sum(count_e[:k] * yhat[:k]) / (np.sum(count_e[:k]) + 1e-12))
-plt.axhline(intercept, color='k', linestyle='--')
-plt.axhline(Cpsth[ii,jj], color='g', linestyle='--')
-bin_centers
+ii = 0
+for jj in range(robs.shape[-1]):
+    analyzer.inspect_neuron_pair(ii, jj, 40, ax=None, show=True)
 
 
 #%% plot fano factor
