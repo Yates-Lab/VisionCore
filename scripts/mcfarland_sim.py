@@ -306,6 +306,7 @@ def shift_movie_with_eye(
     center=(0.0, 0.0),            # (cx,cy) in [-1,1]
     mode="bilinear",
     padding_mode="zeros",
+    scale_factor=1.0,
     align_corners=True,
 ):
     """
@@ -337,8 +338,8 @@ def shift_movie_with_eye(
 
     # Base sampling grid scaled by actual pixel dimensions
     # Grid spans from -outW/(2*W) to +outW/(2*W) in normalized coords
-    x_extent = outW / W  # extent in normalized coords [-1,1]
-    y_extent = outH / H
+    x_extent = (outW / W) * scale_factor  # extent in normalized coords [-1,1]
+    y_extent = (outH / H) * scale_factor
 
     ys = torch.linspace(-y_extent, y_extent, outH, device=device, dtype=dtype)
     xs = torch.linspace(-x_extent, x_extent, outW, device=device, dtype=dtype)
@@ -477,8 +478,8 @@ def save_eye_movies(
 
 def build_temporal_kernel(kernel_size=16, 
         dt=1/240, 
-        tau_fast=0.008, 
-        tau_slow=0.022, 
+        tau_fast=0.004, 
+        tau_slow=0.011, 
         a=0.9, n=2):
     """
     Build biphasic temporal kernel using difference of gamma functions.
@@ -681,40 +682,40 @@ class PyramidSimulator:
         # Simulate with or without temporal filtering
         responses = np.zeros((T, self.num_scales, self.num_ori, H, W))
 
-        # if self.temporal_kernel is not None:
-        #     L = len(self.temporal_kernel)
-        #     N = T-L+1
-        #     iix = np.arange(N)[:, None] + np.arange(L)
-        #     new_movie = torch.zeros((T, C, H, W), dtype=movie.dtype, device=movie.device)
-        #     print(movie[iix].shape)
-        #     tmp = (movie[iix] * self.temporal_kernel[None, :, None, None, None]).sum(1)
-        #     print(tmp.shape)
-        #     new_movie[L-1:] = tmp
-        #     movie = new_movie
-
-        # # No temporal filtering
-        # pyr_coeffs = self.pyr(movie)
-        # for ilevel in range(self.num_scales):
-        #     for iori in range(self.num_ori):
-        #         responses[:, ilevel, iori] = pyr_coeffs[(ilevel, iori)].squeeze()
-
-        # old (apply temporal kernel AFTER)
         if self.temporal_kernel is not None:
             L = len(self.temporal_kernel)
             N = T-L+1
             iix = np.arange(N)[:, None] + np.arange(L)
-            coefs = self.pyr(movie[iix].reshape(N*L, 1, H, W)) #.reshape(N, L, H, W)
+            new_movie = torch.zeros((T, C, H, W), dtype=movie.dtype, device=movie.device)
+            # print(movie[iix].shape)
+            tmp = (movie[iix] * self.temporal_kernel[None, :, None, None, None]).sum(1)
+            # print(tmp.shape)
+            new_movie[L-1:] = tmp
+            movie = new_movie
+
+        # No temporal filtering
+        pyr_coeffs = self.pyr(movie)
+        for ilevel in range(self.num_scales):
+            for iori in range(self.num_ori):
+                responses[:, ilevel, iori] = pyr_coeffs[(ilevel, iori)].squeeze()
+
+        # # old (apply temporal kernel AFTER)
+        # if self.temporal_kernel is not None:
+        #     L = len(self.temporal_kernel)
+        #     N = T-L+1
+        #     iix = np.arange(N)[:, None] + np.arange(L)
+        #     coefs = self.pyr(movie[iix].reshape(N*L, 1, H, W)) #.reshape(N, L, H, W)
             
-            for ilevel in range(self.num_scales):
-                for iori in range(self.num_ori):
-                    co = coefs[(ilevel, iori)]
-                    responses[L-1:, ilevel, iori] = (co.reshape(N, L, H, W) * self.temporal_kernel[None, :, None, None]).sum(1)
-        else:
-            # No temporal filtering
-            pyr_coeffs = self.pyr(movie)
-            for ilevel in range(self.num_scales):
-                for iori in range(self.num_ori):
-                    responses[:, ilevel, iori] = pyr_coeffs[(ilevel, iori)].squeeze()
+        #     for ilevel in range(self.num_scales):
+        #         for iori in range(self.num_ori):
+        #             co = coefs[(ilevel, iori)]
+        #             responses[L-1:, ilevel, iori] = (co.reshape(N, L, H, W) * self.temporal_kernel[None, :, None, None]).sum(1)
+        # else:
+        #     # No temporal filtering
+        #     pyr_coeffs = self.pyr(movie)
+        #     for ilevel in range(self.num_scales):
+        #         for iori in range(self.num_ori):
+        #             responses[:, ilevel, iori] = pyr_coeffs[(ilevel, iori)].squeeze()
         
         return responses
 
@@ -1242,52 +1243,128 @@ class DualWindowAnalysis:
 
         return SpikeCounts, EyeTraj, T_idx, idx_tr
 
-    def _calculate_second_moment(self, SpikeCounts, EyeTraj, T_idx, n_bins=25, bin_edges=None):
+    # 
+    def _calculate_second_moment(self, SpikeCounts, EyeTraj, T_idx, n_bins=25):
+        """
+        Calculate second moment E[SS^T | d] for all pairs of samples
+        use split half cross-validation to estimate E[SS^T]
+    
+        """
         
-        unique_times = np.unique(T_idx.detach().cpu().numpy())
+        diff = torch.sqrt( torch.sum((EyeTraj[:, None, :, :] - EyeTraj[None, :, :, :])**2,-1)).mean(2)       # (N, N, T, 2)
+        i, j = np.triu_indices_from(diff)
+        dist = diff[i,j]
+        bin_edges = np.percentile(dist.cpu().numpy(), np.arange(0, 100, 100/(n_bins+1)))
 
-        if bin_edges is None:
-            bin_edges = np.linspace(0, 1.0, n_bins + 1)
-        
         bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
         n_bins = len(bin_edges) - 1
 
-        n_neurons = SpikeCounts.shape[1]
+        unique_times = np.unique(T_idx.detach().cpu().numpy())
+        C = SpikeCounts.shape[1]
+        T = EyeTraj.shape[1]
+        device = EyeTraj.device
 
-        SS_e = np.zeros((n_bins, n_neurons, n_neurons))
-        count_e = np.zeros(n_bins)
+        bin_edges_t = torch.as_tensor(bin_edges, device=device, dtype=EyeTraj.dtype)
+        inv_sqrt_T = (1.0 / torch.sqrt(torch.tensor(float(T), device=device, dtype=EyeTraj.dtype)))
 
-        '''
-        We loop over unique times, then compute the second moment for each time for 
-        all neurons all at once using einsum
-        '''
+        # (optional) keep accumulators on CPU as torch, convert to numpy at end
+        SS_e_A_t = torch.zeros((n_bins, C, C), device='cpu', dtype=torch.float64)
+        SS_e_B_t = torch.zeros((n_bins, C, C), device='cpu', dtype=torch.float64)
+        count_e_A_t = torch.zeros((n_bins,), device='cpu', dtype=torch.long)
+        count_e_B_t = torch.zeros((n_bins,), device='cpu', dtype=torch.long)
+
+        def accumulate_split(valid_idx, SS_e_t, count_e_t):
+            # valid_idx: 1D numpy array of trial indices for this split
+            N = len(valid_idx)
+            if N < 2:
+                return
+
+            X = EyeTraj[valid_idx]                 # (N, T, 2)
+            S = SpikeCounts[valid_idx]             # (N, C)
+
+            # Pair list for cross-trial only
+            ii, jj = torch.triu_indices(N, N, offset=1, device=device)  # (P,), (P,)
+
+            # Eye distances on those pairs, without diff materialization
+            Xflat = X.reshape(N, -1)                                   # (N, 2T)
+            D = torch.cdist(Xflat, Xflat) * inv_sqrt_T                 # (N, N)
+            d = D[ii, jj]                                              # (P,)
+
+            # Bin IDs in 1..n_bins are interior bins (same convention as your np.digitize + (k+1))
+            # bucketize returns in [0..len(edges)] where edges includes endpoints.
+            bid = torch.bucketize(d, bin_edges_t, right=False)         # (P,)
+
+            # Keep only pairs that fall into bins 1..n_bins
+            ok = (bid >= 1) & (bid <= n_bins)
+            if not ok.any():
+                return
+            ii = ii[ok]; jj = jj[ok]; bid = bid[ok]                    # (P',)
+
+            # We’ll accumulate per bin with S_i^T @ S_j
+            # (still no (P,C,C) tensor materialized)
+            for k in range(1, n_bins + 1):
+                mk = (bid == k)
+                if not mk.any():
+                    continue
+                Si = S[ii[mk]]                                         # (P_k, C)
+                Sj = S[jj[mk]]                                         # (P_k, C)
+
+                # sum_p Si[p]^T Sj[p]  -> (C, C)
+                # do on GPU, then move the (C,C) result to CPU accumulator
+                M = Si.transpose(0, 1).matmul(Sj)                      # (C, C)
+
+                SS_e_t[k-1] += M.detach().cpu().to(torch.float64)
+                count_e_t[k-1] += mk.sum().detach().cpu()
+
         for t in unique_times:
-            valid = (T_idx == t).detach().cpu().numpy()
+            valid = np.where((T_idx == t).detach().cpu().numpy())[0]
+            if len(valid) < 10:
+                continue
 
-            # print(f"Valid: {valid.sum()}")
+            valid_A = valid[::2]
+            valid_B = valid[1::2]
 
-            Xf = EyeTraj[valid]
-            diff = Xf[:, None, :, :] - Xf[None, :, :, :]        # (N, N, T, 2)
-            dist = torch.sqrt(torch.sum(diff * diff, dim=-1))   # (N, N, T)
-            D = dist.mean(dim=-1)                               # (N, N)
-            D = torch.triu(D)
-            Spair = torch.einsum('im,jn->ijmn', SpikeCounts[valid], SpikeCounts[valid])
-            valid_pairs = D > 0
-            i, j = np.where(valid_pairs.cpu())
-            Spair = Spair[i, j]
+            accumulate_split(valid_A, SS_e_A_t, count_e_A_t)
+            accumulate_split(valid_B, SS_e_B_t, count_e_B_t)
 
-            id = np.digitize(D[valid_pairs].cpu(), bin_edges)
-            # keep only bins 1..n_bins
-            mask = (id >= 1) & (id <= n_bins)
+        # Convert to numpy and form split-half estimate
+        SS_e_A = SS_e_A_t.numpy()
+        SS_e_B = SS_e_B_t.numpy()
+        count_e_A = count_e_A_t.numpy()
+        count_e_B = count_e_B_t.numpy()
 
-            for k in range(n_bins):
-                mask_k = (id == (k+1))
-                SS_e[k] += Spair[mask_k].sum(dim=0).cpu().numpy()
-                count_e[k] += mask_k.sum()
+        MM_A = SS_e_A / count_e_A[:, None, None]
+        MM_B = SS_e_B / count_e_B[:, None, None]
+        MM = 0.5 * (MM_A + MM_B)
+        count_e = count_e_A + count_e_B
 
-        # second moment
-        MM = SS_e / count_e[:, None, None]
-        return MM, bin_centers, count_e
+        # apply shrinkage on outliers
+        Delta = MM_A[0:1] - MM_B[0:1]
+
+        # per-neuron energy across bins + across row/col
+        row = np.sqrt((Delta**2).mean(axis=(0,2)))   # (C,) mean over (k,j)
+        col = np.sqrt((Delta**2).mean(axis=(0,1)))   # (C,) mean over (k,i)
+        score = 0.5*(row + col)                      # (C,)
+
+        med = np.median(score)
+        mad = np.median(np.abs(score - med)) + 1e-12
+        z = (score - med) / (1.4826*mad)             # robust z-score
+
+        w = 1.0 / (1.0 + np.maximum(z, 0.0)**2)      # 1 for good, small for bad
+        # optional: clamp so you don't nuke anything completely
+        w = np.clip(w, 0.1, 1.0)
+
+        MM = 0.5*(MM_A + MM_B)
+
+        # baseline: across-bins average second moment (you can choose something else)
+        MM0 = MM.mean(axis=0, keepdims=True)         # (1,C,C), broadcast over K
+
+        W = np.sqrt(w[None,:,None] * w[None,None,:]) # (1,C,C)
+        MM_shrunk = W*MM + (1.0 - W)*MM0
+
+        MM_shrunk = 0.5*(MM_shrunk + np.swapaxes(MM_shrunk, -1, -2))   # (K,C,C)
+
+        return MM_shrunk, bin_centers, count_e
     
     # -------------------------
     # unbiased PSTH covariance (split-half cross-covariance)
@@ -1313,8 +1390,8 @@ class DualWindowAnalysis:
         idx_A = perm < N//2
         idx_B = ~idx_A
 
-        PSTH_A = np.nan*np.zeros((NT, robs.shape[2]))
-        PSTH_B = np.nan*np.zeros((NT, robs.shape[2]))
+        PSTH_A = np.nan*np.zeros((NT, S.shape[1]))
+        PSTH_B = np.nan*np.zeros((NT, S.shape[1]))
         for it, t in enumerate(unique_times):
             ix = (T_idx == t).detach().cpu().numpy()
             ix_A = ix & idx_A
@@ -1355,20 +1432,19 @@ class DualWindowAnalysis:
           Sigma_intercept
         """
 
-        # fit intercepts
+        # fit intercepts (for diagonal only)
         NC = Ceye.shape[1]
         Crate = np.zeros((NC, NC))
         for ii in range(NC):
-            for jj in range(NC):
-                yhat, _ = pava_nonincreasing_with_blocks(Ceye[:,ii,jj], count_e)
-                Crate[ii,jj] = yhat[0]
+                yhat, _ = pava_nonincreasing_with_blocks(Ceye[:,ii,ii], count_e)
+                Crate[ii,ii] = yhat[0]
 
         return Crate
 
     # -------------------------
     # run_sweep
     # -------------------------
-    def run_sweep(self, window_sizes_ms, t_hist_ms=10):
+    def run_sweep(self, window_sizes_ms, t_hist_ms=10, n_bins=15):
         t_hist_bins = int(t_hist_ms / (self.dt * 1000))
         results = []
         mats_save = []
@@ -1381,36 +1457,47 @@ class DualWindowAnalysis:
             if t_hist_bins < t_count_bins:
                 t_hist_bins = t_count_bins
 
-            # estract windows
+            # extract windows
             SpikeCounts, EyeTraj, T_idx, _ = self._extract_windows_gpu(t_hist_bins, t_count_bins)
             n_samples = SpikeCounts.shape[0]
             if SpikeCounts is None or n_samples < 100: continue # arbitrary threshold (how much data do we need?)
 
             # calculate eye conditioned covariance
-            MM, bin_centers, count_e = analyzer._calculate_second_moment(SpikeCounts, EyeTraj, T_idx, n_bins=25)
+            MM, bin_centers, count_e = self._calculate_second_moment(SpikeCounts, EyeTraj, T_idx, n_bins=n_bins)
             Erate = torch.nanmean(SpikeCounts, 0).detach().cpu().numpy() # raw means
             Ceye = MM - Erate[:,None] * Erate[None,:] # raw rate covariances conditioned on eye trajectory
 
             # find intercept to get estimate of rate covariance whe eye distance is 0
-            # Crate = analyzer._fit_intercepts_vectorized(Ceye, count_e) # fit intercepts
+            
             Crate = Ceye[0]
+            # Crate = self._fit_intercepts_vectorized(Ceye, count_e) # fit intercepts (for diagonal only)
+            
             # total covariance and PSTH
             ix = np.isfinite(SpikeCounts.sum(1).detach().cpu().numpy())
             Ctotal = torch.cov(SpikeCounts[ix].T, correction=0).detach().cpu().numpy() # total covariance
-            Cpsth, PSTH_A, PSTH_B = analyzer._split_half_psth_covariance(SpikeCounts, T_idx, min_trials_per_time=10, seed=0)
+            Cpsth, PSTH_A, PSTH_B = self._split_half_psth_covariance(SpikeCounts, T_idx, min_trials_per_time=10, seed=0)
 
             # covariance due to fixational eye movements
             Cfem = Crate - Cpsth
+            Cfem = 0.5 * (Cfem + Cfem.T) # symmetrize
 
             # noise covariance
             CnoiseU = Ctotal - Cpsth
             CnoiseC = Ctotal - Crate
+            # symmetrize
+            CnoiseU = 0.5 * (CnoiseU + CnoiseU.T)
+            CnoiseC = 0.5 * (CnoiseC + CnoiseC.T)
+            
 
+            # fano factors
             ff_uncorr = np.diag(CnoiseU) / Erate
             ff_corr = np.diag(CnoiseC) / Erate
 
+            # noise correlation
             NoiseCorrU = cov_to_corr(CnoiseU)
             NoiseCorrC = cov_to_corr(CnoiseC)
+
+            alpha = np.diag(Cpsth) / np.diag(Crate)
 
             if np.isnan(Cfem).any():
                 rank = np.nan
@@ -1425,6 +1512,7 @@ class DualWindowAnalysis:
                 "ff_corr": ff_corr,
                 "ff_uncorr_mean": np.nanmean(ff_uncorr),
                 "ff_corr_mean": np.nanmean(ff_corr),
+                "alpha": alpha,
                 "fem_rank_ratio": rank,
                 "n_samples": n_samples,
             })
@@ -1511,286 +1599,200 @@ class DualWindowAnalysis:
 
 
 #%%
-full_stack = get_fixrsvp_stack(frames_per_im=8)
-full_stack = torch.from_numpy(full_stack)
-ppd = 60
-dt = 1/240
-t, pos, vel, state = simulate_eye_trace(
-        T_total=full_stack.shape[0]*dt, dt=dt,
-        fix_dist="lognormal",
-        fix_mean=0.2, fix_spread=0.45,
-        D=0.001,
-        ms_dur_mean=0.020, ms_dur_jitter=0.02,
-        ms_amp_mean=0.3, ms_amp_spread=0.55,
-        use_sigmoid_gate=True
+if __name__ == "__main__":
+
+
+#%%  Load stimuli, simulate eye trace
+    dt = 1/240
+    ppd = 60
+
+    # get stimuli
+    full_stack = get_fixrsvp_stack(frames_per_im=int(1/dt/30))
+    full_stack = torch.from_numpy(full_stack)
+    
+    # example eye trace (for dialing in parameters)
+    t, pos, vel, state = simulate_eye_trace(
+            T_total=full_stack.shape[0]*dt, dt=dt,
+            fix_dist="lognormal",
+            fix_mean=0.4, fix_spread=0.45,
+            D=0.001,
+            ms_dur_mean=0.020, ms_dur_jitter=0.02,
+            ms_amp_mean=0.15, ms_amp_spread=0.55,
+            use_sigmoid_gate=True
+        )
+
+    plt.plot(pos)
+    plt.ylim(-1, 1)
+
+
+
+#%% shit movie
+
+    eye_norm = eye_deg_to_norm(torch.from_numpy(pos), ppd, full_stack.shape[1:3])
+    eye_movie = shift_movie_with_eye(
+        full_stack,
+        eye_norm,
+        out_size=(101, 101),          # (outH,outW)
+        center=(0.0, 0.0),            # (cx,cy) in [-1,1]
+        scale_factor=1.0,
+        mode="bilinear")
+
+    plt.imshow(eye_movie[7].numpy(), cmap='gray')
+
+    # Save movies
+    eye_pos_pix = eye_deg_to_pix(torch.from_numpy(pos), ppd)
+
+    save_eye_movies(
+        full_stack=full_stack,
+        eye_movie=eye_movie,
+        eye_pos_pix=eye_pos_pix,
+        save_prefix="fixrsvp_eye_sim",
+        fps=30,
+        trail_length=10,
+        dot_size=8,
+        trail_alpha=0.7
     )
-
-plt.plot(pos)
-plt.ylim(-1, 1)
-
-
-
-#%%
-
-
-eye_norm = eye_deg_to_norm(torch.from_numpy(pos), ppd, full_stack.shape[1:3])
-eye_movie = shift_movie_with_eye(
-    full_stack,
-    eye_norm,
-    out_size=(100, 100),          # (outH,outW)
-    center=(0.0, 0.0),            # (cx,cy) in [-1,1]
-    mode="bilinear")
-
-plt.imshow(eye_movie[7].numpy(), cmap='gray')
-
-# %%
-# Save movies
-eye_pos_pix = eye_deg_to_pix(torch.from_numpy(pos), ppd)
-
-save_eye_movies(
-    full_stack=full_stack,
-    eye_movie=eye_movie,
-    eye_pos_pix=eye_pos_pix,
-    save_prefix="fixrsvp_eye_sim",
-    fps=30,
-    trail_length=10,
-    dot_size=8,
-    trail_alpha=0.7
-)
 
 # %% simulate responses
 
+    temporal_kernel = build_temporal_kernel()
 
-temporal_kernel = build_temporal_kernel()
+    pyr = PyramidSimulator(
+        image_shape=(101, 101),
+        num_ori=8,
+        num_scales=4,
+        temporal_kernel=None#torch.flip(temporal_kernel, dims=[0])
+    )
 
-pyr = PyramidSimulator(
-    image_shape=(100, 100),
-    num_ori=8,
-    num_scales=3,
-    temporal_kernel=None #torch.flip(temporal_kernel, dims=[0])
-)
+    coefs_pyr, eyepos_sim = simulate_responses(pyr,
+                n_trials=100,
+                fix_mean=0.4, fix_spread=0.45,
+                D=0.001,
+                ms_amp_mean=0.15,
+        )
+#%% convert coefficients to spikes
 
-robs_pyr, eyepos_sim = simulate_responses(pyr)
-#%%
+    f = lambda x: np.maximum(0, x)
+    driver = np.real(coefs_pyr[:,16:,3,0,3:-3,50])
+    robs = f(driver)
+    robs /= np.mean(robs, (0,1), keepdims=True)
+    robs *= 10 # mean firing rate = 10 spikes/s
 
-robs = np.maximum(np.real(robs_pyr[:,16:,2,0,25,20:40]), 0)
-eyepos = eyepos_sim[:,16:].copy()
-eyepos[:,:,1] = 0
-
-cc = 18
-plt.imshow(robs[:,:,cc], aspect='auto', cmap='gray_r', interpolation='none')
-
-#%%
-
-
-
-# 1. Setup
-# Assuming 'robs', 'eyepos', 'valid_mask' are already loaded from your dataset code
-# valid_mask should be True where data is good (no fix breaks)
-valid_mask = np.isfinite(np.sum(robs, axis=2)) & np.isfinite(np.sum(eyepos, axis=2))
-neuron_mask = np.where(np.nansum(robs, (0,1))>500)[0]
+    robs = np.random.poisson(robs*dt)
+    tracker_noise = np.random.randn(*eyepos_sim[:,16:].shape)*0
+    eyepos = eyepos_sim[:,16:].copy() + tracker_noise
 
 
-#%%
-analyzer = DualWindowAnalysis(robs, eyepos, valid_mask, dt=1/240)
+    sx = int(np.sqrt(robs.shape[-1]))
+    sy = int(np.ceil(robs.shape[-1] / sx))
+    fig, axs = plt.subplots(sy, sx, figsize=(3*sx, 2*sy), sharex=True, sharey=False)
 
-windows = [5, 10, 20, 40, 80, 100, 150]
-results, last_mats = analyzer.run_sweep(windows, t_hist_ms=5)
+    for cc in range(robs.shape[-1]):
+        ax = axs.flatten()[cc]
+        ax.imshow(robs[:, :, cc], aspect='auto', interpolation='none', cmap='gray_r')
+        # axis off
+        ax.set_xticks([])
+        ax.set_yticks([])
 
-#%%
+#%% Run analysis
 
-window_idx = 4
-Ctotal = last_mats[window_idx]['Total']
-Cfem = last_mats[window_idx]['FEM']
-Cpsth = last_mats[window_idx]['PSTH']
-CnoiseU = last_mats[window_idx]['NoiseCorrU']
-CnoiseC = last_mats[window_idx]['NoiseCorrC']
-FF_uncorr = results[window_idx]['ff_uncorr']
-FF_corr = results[window_idx]['ff_corr']
+    # 1. Setup
+    # Assuming 'robs', 'eyepos', 'valid_mask' are already loaded from your dataset code
+    # valid_mask should be True where data is good (no fix breaks)
+    valid_mask = np.isfinite(np.sum(robs, axis=2)) & np.isfinite(np.sum(eyepos, axis=2))
+    
+    analyzer = DualWindowAnalysis(robs, eyepos, valid_mask, dt=1/240)
 
-v = np.max(Ctotal.flatten())
-plt.subplot(1,3,1)
-plt.imshow(Ctotal, vmin=-v, vmax=v)
-plt.title('Total')
-plt.subplot(1,3,2)
-plt.imshow(Cfem, vmin=-v, vmax=v)
-plt.title('Eye')
-plt.subplot(1,3,3)
-plt.imshow(Cpsth, vmin=-v, vmax=v)
-plt.title('PSTH')
+    windows = [5, 10, 20, 40, 80, 100, 150]
+    results, last_mats = analyzer.run_sweep(windows, t_hist_ms=5)
 
-plt.figure()
-plt.subplot(1,2,1)
-plt.imshow(CnoiseU, vmin=-1, vmax=1)
-plt.colorbar()
-plt.title('Noise (Uncorrected))')
-plt.subplot(1,2,2)
-plt.imshow(CnoiseC, vmin=-1, vmax=1)
-plt.colorbar()
-plt.title('Noise (Corrected) ')
-
-
-plt.figure()
-plt.plot(FF_uncorr, FF_corr, '.')
-plt.plot(plt.xlim(), plt.xlim(), 'k')
-plt.xlabel('Fano Factor (Uncorrected)')
-plt.ylabel('Fano Factor (Corrected)')
-plt.title('Fano Factor vs Window Size')
+#%% inspect pairs
+    # ii = 20
+    # for jj in range(5):
+    #     analyzer.inspect_neuron_pair(ii, jj, 20, ax=None, show=True)
 
 #%%
 
+    window_idx = 2
+    Ctotal = last_mats[window_idx]['Total']
+    Cfem = last_mats[window_idx]['Intercept']
+    Cpsth = last_mats[window_idx]['PSTH']
+    CnoiseU = last_mats[window_idx]['NoiseCorrU']
+    CnoiseC = last_mats[window_idx]['NoiseCorrC']
+    FF_uncorr = results[window_idx]['ff_uncorr']
+    FF_corr = results[window_idx]['ff_corr']
+
+    v = np.max(Ctotal.flatten())
+    plt.subplot(1,3,1)
+    plt.imshow(Ctotal, vmin=-v, vmax=v)
+    plt.title('Total')
+    plt.subplot(1,3,2)
+    plt.imshow(Cfem, vmin=-v, vmax=v)
+    plt.title('Eye')
+    plt.subplot(1,3,3)
+    plt.imshow(Cpsth, vmin=-v, vmax=v)
+    plt.title('PSTH')
+
+    plt.figure()
+    plt.subplot(1,2,1)
+    plt.imshow(CnoiseU, vmin=-1, vmax=1)
+    plt.colorbar()
+    plt.title('Noise (Uncorrected))')
+    plt.subplot(1,2,2)
+    plt.imshow(CnoiseC, vmin=-1, vmax=1)
+    plt.colorbar()
+    plt.title('Noise (Corrected) ')
+
+
+    plt.figure()
+    plt.plot(FF_uncorr, FF_corr, '.')
+    plt.plot(plt.xlim(), plt.xlim(), 'k')
+    plt.xlabel('Fano Factor (Uncorrected)')
+    plt.ylabel('Fano Factor (Corrected)')
+    plt.title('Fano Factor vs Window Size')
 
 #%%
-ii = 0
-for jj in range(robs.shape[-1]):
-    analyzer.inspect_neuron_pair(ii, jj, 40, ax=None, show=True)
+    def get_upper_triangle(C):
+        rows, cols = np.triu_indices_from(C, k=1)
+        v = C[rows, cols]
+        return v
 
+    rho_uncorr = get_upper_triangle(CnoiseU)
+    rho_corr = get_upper_triangle(CnoiseC)
 
-#%% plot fano factor
-plt.plot(np.diag(CnoiseU)/Erate, np.diag(CnoiseC) /  Erate, '.')
-plt.plot(plt.xlim(), plt.xlim(), 'k')
+    plt.figure()
+    plt.plot(rho_uncorr, rho_corr, '.')
+    plt.plot(plt.xlim(), plt.xlim(), 'k')
+    plt.axhline(0, color='k', linestyle='--')
+    plt.axvline(0, color='k', linestyle='--')
+    plt.xlabel('Correlation (Uncorrected)')
+    plt.ylabel('Correlation (Corrected)')
+    plt.title('Correlation vs Window Size')
 
-
-
-#%%
-# 2. Run Sweep
-windows = [5, 10, 20, 40, 80, 100, 150]
-results, last_mats = analyzer.run_sweep(windows, t_hist_ms=windows[0])
-
-#%%
-params_mixed['neuron_params']
-
-#%%
-for i in range(10):
-    for j in range(10):
-        analyzer.inspect_neuron_pair(i, j, 40, ax=None, show=True)
-
-#%%
-
-NC = robs.shape[-1]
-sx = int(np.sqrt(NC))
-sy = int(np.ceil(NC / sx))
-fig, axs = plt.subplots(sy, sx, figsize=(5*sx, 5*sy), sharex=True, sharey=False)
-for i in range(sx*sy):
-    if i >= NC:
-        axs.flatten()[i].axis('off')
-        continue
-    analyzer.inspect_neuron_pair(i, i, 40, ax=axs.flatten()[i], show=False)
-# analyzer.inspect_neuron_pair(0, 0, 5, ax=None, show=True)
-plt.show()
 
 #%% 3. Plot Fano Factor Scaling
-window_ms = [results[i]['window_ms'] for i in range(len(results))]
-ff_uncorr = np.zeros_like(window_ms, dtype=np.float64)
-ff_uncorr_std = np.zeros_like(window_ms, dtype=np.float64)
-ff_corr = np.zeros_like(window_ms, dtype=np.float64)
-ff_corr_std = np.zeros_like(window_ms, dtype=np.float64)
-for iwindow in range(len(window_ms)):
-    ff_uncorr[iwindow] = np.nanmean(results[iwindow]['ff_uncorr'])
-    ff_corr[iwindow] = np.nanmean(results[iwindow]['ff_corr'])
-    ff_uncorr_std[iwindow] = np.nanstd(results[iwindow]['ff_uncorr'])
-    ff_corr_std[iwindow] = np.nanstd(results[iwindow]['ff_corr'])
+    window_ms = [results[i]['window_ms'] for i in range(len(results))]
+    ff_uncorr = np.zeros_like(window_ms, dtype=np.float64)
+    ff_uncorr_std = np.zeros_like(window_ms, dtype=np.float64)
+    ff_corr = np.zeros_like(window_ms, dtype=np.float64)
+    ff_corr_std = np.zeros_like(window_ms, dtype=np.float64)
+    for iwindow in range(len(window_ms)):
+        ff_uncorr[iwindow] = np.nanmean(results[iwindow]['ff_uncorr'])
+        ff_corr[iwindow] = np.nanmean(results[iwindow]['ff_corr'])
+        ff_uncorr_std[iwindow] = np.nanstd(results[iwindow]['ff_uncorr'])
+        ff_corr_std[iwindow] = np.nanstd(results[iwindow]['ff_corr'])
 
-plt.figure(figsize=(8, 6))
-plt.plot(window_ms, ff_uncorr, 'o-', label='Standard (Uncorrected)')
-plt.plot(window_ms, ff_corr, 'o-', label='FEM-Corrected')
-# plot error bars
-plt.fill_between(window_ms, ff_uncorr - ff_uncorr_std, ff_uncorr + ff_uncorr_std, alpha=0.2)
-plt.fill_between(window_ms, ff_corr - ff_corr_std, ff_corr + ff_corr_std, alpha=0.2)
+    plt.figure(figsize=(8, 6))
+    plt.plot(window_ms, ff_uncorr, 'o-', label='Standard (Uncorrected)')
+    plt.plot(window_ms, ff_corr, 'o-', label='FEM-Corrected')
+    # plot error bars
+    plt.fill_between(window_ms, ff_uncorr - ff_uncorr_std, ff_uncorr + ff_uncorr_std, alpha=0.2)
+    plt.fill_between(window_ms, ff_corr - ff_corr_std, ff_corr + ff_corr_std, alpha=0.2)
 
-plt.axhline(1.0, color='k', linestyle='--', alpha=0.5)
-plt.xlabel('Count Window (ms)')
-plt.ylabel('Mean Fano Factor')
-plt.title('Integration of Noise: FEM Correction')
-plt.legend()
-plt.grid(True, alpha=0.3)
-plt.show()
-
-#%%
-window_idx = 3
-alpha = np.diag(last_mats[window_idx]['PSTH'])/np.diag(last_mats[window_idx]['Intercept'])
-plt.figure()
-plt.hist(1-alpha, bins=50)
-plt.xlabel('1 - alpha')
-plt.ylabel('Count')
-plt.title(f'1 - alpha, {windows[window_idx]}ms')
-plt.xlim(0, 1)
-plt.show()
-#%%
-# 4. Check Rank of the last window (e.g., 150ms)
-window_idx = -1
-Sigma_FEM = last_mats[window_idx]['FEM']
-u, s, vh = np.linalg.svd(Sigma_FEM)
-plt.figure(figsize=(12, 4))
-# plt.subplot(1,3,1)
-plt.plot(np.cumsum(s), 'o-', label='FEM')
-plt.title(f"Singular Values FEM ({windows[-1]}ms)")
-
-# same for total covariance
-Sigma_Total = last_mats[window_idx]['Total']
-u, s, vh = np.linalg.svd(Sigma_Total)
-# plt.subplot(1,3,2)
-plt.plot(np.cumsum(s), 'o-', label='Total')
-plt.title(f"Singular Values Total  ({windows[-1]}ms)")
-
-# now noise cov
-Sigma_Noise = last_mats[window_idx]['Noise_Corr']
-u, s, vh = np.linalg.svd(Sigma_Noise)
-# plt.subplot(1,3,3)
-plt.plot(np.cumsum(s), 'o-', label='Noise')
-plt.title(f"Singular Values Noise  ({windows[-1]}ms)")
-plt.show()
-# %%
-
-
-
-i = 2
-plt.plot(results[i]['ff_uncorr'], results[i]['ff_corr'], 'o')
-plt.axhline(1, color='k', linestyle='--', alpha=0.5)
-plt.axvline(1, color='k', linestyle='--', alpha=0.5)
-# plot means
-plt.plot(np.mean(results[i]['ff_uncorr']), np.mean(results[i]['ff_corr']), 'ko')
-
-plt.plot(plt.xlim(), plt.xlim(), 'k')
-plt.xlabel('Fano Factor (Uncorrected)')
-plt.ylabel('Fano Factor (Corrected)')
-plt.title(f"FF Window Size ({windows[i]}ms)")
-
-#%%
-results[0]
-# %%
-# show the total covariance matrix subtracting the diagonal
-window_idx = 2
-plt.figure(figsize=(12, 4))
-plt.subplot(1,3,1)
-plt.imshow(last_mats[window_idx]['Total'] - np.diag(np.diag(last_mats[window_idx]['Total'])))
-plt.colorbar()
-plt.title(f"Total Covariance ({windows[window_idx]}ms)")
-
-# show FEM
-plt.subplot(1,3,2)
-plt.imshow(last_mats[window_idx]['FEM'] - np.diag(np.diag(last_mats[window_idx]['FEM'])))
-plt.colorbar()
-plt.title(f"FEM Covariance ({windows[window_idx]}ms)")
-
-# show Noise_Corr
-plt.subplot(1,3,3)
-plt.imshow(last_mats[window_idx]['PSTH'] - np.diag(np.diag(last_mats[window_idx]['PSTH'])))
-plt.colorbar()
-plt.title(f"PSTH Covariance ({windows[window_idx]}ms)")
-
-
-
-# %%
-Sigma_Noise_uncorrected = last_mats[window_idx]['Total'] - last_mats[window_idx]['PSTH']
-Sigma_Noise_corrected = last_mats[window_idx]['Total'] - last_mats[window_idx]['FEM'] - last_mats[window_idx]['PSTH']
-
-
-plt.subplot(1,2,1)
-plt.imshow(cov_to_corr(Sigma_Noise_uncorrected))
-plt.colorbar()
-plt.subplot(1,2,2)
-plt.imshow(cov_to_corr(Sigma_Noise_corrected))
-plt.colorbar()
-
-# %%
+    plt.axhline(1.0, color='k', linestyle='--', alpha=0.5)
+    plt.xlabel('Count Window (ms)')
+    plt.ylabel('Mean Fano Factor')
+    plt.title('Integration of Noise: FEM Correction')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.show()
