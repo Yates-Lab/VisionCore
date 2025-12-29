@@ -6,6 +6,7 @@ This module provides a config-driven regularization system that supports:
 2. Proximal updates (soft thresholding, clamping) applied after optimizer step
 3. Sophisticated parameter matching with AND logic
 4. Flexible scheduling (constant, warmup, linear ramp)
+5. Adam-aware proximal L1 using per-parameter effective learning rates
 
 Example YAML configuration:
 ```yaml
@@ -17,7 +18,7 @@ regularization:
     schedule:
       kind: warmup
       start_epoch: 5
-      
+
   - name: shrink_readout_std
     type: proximal_clamp
     lambda: 1.0  # max value
@@ -32,8 +33,57 @@ regularization:
 import torch
 import torch.nn.functional as F
 import warnings
-from typing import List, Dict, Any, Tuple, Optional
+from typing import List, Dict, Any, Tuple, Optional, Union
 import re
+
+
+@torch.no_grad()
+def adam_effective_lr(optimizer: torch.optim.Optimizer, param: torch.Tensor) -> Optional[torch.Tensor]:
+    """
+    Compute per-parameter effective learning rate for Adam/AdamW optimizers.
+
+    For Adam, the effective learning rate for parameter θ_i at step t is:
+        η_i,t = α * sqrt(1 - β2^t) / (1 - β1^t) * 1 / (sqrt(v_i,t) + ε)
+
+    This is the correct scaling for proximal L1:
+        θ_i ← soft_threshold(θ_i - η_i,t * g_i,t, λ * η_i,t)
+
+    Args:
+        optimizer: Adam or AdamW optimizer
+        param: Parameter tensor to get effective LR for
+
+    Returns:
+        Tensor of same shape as param containing per-element effective LR,
+        or None if Adam hasn't seen this param yet
+    """
+    state = optimizer.state.get(param, {})
+    if len(state) == 0:
+        return None  # Adam hasn't updated this param yet
+
+    step = state["step"]
+    exp_avg_sq = state["exp_avg_sq"]
+
+    # Find the param group containing this parameter
+    for group in optimizer.param_groups:
+        if any(p is param for p in group["params"]):
+            lr = group["lr"]
+            beta1, beta2 = group["betas"]
+            eps = group["eps"]
+            break
+    else:
+        return None  # Param not found in optimizer
+
+    # Compute bias corrections
+    bias_correction1 = 1 - beta1 ** step
+    bias_correction2 = 1 - beta2 ** step
+
+    # Per-parameter effective learning rate
+    effective_lr = (
+        lr * (bias_correction2 ** 0.5) / bias_correction1
+        / (exp_avg_sq.sqrt() + eps)
+    )
+
+    return effective_lr
 
 
 class Regularizer:
@@ -202,13 +252,18 @@ class Regularizer:
         else:
             return torch.tensor(0.0, device=self.params[0].device)
 
-    def prox(self, epoch: int, lr: float) -> None:
+    def prox(self, epoch: int, lr: float, optimizer: Optional[torch.optim.Optimizer] = None) -> None:
         """
         Apply proximal update to parameters.
 
+        For proximal_l1, if an Adam/AdamW optimizer is provided, uses per-parameter
+        effective learning rates for correct proximal geometry. Otherwise falls back
+        to scalar learning rate.
+
         Args:
             epoch: Current training epoch (0-based)
-            lr: Current learning rate
+            lr: Current learning rate (scalar fallback)
+            optimizer: Optional optimizer for per-parameter LR extraction (Adam/AdamW)
         """
         effective_lambda = self.get_schedule_weight(epoch)
 
@@ -217,8 +272,19 @@ class Regularizer:
 
         if self.kind == "proximal_l1":
             # Soft thresholding for L1 proximal operator
-            shrink = effective_lambda * lr
+            # Use per-parameter Adam LR if optimizer provided, else scalar LR
             for param in self.params:
+                if optimizer is not None:
+                    eta = adam_effective_lr(optimizer, param)
+                    if eta is not None:
+                        # Per-element soft thresholding with Adam geometry
+                        shrink = effective_lambda * eta
+                        param.data.copy_(
+                            torch.sign(param.data) * torch.clamp(param.data.abs() - shrink, min=0.0)
+                        )
+                        continue
+                # Fallback to scalar LR
+                shrink = effective_lambda * lr
                 param.data = F.softshrink(param.data, lambd=shrink)
 
         elif self.kind == "proximal_clamp":

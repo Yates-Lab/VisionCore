@@ -632,10 +632,11 @@ class MultiDatasetModel(pl.LightningModule):
         optimizer.zero_grad()
 
         # Apply proximal updates for regularization
+        # Pass optimizer for Adam-aware per-parameter learning rates
         for group in optimizer.param_groups:
             lr = group["lr"]
             for reg in self.reg_terms:
-                reg.prox(epoch, lr)
+                reg.prox(epoch, lr, optimizer=optimizer)
 
         return loss
 
