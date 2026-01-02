@@ -1123,6 +1123,55 @@ def pava_nonincreasing_with_blocks(y, w, eps=1e-12):
         blocks.append((s, e, float(m), float(ww)))
     return yhat, blocks
 
+from scipy import stats
+import numpy as np
+
+def compute_robust_fano_statistics(variances, means, plot=False):
+    """
+    Computes robust population Fano Factor to avoid low-firing rate artifacts.
+    
+    Args:
+        variances: (N,) array of spike count variances
+        means:     (N,) array of mean spike counts
+        
+    Returns:
+        dict containing robust metrics
+    """
+    # 1. Hard Filter: Discard wildly unstable estimates
+    # We require at least 0.1 spikes per window on average to even consider the neuron.
+    # Below this, the Fano Factor is mathematically meaningless (0/0 or noise/small).
+    valid_mask = (means > 0.1) & np.isfinite(variances) & np.isfinite(means)
+    
+    v_clean = variances[valid_mask]
+    m_clean = means[valid_mask]
+    
+    if len(v_clean) < 5:
+        return {"FF_slope": np.nan, "FF_pop": np.nan, "FF_median": np.nan}
+
+    # --- Metric 1: The Slope Estimator (The Gold Standard) ---
+    # Fits Var = F * Mean + beta
+    # This naturally weights high-firing neurons more (they have higher leverage)
+    # and ignores the "explosion" at the low end.
+    res = stats.linregress(m_clean, v_clean)
+    slope = res.slope
+    
+    # --- Metric 2: The Population Ratio (Variance Weighted) ---
+    # Equivalent to pooling all spikes from all neurons into one giant "super-neuron"
+    # F_pop = Sum(Vars) / Sum(Means)
+    ff_pop = np.sum(v_clean) / np.sum(m_clean)
+
+    # --- Metric 3: The Median (Outlier rejection) ---
+    # If you MUST use individual ratios, take the Median, never the Mean.
+    ff_individual = v_clean / m_clean
+    ff_median = np.median(ff_individual)
+
+    return {
+        "FF_slope": slope,
+        "FF_pop": ff_pop,
+        "FF_median": ff_median,
+        "n_neurons": len(v_clean)
+    }
+
 
 # Law of total covariance decomposition    
 class DualWindowAnalysis:
@@ -1251,9 +1300,24 @@ class DualWindowAnalysis:
     
         """
         
-        diff = torch.sqrt( torch.sum((EyeTraj[:, None, :, :] - EyeTraj[None, :, :, :])**2,-1)).mean(2)       # (N, N, T, 2)
-        i, j = np.triu_indices_from(diff)
-        dist = diff[i,j]
+        # OLD: bins are mean euclidean distance. we had to move away from this because there's no way to do it on GPU without blowing up memory
+        # diff = torch.sqrt( torch.sum((EyeTraj[:, None, :, :] - EyeTraj[None, :, :, :])**2,-1)).mean(2)       # (N, N, T, 2)
+        # i, j = np.triu_indices_from(diff)
+        # dist = diff[i,j]
+
+        # NEW: bins are RMS distance. this mimics the fast operation in the loop
+        
+        # Flatten time and coordinate dimensions: (N, T, 2) -> (N, 2T) This matches the geometry used by torch.cdist inside the loop.
+        N_samples, T, _ = EyeTraj.shape
+        EyeFlat = EyeTraj.reshape(N_samples, -1) 
+
+        # Compute RMS distance matrix
+        dist_matrix = torch.cdist(EyeFlat, EyeFlat) / np.sqrt(T)
+
+        # Extract upper triangle for percentiles
+        i, j = torch.triu_indices(N_samples, N_samples, offset=1)
+        dist = dist_matrix[i, j]
+
         bin_edges = np.percentile(dist.cpu().numpy(), np.arange(0, 100, 100/(n_bins+1)))
 
         bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
@@ -1338,31 +1402,49 @@ class DualWindowAnalysis:
         MM = 0.5 * (MM_A + MM_B)
         count_e = count_e_A + count_e_B
 
-        # apply shrinkage on outliers
-        Delta = MM_A[0:1] - MM_B[0:1]
+        # ------
+        # Apply shrinkage based on the stability of the estimate across the two halfs
+        # Compute Global Averages (use all data for stability check)
+        global_count = count_e.sum()
+        
+        if global_count == 0: # Avoid div by zero if empty
+             return MM, bin_centers, count_e
 
-        # per-neuron energy across bins + across row/col
-        row = np.sqrt((Delta**2).mean(axis=(0,2)))   # (C,) mean over (k,j)
-        col = np.sqrt((Delta**2).mean(axis=(0,1)))   # (C,) mean over (k,i)
-        score = 0.5*(row + col)                      # (C,)
+        # Weighted average over bins to get global covariance matrix for Split A and B
+        # counts: (K, 1, 1) broadcast
+        Sigma_A_global = (SS_e_A * (count_e_A / count_e_A.sum())[:, None, None]).sum(0)
+        Sigma_B_global = (SS_e_B * (count_e_B / count_e_B.sum())[:, None, None]).sum(0)
 
-        med = np.median(score)
-        mad = np.median(np.abs(score - med)) + 1e-12
-        z = (score - med) / (1.4826*mad)             # robust z-score
+        # Normalize by diagonal to correct for firing rate effect
+        diag_A = np.diag(Sigma_A_global) # (C,)
+        diag_B = np.diag(Sigma_B_global) # (C,)
+        
+        # Geometric mean of diagonals for normalization
+        denom = np.sqrt(np.outer(diag_A, diag_A)) * np.sqrt(np.outer(diag_B, diag_B))
+        denom = np.sqrt(denom) + 1e-12
+        
+        # Calculate Normalized Difference Matrix
+        Diff_Norm = (Sigma_A_global - Sigma_B_global) / denom
 
-        w = 1.0 / (1.0 + np.maximum(z, 0.0)**2)      # 1 for good, small for bad
-        # optional: clamp so you don't nuke anything completely
+        # Robust score based on normalized errors
+        row_energy = np.sqrt((Diff_Norm**2).mean(axis=1)) # (C,) vector
+        
+        # Shrinkage to reduce impact of unstable estimates
+        # We use a fixed threshold of 0.2 corresponds to a 20% correlation mismatch on average.
+        # k controls steepness.
+        # Sigmoid: 1 when energy is 0, drops as energy increases
+        threshold = 0.2  
+        w = 1.0 / (1.0 + (row_energy / threshold)**4)
         w = np.clip(w, 0.1, 1.0)
+        
+        # --- Apply Shrinkage ---
+        MM0 = MM.mean(axis=0, keepdims=True)
 
-        MM = 0.5*(MM_A + MM_B)
-
-        # baseline: across-bins average second moment (you can choose something else)
-        MM0 = MM.mean(axis=0, keepdims=True)         # (1,C,C), broadcast over K
-
-        W = np.sqrt(w[None,:,None] * w[None,None,:]) # (1,C,C)
-        MM_shrunk = W*MM + (1.0 - W)*MM0
-
-        MM_shrunk = 0.5*(MM_shrunk + np.swapaxes(MM_shrunk, -1, -2))   # (K,C,C)
+        W = np.sqrt(w[None,:,None] * w[None,None,:])
+        MM_shrunk = W * MM + (1.0 - W) * MM0
+        
+        # Enforce Symmetry
+        MM_shrunk = 0.5 * (MM_shrunk + np.swapaxes(MM_shrunk, -1, -2))
 
         return MM_shrunk, bin_centers, count_e
     
@@ -1420,26 +1502,85 @@ class DualWindowAnalysis:
     # -------------------------
     # isotonic intercept fit on SECOND MOMENTS
     # -------------------------
-    def _fit_intercepts_vectorized(
-        self,
-        Ceye,       # (n_bins, cells, cells) Eye distance conditioned covariance
-        count_e,    # (n_bins,) # counts per bin
-    ):
-        """
-        Weighted PAVA (nonincreasing) on binned rate covariance;
-        intercept = g(0+) via first block.
-        Returns:
-          Sigma_intercept
-        """
+    # def _fit_intercepts_vectorized(
+    #     self,
+    #     Ceye,       # (n_bins, cells, cells) Eye distance conditioned covariance
+    #     count_e,    # (n_bins,) # counts per bin
+    # ):
+    #     """
+    #     Weighted PAVA (nonincreasing) on binned rate covariance;
+    #     intercept = g(0+) via first block.
+    #     Returns:
+    #       Sigma_intercept
+    #     """
 
-        # fit intercepts (for diagonal only)
-        NC = Ceye.shape[1]
-        Crate = np.zeros((NC, NC))
-        for ii in range(NC):
-                yhat, _ = pava_nonincreasing_with_blocks(Ceye[:,ii,ii], count_e)
-                Crate[ii,ii] = yhat[0]
+    #     # fit intercepts (for diagonal only)
+    #     NC = Ceye.shape[1]
+    #     Crate = Ceye[0]
+    #     for ii in range(NC):
+    #             yhat, _ = pava_nonincreasing_with_blocks(Ceye[:,ii,ii], count_e)
+    #             Crate[ii,ii] = yhat[0]
 
-        return Crate
+    #     return Crate
+    def fit_best_monotonic(self, y, w):
+        """
+        Fits both non-increasing and non-decreasing PAVA.
+        Returns the intercept (yhat[0]) of the fit with the lowest error.
+        """
+        # 1. Fit Non-Increasing (Classic PAVA)
+        y_decr, _ = pava_nonincreasing_with_blocks(y, w)
+        sse_decr = np.sum(w * (y - y_decr)**2)
+        
+        # 2. Fit Non-Decreasing
+        # Trick: Negate y, fit non-increasing, then negate result
+        y_incr_neg, _ = pava_nonincreasing_with_blocks(-y, w)
+        y_incr = -y_incr_neg
+        sse_incr = np.sum(w * (y - y_incr)**2)
+        
+        # 3. Model Selection
+        if sse_decr < sse_incr:
+            return y_decr[0]
+        else:
+            return y_incr[0]
+
+    def _fit_intercepts_vectorized(self, Ceye, count_e):
+        """
+        Fits the intercept (d->0) for every element of the covariance matrix.
+        Strictly enforces monotonicity (either increasing or decreasing) to handle
+        both positive and negative correlations correctly.
+        """
+        n_bins, n_cells, _ = Ceye.shape
+        C_intercept = np.zeros((n_cells, n_cells), dtype=Ceye.dtype)
+
+        # Pre-calculate valid weights once
+        # (Assuming count_e is consistent across pairs, which it is)
+        # We need to handle potential NaNs in Ceye if binning failed for some reason
+        
+        for i in range(n_cells):
+            # Diagonal: Variance must be non-increasing (Conditioning reduces variance)
+            # Technically variance *could* increase if FEMs were suppressing noise, 
+            # but physically FEMs add variance. So non-increasing is the correct physical prior for Diagonal.
+            y_diag = Ceye[:, i, i]
+            yhat, _ = pava_nonincreasing_with_blocks(y_diag, count_e)
+            C_intercept[i, i] = yhat[0]
+
+            # Off-Diagonals: Can be increasing OR decreasing
+            for j in range(i + 1, n_cells):
+                y = Ceye[:, i, j]
+                
+                # Handle NaNs if strictly necessary (though Ceye shouldn't have them if logic is tight)
+                valid = np.isfinite(y)
+                if not valid.any():
+                    C_intercept[i, j] = np.nan
+                    C_intercept[j, i] = np.nan
+                    continue
+                
+                val = self.fit_best_monotonic(y[valid], count_e[valid])
+                
+                C_intercept[i, j] = val
+                C_intercept[j, i] = val
+
+        return C_intercept
 
     # -------------------------
     # run_sweep
@@ -1454,11 +1595,11 @@ class DualWindowAnalysis:
         for win_ms in tqdm(window_sizes_ms):
             t_count_bins = int(win_ms / (self.dt * 1000))
             t_count_bins = max(1, t_count_bins)
-            if t_hist_bins < t_count_bins:
-                t_hist_bins = t_count_bins
+            # if t_hist_bins < t_count_bins:
+            #     t_hist_bins = t_count_bins
 
             # extract windows
-            SpikeCounts, EyeTraj, T_idx, _ = self._extract_windows_gpu(t_hist_bins, t_count_bins)
+            SpikeCounts, EyeTraj, T_idx, _ = self._extract_windows_gpu(np.maximum(t_hist_bins, t_count_bins), t_count_bins)
             n_samples = SpikeCounts.shape[0]
             if SpikeCounts is None or n_samples < 100: continue # arbitrary threshold (how much data do we need?)
 
@@ -1467,14 +1608,15 @@ class DualWindowAnalysis:
             Erate = torch.nanmean(SpikeCounts, 0).detach().cpu().numpy() # raw means
             Ceye = MM - Erate[:,None] * Erate[None,:] # raw rate covariances conditioned on eye trajectory
 
+            # smooth Ceye across 0 dimension
+            # Ceye = savgol_nan_numpy(Ceye, axis=0, window_length=np.maximum(3, n_bins//15), polyorder=2)
+
             # find intercept to get estimate of rate covariance whe eye distance is 0
-            
-            Crate = Ceye[0]
-            # Crate = self._fit_intercepts_vectorized(Ceye, count_e) # fit intercepts (for diagonal only)
+            Crate = self._fit_intercepts_vectorized(Ceye, count_e) # fit intercepts
             
             # total covariance and PSTH
             ix = np.isfinite(SpikeCounts.sum(1).detach().cpu().numpy())
-            Ctotal = torch.cov(SpikeCounts[ix].T, correction=0).detach().cpu().numpy() # total covariance
+            Ctotal = torch.cov(SpikeCounts[ix].T, correction=1).detach().cpu().numpy() # total covariance
             Cpsth, PSTH_A, PSTH_B = self._split_half_psth_covariance(SpikeCounts, T_idx, min_trials_per_time=10, seed=0)
 
             # covariance due to fixational eye movements
@@ -1484,6 +1626,7 @@ class DualWindowAnalysis:
             # noise covariance
             CnoiseU = Ctotal - Cpsth
             CnoiseC = Ctotal - Crate
+
             # symmetrize
             CnoiseU = 0.5 * (CnoiseU + CnoiseU.T)
             CnoiseC = 0.5 * (CnoiseC + CnoiseC.T)
@@ -1515,6 +1658,7 @@ class DualWindowAnalysis:
                 "alpha": alpha,
                 "fem_rank_ratio": rank,
                 "n_samples": n_samples,
+                'Erates': Erate
             })
 
             mats_save.append({

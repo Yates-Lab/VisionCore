@@ -38,7 +38,7 @@ from tqdm import tqdm
 dataset_configs_path = "/home/jake/repos/VisionCore/experiments/dataset_configs/multi_basic_240_all.yaml"
 dataset_configs = load_dataset_configs(dataset_configs_path)
 
-dataset_idx = 2
+dataset_idx = 7
 include_time_lags = False
 dataset_configs[dataset_idx]['types'] = ['fixrsvp']
 train_data, val_data, dataset_config = prepare_data(dataset_configs[dataset_idx])
@@ -96,33 +96,37 @@ plt.subplot(1,2,2)
 plt.imshow(np.nanmean(robs,2)[ind])
 plt.xlim(0, 160)
 
-#%% Run the analysis
+# Run the analysis
 
 # 1. Setup
 # Assuming 'robs', 'eyepos', 'valid_mask' are already loaded from your dataset code
 # valid_mask should be True where data is good (no fix breaks)
 valid_mask = np.isfinite(np.sum(robs, axis=2)) & np.isfinite(np.sum(eyepos, axis=2))
-neuron_mask = np.where(np.nansum(robs, (0,1))>500)[0]
-iix = np.arange(250)
+neuron_mask = np.where(np.nansum(robs, (0,1))>200)[0]
+NC = robs.shape[2]
+print(f"Using {len(neuron_mask)} neurons / {NC} total")
+iix = np.arange(240)
+#%%
 robs_used = robs[:,iix][:,:,neuron_mask]
 analyzer = DualWindowAnalysis(robs_used, eyepos[:,iix], valid_mask[:,iix], dt=1/240)
 
 # 2. Run Sweep
-windows = [5, 10, 20, 40]
-results, last_mats = analyzer.run_sweep(windows, t_hist_ms=1)
+windows = [5, 10, 20, 40, 80]
+results, last_mats = analyzer.run_sweep(windows, t_hist_ms=50, n_bins=25)
 
 cc = 0
+
 #%%
 cc += 1
 if cc >= len(neuron_mask):
     cc = 0
-
-analyzer.inspect_neuron_pair(cc, cc, 5, ax=None, show=True)
+# cc = 9
+analyzer.inspect_neuron_pair(cc, cc, 40, ax=None, show=True)
 
 #%%
 
 
-window_idx = 0
+window_idx = 1
 Ctotal = last_mats[window_idx]['Total']
 Cfem = last_mats[window_idx]['FEM']
 Crate = last_mats[window_idx]['Intercept']
@@ -167,7 +171,7 @@ plt.xlabel('Fano Factor (Uncorrected)')
 plt.ylabel('Fano Factor (Corrected)')
 plt.title(f"FF Window Size ({windows[window_idx]}ms)")
 
-#%%
+#
 def get_upper_triangle(C):
     rows, cols = np.triu_indices_from(C, k=1)
     v = C[rows, cols]
@@ -188,7 +192,7 @@ plt.ylabel('Correlation (Corrected)')
 plt.title('Correlation vs Window Size')
 
 
-#%% 3. Plot Fano Factor Scaling
+# 3. Plot Fano Factor Scaling
 window_ms = [results[i]['window_ms'] for i in range(len(results))]
 ff_uncorr = np.zeros_like(window_ms, dtype=np.float64)
 ff_uncorr_std = np.zeros_like(window_ms, dtype=np.float64)
@@ -221,7 +225,7 @@ plt.grid(True, alpha=0.3)
 plt.show()
 
 #%%
-window_idx = 4
+window_idx = 0
 Sigma_FEM = last_mats[window_idx]['FEM']
 u, s, vh = np.linalg.svd(Sigma_FEM)
 plt.figure()
@@ -250,13 +254,89 @@ plt.legend()
 # plt.yscale('log')
 plt.show()
 # %%
-i = 3
-plt.plot(results[i]['ff_uncorr'], results[i]['ff_corr'], 'o')
+for i in range(len(results)):
+    plt.plot(results[i]['ff_uncorr'], results[i]['ff_corr'], 'o')
+plt.axhline(1.0, color='k', linestyle='--', alpha=0.5)
+plt.axvline(1.0, color='k', linestyle='--', alpha=0.5)
+plt.axhline(0, color='k', linestyle='--', alpha=0.5)
 plt.plot(plt.xlim(), plt.xlim(), 'k')
 plt.xlabel('Fano Factor (Uncorrected)')
 plt.ylabel('Fano Factor (Corrected)')
 
+#%%
+import matplotlib.pyplot as plt
+from scipy import stats
 
+def plot_slope_estimation(ax, means, variances, title, color):
+    """
+    Plots the raw data and the robust slope regression line.
+    """
+    # 1. Filter robustly
+    valid = (means > 0.1) & np.isfinite(variances) & np.isfinite(means)
+    x = means[valid]
+    y = variances[valid]
+    
+    # 2. Scatter raw data
+    ax.scatter(x, y, s=15, alpha=0.6, c=color, label='Neurons')
+    
+    # 3. Fit Robust Slope (Fix intercept to 0 or allow float?)
+    # Generally allowing float is safer to account for additive noise floor,
+    # but theoretically Var = F*Mean implies intercept 0.
+    res = stats.linregress(x, y)
+    
+    # 4. Plot the Regression Line
+    x_line = np.linspace(0, x.max(), 100)
+    y_line = res.slope * x_line + res.intercept
+    
+    ax.plot(x_line, y_line, 'k--', linewidth=2, label=f'Slope (Fano) = {res.slope:.2f}')
+    
+    ax.set_title(title)
+    ax.set_xlabel("Mean Rate (spk/s)")
+    ax.set_ylabel("Variance")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    
+    return res.slope
+
+
+fig, axs = plt.subplots(1,2, figsize=(10,5), sharex=True, sharey=True)
+for i in range(len(results)):
+    
+    CvarU = np.diag(last_mats[i]['Total']-last_mats[i]['PSTH'])
+    CvarC = np.diag(last_mats[i]['Total']-last_mats[i]['Intercept'])
+    mu = results[i]['Erates']
+    plot_slope_estimation(axs[0], mu, CvarU, "Uncorrected", "tab:blue")
+    plot_slope_estimation(axs[1], mu, CvarC, "Corrected", "tab:red")
+
+#%%
+fig, axs = plt.subplots(1,2, figsize=(10,5), sharex=True, sharey=True)
+for i in range(len(results)):
+    CvarU = np.diag(last_mats[i]['Total']-last_mats[i]['PSTH'])
+    CvarC = np.diag(last_mats[i]['Total']-last_mats[i]['Intercept'])
+    mu = results[i]['Erates']
+    axs[0].plot(mu, CvarU, '.')
+    axs[1].plot(mu, CvarC, '.')
+    
+    # plt.plot(results[i]['Erates'],results[i]['ff_corr'], '.' )
+axs[0].set_title('Uncorrected')
+axs[1].set_title('Corrected')
+axs[0].set_xlabel('Mean Rate (spikes/sec)')
+axs[1].set_xlabel('Mean Rate (spikes/sec)')
+axs[0].set_ylabel('Variance (spikes^2/sec)')   
+# plot line of unity
+for ax in axs:
+    ax.plot(ax.get_xlim(), ax.get_xlim(), 'k--', alpha=0.5)
+
+
+#%%
+for thresh in [0.05, 0.1, 0.2, 0.5]:
+    for i in range(len(results)):
+        ff = results[i]['ff_corr'][results[i]['Erates'] > thresh]
+        mu = np.mean(ff)
+        std = np.std(ff)
+        plt.errorbar(i+thresh, mu, yerr=std/np.sqrt(len(ff)), fmt='o')
+
+plt.axvline(.2, color='k', linestyle='--', alpha=0.5)
 #%%
 results[0]
 # %%
