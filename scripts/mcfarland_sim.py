@@ -1176,15 +1176,20 @@ def compute_robust_fano_statistics(variances, means, plot=False):
 # Law of total covariance decomposition    
 class DualWindowAnalysis:
     """
-    McFarland-style FEM covariance decomposition.
+    Covariance decomposition conditioned on eye trajectory similarity.
     
     - We estimate second moments E[S_i S_j | distance bin] (time matched), then fit intercept at d -> 0+
     - Covariance: Cov = E[SS^T] - E[S]E[S]^T
+    - The Law of Total Covariance States:
+        Cov[S] = E[Cov[S | d]] + Cov[E[S | d]]
 
 
     """
 
-    def __init__(self, robs, eyepos, valid_mask, dt=1/240, device="cuda"):
+    def __init__(self, robs, eyepos, valid_mask,
+                dt=1/240,
+                min_seg_len=36,
+                device="cuda"):
         '''
         robs: (tr, t, cells) spike counts
         eyepos: (tr, t, 2) eye positions
@@ -1211,14 +1216,15 @@ class DualWindowAnalysis:
         valid_float = self.valid_mask.float().unsqueeze(-1)  # (tr, t, 1)
         sum_spikes = torch.sum(self.robs * valid_float, dim=0)  # (t, cells)
         cnt = torch.sum(valid_float, dim=0)  # (t, 1)
-        # keep NaNs out of PSTH by marking invalid times as NaN
+
+        # keep NaNs out of PSTH
         psth = torch.full((self.n_time, self.n_cells), float("nan"), device=self.device)
         ok = (cnt[:, 0] > 0)
         psth[ok] = sum_spikes[ok] / cnt[ok]
         self.psth = psth
 
-        # valid contiguous segments per trial
-        self.segments = self._get_valid_segments(min_len_bins=36)
+        # break the data into valid contiguous segments
+        self.segments = self._get_valid_segments(min_len_bins=min_seg_len)
 
         self.window_summaries = {}
         print(f"Loaded {len(self.segments)} valid segments. Init took {time.time()-t0:.2f}s")
@@ -1237,14 +1243,13 @@ class DualWindowAnalysis:
         return segments
 
     # -------------------------
-    # window extraction (GPU)
+    # window extraction
     # -------------------------
-    def _extract_windows_gpu(self, t_count, t_hist, seed=42):
+    def _extract_windows(self, t_count, t_hist):
         """
         Inputs:
           - t_count: number of bins in count window
-          - t_hist:  number of bins in history window
-          - seed:    random seed for subsampling (optional)
+          - t_hist:  number of bins in history window (used for trajectory similarity)
         
         Returns:
           - SpikeCounts:  (N, cells) summed counts over count window
@@ -1305,9 +1310,10 @@ class DualWindowAnalysis:
         # i, j = np.triu_indices_from(diff)
         # dist = diff[i,j]
 
-        # NEW: bins are RMS distance. this mimics the fast operation in the loop
+        # bins are RMS distance. It's not an unreasonable metric for similarity, but we 
+        # favor it over euclidean because there is a fast pytorch implementation on gpu (cdist)
         
-        # Flatten time and coordinate dimensions: (N, T, 2) -> (N, 2T) This matches the geometry used by torch.cdist inside the loop.
+        # Flatten time and coordinate dimensions: (N, T, 2) -> (N, 2T)
         N_samples, T, _ = EyeTraj.shape
         EyeFlat = EyeTraj.reshape(N_samples, -1) 
 
@@ -1331,11 +1337,9 @@ class DualWindowAnalysis:
         bin_edges_t = torch.as_tensor(bin_edges, device=device, dtype=EyeTraj.dtype)
         inv_sqrt_T = (1.0 / torch.sqrt(torch.tensor(float(T), device=device, dtype=EyeTraj.dtype)))
 
-        # (optional) keep accumulators on CPU as torch, convert to numpy at end
-        SS_e_A_t = torch.zeros((n_bins, C, C), device='cpu', dtype=torch.float64)
-        SS_e_B_t = torch.zeros((n_bins, C, C), device='cpu', dtype=torch.float64)
-        count_e_A_t = torch.zeros((n_bins,), device='cpu', dtype=torch.long)
-        count_e_B_t = torch.zeros((n_bins,), device='cpu', dtype=torch.long)
+        # keep accumulators on CPU as torch, convert to numpy at end
+        SS_e_t = torch.zeros((n_bins, C, C), device='cpu', dtype=torch.float64)
+        count_e_t = torch.zeros((n_bins,), device='cpu', dtype=torch.long)
 
         def accumulate_split(valid_idx, SS_e_t, count_e_t):
             # valid_idx: 1D numpy array of trial indices for this split
@@ -1380,73 +1384,23 @@ class DualWindowAnalysis:
                 SS_e_t[k-1] += M.detach().cpu().to(torch.float64)
                 count_e_t[k-1] += mk.sum().detach().cpu()
 
+        
         for t in unique_times:
             valid = np.where((T_idx == t).detach().cpu().numpy())[0]
             if len(valid) < 10:
                 continue
 
-            valid_A = valid[::2]
-            valid_B = valid[1::2]
-
-            accumulate_split(valid_A, SS_e_A_t, count_e_A_t)
-            accumulate_split(valid_B, SS_e_B_t, count_e_B_t)
+            accumulate_split(valid, SS_e_t, count_e_t)
 
         # Convert to numpy and form split-half estimate
-        SS_e_A = SS_e_A_t.numpy()
-        SS_e_B = SS_e_B_t.numpy()
-        count_e_A = count_e_A_t.numpy()
-        count_e_B = count_e_B_t.numpy()
+        SS_e = SS_e_t.numpy()
+        count_e = count_e_t.numpy()
 
-        MM_A = SS_e_A / count_e_A[:, None, None]
-        MM_B = SS_e_B / count_e_B[:, None, None]
-        MM = 0.5 * (MM_A + MM_B)
-        count_e = count_e_A + count_e_B
+        MM = SS_e / count_e[:, None, None]
+        # symmetrize
+        MM = 0.5 * (MM + np.swapaxes(MM, -1, -2))
 
-        # ------
-        # Apply shrinkage based on the stability of the estimate across the two halfs
-        # Compute Global Averages (use all data for stability check)
-        global_count = count_e.sum()
-        
-        if global_count == 0: # Avoid div by zero if empty
-             return MM, bin_centers, count_e
-
-        # Weighted average over bins to get global covariance matrix for Split A and B
-        # counts: (K, 1, 1) broadcast
-        Sigma_A_global = (SS_e_A * (count_e_A / count_e_A.sum())[:, None, None]).sum(0)
-        Sigma_B_global = (SS_e_B * (count_e_B / count_e_B.sum())[:, None, None]).sum(0)
-
-        # Normalize by diagonal to correct for firing rate effect
-        diag_A = np.diag(Sigma_A_global) # (C,)
-        diag_B = np.diag(Sigma_B_global) # (C,)
-        
-        # Geometric mean of diagonals for normalization
-        denom = np.sqrt(np.outer(diag_A, diag_A)) * np.sqrt(np.outer(diag_B, diag_B))
-        denom = np.sqrt(denom) + 1e-12
-        
-        # Calculate Normalized Difference Matrix
-        Diff_Norm = (Sigma_A_global - Sigma_B_global) / denom
-
-        # Robust score based on normalized errors
-        row_energy = np.sqrt((Diff_Norm**2).mean(axis=1)) # (C,) vector
-        
-        # Shrinkage to reduce impact of unstable estimates
-        # We use a fixed threshold of 0.2 corresponds to a 20% correlation mismatch on average.
-        # k controls steepness.
-        # Sigmoid: 1 when energy is 0, drops as energy increases
-        threshold = 0.2  
-        w = 1.0 / (1.0 + (row_energy / threshold)**4)
-        w = np.clip(w, 0.1, 1.0)
-        
-        # --- Apply Shrinkage ---
-        MM0 = MM.mean(axis=0, keepdims=True)
-
-        W = np.sqrt(w[None,:,None] * w[None,None,:])
-        MM_shrunk = W * MM + (1.0 - W) * MM0
-        
-        # Enforce Symmetry
-        MM_shrunk = 0.5 * (MM_shrunk + np.swapaxes(MM_shrunk, -1, -2))
-
-        return MM_shrunk, bin_centers, count_e
+        return MM, bin_centers, count_e
     
     # -------------------------
     # unbiased PSTH covariance (split-half cross-covariance)
@@ -1463,65 +1417,83 @@ class DualWindowAnalysis:
         '''
 
         # set random seed
-        np.random.seed(seed)
+        rng = np.random.default_rng(seed)
 
         unique_times = np.unique(T_idx.detach().cpu().numpy())
         NT = len(unique_times)
-        N = S.shape[0] # number of total samples
-        perm = np.random.permutation(N) # shuffle, just to get random masks for half the data
-        idx_A = perm < N//2
-        idx_B = ~idx_A
+        N_cells = S.shape[1]
+        N_samples = S.shape[0]
 
-        PSTH_A = np.nan*np.zeros((NT, S.shape[1]))
-        PSTH_B = np.nan*np.zeros((NT, S.shape[1]))
+        # Pre-allocate masks (false by default)
+        mask_A = np.zeros(N_samples, dtype=bool)
+        mask_B = np.zeros(N_samples, dtype=bool)
+
+        # iterate time points to ensure exactly 50/50 split per time bin
+        # This minimizes the variance of the split means
+        for t in unique_times:
+            # Find indices for this specific time point
+            # (Note: converting to numpy once outside loop would be faster, but this is clear)
+            ix_t = np.where((T_idx == t).detach().cpu().numpy())[0]
+            n_t = len(ix_t)
+
+            if n_t < min_trials_per_time:
+                continue
+
+            # Shuffle indices for this time point
+            perm = rng.permutation(n_t)
+            
+            # Split indices
+            split_idx = n_t // 2
+            idx_A_local = ix_t[perm[:split_idx]]
+            idx_B_local = ix_t[perm[split_idx:]]
+
+            mask_A[idx_A_local] = True
+            mask_B[idx_B_local] = True
+
+        # --- COMPUTE PSTH HALVES ---
+        # Initialize with NaNs
+        PSTH_A = np.full((NT, N_cells), np.nan)
+        PSTH_B = np.full((NT, N_cells), np.nan)
+
         for it, t in enumerate(unique_times):
-            ix = (T_idx == t).detach().cpu().numpy()
-            ix_A = ix & idx_A
-            ix_B = ix & idx_B
-            if sum(ix_A) < min_trials_per_time: continue
-            if sum(ix_B) < min_trials_per_time: continue
-            PSTH_A[it] = S[ix_A].mean(0).detach().cpu().numpy()
-            PSTH_B[it] = S[ix_B].mean(0).detach().cpu().numpy()
+            # Intersect time mask with split masks
+            # Since we built masks_A/B strictly on time indices, we can just check validity
+            ix_t = (T_idx == t).detach().cpu().numpy()
+            
+            # We must re-verify the intersection to map to the correct row 'it'
+            # (mask_A is global, ix_t is local time selector)
+            m_A = mask_A & ix_t
+            m_B = mask_B & ix_t
+            
+            # Check if we have data (redundant with loop above but safe)
+            if not m_A.any() or not m_B.any():
+                continue
 
-        # keep finite times only
+            PSTH_A[it] = S[m_A].mean(0).detach().cpu().numpy()
+            PSTH_B[it] = S[m_B].mean(0).detach().cpu().numpy()
+
+        # --- UNBIASED COVARIANCE ---
+        # Keep only times where both splits were valid
         finite_times = np.isfinite(PSTH_A).all(axis=1) & np.isfinite(PSTH_B).all(axis=1)
         
-        # covariance between A and B
-        # center across time
+        if finite_times.sum() < 2:
+            # Not enough time points to compute covariance
+            return np.full((N_cells, N_cells), np.nan), PSTH_A, PSTH_B
+
+        # Center across time
+        # (N_time_valid, N_cells)
         XA = PSTH_A[finite_times] - PSTH_A[finite_times].mean(0, keepdims=True)
         XB = PSTH_B[finite_times] - PSTH_B[finite_times].mean(0, keepdims=True)
 
-        # split-half cross-validated covariance
-        Ccv = (XA.T @ XB) / (XA.shape[0]) # biased estimator used everywhere else (subtract 1 if you want unbiased)
+        # Unbiased estimator: Divide by (N_time - 1)
+        n_time_bins = XA.shape[0]
+        Ccv = (XA.T @ XB) / (n_time_bins - 1)
 
-        # symmetrize
+        # Symmetrize
         Ccv = 0.5 * (Ccv + Ccv.T)
 
         return Ccv, PSTH_A, PSTH_B
 
-    # -------------------------
-    # isotonic intercept fit on SECOND MOMENTS
-    # -------------------------
-    # def _fit_intercepts_vectorized(
-    #     self,
-    #     Ceye,       # (n_bins, cells, cells) Eye distance conditioned covariance
-    #     count_e,    # (n_bins,) # counts per bin
-    # ):
-    #     """
-    #     Weighted PAVA (nonincreasing) on binned rate covariance;
-    #     intercept = g(0+) via first block.
-    #     Returns:
-    #       Sigma_intercept
-    #     """
-
-    #     # fit intercepts (for diagonal only)
-    #     NC = Ceye.shape[1]
-    #     Crate = Ceye[0]
-    #     for ii in range(NC):
-    #             yhat, _ = pava_nonincreasing_with_blocks(Ceye[:,ii,ii], count_e)
-    #             Crate[ii,ii] = yhat[0]
-
-    #     return Crate
     def fit_best_monotonic(self, y, w):
         """
         Fits both non-increasing and non-decreasing PAVA.
@@ -1581,6 +1553,42 @@ class DualWindowAnalysis:
                 C_intercept[j, i] = val
 
         return C_intercept
+    
+    def _calculate_Crate(self, SpikeCounts, EyeTraj, T_idx, n_bins=25):
+        """
+        Calculate the eye-conditioned covariance matrix (Crate) using split-half cross-validation.
+
+        Inputs:
+        -------
+        SpikeCounts : torch.Tensor (N, cells)
+            Spike counts for each sample
+        EyeTraj : torch.Tensor (N, t_hist, 2)
+            Eye positions for each sample
+        T_idx : torch.Tensor (N,)
+            Time index of start of count window (aligned label)
+        n_bins : int
+            Number of bins to use for eye distance
+        
+        Returns:
+        --------
+        Crate : np.ndarray (cells, cells)
+            Eye-conditioned covariance matrix
+        Erate: np.ndarray (cells,)
+            Mean spike counts per cell
+        Ceye: np.ndarray (n_bins, cells, cells)
+            Raw eye-conditioned covariance matrix (biased estimator)
+        bin_centers: np.ndarray (n_bins,)
+            Bin centers for eye distance
+        count_e: np.ndarray (n_bins,)
+            Number of pairs in each bin
+        """
+        MM, bin_centers, count_e = self._calculate_second_moment(SpikeCounts, EyeTraj, T_idx, n_bins=n_bins)
+        Erate = torch.nanmean(SpikeCounts, 0).detach().cpu().numpy() # raw means
+        Ceye = MM - Erate[:,None] * Erate[None,:] # raw rate covariances conditioned on eye trajectory
+
+        Crate = self._fit_intercepts_vectorized(Ceye, count_e) # fit intercepts
+        
+        return Crate, Erate, Ceye, bin_centers, count_e
 
     # -------------------------
     # run_sweep
@@ -1595,30 +1603,22 @@ class DualWindowAnalysis:
         for win_ms in tqdm(window_sizes_ms):
             t_count_bins = int(win_ms / (self.dt * 1000))
             t_count_bins = max(1, t_count_bins)
-            # if t_hist_bins < t_count_bins:
-            #     t_hist_bins = t_count_bins
 
             # extract windows
-            SpikeCounts, EyeTraj, T_idx, _ = self._extract_windows_gpu(np.maximum(t_hist_bins, t_count_bins), t_count_bins)
+            SpikeCounts, EyeTraj, T_idx, _ = self._extract_windows(t_count_bins, np.maximum(t_hist_bins, t_count_bins))
             n_samples = SpikeCounts.shape[0]
             if SpikeCounts is None or n_samples < 100: continue # arbitrary threshold (how much data do we need?)
 
             # calculate eye conditioned covariance
-            MM, bin_centers, count_e = self._calculate_second_moment(SpikeCounts, EyeTraj, T_idx, n_bins=n_bins)
-            Erate = torch.nanmean(SpikeCounts, 0).detach().cpu().numpy() # raw means
-            Ceye = MM - Erate[:,None] * Erate[None,:] # raw rate covariances conditioned on eye trajectory
-
-            # smooth Ceye across 0 dimension
-            # Ceye = savgol_nan_numpy(Ceye, axis=0, window_length=np.maximum(3, n_bins//15), polyorder=2)
-
-            # find intercept to get estimate of rate covariance whe eye distance is 0
-            Crate = self._fit_intercepts_vectorized(Ceye, count_e) # fit intercepts
+            Crate, Erate, Ceye, bin_centers, count_e = self._calculate_Crate(SpikeCounts, EyeTraj, T_idx, n_bins=n_bins)
             
-            # total covariance and PSTH
-            ix = np.isfinite(SpikeCounts.sum(1).detach().cpu().numpy())
-            Ctotal = torch.cov(SpikeCounts[ix].T, correction=1).detach().cpu().numpy() # total covariance
+            # PSTH covariance
             Cpsth, PSTH_A, PSTH_B = self._split_half_psth_covariance(SpikeCounts, T_idx, min_trials_per_time=10, seed=0)
 
+            # total covariance
+            ix = np.isfinite(SpikeCounts.sum(1).detach().cpu().numpy())
+            Ctotal = torch.cov(SpikeCounts[ix].T, correction=1).detach().cpu().numpy() # total covariance
+            
             # covariance due to fixational eye movements
             Cfem = Crate - Cpsth
             Cfem = 0.5 * (Cfem + Cfem.T) # symmetrize
@@ -1631,7 +1631,6 @@ class DualWindowAnalysis:
             CnoiseU = 0.5 * (CnoiseU + CnoiseU.T)
             CnoiseC = 0.5 * (CnoiseC + CnoiseC.T)
             
-
             # fano factors
             ff_uncorr = np.diag(CnoiseU) / Erate
             ff_corr = np.diag(CnoiseC) / Erate
