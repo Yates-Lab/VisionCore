@@ -154,7 +154,7 @@ def run_mcfarland_on_dataset(dataset_configs, dataset_idx, windows = [5, 10, 20,
     analyzer = DualWindowAnalysis(robs_used, eyepos[:,iix], valid_mask[:,iix], dt=dt)
 
     # 2. Run Sweep
-    results, last_mats = analyzer.run_sweep(windows, t_hist_ms=50, n_bins=25)
+    results, last_mats = analyzer.run_sweep(windows, t_hist_ms=50, n_bins=15)
     
     output['neuron_mask'] = neuron_mask
     output['windows'] = windows
@@ -268,120 +268,427 @@ for dataset_idx in range(len(dataset_configs)):
     except Exception as e:
         print(f"Failed to run on dataset {dataset_idx}: {e}")
 
+#%% check a pair
+# analyzers[0].inspect_neuron_pair(20,20, 20, ax=None, show=True)
 
 #%%
 
-from mcfarland_sim import compute_robust_fano_statistics
+def get_upper_triangle(C):
+    rows, cols = np.triu_indices_from(C, k=1)
+    v = C[rows, cols]
+    return v
+
 
 n = len(outputs[0]['results'])
-fig, axs = plt.subplots(1,n, figsize=(3*n, 6), sharex=True, sharey=True)
+fig, axs = plt.subplots(1,n, figsize=(3*n, 3), sharex=False, sharey=False)
 ffs = []
 for i in range(n):
     
     ff_uncorrs = []
     ff_corrs = []
     erates = []
+    rhos_uncorr = []
+    rhos_corr = []
+    alphas = []
     for j in range(len(outputs)):
         window_ms = outputs[j]['results'][i]['window_ms']
         ff_uncorr = outputs[j]['results'][i]['ff_uncorr']
         ff_corr = outputs[j]['results'][i]['ff_corr']
         Erates = outputs[j]['results'][i]['Erates']
+        alpha = outputs[j]['results'][i]['alpha']
+        
+        CnoiseU = outputs[j]['last_mats'][i]['NoiseCorrU']
+        CnoiseC = outputs[j]['last_mats'][i]['NoiseCorrC']
+        rho_uncorr = get_upper_triangle(CnoiseU)
+        rho_corr = get_upper_triangle(CnoiseC)
+
         valid = Erates > 0.1
         ff_uncorrs.append(ff_uncorr[valid])
         ff_corrs.append(ff_corr[valid])
         erates.append(Erates[valid])
+        rhos_uncorr.append(rho_uncorr)
+        rhos_corr.append(rho_corr)
+        alphas.append(alpha[valid])
 
         axs[i].plot(Erates, ff_uncorr*Erates, 'r.', alpha=0.1)
         axs[i].plot(Erates, ff_corr*Erates, 'b.', alpha=0.1)
-        axs[i].set_xlim(0, 5)
-        axs[i].set_ylim(0, 15)
+        xd = [0, np.percentile(Erates[valid], 99)]
+        axs[i].plot(xd, xd, 'k--', alpha=0.5)
+        axs[i].set_xlim(xd)
+        axs[i].set_ylim(xd[0], xd[1]*2)
+        
     
-    ffs.append({'window_ms': window_ms, 'uncorr': np.concatenate(ff_uncorrs), 'corr': np.concatenate(ff_corrs), 'erate': np.concatenate(erates)})
+    ffs.append({'window_ms': window_ms,
+                'uncorr': np.concatenate(ff_uncorrs),
+                'corr': np.concatenate(ff_corrs),
+                'erate': np.concatenate(erates),
+                'alpha': np.concatenate(alphas),
+                'rho_uncorr': np.concatenate(rhos_uncorr),
+                'rho_corr': np.concatenate(rhos_corr),
+                })
     
     # axs[i].axhline(1.0, color='k', linestyle='--', alpha=0.5)
-    plt.xlabel('Mean Rate (spikes/sec)')
-    plt.ylabel('Fano Factor')
+    axs[i].set_xlabel('Mean')
+axs[0].set_ylabel('Variance')
     
 
 plt.show()
-
 #%%
-ff_stat = compute_robust_fano_statistics(ffs[0]['uncorr']*ffs[0]['erate'], ffs[0]['erate'])
 
+import numpy as np
 import matplotlib.pyplot as plt
 from scipy import stats
 
-def plot_slope_estimation(ax, means, variances, title, color):
+def slope_ci_t(res, n, ci=0.95):
+    """Parametric CI using linregress stderr and t critical value."""
+    df = n - 2
+    tcrit = stats.t.ppf(0.5 + ci/2, df)
+    lo = res.slope - tcrit * res.stderr
+    hi = res.slope + tcrit * res.stderr
+    return lo, hi
+
+def bootstrap_mean_ci(x, n_boot=5000, ci=95, seed=0):
+    x = np.asarray(x)
+    x = x[np.isfinite(x)]
+    if x.size == 0:
+        return np.nan, (np.nan, np.nan)
+
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, x.size, size=(n_boot, x.size))
+    boot_means = x[idx].mean(axis=1)
+
+    alpha = (100 - ci) / 2
+    lo, hi = np.percentile(boot_means, [alpha, 100 - alpha])
+    return x.mean(), (lo, hi)
+
+def fisherz_mean_ci(r, n_boot=5000, ci=95, seed=0, eps=1e-6):
     """
-    Plots the raw data and the robust slope regression line.
+    Returns:
+      mean_r: tanh(mean(arctanh(r)))
+      (lo_r, hi_r): bootstrap CI in r-space (computed by bootstrapping z-means then tanh)
     """
-    # 1. Filter robustly
+    r = np.asarray(r)
+    r = r[np.isfinite(r)]
+    if r.size == 0:
+        return np.nan, (np.nan, np.nan)
+
+    # avoid inf at |r|=1
+    r = np.clip(r, -1 + eps, 1 - eps)
+    z = np.arctanh(r)
+
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, z.size, size=(n_boot, z.size))
+    boot_zmeans = z[idx].mean(axis=1)
+
+    alpha = (100 - ci) / 2
+    lo_z, hi_z = np.percentile(boot_zmeans, [alpha, 100 - alpha])
+
+    mean_r = np.tanh(z.mean())
+    lo_r, hi_r = np.tanh(lo_z), np.tanh(hi_z)
+    return mean_r, (lo_r, hi_r)
+
+
+def bootstrap_slope_ci(x, y, nboot=5000, ci=0.95, rng=0):
+    """
+    Nonparametric bootstrap: resample (x_i, y_i) pairs.
+    Returns (slope_hat, lo, hi, slopes_boot).
+    """
+    x = np.asarray(x); y = np.asarray(y)
+    n = len(x)
+    rng = np.random.default_rng(rng)
+
+    slopes = np.empty(nboot, dtype=float)
+    for b in range(nboot):
+        idx = rng.integers(0, n, size=n)
+        slopes[b] = stats.linregress(x[idx], y[idx]).slope
+
+    alpha = 1 - ci
+    lo, hi = np.quantile(slopes, [alpha/2, 1 - alpha/2])
+    slope_hat = stats.linregress(x, y).slope
+    return slope_hat, lo, hi, slopes
+
+def plot_slope_estimation(ax, means, variances, title, color, label=''):
+    # Filter
     valid = (means > 0.1) & np.isfinite(variances) & np.isfinite(means)
-    x = means[valid]
-    y = variances[valid]
+    x = np.asarray(means[valid])
+    y = np.asarray(variances[valid])
+
     
-    # 2. Scatter raw data
-    ax.scatter(x, y, s=15, alpha=0.6, c=color, label='Neurons')
-    
-    # 3. Fit Robust Slope (Fix intercept to 0 or allow float?)
-    # Generally allowing float is safer to account for additive noise floor,
-    # but theoretically Var = F*Mean implies intercept 0.
+
     res = stats.linregress(x, y)
     
-    # 4. Plot the Regression Line
+    ax.scatter(x, y, s=15, alpha=0.6, c=color, label=f'{label} FF = {res.slope:.2f}')
+
     x_line = np.linspace(0, x.max(), 100)
     y_line = res.slope * x_line + res.intercept
-    
-    ax.plot(x_line, y_line, 'k--', linewidth=2, label=f'Slope (Fano) = {res.slope:.2f}')
-    
+    ax.plot(x_line, y_line, 'k--', linewidth=2)
+
     ax.set_title(title)
     ax.set_xlabel("Mean Rate (spk/s)")
     ax.set_ylabel("Variance")
     ax.legend()
     ax.grid(True, alpha=0.3)
-    
-    return res
+
+    return res, x, y  # return x,y too so we can bootstrap outside
 
 
-#%%
-for i in range(n):
-    fig, axs = plt.subplots(1,2, figsize=(10,5), sharex=True, sharey=True)
-    res = plot_slope_estimation(axs[0], ffs[i]['erate'], ffs[i]['uncorr']*ffs[i]['erate'], "Uncorrected", "tab:blue")
-    plot_slope_estimation(axs[1], ffs[i]['erate'], ffs[i]['corr']*ffs[i]['erate'], "Corrected", "tab:orange")
-    plt.show()
+window_ms = np.array([outputs[0]['results'][i]['window_ms'] for i in range(len(outputs[0]['results']))])
+n = len(window_ms)
 
-#%%
+ff_u_slope = np.zeros(n)
+ff_c_slope = np.zeros(n)
+
+# bootstrap CI storage (lo, hi)
+ff_u_ci = np.zeros((2, n))
+ff_c_ci = np.zeros((2, n))
+
+# optional "aleatoric" variability: IQR of per-neuron fano = var/mean
+ff_u_iqr = np.zeros((2, n))
+ff_c_iqr = np.zeros((2, n))
+
+fig, axs = plt.subplots(1, n, figsize=(3*n, 3))
+
+for i in range(n):    
+
+    # Uncorrected
+    res_u, x_u, y_u = plot_slope_estimation(
+        axs[i],
+        ffs[i]['erate'],
+        ffs[i]['uncorr'] * ffs[i]['erate'],
+        "",
+        "tab:blue",
+        label='Uncorrected'
+    )
+    ff_u_slope[i] = res_u.slope
+
+    # Bootstrap CI for slope (epistemic, fewer assumptions)
+    slope_hat, lo, hi, _ = bootstrap_slope_ci(x_u, y_u, nboot=5000, ci=0.95, rng=123 + i)
+    ff_u_ci[:, i] = [lo, hi]
+
+    # "Aleatoric" / population variability proxy: spread of per-neuron fano
+    fano_u = y_u / x_u
+    ff_u_iqr[:, i] = np.quantile(fano_u, [0.25, 0.75])
+
+    # Corrected
+    res_c, x_c, y_c = plot_slope_estimation(
+        axs[i],
+        ffs[i]['erate'],
+        ffs[i]['corr'] * ffs[i]['erate'],
+        f"Window {ffs[i]['window_ms']}ms",
+        "tab:orange",
+        label='Corrected'
+    )
+    ff_c_slope[i] = res_c.slope
+
+    slope_hat, lo, hi, _ = bootstrap_slope_ci(x_c, y_c, nboot=5000, ci=0.95, rng=999 + i)
+    ff_c_ci[:, i] = [lo, hi]
+
+    fano_c = y_c / x_c
+    ff_c_iqr[:, i] = np.quantile(fano_c, [0.25, 0.75])
+
+# save figure
+fig.savefig('../figures/mcfarland/population_fano_window.pdf', bbox_inches='tight', dpi=300) 
+
+# Sort by window_ms so lines don’t zig-zag
+order = np.argsort(window_ms)
+window_ms = window_ms[order]
+
+ff_u_slope = ff_u_slope[order]
+ff_c_slope = ff_c_slope[order]
+ff_u_ci = ff_u_ci[:, order]
+ff_c_ci = ff_c_ci[:, order]
+ff_u_iqr = ff_u_iqr[:, order]
+ff_c_iqr = ff_c_iqr[:, order]
+
+#%% plot population summary
+# Convert (lo,hi) to asymmetric yerr for matplotlib: (2, n) = [lower_err; upper_err]
+u_yerr = np.vstack([ff_u_slope - ff_u_ci[0], ff_u_ci[1] - ff_u_slope])
+c_yerr = np.vstack([ff_c_slope - ff_c_ci[0], ff_c_ci[1] - ff_c_slope])
+
+fig, axs = plt.subplots(1, 2, figsize=(8, 4), sharex=True, sharey=True)
+axs[0].errorbar(window_ms, ff_u_slope, yerr=u_yerr, fmt='o-', capsize=3, label='Uncorrected slope (95% bootstrap CI)')
+axs[0].errorbar(window_ms, ff_c_slope, yerr=c_yerr, fmt='o-', capsize=3, label='Corrected slope (95% bootstrap CI)')
+axs[0].axhline(1.0, color='k', linestyle='--', alpha=0.5)
+axs[0].set_xlabel("Window (ms)")
+axs[0].set_ylabel("Fano / slope")
+axs[0].legend()
+axs[0].grid(True, alpha=0.3)
+axs[0].set_title("Population Fano")
+
+
 
 def geomean(x):
     return np.exp(np.mean(np.log(x)))
 
-i += 1
-x = ffs[i]['uncorr']
-y = ffs[i]['corr']
+ff_u_geomean = np.zeros(n)
+ff_c_geomean = np.zeros(n)
+for i in range(n):
 
-ix = (x > 0.1) & (y > 0.1) & (x < 3)
+    x = ffs[i]['uncorr']
+    y = ffs[i]['corr']
+    ix = np.isfinite(x) & np.isfinite(y)
+    ff_u_geomean[i] = geomean(x[ix])
+    ff_c_geomean[i] = geomean(y[ix])
 
-plt.plot(x[ix], y[ix], '.')
-plt.plot(geomean(x[ix]), geomean(y[ix]), 'ro')
-plt.axhline(1.0, color='r')
-plt.axvline(1.0, color='r')
+
+axs[1].fill_between(window_ms, ff_u_iqr[0], ff_u_iqr[1], alpha=0.12, label='Uncorr per-neuron Fano IQR')
+axs[1].fill_between(window_ms, ff_c_iqr[0], ff_c_iqr[1], alpha=0.12, label='Corr per-neuron Fano IQR')
+axs[1].plot(window_ms, ff_u_geomean, 'o-', label='Uncorrected geomean')
+axs[1].plot(window_ms, ff_c_geomean, 'o-', label='Corrected geomean')
+axs[1].legend()
+axs[1].grid(True, alpha=0.3)
+axs[1].set_xlabel("Window (ms)")
+axs[1].set_ylabel("Fano / geomean")
+axs[1].set_title("Per-neuron Fano")
+axs[1].axhline(1.0, color='k', linestyle='--', alpha=0.5)
+
+# save fig
+fig.savefig('../figures/mcfarland/fano_scaling_summary.pdf', bbox_inches='tight', dpi=300) 
+
+
+#%% plot noise correlations
+
+fig, axs = plt.subplots(1, n, figsize=(3*n, 3), sharex=True, sharey=True)
+bins = np.linspace(-.5, .5, 100)
+
+mu_u, lo_u, hi_u = np.empty(n), np.empty(n), np.empty(n)  # uncorrected
+mu_c, lo_c, hi_c = np.empty(n), np.empty(n), np.empty(n)  # corrected
+
+for i in range(n):
+    # 2D hist
+    cnt, xedges, yedges = np.histogram2d(
+        ffs[i]['rho_uncorr'], ffs[i]['rho_corr'],
+        bins=[bins, bins]
+    )
+    cnt = np.log1p(cnt)
+
+    axs[i].imshow(
+        cnt.T,
+        origin='lower',
+        aspect='auto',
+        interpolation='none',
+        cmap='Blues',
+        extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]],
+    )
+
+    axs[i].plot([-0.5, 0.5], [-0.5, 0.5], 'k--', alpha=0.5)
+    axs[i].axhline(0, color='k', linestyle='--', alpha=0.5)
+    axs[i].axvline(0, color='k', linestyle='--', alpha=0.5)
+    axs[i].set_title(f"Window {ffs[i]['window_ms']}ms")
+    axs[i].set_xlabel("Correlation (Uncorrected)")
+    axs[i].set_ylabel("Correlation (Corrected)")
+
+    # means + bootstrap CIs
+    mu_u[i] = np.nanmean(ffs[i]['rho_uncorr'])
+    sd = np.nanstd(ffs[i]['rho_uncorr'])
+    lo_u[i] = mu_u[i] - sd
+    hi_u[i] = mu_u[i] + sd  
+    mu_c[i] = np.nanmean(ffs[i]['rho_corr'])
+    sd = np.nanstd(ffs[i]['rho_corr'])
+    lo_c[i] = mu_c[i] - sd
+    hi_c[i] = mu_c[i] + sd
+    # mu_u[i], (lo_u[i], hi_u[i]) = bootstrap_mean_ci(ffs[i]['rho_uncorr'], seed=10_000 + i)
+    # mu_c[i], (lo_c[i], hi_c[i]) = bootstrap_mean_ci(ffs[i]['rho_corr'],   seed=20_000 + i)
+    axs[i].plot([mu_u[i]], [mu_c[i]], 'ro')
+
+fig.savefig('../figures/mcfarland/noise_correlations.pdf', bbox_inches='tight', dpi=300) 
+
 #%%
-np.array(output['cids'])
-#%%
-cc = 0
+fig2, ax = plt.subplots(figsize=(5, 3))
+
+ax.errorbar(
+    window_ms, mu_u,
+    yerr=np.vstack([mu_u - lo_u, hi_u - mu_u]),
+    fmt='o-', capsize=3, label='Uncorrected'
+)
+ax.errorbar(
+    window_ms, mu_c,
+    yerr=np.vstack([mu_c - lo_c, hi_c - mu_c]),
+    fmt='o-', capsize=3, label='Corrected'
+)
+
+ax.axhline(0, color='k', lw=1, alpha=0.3)
+ax.set_xlabel("Window (ms)")
+ax.set_ylabel("Mean noise correlation")
+ax.legend(frameon=False)
+plt.tight_layout()
+
+fig2.savefig('../figures/mcfarland/noise_correlations_mean.pdf', bbox_inches='tight', dpi=300) 
 
 #%%
-cc += 1
-if cc >= len(neuron_mask):
-    cc = 0
-# cc = 9
-analyzer.inspect_neuron_pair(cc, cc, 40, ax=None, show=True)
+i = 3
+fig, ax = plt.subplots(1, 1, figsize=(4, 4))
+ax.hist2d(ffs[i]['rho_uncorr'], ffs[i]['rho_corr'], bins=np.linspace(-.2,.2,100)) #, '.', alpha=0.1)
+ax.plot(plt.ylim(), plt.ylim(), 'k--', alpha=0.5)
+ax.axhline(0, color='k', linestyle='--', alpha=0.5)
+ax.axvline(0, color='k', linestyle='--', alpha=0.5)
+ax.set_title(f"Window {ffs[i]['window_ms']}ms")
+ax.set_xlabel("Correlation (Uncorrected)")
+ax.set_ylabel("Correlation (Corrected)")
+
+
+#%% Plot histogram of alpha
+fig, ax = plt.subplots(1, n, figsize=(3*n, 3))
+
+for i in range(n):
+    alpha = ffs[i]['alpha']
+    ax[i].hist(1 - alpha, bins=np.linspace(0, 1, 50))
+    ax[i].axvline(np.nanmean(1-alpha), color='r', linestyle='--', alpha=0.5)
+    ax[i].set_xlabel("1 - alpha")
+    ax[i].set_ylabel("Count")
+    ax[i].set_title(f"Window {ffs[i]['window_ms']}ms")
+
+fig.savefig('../figures/mcfarland/alpha.pdf', bbox_inches='tight', dpi=300) 
+
+# plot fano factor vs 1-alpha
+
+for field in ['corr', 'uncorr']:
+    fig, ax = plt.subplots(1, n, figsize=(3*n, 3))
+    for i in range(n):
+        alpha = ffs[i]['alpha']
+        ff = ffs[i][field]
+        ax[i].plot(1 - alpha, ff, 'o', alpha=0.1)
+        ax[i].set_xlim(0, 1)
+        ax[i].set_xlabel("1 - alpha")
+        ax[i].set_ylabel("Fano Factor")
+        ax[i].set_title(f"Window {ffs[i]['window_ms']}ms")
+    fig.savefig(f'../figures/mcfarland/ff_vs_alpha_{field}.pdf', bbox_inches='tight', dpi=300) 
+
+#%%
+j = 0
+i = 1
+Ctotal = outputs[j]['last_mats'][i]['Total']
+Cfem = outputs[j]['last_mats'][i]['FEM']
+Cint = outputs[j]['last_mats'][i]['Intercept']
+Cpsth = outputs[j]['last_mats'][i]['PSTH']
+
+CnoiseU = Ctotal - Cpsth
+CnoiseC = CnoiseU - Cfem
+plt.subplot(1,2,1)
+plt.imshow(CnoiseU)
+plt.subplot(1,2,2)
+plt.imshow(CnoiseC)
+
+
+#%%
+plt.figure(figsize=(10,5))
+plt.subplot(1,2,1)
+plt.plot(np.diag(Ctotal), np.diag(Cint), '.', label='Cintercept')
+plt.plot(np.diag(Ctotal), np.diag(Cpsth), '.', label='Cpsth')
+plt.plot(plt.xlim(), plt.xlim(), 'k')
+plt.xlabel('Total Variance (diagonal of Ctotal)')
+plt.ylabel('Rate Variance (diagonal of Cint, Cpsth)')
+plt.legend()
+plt.subplot(1,2,2)
+plt.plot(get_upper_triangle(Ctotal), get_upper_triangle(Cint), '.')
+plt.plot(get_upper_triangle(Ctotal), get_upper_triangle(Cpsth), '.')
+plt.plot(plt.xlim(), plt.xlim(), 'k')
+plt.xlabel('Total Covariance (upper triangle of Ctotal)')
+plt.ylabel('Rate Covariance (upper triangle of Cint)')
 
 #%%
 
-
-
-
+#%%
 
 
 v = np.max(Cfem.flatten())

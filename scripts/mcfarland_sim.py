@@ -1073,26 +1073,64 @@ def savgol_nan_torch(x, dim=1, window_length=15, polyorder=3):
     y = torch.from_numpy(y_np).to(x.device).type_as(x)
     return y
 
-def cov_to_corr(C):
-    C = torch.tensor(C)
-    # 1. Get the variances (diagonal elements)
+# def cov_to_corr(C):
+#     C = torch.tensor(C)
+#     # 1. Get the variances (diagonal elements)
+#     variances = torch.diag(C)
+    
+#     # 2. Get standard deviations
+#     # Clamp to avoid division by zero if a neuron is silent
+#     std_devs = torch.sqrt(variances).clamp(min=1e-8)
+    
+#     # 3. Outer product to create the denominator matrix
+#     # shape: (n, n) where entry (i, j) is sigma_i * sigma_j
+#     outer_std = torch.outer(std_devs, std_devs)
+    
+#     # 4. Normalize
+#     R = C / outer_std
+    
+#     # set diag to 0
+#     R = R - torch.diag(torch.diag(R))
+    
+#     return R
+def cov_to_corr(C, min_var=1e-3):
+    """
+    Converts covariance to correlation (N x N).
+    Returns NaNs for neurons with unstable, vanishing, or negative variance.
+    """
+    if not isinstance(C, torch.Tensor):
+        C = torch.tensor(C, dtype=torch.float32)
+    
+    # 1. Get variances (diagonal)
     variances = torch.diag(C)
     
-    # 2. Get standard deviations
-    # Clamp to avoid division by zero if a neuron is silent
-    std_devs = torch.sqrt(variances).clamp(min=1e-8)
+    # 2. Identify Valid Neurons
+    # We require variance to be strictly positive and above the noise floor.
+    # Neurons with NaN variance (from run_sweep) or tiny variance (survivors) fail this.
+    valid_mask = variances > min_var
     
-    # 3. Outer product to create the denominator matrix
-    # shape: (n, n) where entry (i, j) is sigma_i * sigma_j
+    # 3. Compute Standard Deviations
+    # Initialize with NaNs so that invalid neurons automatically produce NaN correlations
+    std_devs = torch.full_like(variances, float('nan'))
+    std_devs[valid_mask] = torch.sqrt(variances[valid_mask])
+    
+    # 4. Outer Product (N x N)
+    # Any row/col with a NaN std_dev will result in a NaN row/col in the denominator
     outer_std = torch.outer(std_devs, std_devs)
     
-    # 4. Normalize
+    # 5. Normalize
+    # Division by NaN (or zero) results in NaN, which is exactly what we want.
     R = C / outer_std
     
-    # set diag to 0
-    R = R - torch.diag(torch.diag(R))
+    # 6. Clamp to [-1, 1]
+    # torch.clamp passes NaNs through unchanged, but restricts valid values to physical limits.
+    R = torch.clamp(R, -1.0, 1.0)
     
-    return R
+    # 7. Set diagonal to 0
+    # (Standard practice for noise correlations)
+    R.fill_diagonal_(0.0)
+    
+    return R.numpy()
 
 def pava_nonincreasing_with_blocks(y, w, eps=1e-12):
     # weighted isotonic regression using PAVA (Pool-Adjacent-Violators Algorithm)
@@ -1122,56 +1160,6 @@ def pava_nonincreasing_with_blocks(y, w, eps=1e-12):
         yhat[s:e+1] = m
         blocks.append((s, e, float(m), float(ww)))
     return yhat, blocks
-
-from scipy import stats
-import numpy as np
-
-def compute_robust_fano_statistics(variances, means, plot=False):
-    """
-    Computes robust population Fano Factor to avoid low-firing rate artifacts.
-    
-    Args:
-        variances: (N,) array of spike count variances
-        means:     (N,) array of mean spike counts
-        
-    Returns:
-        dict containing robust metrics
-    """
-    # 1. Hard Filter: Discard wildly unstable estimates
-    # We require at least 0.1 spikes per window on average to even consider the neuron.
-    # Below this, the Fano Factor is mathematically meaningless (0/0 or noise/small).
-    valid_mask = (means > 0.1) & np.isfinite(variances) & np.isfinite(means)
-    
-    v_clean = variances[valid_mask]
-    m_clean = means[valid_mask]
-    
-    if len(v_clean) < 5:
-        return {"FF_slope": np.nan, "FF_pop": np.nan, "FF_median": np.nan}
-
-    # --- Metric 1: The Slope Estimator (The Gold Standard) ---
-    # Fits Var = F * Mean + beta
-    # This naturally weights high-firing neurons more (they have higher leverage)
-    # and ignores the "explosion" at the low end.
-    res = stats.linregress(m_clean, v_clean)
-    slope = res.slope
-    
-    # --- Metric 2: The Population Ratio (Variance Weighted) ---
-    # Equivalent to pooling all spikes from all neurons into one giant "super-neuron"
-    # F_pop = Sum(Vars) / Sum(Means)
-    ff_pop = np.sum(v_clean) / np.sum(m_clean)
-
-    # --- Metric 3: The Median (Outlier rejection) ---
-    # If you MUST use individual ratios, take the Median, never the Mean.
-    ff_individual = v_clean / m_clean
-    ff_median = np.median(ff_individual)
-
-    return {
-        "FF_slope": slope,
-        "FF_pop": ff_pop,
-        "FF_median": ff_median,
-        "n_neurons": len(v_clean)
-    }
-
 
 # Law of total covariance decomposition    
 class DualWindowAnalysis:
@@ -1554,7 +1542,7 @@ class DualWindowAnalysis:
 
         return C_intercept
     
-    def _calculate_Crate(self, SpikeCounts, EyeTraj, T_idx, n_bins=25):
+    def _calculate_Crate(self, SpikeCounts, EyeTraj, T_idx, n_bins=25, Ctotal=None):
         """
         Calculate the eye-conditioned covariance matrix (Crate) using split-half cross-validation.
 
@@ -1587,6 +1575,16 @@ class DualWindowAnalysis:
         Ceye = MM - Erate[:,None] * Erate[None,:] # raw rate covariances conditioned on eye trajectory
 
         Crate = self._fit_intercepts_vectorized(Ceye, count_e) # fit intercepts
+
+        if Ctotal is not None:
+            print("Ctotal is not None")
+            # find neurons that violate the physical limit that the signal covariance cannot exceed the total covariance
+            bad_mask = np.diag(Crate) > .99*np.diag(Ctotal)
+            print(f"  Found {bad_mask.sum()} neurons violating physical limit")
+            Crate[bad_mask,:] = np.nan
+            Crate[:,bad_mask] = np.nan
+            Ceye[:,bad_mask,:] = np.nan
+            Ceye[:,:,bad_mask] = np.nan
         
         return Crate, Erate, Ceye, bin_centers, count_e
 
@@ -1609,16 +1607,16 @@ class DualWindowAnalysis:
             n_samples = SpikeCounts.shape[0]
             if SpikeCounts is None or n_samples < 100: continue # arbitrary threshold (how much data do we need?)
 
+            # total covariance
+            ix = np.isfinite(SpikeCounts.sum(1).detach().cpu().numpy())
+            Ctotal = torch.cov(SpikeCounts[ix].T, correction=1).detach().cpu().numpy() # total covariance
+
             # calculate eye conditioned covariance
-            Crate, Erate, Ceye, bin_centers, count_e = self._calculate_Crate(SpikeCounts, EyeTraj, T_idx, n_bins=n_bins)
+            Crate, Erate, Ceye, bin_centers, count_e = self._calculate_Crate(SpikeCounts, EyeTraj, T_idx, n_bins=n_bins, Ctotal=Ctotal)
             
             # PSTH covariance
             Cpsth, PSTH_A, PSTH_B = self._split_half_psth_covariance(SpikeCounts, T_idx, min_trials_per_time=10, seed=0)
 
-            # total covariance
-            ix = np.isfinite(SpikeCounts.sum(1).detach().cpu().numpy())
-            Ctotal = torch.cov(SpikeCounts[ix].T, correction=1).detach().cpu().numpy() # total covariance
-            
             # covariance due to fixational eye movements
             Cfem = Crate - Cpsth
             Cfem = 0.5 * (Cfem + Cfem.T) # symmetrize
