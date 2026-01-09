@@ -569,87 +569,265 @@ def get_fixrsvp_trials(model, eval_dict, dataset_idx, train_data, val_data):
 
     return robs_trial, rhat_trial, dfs_trial
 
+# def ccnorm_variable_trials(R, P, D=None, *,
+#                            ddof=0,
+#                            min_trials_per_bin=20,
+#                            min_time_bins=20):
+#     """
+#     Noise-corrected correlation allowing trial count N_t to vary over time,
+#     using an explicit mask instead of NaNs.
 
-import numpy as np
+#     Parameters
+#     ----------
+#     R : array, shape (N, T, K)
+#         Single-trial responses.
+#     P : array, same shape
+#         Model predictions.
+#     D : bool array, same shape, optional
+#         Valid-sample mask (True=keep). If None, samples where R is NaN are invalid.
+#     ddof : int
+#         Passed to variance/covariance (0=pop, 1=sample).
+#     min_trials_per_bin : int
+#         Require ≥ this many valid trials in a bin to use it.
+#     min_time_bins : int
+#         Require ≥ this many bins after masking, else return NaN for that neuron.
 
-def ccnorm_variable_trials(R, P, D=None, *,
-                           ddof=0,
-                           min_trials_per_bin=20,
-                           min_time_bins=20):
+#     Returns
+#     -------
+#     cc : array, shape (K,)
+#         CC_norm per neuron.
+#     """
+#     R = np.asarray(R, float)
+#     P = np.asarray(P, float)
+#     N, T, K = R.shape
+
+#     # Build explicit mask D
+#     if D is None:
+#         D = ~np.isnan(R)
+#     else:
+#         D = np.asarray(D, bool)
+
+#     # Prepare output
+#     cc = np.full(K, np.nan)
+
+#     for k in range(K):
+#         # slice out neuron k
+#         r_k = R[..., k]       # (N, T)
+#         p_k = P[..., k]       # (N, T)
+#         m_k = D[..., k]       # (N, T) mask
+
+#         # count valid trials per time-bin
+#         n_t = m_k.sum(axis=0)               # (T,)
+#         good_t = n_t >= min_trials_per_bin
+#         if good_t.sum() < min_time_bins:
+#             continue
+
+#         # masked arrays over the “good” time bins
+#         r_ma = np.ma.masked_array(r_k[:, good_t], mask=~m_k[:, good_t])
+#         p_ma = np.ma.masked_array(p_k[:, good_t], mask=~m_k[:, good_t])
+
+#         # PSTH and sample-noise variance per bin
+#         y_t   = r_ma.mean(axis=0).data     # shape (T_good,)
+#         s2_t  = r_ma.var(axis=0, ddof=ddof).data
+
+#         # explainable variance (eq ★)
+#         var_y = y_t.var(ddof=ddof)
+#         noise_corr = np.mean(s2_t / n_t[good_t])
+#         SP = var_y - noise_corr
+#         if SP <= 0 or np.isnan(SP):
+#             continue
+
+#         # model stats
+#         p_mean = p_ma.mean(axis=0).data
+#         cov = np.mean((y_t - y_t.mean()) * (p_mean - p_mean.mean()))
+#         var_p = p_mean.var(ddof=ddof)
+#         if var_p == 0:
+#             continue
+
+#         cc[k] = cov / np.sqrt(var_p * SP)
+
+#     return cc
+def _pearson_1d(a, b, ddof=0):
+    """Pearson corr between 1D arrays, robust to constant arrays."""
+    a = np.asarray(a, float)
+    b = np.asarray(b, float)
+    if a.size < 2:
+        return np.nan
+    a = a - a.mean()
+    b = b - b.mean()
+    va = a.var(ddof=ddof)
+    vb = b.var(ddof=ddof)
+    if va <= 0 or vb <= 0:
+        return np.nan
+    cov = np.mean(a * b)  # ddof=0 covariance
+    return cov / np.sqrt(va * vb)
+
+def ccnorm_split_half_variable_trials(
+    R, P, D=None, *,
+    ddof=0,
+    min_trials_per_bin=20,
+    min_time_bins=20,
+    n_splits=50,
+    rng=None,
+    min_trials_per_half=None,
+    return_components=True,
+):
     """
-    Noise-corrected correlation allowing trial count N_t to vary over time,
-    using an explicit mask instead of NaNs.
+    CC_norm via split-half resampling to estimate CCmax, with a valid-data mask.
 
     Parameters
     ----------
-    R : array, shape (N, T, K)
+    R : array, (N, T, K)
         Single-trial responses.
-    P : array, same shape
-        Model predictions.
-    D : bool array, same shape, optional
-        Valid-sample mask (True=keep). If None, samples where R is NaN are invalid.
+    P : array, (N, T, K)
+        Single-trial model predictions.
+    D : bool array, (N, T, K), optional
+        Valid-sample mask (True=keep). If None, invalid are where R is NaN.
     ddof : int
-        Passed to variance/covariance (0=pop, 1=sample).
+        ddof for variances in the correlation denominator (0 or 1).
     min_trials_per_bin : int
-        Require ≥ this many valid trials in a bin to use it.
+        Require ≥ this many valid trials in the *full* data to consider a bin at all.
     min_time_bins : int
-        Require ≥ this many bins after masking, else return NaN for that neuron.
+        Require ≥ this many time bins for computing CCabs / CChalf.
+    n_splits : int
+        Number of random split-halves to average.
+    rng : np.random.Generator or int or None
+        Random generator or seed.
+    min_trials_per_half : int or None
+        Minimum valid trials per bin per half. If None, uses min_trials_per_bin//2.
+    return_components : bool
+        If True, return (ccnorm, ccabs, ccmax, cchalf_mean, cchalf_n).
 
     Returns
     -------
-    cc : array, shape (K,)
-        CC_norm per neuron.
+    ccnorm : (K,)
+    (optionally) ccabs : (K,), ccmax : (K,), cchalf_mean : (K,), cchalf_n : (K,)
     """
     R = np.asarray(R, float)
     P = np.asarray(P, float)
     N, T, K = R.shape
 
-    # Build explicit mask D
     if D is None:
         D = ~np.isnan(R)
     else:
         D = np.asarray(D, bool)
 
-    # Prepare output
-    cc = np.full(K, np.nan)
+    D = D & ~np.isnan(R)
+        
+    R[~D] = np.nan
+    P[~D] = np.nan
+    
+    if rng is None:
+        rng = np.random.default_rng()
+    elif isinstance(rng, (int, np.integer)):
+        rng = np.random.default_rng(int(rng))
+    # else assume it's already a Generator
+
+    if min_trials_per_half is None:
+        min_trials_per_half = max(1, min_trials_per_bin // 2)
+
+    ccnorm = np.full(K, np.nan)
+    ccabs  = np.full(K, np.nan)
+    ccmax  = np.full(K, np.nan)
+    cchalf_mean = np.full(K, np.nan)
+    cchalf_n    = np.zeros(K, dtype=int)
+
+    # Precompute one fixed random permutation scheme per split (over trials)
+    # so all neurons use the same split structure (optional but nice).
+    # Each split produces two index sets A/B of ~N/2 each.
+    trial_splits = []
+    for _ in range(n_splits):
+        perm = rng.permutation(N)
+        A = perm[: N // 2]
+        B = perm[N // 2 :]
+        trial_splits.append((A, B))
 
     for k in range(K):
-        # slice out neuron k
-        r_k = R[..., k]       # (N, T)
-        p_k = P[..., k]       # (N, T)
-        m_k = D[..., k]       # (N, T) mask
+        r_k = R[..., k]      # (N,T)
+        p_k = P[..., k]      # (N,T)
+        m_k = D[..., k]      # (N,T)
 
-        # count valid trials per time-bin
-        n_t = m_k.sum(axis=0)               # (T,)
-        good_t = n_t >= min_trials_per_bin
-        if good_t.sum() < min_time_bins:
+        # Time bins that are even eligible (enough valid trials overall)
+        n_t_full = m_k.sum(axis=0)  # (T,)
+        eligible_t = n_t_full >= min_trials_per_bin
+        
+        # plt.plot(np.nanmean(r_k, 0), 'r')
+        # plt.plot(m_k.sum(axis=0), 'k')
+        # plt.plot(eligible_t, 'b')
+        if eligible_t.sum() < min_time_bins:
+            # print(f"  Skipping neuron {k} - not enough eligible time bins")
             continue
 
-        # masked arrays over the “good” time bins
-        r_ma = np.ma.masked_array(r_k[:, good_t], mask=~m_k[:, good_t])
-        p_ma = np.ma.masked_array(p_k[:, good_t], mask=~m_k[:, good_t])
+        # ---------- CCabs: corr(full PSTH, full mean prediction) ----------
+        r_ma = np.ma.masked_array(r_k[:, eligible_t], mask=~m_k[:, eligible_t])
+        p_ma = np.ma.masked_array(p_k[:, eligible_t], mask=~m_k[:, eligible_t])
 
-        # PSTH and sample-noise variance per bin
-        y_t   = r_ma.mean(axis=0).data     # shape (T_good,)
-        s2_t  = r_ma.var(axis=0, ddof=ddof).data
+        y_full = r_ma.mean(axis=0).filled(np.nan)
+        p_full = p_ma.mean(axis=0).filled(np.nan)
+        
+        # plt.figure()
+        # plt.plot(y_full, 'k')
+        # plt.plot(p_full, 'r')
+        # plt.show()
 
-        # explainable variance (eq ★)
-        var_y = y_t.var(ddof=ddof)
-        noise_corr = np.mean(s2_t / n_t[good_t])
-        SP = var_y - noise_corr
-        if SP <= 0 or np.isnan(SP):
+        # Drop any remaining NaNs (can happen if a bin becomes fully masked)
+        ok = np.isfinite(y_full) & np.isfinite(p_full)
+        if ok.sum() < min_time_bins:
+            # print(f"  Skipping neuron {k} - not enough finite values after masking")
             continue
 
-        # model stats
-        p_mean = p_ma.mean(axis=0).data
-        cov = np.mean((y_t - y_t.mean()) * (p_mean - p_mean.mean()))
-        var_p = p_mean.var(ddof=ddof)
-        if var_p == 0:
+        ccabs[k] = _pearson_1d(y_full[ok], p_full[ok], ddof=ddof)
+
+        # ---------- CChalf: average corr(half PSTH A, half PSTH B) ----------
+        ccs = []
+        for A, B in trial_splits:
+            mA = m_k[A, :]  # (NA,T)
+            mB = m_k[B, :]  # (NB,T)
+            nA = mA.sum(axis=0)
+            nB = mB.sum(axis=0)
+
+            # Need bins that are eligible overall AND have enough trials in both halves
+            good_t = eligible_t & (nA >= min_trials_per_half) & (nB >= min_trials_per_half)
+            if good_t.sum() < min_time_bins:
+                # print(f"  Skipping neuron {k} - not enough good time bins for split-half")
+                continue
+
+            rA = np.ma.masked_array(r_k[A, :][:, good_t], mask=~m_k[A, :][:, good_t])
+            rB = np.ma.masked_array(r_k[B, :][:, good_t], mask=~m_k[B, :][:, good_t])
+
+            yA = rA.mean(axis=0).filled(np.nan)
+            yB = rB.mean(axis=0).filled(np.nan)
+
+            ok2 = np.isfinite(yA) & np.isfinite(yB)
+            if ok2.sum() < min_time_bins:
+                # print(f"  Skipping neuron {k} - not enough finite values after masking for split-half")
+                continue
+
+            c = _pearson_1d(yA[ok2], yB[ok2], ddof=ddof)
+            if np.isfinite(c):
+                ccs.append(c)
+
+        if len(ccs) == 0:
             continue
 
-        cc[k] = cov / np.sqrt(var_p * SP)
+        cchalf_mean[k] = float(np.mean(ccs))
+        cchalf_n[k] = len(ccs)
 
-    return cc
+        # ---------- CCmax from mean split-half correlation ----------
+        # Standard conversion (equal halves assumption):
+        # CCmax = sqrt( 2*CChalf / (1 + CChalf) )
+        ch = cchalf_mean[k]
+        if not np.isfinite(ch) or ch <= 0:
+            continue
+        ccmax[k] = np.sqrt((2.0 * ch) / (1.0 + ch))
+        
+        # ---------- CCnorm ----------
+        if np.isfinite(ccabs[k]) and np.isfinite(ccmax[k]) and ccmax[k] > 1e-3:
+            ccnorm[k] = ccabs[k] / ccmax[k]
+
+    if return_components:
+        return ccnorm, ccabs, ccmax, cchalf_mean, cchalf_n
+    return ccnorm
 
 
 
