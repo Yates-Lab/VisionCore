@@ -34,7 +34,7 @@ from training import MultiDatasetModel
 # Import our utility functions
 from .eval_stack_utils import (
     load_single_dataset, get_stim_inds, evaluate_dataset, load_qc_data,
-    get_fixrsvp_trials, ccnorm_variable_trials, get_saccade_eval,
+    get_fixrsvp_trials, get_saccade_eval, ccnorm_split_half_variable_trials,
     detect_saccades_from_session, scan_checkpoints, extract_val_loss, extract_epoch
 )
 
@@ -802,7 +802,8 @@ def run_ccnorm_analysis(model, train_data, val_data, dataset_idx, bps_results=No
         rbarhat = np.nansum(rhat_trial*dfs_trial, axis=0) / np.nansum(dfs_trial, axis=0)/dt
 
         # Calculate CCNORM
-        ccn = ccnorm_variable_trials(robs_trial, rhat_trial, dfs_trial, min_trials_per_bin=30, min_time_bins=60)
+        from eval.eval_stack_utils import ccnorm_split_half_variable_trials
+        ccn = ccnorm_split_half_variable_trials(robs_trial, rhat_trial, dfs_trial, return_components=False, n_splits=500)
         ccn = np.minimum(np.maximum(ccn, 0), 1)  # Clip to [0, 1]
 
         ccnorm_results = {
