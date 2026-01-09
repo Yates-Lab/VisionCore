@@ -28,20 +28,12 @@ mpl.rcParams['font.sans-serif'] = ['Arial', 'Helvetica', 'DejaVu Sans']
 enable_autoreload()
 device = get_free_device()
 
-
-# from mcfarland_sim import _savgol_1d_nan, savgol_nan_numpy, savgol_nan_torch
 from mcfarland_sim import DualWindowAnalysis
-    
-#%% Load Dataset
 from tqdm import tqdm
 
 dataset_configs_path = "/home/jake/repos/VisionCore/experiments/dataset_configs/multi_basic_240_all.yaml"
 dataset_configs = load_dataset_configs(dataset_configs_path)
-
-dataset_idx = 7
-
-#%%
-
+#%% Main analysis 
 def run_mcfarland_on_dataset(dataset_configs, dataset_idx, windows = [5, 10, 20, 40, 80],
         plot=False, total_spikes_threshold=200, valid_time_bins=240, dt=1/240):
     '''
@@ -73,7 +65,7 @@ def run_mcfarland_on_dataset(dataset_configs, dataset_idx, windows = [5, 10, 20,
     dataset_config['types'] = ['fixrsvp']
     train_data, val_data, dataset_config = prepare_data(dataset_config)
     sess = train_data.dsets[0].metadata['sess']
-    ppd = train_data.dsets[0].metadata['ppd']
+    # ppd = train_data.dsets[0].metadata['ppd']
     cids = dataset_config['cids']
     print(f"Running on {sess.name}")
 
@@ -254,14 +246,13 @@ def run_mcfarland_on_dataset(dataset_configs, dataset_idx, windows = [5, 10, 20,
 
     return output, analyzer
 
-#%%
-
+#%% Run main analysis on all datasets
 outputs = []
 analyzers = []
 
 for dataset_idx in range(len(dataset_configs)):
     print(f"Running on dataset {dataset_idx}")
-    try:
+    try: # some datasets do not have fixrsvp
         output, analyzer = run_mcfarland_on_dataset(dataset_configs, dataset_idx, plot=False)
         outputs.append(output)
         analyzers.append(analyzer)
@@ -273,7 +264,7 @@ for dataset_idx in range(len(dataset_configs)):
 
 #%%
 
-def get_upper_triangle(C):
+def get_upper_triangle(C): # used to get the correlation values
     rows, cols = np.triu_indices_from(C, k=1)
     v = C[rows, cols]
     return v
@@ -360,32 +351,6 @@ def bootstrap_mean_ci(x, n_boot=5000, ci=95, seed=0):
     alpha = (100 - ci) / 2
     lo, hi = np.percentile(boot_means, [alpha, 100 - alpha])
     return x.mean(), (lo, hi)
-
-def fisherz_mean_ci(r, n_boot=5000, ci=95, seed=0, eps=1e-6):
-    """
-    Returns:
-      mean_r: tanh(mean(arctanh(r)))
-      (lo_r, hi_r): bootstrap CI in r-space (computed by bootstrapping z-means then tanh)
-    """
-    r = np.asarray(r)
-    r = r[np.isfinite(r)]
-    if r.size == 0:
-        return np.nan, (np.nan, np.nan)
-
-    # avoid inf at |r|=1
-    r = np.clip(r, -1 + eps, 1 - eps)
-    z = np.arctanh(r)
-
-    rng = np.random.default_rng(seed)
-    idx = rng.integers(0, z.size, size=(n_boot, z.size))
-    boot_zmeans = z[idx].mean(axis=1)
-
-    alpha = (100 - ci) / 2
-    lo_z, hi_z = np.percentile(boot_zmeans, [alpha, 100 - alpha])
-
-    mean_r = np.tanh(z.mean())
-    lo_r, hi_r = np.tanh(lo_z), np.tanh(hi_z)
-    return mean_r, (lo_r, hi_r)
 
 
 def bootstrap_slope_ci(x, y, nboot=5000, ci=0.95, rng=0):

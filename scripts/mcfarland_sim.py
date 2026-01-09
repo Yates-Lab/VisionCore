@@ -37,26 +37,66 @@ device = get_free_device()
 #-----------
 # Get Stimuli
 #-----------
-def get_fixrsvp_stack(full_size=600, frames_per_im=3):
-    from DataYatesV1.exp.fix_rsvp import get_rsvp_fix_stim
+def get_fixrsvp_stack(full_size=600, frames_per_im=3,
+        bkgnd = 127.0,
+        radius = 1.5,
+        ppd = 37.50476617, prefix='im'):
+    
+    center_pix = [full_size / 2, full_size / 2]
+    from DataYatesV1.exp.support import get_rsvp_fix_stim, get_face_library, get_backimage_directory
+    from DataYatesV1.exp.general import gen_gauss_image_texture, place_gauss_image_texture
 
-    images = get_rsvp_fix_stim()
-    im_size = images['im01'].shape
-    window = np.hanning(im_size[0])[:, None] * np.hanning(im_size[1])[None, :]
-    num_images = 60
-    center_pix = full_size // 2 - im_size[0] // 2
-    full_stack = np.zeros((num_images*frames_per_im, full_size, full_size))
+    if prefix == 'im':
+        images = get_rsvp_fix_stim()
+        num_images = len(images.keys())-3
+    elif prefix == 'face':
+        images = get_face_library()
+        num_images = len(images.keys())-3
+    elif prefix == 'nat':
+        from PIL import Image
+        directory = get_backimage_directory() # posix path
 
-    frame_counter = 0
-    for im_id in range(60):
-        im = images[f'im{im_id+1:02d}'].mean(axis=2).astype(np.float32)
-        im -= 127
-        im /= 255
+        # list all images in the directory
+        image_files = [f for f in directory.iterdir() if f.is_file()]
+        num_images = len(image_files)
+
+        images = []
+        for image_file in image_files:
+            image = Image.open(image_file)
+            W, H = 1280, 720
+            ctr = [W//2, H//2]
+            ix = np.arange(-full_size//2, full_size//2)
+            image = image.resize((W, H), resample=2)
+            image = np.array(image)[ix + ctr[1],:][:, ix + ctr[0]]
+            if image.ndim == 3:
+                image = np.mean(image, axis=2) #.astype(np.uint8)
+            images.append(image)
+
+        images = np.stack(images, axis=0)
+        
+    
+    full_stack = []
+    # frame_counter = 0
+    for im_id in range(num_images):
+        if isinstance(images, dict):
+            
+            im = images[f'{prefix}{im_id+1:02d}'].mean(axis=2).astype(np.float32)
+            im_tex, alpha_tex = gen_gauss_image_texture(im, bkgnd)
+        
+            im, _ = place_gauss_image_texture(im_tex, alpha_tex, 
+                                        np.array([0.,0.]), radius, center_pix,
+                                        bkgnd, ppd, roi=np.array([[0, full_size-1], [0, full_size-1]]), binSize=1)
+
+            im = (im + .5 + bkgnd).astype(np.uint8)
+        else:
+            im = images[im_id]
+        
         # place in center
         for _ in range(frames_per_im):
-            full_stack[frame_counter, center_pix:center_pix+im_size[0], center_pix:center_pix+im_size[1]] = window * im
-            frame_counter += 1
-
+            full_stack.append(im)
+            
+    full_stack = np.stack(full_stack, axis=0)
+    
     return full_stack
 
 
