@@ -40,7 +40,9 @@ def get_fixrsvp_stack(full_size=600, frames_per_im=3,
         bkgnd = 127.0,
         radius = 1.5,
         ppd = 37.50476617, prefix='im'):
-    
+    '''
+    Utility for getting different types of stimuli.
+    '''
     center_pix = [full_size / 2, full_size / 2]
     from DataYatesV1.exp.support import get_rsvp_fix_stim, get_face_library, get_backimage_directory
     from DataYatesV1.exp.general import gen_gauss_image_texture, place_gauss_image_texture
@@ -98,7 +100,11 @@ def get_fixrsvp_stack(full_size=600, frames_per_im=3,
     
     return full_stack
 
+# ----------------------------
+# Simulating eye movements
+# ----------------------------
 
+# fixation duration
 def sample_fix_durations(n, dist="lognormal", mean=0.25, sigma=0.35, rng=None):
     """
     Sample fixation durations (seconds).
@@ -125,9 +131,8 @@ def sample_fix_durations(n, dist="lognormal", mean=0.25, sigma=0.35, rng=None):
 
     raise ValueError("dist must be 'lognormal' or 'gamma'.")
 
-# ----------------------------
-# Microsaccade main sequence
-# ----------------------------
+
+# Microsaccade size follows main sequence
 def main_sequence_peak_vel(amp_deg, v0=20.0, vmax=200.0, a0=1.0):
     """
     Simple saturating main sequence: v_peak = v0 + (vmax - v0)*(1 - exp(-amp/a0))
@@ -137,9 +142,7 @@ def main_sequence_peak_vel(amp_deg, v0=20.0, vmax=200.0, a0=1.0):
     amp_deg = np.asarray(amp_deg)
     return v0 + (vmax - v0) * (1.0 - np.exp(-amp_deg / max(a0, 1e-9)))
 
-# ----------------------------
 # Core simulator
-# ----------------------------
 def simulate_eye_trace(
     T_total=10.0,
     dt=0.001,
@@ -296,7 +299,11 @@ def simulate_eye_trace(
 
     return t, pos, vel, state
 
+# ----------------------------
+# Utilities for resampling images with gaze position
+# ----------------------------
 
+# convert degrees to normalized units (-1 to 1 range for image coordinates)
 def eye_deg_to_norm(
     eye_deg: torch.Tensor,   # (T,2) in degrees, (x_deg,y_deg), y positive UP
     ppd: float,              # pixels per degree
@@ -321,6 +328,7 @@ def eye_deg_to_norm(
 
     return torch.stack((x_norm, y_norm), dim=-1)
 
+# convert degrees to pixels (relative to image center)
 def eye_deg_to_pix(
     eye_deg: torch.Tensor,   # (T,2) in degrees, (x_deg,y_deg), y positive UP
     ppd: float,              # pixels per degree
@@ -338,6 +346,7 @@ def eye_deg_to_pix(
 
     return torch.stack((x_pix, y_pix), dim=-1)
 
+# resample gaze-contingent movie
 def shift_movie_with_eye(
     movie: torch.Tensor,          # (T,H,W) or (T,C,H,W)
     eye_xy: torch.Tensor,         # (T,2) in [-1,1], (x,y)
@@ -403,7 +412,7 @@ def shift_movie_with_eye(
 
     return out
 
-
+# save out animations
 def save_eye_movies(
     full_stack: torch.Tensor,      # (T,H,W) full stimulus
     eye_movie: torch.Tensor,        # (T,outH,outW) shifted ROI
@@ -514,7 +523,11 @@ def save_eye_movies(
     plt.close(fig2)
     print(f"Saved ROI movie to {save_prefix}_roi.mp4")
 
+# ----------------------------
+# Simulate "neural" responses using steerable pyramid
+# ----------------------------
 
+# build biphasic temporal kernel
 def build_temporal_kernel(kernel_size=16, 
         dt=1/240, 
         tau_fast=0.004, 
@@ -910,56 +923,6 @@ class PyramidSimulator:
             'rf_contour': self.rf_contour[(scale, ori)],
         }
 
-def extract_metrics(outputs):
-    n = len(outputs[0]['results'])
-    # fig, axs = plt.subplots(1,n, figsize=(3*n, 3), sharex=False, sharey=False)
-    metrics = []
-    for i in range(n):
-        
-        ff_uncorrs = []
-        ff_corrs = []
-        erates = []
-        rhos_uncorr = []
-        rhos_corr = []
-        alphas = []
-        for j in range(len(outputs)):
-            window_ms = outputs[j]['results'][i]['window_ms']
-            ff_uncorr = outputs[j]['results'][i]['ff_uncorr']
-            ff_corr = outputs[j]['results'][i]['ff_corr']
-            Erates = outputs[j]['results'][i]['Erates']
-            alpha = outputs[j]['results'][i]['alpha']
-            
-            CnoiseU = outputs[j]['last_mats'][i]['NoiseCorrU']
-            CnoiseC = outputs[j]['last_mats'][i]['NoiseCorrC']
-            rho_uncorr = get_upper_triangle(CnoiseU)
-            rho_corr = get_upper_triangle(CnoiseC)
-
-            valid = Erates > 0.1
-            ff_uncorrs.append(ff_uncorr[valid])
-            ff_corrs.append(ff_corr[valid])
-            erates.append(Erates[valid])
-            rhos_uncorr.append(rho_uncorr)
-            rhos_corr.append(rho_corr)
-            alphas.append(alpha[valid])
-
-            # axs[i].plot(Erates, ff_uncorr*Erates, 'r.', alpha=0.1)
-            # axs[i].plot(Erates, ff_corr*Erates, 'b.', alpha=0.1)
-            # xd = [0, np.percentile(Erates[valid], 99)]
-            # axs[i].plot(xd, xd, 'k--', alpha=0.5)
-            # axs[i].set_xlim(xd)
-            # axs[i].set_ylim(xd[0], xd[1]*2)
-            
-        
-        metrics.append({'window_ms': window_ms,
-                    'uncorr': np.concatenate(ff_uncorrs),
-                    'corr': np.concatenate(ff_corrs),
-                    'erate': np.concatenate(erates),
-                    'alpha': np.concatenate(alphas),
-                    'rho_uncorr': np.concatenate(rhos_uncorr),
-                    'rho_corr': np.concatenate(rhos_corr),
-                    })
-    return metrics
-
 # Main simulation
 def simulate_responses(
     pyr,
@@ -1091,6 +1054,11 @@ def simulate_responses(
         eyepos[itrial, :T_eye] = pos
            
     return robs, eyepos
+
+# ----------------------------
+# General Utilities used throughout
+# ----------------------------
+
 
 # Utility function for smoothing eye position
 def _savgol_1d_nan(y, window_length=15, polyorder=3):
@@ -1248,6 +1216,78 @@ def pava_nonincreasing_with_blocks(y, w, eps=1e-12):
         blocks.append((s, e, float(m), float(ww)))
     return yhat, blocks
 
+def slope_ci_t(res, n, ci=0.95):
+    """Parametric CI using linregress stderr and t critical value."""
+    df = n - 2
+    tcrit = stats.t.ppf(0.5 + ci/2, df)
+    lo = res.slope - tcrit * res.stderr
+    hi = res.slope + tcrit * res.stderr
+    return lo, hi
+
+def bootstrap_mean_ci(x, n_boot=5000, ci=95, seed=0):
+    x = np.asarray(x)
+    x = x[np.isfinite(x)]
+    if x.size == 0:
+        return np.nan, (np.nan, np.nan)
+
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, x.size, size=(n_boot, x.size))
+    boot_means = x[idx].mean(axis=1)
+
+    alpha = (100 - ci) / 2
+    lo, hi = np.percentile(boot_means, [alpha, 100 - alpha])
+    return x.mean(), (lo, hi)
+
+def bootstrap_slope_ci(x, y, nboot=5000, ci=0.95, rng=0):
+    """
+    Nonparametric bootstrap: resample (x_i, y_i) pairs.
+    Returns (slope_hat, lo, hi, slopes_boot).
+    """
+    x = np.asarray(x); y = np.asarray(y)
+    n = len(x)
+    rng = np.random.default_rng(rng)
+
+    slopes = np.empty(nboot, dtype=float)
+    for b in range(nboot):
+        idx = rng.integers(0, n, size=n)
+        slopes[b] = stats.linregress(x[idx], y[idx]).slope
+
+    alpha = 1 - ci
+    lo, hi = np.quantile(slopes, [alpha/2, 1 - alpha/2])
+    slope_hat = stats.linregress(x, y).slope
+    return slope_hat, lo, hi, slopes
+
+def plot_slope_estimation(ax, means, variances, title, color, label=''):
+    # Filter
+    valid = (means > 0.1) & np.isfinite(variances) & np.isfinite(means)
+    x = np.asarray(means[valid])
+    y = np.asarray(variances[valid])
+
+    res = stats.linregress(x, y)
+    
+    ax.scatter(x, y, s=15, alpha=0.6, c=color, label=f'{label} FF = {res.slope:.2f}')
+
+    x_line = np.linspace(0, x.max(), 100)
+    y_line = res.slope * x_line + res.intercept
+    ax.plot(x_line, y_line, 'k--', linewidth=2)
+
+    ax.set_title(title)
+    ax.set_xlabel("Mean Rate (spk/s)")
+    ax.set_ylabel("Variance")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    return res, x, y  # return x,y too so we can bootstrap outside
+
+def get_upper_triangle(C): # used to get the correlation values
+    rows, cols = np.triu_indices_from(C, k=1)
+    v = C[rows, cols]
+    return v
+
+# ----------------------------
+# Main analysis
+# ----------------------------
+
 # Law of total covariance decomposition    
 class DualWindowAnalysis:
     """
@@ -1317,9 +1357,8 @@ class DualWindowAnalysis:
                     segments.append((tr, s, e))
         return segments
 
-    # -------------------------
-    # window extraction
-    # -------------------------
+    
+    # window extraction 
     def _extract_windows(self, t_count, t_hist):
         """
         Inputs:
@@ -1372,7 +1411,7 @@ class DualWindowAnalysis:
 
         return SpikeCounts, EyeTraj, T_idx, idx_tr
 
-    # 
+    # Calculate second moment
     def _calculate_second_moment(self, SpikeCounts, EyeTraj, T_idx, n_bins=25):
         """
         Calculate second moment E[SS^T | d] for all pairs of samples
@@ -1477,9 +1516,7 @@ class DualWindowAnalysis:
 
         return MM, bin_centers, count_e
     
-    # -------------------------
     # unbiased PSTH covariance (split-half cross-covariance)
-    # -------------------------
     def _split_half_psth_covariance(self, S, T_idx, min_trials_per_time=10, seed=0):
         '''
         Split-half cross-covariance to estimate PSTH covariance.
@@ -1675,9 +1712,7 @@ class DualWindowAnalysis:
         
         return Crate, Erate, Ceye, bin_centers, count_e
 
-    # -------------------------
     # run_sweep
-    # -------------------------
     def run_sweep(self, window_sizes_ms, t_hist_ms=10, n_bins=15):
         t_hist_bins = int(t_hist_ms / (self.dt * 1000))
         results = []
@@ -1770,9 +1805,7 @@ class DualWindowAnalysis:
 
         return results, mats_save
 
-    # -------------------------
-    # public API: inspect_neuron_pair (unchanged call signature)
-    # -------------------------
+    # utility for analyzing the analysis at the resolution of a single neuron or pair
     def inspect_neuron_pair(self, i, j, win_ms, ax=None, show=True):
         """
         Plots COVARIANCE vs distance by converting stored SECOND MOMENTS to covariance
@@ -1825,68 +1858,10 @@ class DualWindowAnalysis:
 
         return fig, ax
 
-def slope_ci_t(res, n, ci=0.95):
-    """Parametric CI using linregress stderr and t critical value."""
-    df = n - 2
-    tcrit = stats.t.ppf(0.5 + ci/2, df)
-    lo = res.slope - tcrit * res.stderr
-    hi = res.slope + tcrit * res.stderr
-    return lo, hi
 
-def bootstrap_mean_ci(x, n_boot=5000, ci=95, seed=0):
-    x = np.asarray(x)
-    x = x[np.isfinite(x)]
-    if x.size == 0:
-        return np.nan, (np.nan, np.nan)
-
-    rng = np.random.default_rng(seed)
-    idx = rng.integers(0, x.size, size=(n_boot, x.size))
-    boot_means = x[idx].mean(axis=1)
-
-    alpha = (100 - ci) / 2
-    lo, hi = np.percentile(boot_means, [alpha, 100 - alpha])
-    return x.mean(), (lo, hi)
-
-def bootstrap_slope_ci(x, y, nboot=5000, ci=0.95, rng=0):
-    """
-    Nonparametric bootstrap: resample (x_i, y_i) pairs.
-    Returns (slope_hat, lo, hi, slopes_boot).
-    """
-    x = np.asarray(x); y = np.asarray(y)
-    n = len(x)
-    rng = np.random.default_rng(rng)
-
-    slopes = np.empty(nboot, dtype=float)
-    for b in range(nboot):
-        idx = rng.integers(0, n, size=n)
-        slopes[b] = stats.linregress(x[idx], y[idx]).slope
-
-    alpha = 1 - ci
-    lo, hi = np.quantile(slopes, [alpha/2, 1 - alpha/2])
-    slope_hat = stats.linregress(x, y).slope
-    return slope_hat, lo, hi, slopes
-
-def plot_slope_estimation(ax, means, variances, title, color, label=''):
-    # Filter
-    valid = (means > 0.1) & np.isfinite(variances) & np.isfinite(means)
-    x = np.asarray(means[valid])
-    y = np.asarray(variances[valid])
-
-    res = stats.linregress(x, y)
-    
-    ax.scatter(x, y, s=15, alpha=0.6, c=color, label=f'{label} FF = {res.slope:.2f}')
-
-    x_line = np.linspace(0, x.max(), 100)
-    y_line = res.slope * x_line + res.intercept
-    ax.plot(x_line, y_line, 'k--', linewidth=2)
-
-    ax.set_title(title)
-    ax.set_xlabel("Mean Rate (spk/s)")
-    ax.set_ylabel("Variance")
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-
-    return res, x, y  # return x,y too so we can bootstrap outside
+# call analysis on a dataset
+from eval.eval_stack_multidataset import load_model, load_single_dataset, run_bps_analysis, run_qc_analysis
+from eval.eval_stack_utils import run_model, rescale_rhat, ccnorm_split_half_variable_trials
 
 def run_mcfarland_on_dataset(model, dataset_idx, windows = [10, 20, 40, 80],
         plot=False, total_spikes_threshold=200, valid_time_bins=120, dt=1/120,
@@ -2172,10 +2147,56 @@ def run_mcfarland_on_dataset(model, dataset_idx, windows = [10, 20, 40, 80],
 
     return output, analyzer
 
-def get_upper_triangle(C): # used to get the correlation values
-    rows, cols = np.triu_indices_from(C, k=1)
-    v = C[rows, cols]
-    return v
+# extract metrics from the above analysis
+def extract_metrics(outputs):
+    n = len(outputs[0]['results'])
+    # fig, axs = plt.subplots(1,n, figsize=(3*n, 3), sharex=False, sharey=False)
+    metrics = []
+    for i in range(n):
+        
+        ff_uncorrs = []
+        ff_corrs = []
+        erates = []
+        rhos_uncorr = []
+        rhos_corr = []
+        alphas = []
+        for j in range(len(outputs)):
+            window_ms = outputs[j]['results'][i]['window_ms']
+            ff_uncorr = outputs[j]['results'][i]['ff_uncorr']
+            ff_corr = outputs[j]['results'][i]['ff_corr']
+            Erates = outputs[j]['results'][i]['Erates']
+            alpha = outputs[j]['results'][i]['alpha']
+            
+            CnoiseU = outputs[j]['last_mats'][i]['NoiseCorrU']
+            CnoiseC = outputs[j]['last_mats'][i]['NoiseCorrC']
+            rho_uncorr = get_upper_triangle(CnoiseU)
+            rho_corr = get_upper_triangle(CnoiseC)
+
+            valid = Erates > 0.1
+            ff_uncorrs.append(ff_uncorr[valid])
+            ff_corrs.append(ff_corr[valid])
+            erates.append(Erates[valid])
+            rhos_uncorr.append(rho_uncorr)
+            rhos_corr.append(rho_corr)
+            alphas.append(alpha[valid])
+
+            # axs[i].plot(Erates, ff_uncorr*Erates, 'r.', alpha=0.1)
+            # axs[i].plot(Erates, ff_corr*Erates, 'b.', alpha=0.1)
+            # xd = [0, np.percentile(Erates[valid], 99)]
+            # axs[i].plot(xd, xd, 'k--', alpha=0.5)
+            # axs[i].set_xlim(xd)
+            # axs[i].set_ylim(xd[0], xd[1]*2)
+            
+        
+        metrics.append({'window_ms': window_ms,
+                    'uncorr': np.concatenate(ff_uncorrs),
+                    'corr': np.concatenate(ff_corrs),
+                    'erate': np.concatenate(erates),
+                    'alpha': np.concatenate(alphas),
+                    'rho_uncorr': np.concatenate(rhos_uncorr),
+                    'rho_corr': np.concatenate(rhos_corr),
+                    })
+    return metrics
 
 
 #%%
