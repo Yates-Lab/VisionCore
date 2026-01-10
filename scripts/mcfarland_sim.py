@@ -6,17 +6,16 @@ import sys
 sys.path.append('..')
 import numpy as np
 
-from DataYatesV1 import enable_autoreload, get_free_device, get_session, get_complete_sessions
-from models.data import prepare_data
-from models.config_loader import load_dataset_configs
+from DataYatesV1 import enable_autoreload, get_free_device
 
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 
+from scipy import stats
+
 import torch
 import torch.nn.functional as F
 
-from scipy.optimize import curve_fit
 from tqdm import tqdm
 import time
 from scipy.signal import savgol_filter
@@ -911,7 +910,55 @@ class PyramidSimulator:
             'rf_contour': self.rf_contour[(scale, ori)],
         }
 
+def extract_metrics(outputs):
+    n = len(outputs[0]['results'])
+    # fig, axs = plt.subplots(1,n, figsize=(3*n, 3), sharex=False, sharey=False)
+    metrics = []
+    for i in range(n):
+        
+        ff_uncorrs = []
+        ff_corrs = []
+        erates = []
+        rhos_uncorr = []
+        rhos_corr = []
+        alphas = []
+        for j in range(len(outputs)):
+            window_ms = outputs[j]['results'][i]['window_ms']
+            ff_uncorr = outputs[j]['results'][i]['ff_uncorr']
+            ff_corr = outputs[j]['results'][i]['ff_corr']
+            Erates = outputs[j]['results'][i]['Erates']
+            alpha = outputs[j]['results'][i]['alpha']
+            
+            CnoiseU = outputs[j]['last_mats'][i]['NoiseCorrU']
+            CnoiseC = outputs[j]['last_mats'][i]['NoiseCorrC']
+            rho_uncorr = get_upper_triangle(CnoiseU)
+            rho_corr = get_upper_triangle(CnoiseC)
 
+            valid = Erates > 0.1
+            ff_uncorrs.append(ff_uncorr[valid])
+            ff_corrs.append(ff_corr[valid])
+            erates.append(Erates[valid])
+            rhos_uncorr.append(rho_uncorr)
+            rhos_corr.append(rho_corr)
+            alphas.append(alpha[valid])
+
+            # axs[i].plot(Erates, ff_uncorr*Erates, 'r.', alpha=0.1)
+            # axs[i].plot(Erates, ff_corr*Erates, 'b.', alpha=0.1)
+            # xd = [0, np.percentile(Erates[valid], 99)]
+            # axs[i].plot(xd, xd, 'k--', alpha=0.5)
+            # axs[i].set_xlim(xd)
+            # axs[i].set_ylim(xd[0], xd[1]*2)
+            
+        
+        metrics.append({'window_ms': window_ms,
+                    'uncorr': np.concatenate(ff_uncorrs),
+                    'corr': np.concatenate(ff_corrs),
+                    'erate': np.concatenate(erates),
+                    'alpha': np.concatenate(alphas),
+                    'rho_uncorr': np.concatenate(rhos_uncorr),
+                    'rho_corr': np.concatenate(rhos_corr),
+                    })
+    return metrics
 
 # Main simulation
 def simulate_responses(
@@ -1777,6 +1824,358 @@ class DualWindowAnalysis:
             plt.show()
 
         return fig, ax
+
+def slope_ci_t(res, n, ci=0.95):
+    """Parametric CI using linregress stderr and t critical value."""
+    df = n - 2
+    tcrit = stats.t.ppf(0.5 + ci/2, df)
+    lo = res.slope - tcrit * res.stderr
+    hi = res.slope + tcrit * res.stderr
+    return lo, hi
+
+def bootstrap_mean_ci(x, n_boot=5000, ci=95, seed=0):
+    x = np.asarray(x)
+    x = x[np.isfinite(x)]
+    if x.size == 0:
+        return np.nan, (np.nan, np.nan)
+
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, x.size, size=(n_boot, x.size))
+    boot_means = x[idx].mean(axis=1)
+
+    alpha = (100 - ci) / 2
+    lo, hi = np.percentile(boot_means, [alpha, 100 - alpha])
+    return x.mean(), (lo, hi)
+
+def bootstrap_slope_ci(x, y, nboot=5000, ci=0.95, rng=0):
+    """
+    Nonparametric bootstrap: resample (x_i, y_i) pairs.
+    Returns (slope_hat, lo, hi, slopes_boot).
+    """
+    x = np.asarray(x); y = np.asarray(y)
+    n = len(x)
+    rng = np.random.default_rng(rng)
+
+    slopes = np.empty(nboot, dtype=float)
+    for b in range(nboot):
+        idx = rng.integers(0, n, size=n)
+        slopes[b] = stats.linregress(x[idx], y[idx]).slope
+
+    alpha = 1 - ci
+    lo, hi = np.quantile(slopes, [alpha/2, 1 - alpha/2])
+    slope_hat = stats.linregress(x, y).slope
+    return slope_hat, lo, hi, slopes
+
+def plot_slope_estimation(ax, means, variances, title, color, label=''):
+    # Filter
+    valid = (means > 0.1) & np.isfinite(variances) & np.isfinite(means)
+    x = np.asarray(means[valid])
+    y = np.asarray(variances[valid])
+
+    res = stats.linregress(x, y)
+    
+    ax.scatter(x, y, s=15, alpha=0.6, c=color, label=f'{label} FF = {res.slope:.2f}')
+
+    x_line = np.linspace(0, x.max(), 100)
+    y_line = res.slope * x_line + res.intercept
+    ax.plot(x_line, y_line, 'k--', linewidth=2)
+
+    ax.set_title(title)
+    ax.set_xlabel("Mean Rate (spk/s)")
+    ax.set_ylabel("Variance")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    return res, x, y  # return x,y too so we can bootstrap outside
+
+def run_mcfarland_on_dataset(model, dataset_idx, windows = [10, 20, 40, 80],
+        plot=False, total_spikes_threshold=200, valid_time_bins=120, dt=1/120,
+        rescale=True, batch_size=128):
+    '''
+    Run the Covariance Decomposition on a dataset.
+
+    Inputs:
+    -------
+    dataset_configs : list
+        List of dataset configuration dictionaries
+    dataset_idx : int
+        Index of the dataset to run on
+    windows : list
+        List of window sizes to run on (in ms)
+    total_spikes_threshold : int
+        Minimum number of spikes for a neuron to be included
+    valid_time_bins : int
+        Maximum number of time bins from each trial included
+    dt : float
+        Time bin size (in seconds)
+    
+    Returns:
+    --------
+    output : dict
+        Dictionary containing the results of the analysis
+
+    '''
+
+    print(f"Dataset {dataset_idx}: {model.names[dataset_idx]}")
+    train_data, val_data, dataset_config = load_single_dataset(model, dataset_idx)
+    dataset_name = model.names[dataset_idx]
+
+    bps_results = run_bps_analysis(
+            model, train_data, val_data, dataset_idx,
+            batch_size=batch_size, rescale=rescale
+        )
+    
+    qc_results = run_qc_analysis(
+            dataset_name, dataset_config['cids'], dataset_idx
+        )
+        
+    sess = train_data.dsets[0].metadata['sess']
+    # ppd = train_data.dsets[0].metadata['ppd']
+    cids = dataset_config['cids']
+    print(f"Running on {sess.name}")
+
+    # get fixrsvp inds and make one dataaset object
+    inds = torch.concatenate([
+            train_data.get_dataset_inds('fixrsvp'),
+            val_data.get_dataset_inds('fixrsvp')
+        ], dim=0)
+
+    dataset = train_data.shallow_copy()
+    dataset.inds = inds
+
+    # Getting key variables
+    dset_idx = inds[:,0].unique().item()
+    trial_inds = dataset.dsets[dset_idx].covariates['trial_inds'].numpy()
+    trials = np.unique(trial_inds)
+
+    NC = dataset.dsets[dset_idx]['robs'].shape[1]
+    T = np.max(dataset.dsets[dset_idx].covariates['psth_inds'][:].numpy()).item() + 1
+    NT = len(trials)
+
+    fixation = np.hypot(dataset.dsets[dset_idx]['eyepos'][:,0].numpy(), dataset.dsets[dset_idx]['eyepos'][:,1].numpy()) < 1
+
+    # Loop over trials and align responses
+    robs = np.nan*np.zeros((NT, T, NC))
+    rhat = np.nan*np.zeros((NT, T, NC))
+    dfs = np.nan*np.zeros((NT, T, NC))
+    eyepos = np.nan*np.zeros((NT, T, 2))
+    fix_dur =np.nan*np.zeros((NT,))
+
+    for itrial in tqdm(range(NT)):
+        # print(f"Trial {itrial}/{NT}")
+        ix = trials[itrial] == trial_inds
+        ix = ix & fixation
+        if np.sum(ix) == 0:
+            continue
+        
+        # run model
+        stim_inds = np.where(ix)[0]
+        stim_inds = stim_inds[:,None] - np.array(dataset_config['keys_lags']['stim'])[None,:]
+        stim = dataset.dsets[dset_idx]['stim'][stim_inds].permute(0,2,1,3,4)
+        behavior = dataset.dsets[dset_idx]['behavior'][ix]
+
+        out = run_model(model, {'stim': stim, 'behavior': behavior}, dataset_idx=dataset_idx)
+
+        psth_inds = dataset.dsets[dset_idx].covariates['psth_inds'][ix].numpy()
+        fix_dur[itrial] = len(psth_inds)
+        robs[itrial][psth_inds] = dataset.dsets[dset_idx]['robs'][ix].numpy()
+        rhat[itrial][psth_inds] = out['rhat'].detach().cpu().numpy()
+        dfs[itrial][psth_inds] = dataset.dsets[dset_idx]['dfs'][ix].numpy()
+        eyepos[itrial][psth_inds] = dataset.dsets[dset_idx]['eyepos'][ix].numpy()
+    
+
+    good_trials = fix_dur > 20
+    robs = robs[good_trials]
+    rhat = rhat[good_trials]
+    dfs = dfs[good_trials]
+    # robs[dfs!=True]=np.nan
+    # rhat[dfs!=True]=np.nan
+    eyepos = eyepos[good_trials]
+    fix_dur = fix_dur[good_trials]
+
+    if plot:
+        ind = np.argsort(fix_dur)[::-1]
+        plt.subplot(1,2,1)
+        plt.imshow(eyepos[ind,:,0])
+        plt.xlim(0, 160)
+        plt.subplot(1,2,2)
+        plt.imshow(np.nanmean(robs,2)[ind])
+        plt.xlim(0, 160)
+
+    # Run the analysis
+    output = {}
+    output['sess'] = sess.name
+    output['cids'] = np.array(cids)
+
+
+    # 1. Setup
+    
+    # valid_mask should be True where data is good (no fix breaks)
+    neuron_mask = np.where(np.nansum(robs, (0,1))>total_spikes_threshold)[0]
+    valid_mask = np.isfinite(np.sum(robs[:,:,neuron_mask], axis=2)) & np.isfinite(np.sum(eyepos, axis=2))
+    
+    NC = robs.shape[2]
+    
+    print(f"Using {len(neuron_mask)} neurons / {NC} total")
+    iix = np.arange(valid_time_bins)
+
+    robs_used = robs[:,iix][:,:,neuron_mask]
+    analyzer = DualWindowAnalysis(robs_used, eyepos[:,iix], valid_mask[:,iix], dt=dt)
+
+    # 2. Run Sweep
+    results, last_mats = analyzer.run_sweep(windows, t_hist_ms=50, n_bins=15)
+    
+    output['neuron_mask'] = neuron_mask
+    output['bps_results'] = bps_results
+    output['qc_results'] = qc_results
+    output['windows'] = windows
+    output['cids_used'] = output['cids'][neuron_mask]
+    output['results'] = results
+    output['last_mats'] = last_mats
+
+    rhat_used = rhat[:,iix][:,:,neuron_mask]
+    dfs_used = dfs[:,iix][:,:,neuron_mask]
+
+    rtrials, rtime, rneuron = rhat_used.shape
+    if rescale:
+        # reshape into (rtrials*rtime, rneuron)
+        rhat_reshape = rhat_used.reshape(rtrials*rtime, rneuron)
+        robs_reshape = robs_used.reshape(rtrials*rtime, rneuron)
+        print(valid_mask.shape, valid_mask[:,iix].shape)
+        valid_mask_reshape = valid_mask[:,iix].reshape(rtrials*rtime, 1).repeat(rneuron, axis=1)
+        # rescale per neuron with affine transform
+        print(robs_reshape.shape, rhat_reshape.shape, valid_mask_reshape.shape)
+        rhat_rescaled, _ = rescale_rhat(torch.from_numpy(robs_reshape), torch.from_numpy(rhat_reshape), torch.from_numpy(valid_mask_reshape), mode='affine')
+        rhat_used = rhat_rescaled.reshape(rtrials, rtime, rneuron).detach().cpu().numpy()
+    
+    # get ccnorm using split-half estimate of the max (Schoppe et al., 2016)
+    # do it twice and take averate, set to nan if diff is excessive, which means our estimator is unreliable
+    ccnorm, ccabs, ccmax, cchalf_mean, cchalf_n = ccnorm_split_half_variable_trials(robs_used, rhat_used, dfs_used, return_components=True, n_splits=500)
+    ccnorm2, ccabs2, ccmax2, cchalf_mean2, cchalf_n2 = ccnorm_split_half_variable_trials(robs_used, rhat_used, dfs_used, return_components=True, n_splits=500)
+
+    bad = (ccnorm - ccnorm2)**2 > .01
+    ccnorm = 0.5 * (ccnorm + ccnorm2)
+    ccabs = 0.5 * (ccabs + ccabs2)
+    ccmax = 0.5 * (ccmax + ccmax2)
+    cchalf_mean = 0.5 * (cchalf_mean + cchalf_mean2)
+    cchalf_n = 0.5 * (cchalf_n + cchalf_n2)
+    
+    ccnorm[bad] = np.nan
+
+    output['ccnorm'] = {'ccnorm': ccnorm, 'ccabs': ccabs, 'ccmax': ccmax, 'cchalf_mean': cchalf_mean, 'cchalf_n': cchalf_n}
+
+    # redo variance analysis on residuals. We use this to establish variance explained metrics and subspace alignment.
+    residuals = robs_used - rhat_used
+
+    # plt.figure(figsize=(10,5))
+    # plt.subplot(1,2,1)
+    # plt.imshow(robs_used[:,:,0])
+    # plt.subplot(1,2,2)
+    # plt.imshow(rhat_used[:,:,0])
+    # plt.show()
+    analyzer_residuals = DualWindowAnalysis(residuals, eyepos[:,iix], valid_mask[:,iix], dt=dt)
+    results_residuals, last_mats_residuals = analyzer_residuals.run_sweep(windows, t_hist_ms=50, n_bins=15)
+    
+    
+    output['results_residuals'] = results_residuals
+    output['last_mats_residuals'] = last_mats_residuals
+
+    if plot:
+        window_idx = 1
+        Ctotal = last_mats[window_idx]['Total']
+        Cfem = last_mats[window_idx]['FEM']
+        Crate = last_mats[window_idx]['Intercept']
+        Cpsth = last_mats[window_idx]['PSTH']
+        CnoiseU = last_mats[window_idx]['NoiseCorrU']
+        CnoiseC = last_mats[window_idx]['NoiseCorrC']
+        FF_uncorr = results[window_idx]['ff_uncorr']
+        FF_corr = results[window_idx]['ff_corr']
+        Erates = results[window_idx]['Erates']
+
+
+        v = np.max(Cfem.flatten())
+        plt.figure()
+        plt.subplot(1,3,1)
+        plt.imshow(Ctotal, vmin=-v, vmax=v)
+        plt.title('Total')
+        plt.subplot(1,3,2)
+        plt.imshow(Cfem, vmin=-v, vmax=v)
+        plt.title('Eye')
+        plt.subplot(1,3,3)
+        plt.imshow(Cpsth, vmin=-v, vmax=v)
+        plt.title('PSTH')
+
+        plt.figure()
+        plt.subplot(1,2,1)
+        v = .2
+        plt.imshow(CnoiseU, vmin=-v, vmax=v)
+        plt.colorbar()
+        plt.title('Noise (Uncorrected))')
+        plt.subplot(1,2,2)
+        plt.imshow(CnoiseC, vmin=-v, vmax=v)
+        plt.colorbar()
+        plt.title('Noise (Corrected) ')
+
+        def get_upper_triangle(C):
+            rows, cols = np.triu_indices_from(C, k=1)
+            v = C[rows, cols]
+            return v
+
+        rho_uncorr = get_upper_triangle(CnoiseU)
+        rho_corr = get_upper_triangle(CnoiseC)
+
+        plt.figure()
+        plt.plot(rho_uncorr, rho_corr, '.', alpha=0.1)
+        # plot mean
+        plt.plot(rho_uncorr.mean(), rho_corr.mean(), 'ro')
+        plt.plot(plt.xlim(), plt.xlim(), 'k')
+        plt.axhline(0, color='k', linestyle='--')
+        plt.axvline(0, color='k', linestyle='--')
+        plt.xlabel('Correlation (Uncorrected)')
+        plt.ylabel('Correlation (Corrected)')
+        plt.title('Correlation vs Window Size')
+        plt.show()
+
+        # 3. Plot Fano Factor Scaling
+        window_ms = [results[i]['window_ms'] for i in range(len(results))]
+        ff_uncorr = np.zeros_like(window_ms, dtype=np.float64)
+        ff_uncorr_std = np.zeros_like(window_ms, dtype=np.float64)
+        ff_uncorr_se = np.zeros_like(window_ms, dtype=np.float64)
+        ff_corr = np.zeros_like(window_ms, dtype=np.float64)
+        ff_corr_std = np.zeros_like(window_ms, dtype=np.float64)
+        ff_corr_se = np.zeros_like(window_ms, dtype=np.float64)
+
+        for iwindow in range(len(window_ms)):
+            Erates = results[iwindow]['Erates']
+            good = Erates > 0.4
+            ff_uncorr[iwindow] = np.nanmedian(results[iwindow]['ff_uncorr'][good])
+            ff_corr[iwindow] = np.nanmedian(results[iwindow]['ff_corr'][good])
+            ff_uncorr_std[iwindow] = np.nanstd(results[iwindow]['ff_uncorr'][good])
+            ff_corr_std[iwindow] = np.nanstd(results[iwindow]['ff_corr'][good])
+            ff_uncorr_se[iwindow] = ff_uncorr_std[iwindow] / np.sqrt(len(results[iwindow]['ff_uncorr'][good]))
+            ff_corr_se[iwindow] = ff_corr_std[iwindow] / np.sqrt(len(results[iwindow]['ff_corr'][good]))
+
+        plt.figure(figsize=(8, 6))
+        plt.plot(window_ms, ff_uncorr, 'o-', label='Standard (Uncorrected)')
+        plt.plot(window_ms, ff_corr, 'o-', label='FEM-Corrected')
+        # plot error bars
+        plt.fill_between(window_ms, ff_uncorr - ff_uncorr_se, ff_uncorr + ff_uncorr_se, alpha=0.2)
+        plt.fill_between(window_ms, ff_corr - ff_corr_se, ff_corr + ff_corr_se, alpha=0.2)
+
+        plt.axhline(1.0, color='k', linestyle='--', alpha=0.5)
+        plt.xlabel('Count Window (ms)')
+        plt.ylabel('Mean Fano Factor')
+        plt.title('Integration of Noise: FEM Correction')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.show()
+
+    return output, analyzer
+
+def get_upper_triangle(C): # used to get the correlation values
+    rows, cols = np.triu_indices_from(C, k=1)
+    v = C[rows, cols]
+    return v
 
 
 #%%
