@@ -1284,50 +1284,6 @@ def get_upper_triangle(C): # used to get the correlation values
     v = C[rows, cols]
     return v
 
-def get_stratified_derangement(lengths, n_bins=4, rng=None):
-    """
-    Returns a permutation of indices such that:
-    1. indices are shuffled only among trials of similar length.
-    2. No index maps to itself (derangement), unless a bin size is 1.
-    """
-    rng = np.random.default_rng(rng)
-    n = len(lengths)
-    
-    # 1. Sort indices by length
-    sorted_idx = np.argsort(lengths)
-    
-    # 2. Split into bins
-    # We use array_split to handle uneven divisions automatically
-    # For N=60 and n_bins=4, we get chunks of ~15.
-    chunks = np.array_split(sorted_idx, n_bins)
-    
-    permuted_indices = np.zeros(n, dtype=int)
-    
-    for chunk in chunks:
-        # chunk contains the original indices of this group
-        if len(chunk) <= 1:
-            # Cannot derange a single element
-            permuted_indices[chunk] = chunk
-            continue
-            
-        # Generate derangement for this chunk
-        # We try to shuffle until we get a derangement (fast for len > 3)
-        original = chunk.copy()
-        shuffled = chunk.copy()
-        
-        # Simple rejection sampling for derangement
-        for _ in range(100):
-            rng.shuffle(shuffled)
-            if not np.any(shuffled == original):
-                break
-        else:
-            # Fallback: simple cyclic shift guarantees derangement
-            shuffled = np.roll(original, 1)
-            
-        permuted_indices[original] = shuffled
-        
-    return permuted_indices
-
 def index_cov(cov_matrix, indices):
     # index into a square matrix
     return cov_matrix[indices][:, indices]
@@ -2103,50 +2059,65 @@ def run_mcfarland_on_dataset(model, dataset_idx, windows = [10, 20, 40, 80],
     # plt.imshow(rhat_used[:,:,0])
     # plt.show()
     analyzer_residuals = DualWindowAnalysis(residuals, eyepos[:,iix], valid_mask[:,iix], dt=dt)
-    results_residuals, last_mats_residuals = analyzer_residuals.run_sweep(windows, t_hist_ms=50, n_bins=15)
+    t_hist_ms = 50
+    results_residuals, last_mats_residuals = analyzer_residuals.run_sweep(windows, t_hist_ms=t_hist_ms, n_bins=15)
     
     
     output['results_residuals'] = results_residuals
     output['last_mats_residuals'] = last_mats_residuals
 
 
-    # Surrogate Analysis (Shuffled Data)
+    # --- 2. Surrogate Analysis (Roll + Flip) ---
     if n_shuffles > 0:
-        print(f"Running {n_shuffles} Shuffles...")
+        print(f"Running {n_shuffles} Shuffles (Roll + Flip)...")
         shuffled_results = []
-        shuffled_mats = [] # List to store full covariance matrices
+        shuffled_mats = []
         
         rng_shuffle = np.random.default_rng(seed)
-        
-        NT = robs_used.shape[0]
-        valid_start = np.nan*np.zeros((NT,))
-        valid_end = np.nan*np.zeros((NT,))
-        trial_len = np.nan*np.zeros((NT,))
-        for i in range(NT):
-            isvalid = np.sum(np.isfinite(robs_used[i]), 1)>0
-            if np.sum(isvalid)==0:
-                continue
-            valid_start[i] = np.where(isvalid)[0][0]
-            valid_end[i] = np.where(isvalid)[0][-1] + 1
-            trial_len[i] = valid_end[i] - valid_start[i]
-
-        good_trials = (valid_start.astype(int) == int(np.median(valid_start))) & (trial_len > 40)
-        good_trials = np.where(good_trials)[0]
+        n_trials = robs_used.shape[0]
+        n_time = robs_used.shape[1]
         
         for k in tqdm(range(n_shuffles), desc="Shuffling"):
-            # Permute trial indices (ensure no trial matches itself)
-            perm_idx = get_stratified_derangement(trial_len, n_bins=4, rng=rng_shuffle)
+            
+            # Start with a copy of the original data (preserving NaNs)
+            eyepos_shuff = eyepos_used.copy()
+            do_flip = rng_shuffle.random(size=n_trials) > 0.5
+            
+            for tr in range(n_trials):
+                # 1. Identify valid indices (where data is NOT NaN)
+                # Check sum across x,y to catch any NaN
+                valid_idx = np.where(np.isfinite(np.sum(eyepos_used[tr], axis=1)))[0]
+                
+                if len(valid_idx) == 0:
+                    continue # Should be filtered out already, but safe to skip
+                
+                # Extract the valid chunk
+                chunk = eyepos_used[tr, valid_idx, :]
+                # plt.plot(chunk)
+                n_chunk = len(chunk)
+                
+                # 2. Random Roll (Shift)
+                # Pick shift between 10% and 90% of VALID length
+                if n_chunk > 10:
+                    shift = rng_shuffle.integers(low=int(n_chunk*0.1), high=int(n_chunk*0.9))
+                    chunk = np.roll(chunk, shift=shift, axis=0)
+                
+                # 3. Random Flip
+                if do_flip[tr]:
+                     chunk = np.flip(chunk, axis=0)
+                
+                # 4. Insert back into the valid slots
+                # This ensures NaNs remain exactly where they were
+                eyepos_shuff[tr, valid_idx, :] = chunk
+                # plt.plot(chunk)
+                # plt.show()
             
             
-            eyepos_shuff = eyepos_used[perm_idx] # Permute ONLY eye traces
-            robs_shuff = robs_used[good_trials]
-            valid_mask_shuff = valid_mask_used[good_trials]
-    
-            # Run Analysis
-            analyzer_shuff = DualWindowAnalysis(robs_shuff, eyepos_shuff, valid_mask_shuff, dt=dt)
             
-            # Run sweep on surrogate data
-            res_shuff, mats_shuff = analyzer_shuff.run_sweep(windows, t_hist_ms=50, n_bins=15)
+            analyzer_shuff = DualWindowAnalysis(robs_used, eyepos_shuff, valid_mask_used, 
+                                                dt=dt)
+            
+            res_shuff, mats_shuff = analyzer_shuff.run_sweep(windows, t_hist_ms=t_hist_ms, n_bins=15)
             
             shuffled_results.append(res_shuff)
             

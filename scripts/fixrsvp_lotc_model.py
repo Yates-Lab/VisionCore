@@ -782,11 +782,24 @@ def run_subspace_with_shuffles(outputs, window_idx=1, rep_k=5, min_total_spikes=
                 s_Cpsth = index_cov(s_Cpsth, valid)
                 s_Cfem = index_cov(s_Cfem, valid)
 
+                v = Cpsth.amax()
                 plt.figure()
-                plt.subplot(1,2,1)
-                plt.imshow(s_Cpsth)
-                plt.subplot(1,2,2)
-                plt.imshow(s_Cfem)
+                plt.subplot(2,2,1)
+                plt.imshow(s_Cpsth, interpolation='none', vmin=-v, vmax=v)
+                plt.title('Shuffled PSTH')
+                plt.axis('off')
+                plt.subplot(2,2,2)
+                plt.imshow(s_Cfem, interpolation='none', vmin=-v, vmax=v)
+                plt.title('Shuffled FEM')
+                plt.axis('off')
+                plt.subplot(2,2,3)
+                plt.imshow(Cpsth, interpolation='none', vmin=-v, vmax=v)
+                plt.title('Real PSTH')
+                plt.axis('off')
+                plt.subplot(2,2,4)
+                plt.imshow(Cfem, interpolation='none', vmin=-v, vmax=v)
+                plt.title('Real FEM')
+                plt.axis('off')
                 plt.show()
 
                 s_Up_k = get_dominant_subspace(s_Cpsth, curr_k)
@@ -835,7 +848,7 @@ fig, ax = plt.subplots(figsize=(6, 6))
 
 # 1. Plot Shuffled Distribution (Null Hypothesis)
 # We use a 2D histogram or scatter for shuffles since there are many points
-ax.scatter(shuff_sub['x'], shuff_sub['y'], color='gray', s=10, alpha=0.2, label='Shuffled (Chance)')
+ax.scatter(shuff_sub['x'], shuff_sub['y'], color='gray', s=10, alpha=0.5, label='Shuffled (Chance)')
 
 # Optional: Plot centroid of shuffles
 mx_s = np.mean(shuff_sub['x'])
@@ -847,8 +860,8 @@ ax.scatter(real_sub['x'], real_sub['y'], color='purple', s=100, edgecolors='whit
 
 # Formatting
 ax.plot([0, 1], [0, 1], 'k--', alpha=0.5)
-ax.set_xlim(0, 1.0)
-ax.set_ylim(0, 1.0)
+# ax.set_xlim(0, 1.0)
+# ax.set_ylim(0, 1.0)
 ax.set_xlabel('PSTH Var explained by FEM Subspace')
 ax.set_ylabel('FEM Var explained by PSTH Subspace')
 ax.set_title('Subspace Alignment vs. Chance')
