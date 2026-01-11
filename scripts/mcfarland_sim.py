@@ -1284,6 +1284,54 @@ def get_upper_triangle(C): # used to get the correlation values
     v = C[rows, cols]
     return v
 
+def get_stratified_derangement(lengths, n_bins=4, rng=None):
+    """
+    Returns a permutation of indices such that:
+    1. indices are shuffled only among trials of similar length.
+    2. No index maps to itself (derangement), unless a bin size is 1.
+    """
+    rng = np.random.default_rng(rng)
+    n = len(lengths)
+    
+    # 1. Sort indices by length
+    sorted_idx = np.argsort(lengths)
+    
+    # 2. Split into bins
+    # We use array_split to handle uneven divisions automatically
+    # For N=60 and n_bins=4, we get chunks of ~15.
+    chunks = np.array_split(sorted_idx, n_bins)
+    
+    permuted_indices = np.zeros(n, dtype=int)
+    
+    for chunk in chunks:
+        # chunk contains the original indices of this group
+        if len(chunk) <= 1:
+            # Cannot derange a single element
+            permuted_indices[chunk] = chunk
+            continue
+            
+        # Generate derangement for this chunk
+        # We try to shuffle until we get a derangement (fast for len > 3)
+        original = chunk.copy()
+        shuffled = chunk.copy()
+        
+        # Simple rejection sampling for derangement
+        for _ in range(100):
+            rng.shuffle(shuffled)
+            if not np.any(shuffled == original):
+                break
+        else:
+            # Fallback: simple cyclic shift guarantees derangement
+            shuffled = np.roll(original, 1)
+            
+        permuted_indices[original] = shuffled
+        
+    return permuted_indices
+
+def index_cov(cov_matrix, indices):
+    # index into a square matrix
+    return cov_matrix[indices][:, indices]
+        
 # ----------------------------
 # Main analysis
 # ----------------------------
@@ -1777,7 +1825,8 @@ class DualWindowAnalysis:
                 "alpha": alpha,
                 "fem_rank_ratio": rank,
                 "n_samples": n_samples,
-                'Erates': Erate
+                'Erates': Erate,
+                'count_e': count_e
             })
 
             mats_save.append({
@@ -1863,9 +1912,12 @@ class DualWindowAnalysis:
 from eval.eval_stack_multidataset import load_model, load_single_dataset, run_bps_analysis, run_qc_analysis
 from eval.eval_stack_utils import run_model, rescale_rhat, ccnorm_split_half_variable_trials
 
+
+        
 def run_mcfarland_on_dataset(model, dataset_idx, windows = [10, 20, 40, 80],
         plot=False, total_spikes_threshold=200, valid_time_bins=120, dt=1/120,
-        rescale=True, batch_size=128):
+        rescale=True, batch_size=128,
+        n_shuffles=0, seed=42, save_full_surrogates=True):
     '''
     Run the Covariance Decomposition on a dataset.
 
@@ -1995,7 +2047,9 @@ def run_mcfarland_on_dataset(model, dataset_idx, windows = [10, 20, 40, 80],
     iix = np.arange(valid_time_bins)
 
     robs_used = robs[:,iix][:,:,neuron_mask]
-    analyzer = DualWindowAnalysis(robs_used, eyepos[:,iix], valid_mask[:,iix], dt=dt)
+    eyepos_used = eyepos[:,iix]
+    valid_mask_used = valid_mask[:,iix]
+    analyzer = DualWindowAnalysis(robs_used, eyepos_used, valid_mask_used, dt=dt)
 
     # 2. Run Sweep
     results, last_mats = analyzer.run_sweep(windows, t_hist_ms=50, n_bins=15)
@@ -2055,6 +2109,56 @@ def run_mcfarland_on_dataset(model, dataset_idx, windows = [10, 20, 40, 80],
     output['results_residuals'] = results_residuals
     output['last_mats_residuals'] = last_mats_residuals
 
+
+    # Surrogate Analysis (Shuffled Data)
+    if n_shuffles > 0:
+        print(f"Running {n_shuffles} Shuffles...")
+        shuffled_results = []
+        shuffled_mats = [] # List to store full covariance matrices
+        
+        rng_shuffle = np.random.default_rng(seed)
+        
+        NT = robs_used.shape[0]
+        valid_start = np.nan*np.zeros((NT,))
+        valid_end = np.nan*np.zeros((NT,))
+        trial_len = np.nan*np.zeros((NT,))
+        for i in range(NT):
+            isvalid = np.sum(np.isfinite(robs_used[i]), 1)>0
+            if np.sum(isvalid)==0:
+                continue
+            valid_start[i] = np.where(isvalid)[0][0]
+            valid_end[i] = np.where(isvalid)[0][-1] + 1
+            trial_len[i] = valid_end[i] - valid_start[i]
+
+        good_trials = (valid_start.astype(int) == int(np.median(valid_start))) & (trial_len > 40)
+        good_trials = np.where(good_trials)[0]
+        
+        for k in tqdm(range(n_shuffles), desc="Shuffling"):
+            # Permute trial indices (ensure no trial matches itself)
+            perm_idx = get_stratified_derangement(trial_len, n_bins=4, rng=rng_shuffle)
+            
+            
+            eyepos_shuff = eyepos_used[perm_idx] # Permute ONLY eye traces
+            robs_shuff = robs_used[good_trials]
+            valid_mask_shuff = valid_mask_used[good_trials]
+    
+            # Run Analysis
+            analyzer_shuff = DualWindowAnalysis(robs_shuff, eyepos_shuff, valid_mask_shuff, dt=dt)
+            
+            # Run sweep on surrogate data
+            res_shuff, mats_shuff = analyzer_shuff.run_sweep(windows, t_hist_ms=50, n_bins=15)
+            
+            shuffled_results.append(res_shuff)
+            
+            # Store Full Matrices (Optional)
+            if save_full_surrogates:
+                # mats_shuff is a list of dicts (one dict per window size)
+                shuffled_mats.append(mats_shuff)
+            
+        output['shuffled_results'] = shuffled_results
+        if save_full_surrogates:
+            output['shuffled_mats'] = shuffled_mats
+
     if plot:
         window_idx = 1
         Ctotal = last_mats[window_idx]['Total']
@@ -2111,7 +2215,7 @@ def run_mcfarland_on_dataset(model, dataset_idx, windows = [10, 20, 40, 80],
         plt.title('Correlation vs Window Size')
         plt.show()
 
-        # 3. Plot Fano Factor Scaling
+        # Plot Fano Factor Scaling
         window_ms = [results[i]['window_ms'] for i in range(len(results))]
         ff_uncorr = np.zeros_like(window_ms, dtype=np.float64)
         ff_uncorr_std = np.zeros_like(window_ms, dtype=np.float64)
@@ -2147,55 +2251,131 @@ def run_mcfarland_on_dataset(model, dataset_idx, windows = [10, 20, 40, 80],
 
     return output, analyzer
 
-# extract metrics from the above analysis
-def extract_metrics(outputs):
-    n = len(outputs[0]['results'])
-    # fig, axs = plt.subplots(1,n, figsize=(3*n, 3), sharex=False, sharey=False)
-    metrics = []
-    for i in range(n):
-        
-        ff_uncorrs = []
-        ff_corrs = []
-        erates = []
-        rhos_uncorr = []
-        rhos_corr = []
-        alphas = []
-        for j in range(len(outputs)):
-            window_ms = outputs[j]['results'][i]['window_ms']
-            ff_uncorr = outputs[j]['results'][i]['ff_uncorr']
-            ff_corr = outputs[j]['results'][i]['ff_corr']
-            Erates = outputs[j]['results'][i]['Erates']
-            alpha = outputs[j]['results'][i]['alpha']
-            
-            CnoiseU = outputs[j]['last_mats'][i]['NoiseCorrU']
-            CnoiseC = outputs[j]['last_mats'][i]['NoiseCorrC']
-            rho_uncorr = get_upper_triangle(CnoiseU)
-            rho_corr = get_upper_triangle(CnoiseC)
 
-            valid = Erates > 0.1
-            ff_uncorrs.append(ff_uncorr[valid])
-            ff_corrs.append(ff_corr[valid])
+# extract metrics from the above analysis
+# def extract_metrics(outputs):
+#     n = len(outputs[0]['results'])
+#     # fig, axs = plt.subplots(1,n, figsize=(3*n, 3), sharex=False, sharey=False)
+#     metrics = []
+#     for i in range(n):
+        
+#         ff_uncorrs = []
+#         ff_corrs = []
+#         erates = []
+#         rhos_uncorr = []
+#         rhos_corr = []
+#         alphas = []
+#         for j in range(len(outputs)):
+#             window_ms = outputs[j]['results'][i]['window_ms']
+#             ff_uncorr = outputs[j]['results'][i]['ff_uncorr']
+#             ff_corr = outputs[j]['results'][i]['ff_corr']
+#             Erates = outputs[j]['results'][i]['Erates']
+#             alpha = outputs[j]['results'][i]['alpha']
+            
+#             CnoiseU = outputs[j]['last_mats'][i]['NoiseCorrU']
+#             CnoiseC = outputs[j]['last_mats'][i]['NoiseCorrC']
+#             rho_uncorr = get_upper_triangle(CnoiseU)
+#             rho_corr = get_upper_triangle(CnoiseC)
+
+#             valid = Erates > 0.1
+#             ff_uncorrs.append(ff_uncorr[valid])
+#             ff_corrs.append(ff_corr[valid])
+#             erates.append(Erates[valid])
+#             rhos_uncorr.append(rho_uncorr)
+#             rhos_corr.append(rho_corr)
+#             alphas.append(alpha[valid])
+
+#             # axs[i].plot(Erates, ff_uncorr*Erates, 'r.', alpha=0.1)
+#             # axs[i].plot(Erates, ff_corr*Erates, 'b.', alpha=0.1)
+#             # xd = [0, np.percentile(Erates[valid], 99)]
+#             # axs[i].plot(xd, xd, 'k--', alpha=0.5)
+#             # axs[i].set_xlim(xd)
+#             # axs[i].set_ylim(xd[0], xd[1]*2)
+            
+        
+#         metrics.append({'window_ms': window_ms,
+#                     'uncorr': np.concatenate(ff_uncorrs),
+#                     'corr': np.concatenate(ff_corrs),
+#                     'erate': np.concatenate(erates),
+#                     'alpha': np.concatenate(alphas),
+#                     'rho_uncorr': np.concatenate(rhos_uncorr),
+#                     'rho_corr': np.concatenate(rhos_corr),
+#                     })
+#     return metrics
+
+def extract_metrics(outputs, min_total_spikes=50):
+    """
+    Extracts metrics for both Real and Shuffled data.
+    """
+    n_windows = len(outputs[0]['results'])
+    metrics = []
+    
+    for i in range(n_windows):
+        
+        # Real Data Containers
+        ff_uncorrs, ff_corrs, erates, alphas = [], [], [], []
+        rhos_uncorr, rhos_corr = [], []
+        
+        # Shuffled Data Containers (List of arrays, will concatenate later)
+        shuff_ff_uncorr_means = [] 
+        shuff_ff_corr_means = []
+        shuff_alphas = [] # This might be large, be careful
+        
+        for j in range(len(outputs)):
+            # --- REAL DATA ---
+            res = outputs[j]['results'][i]
+            mats = outputs[j]['last_mats'][i]
+            
+            window_ms = res['window_ms']
+            Erates = res['Erates']
+            n_samples = res['n_samples']
+            
+            # Filter
+            total_spikes = Erates * n_samples
+            valid = total_spikes > min_total_spikes
+            
+            ff_uncorrs.append(res['ff_uncorr'][valid])
+            ff_corrs.append(res['ff_corr'][valid])
             erates.append(Erates[valid])
+            alphas.append(res['alpha'][valid])
+            
+            # Covariances
+            rho_uncorr = get_upper_triangle(index_cov(mats['NoiseCorrU'], valid))
+            rho_corr = get_upper_triangle(index_cov(mats['NoiseCorrC'], valid))
             rhos_uncorr.append(rho_uncorr)
             rhos_corr.append(rho_corr)
-            alphas.append(alpha[valid])
 
-            # axs[i].plot(Erates, ff_uncorr*Erates, 'r.', alpha=0.1)
-            # axs[i].plot(Erates, ff_corr*Erates, 'b.', alpha=0.1)
-            # xd = [0, np.percentile(Erates[valid], 99)]
-            # axs[i].plot(xd, xd, 'k--', alpha=0.5)
-            # axs[i].set_xlim(xd)
-            # axs[i].set_ylim(xd[0], xd[1]*2)
+            # --- SHUFFLED DATA ---
+            if 'shuffled_results' in outputs[j] and len(outputs[j]['shuffled_results']) > 0:
+                # shuffled_results is List[n_shuffles] of List[n_windows] of dicts
+                
+                # 1. Extract means per shuffle (useful for Fano plots)
+                # s_res is a dict for a specific shuffle and specific window
+                curr_shuffles = [s[i] for s in outputs[j]['shuffled_results']]
+                
+                # Extract scalar means across shuffles for this dataset
+                s_ff_u_mean = [s['ff_uncorr_mean'] for s in curr_shuffles]
+                s_ff_c_mean = [s['ff_corr_mean'] for s in curr_shuffles]
+                
+                shuff_ff_uncorr_means.append(s_ff_u_mean)
+                shuff_ff_corr_means.append(s_ff_c_mean)
+
+        metrics.append({
+            'window_ms': window_ms,
+            # Real Data (Concatenated per neuron/pair)
+            'uncorr': np.concatenate(ff_uncorrs),
+            'corr': np.concatenate(ff_corrs),
+            'erate': np.concatenate(erates),
+            'alpha': np.concatenate(alphas),
+            'rho_uncorr': np.concatenate(rhos_uncorr),
+            'rho_corr': np.concatenate(rhos_corr),
             
+            # Shuffled Data (List of lists: [n_datasets] -> [n_shuffles])
+            # We keep structure to calculate CIs per dataset if needed
+            'shuff_uncorr_means': shuff_ff_uncorr_means, # Mean FF per shuffle
+            'shuff_corr_means': shuff_ff_corr_means,     # Mean FF per shuffle
+        })
         
-        metrics.append({'window_ms': window_ms,
-                    'uncorr': np.concatenate(ff_uncorrs),
-                    'corr': np.concatenate(ff_corrs),
-                    'erate': np.concatenate(erates),
-                    'alpha': np.concatenate(alphas),
-                    'rho_uncorr': np.concatenate(rhos_uncorr),
-                    'rho_corr': np.concatenate(rhos_corr),
-                    })
     return metrics
 
 

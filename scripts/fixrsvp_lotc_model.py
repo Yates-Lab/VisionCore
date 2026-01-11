@@ -67,15 +67,17 @@ model, dataset_configs = get_model_and_dataset_configs()
 model = model.to(device)
 
 #%% Run main analysis on all datasets
-run_analysis = False
+run_analysis = True
+n_shuffles = 10
+
 if run_analysis:
     outputs = []
     analyzers = []
 
-    for dataset_idx in range(len(model.names)):
+    for dataset_idx in range(5): #range(len(model.names)):
         print(f"Running on dataset {dataset_idx}")
         try: # some datasets do not have fixrsvp
-            output, analyzer = run_mcfarland_on_dataset(model, dataset_idx, plot=False)
+            output, analyzer = run_mcfarland_on_dataset(model, dataset_idx, plot=False, n_shuffles=n_shuffles)
             outputs.append(output)
             analyzers.append(analyzer)
         except Exception as e:
@@ -97,10 +99,9 @@ with open('mcfarland_analyzers.pkl', 'rb') as f:
 
 
 #%% Extract relevant metrics for plotting
-metrics = extract_metrics(outputs)
+metrics = extract_metrics(outputs, min_total_spikes=1000)
 
-    
-#%% plot Fano Factors
+# plot Fano Factors
 
 from mcfarland_sim import plot_slope_estimation, bootstrap_slope_ci
 
@@ -309,9 +310,10 @@ for field in ['corr', 'uncorr']:
         alpha = metrics[i]['alpha']
         ff = metrics[i][field]
         ax[i].plot(1 - alpha, ff, 'o', alpha=0.1)
+        ax[i].axhline(1, color='k', linestyle='--', alpha=0.5)
         ax[i].set_xlim(0, 1)
         ax[i].set_xlabel("1 - alpha")
-        ax[i].set_ylabel("Fano Factor")
+        ax[i].set_ylabel(f"Fano Factor ({field})")
         ax[i].set_title(f"Window {metrics[i]['window_ms']}ms")
     fig.savefig(f'../figures/mcfarland/ff_vs_alpha_{field}.pdf', bbox_inches='tight', dpi=300) 
 
@@ -686,4 +688,175 @@ ax.grid(True, alpha=0.3)
 
 plt.tight_layout()
 plt.show()
+# %% Include shuffled data as a control
+
+#%% Plot Population Summary with Shuffles
+metrics = extract_metrics(outputs, min_total_spikes=50)
+window_ms = np.array([m['window_ms'] for m in metrics])
+n_wins = len(window_ms)
+
+# Calculate Real Stats (Slope logic same as before)
+# ... [Your existing bootstrap slope code here] ...
+
+# --- NEW: Process Shuffled Stats ---
+# We want the mean Fano Factor across all datasets for each shuffle
+shuff_ff_c_global = np.zeros((n_wins, n_shuffles)) 
+
+for i in range(n_wins):
+    # Flatten across datasets: We have List[n_datasets][n_shuffles]
+    # We want average across datasets for shuffle k
+    # (Assuming simple average of means is acceptable for visualization)
+    flat_shuffles = np.array(metrics[i]['shuff_corr_means']) # (n_datasets, n_shuffles)
+    shuff_ff_c_global[i, :] = np.nanmean(flat_shuffles, axis=0)
+
+# Calculate CI for shuffles
+shuff_mu = np.mean(shuff_ff_c_global, axis=1)
+shuff_std = np.std(shuff_ff_c_global, axis=1)
+
+fig, ax = plt.subplots(figsize=(6, 5))
+
+# 1. Plot Shuffled (Null)
+ax.plot(window_ms, shuff_mu, 'o-', color='gray', label='Shuffled Control', alpha=0.7)
+ax.fill_between(window_ms, shuff_mu - 2*shuff_std, shuff_mu + 2*shuff_std, color='gray', alpha=0.2)
+
+# 2. Plot Real Corrected (Reuse your slope variables from previous block)
+# Assuming you have ff_c_slope or similar mean metric calculated
+# If not, let's just calculate mean FF_corr for visualization
+real_ff_c_mean = [np.nanmean(m['corr']) for m in metrics]
+ax.plot(window_ms, real_ff_c_mean, 'o-', color='tab:orange', label='Real Data (FEM Corrected)')
+
+ax.axhline(1.0, color='k', linestyle='--', alpha=0.5)
+ax.set_xlabel("Window (ms)")
+ax.set_ylabel("Mean Fano Factor")
+ax.set_title("Does FEM correction beat chance?")
+ax.legend()
+plt.tight_layout()
+plt.show()
+
+#%%
+#%% Subspace Analysis with Shuffles
+
+def run_subspace_with_shuffles(outputs, window_idx=1, rep_k=5, min_total_spikes=50):
+    
+    real_data = {'x': [], 'y': [], 'names': []}
+    shuff_data = {'x': [], 'y': []} # Flattened across datasets/shuffles
+    
+    n_sessions = len(outputs)
+    
+    for i in range(n_sessions):
+        # --- PREP MASKS ---
+        res = outputs[i]['results'][window_idx]
+        Erates = res['Erates']
+        n_samples = res['n_samples']
+        spike_mask = (Erates * n_samples) > min_total_spikes
+        
+        # --- REAL DATA ---
+        mats = outputs[i]['last_mats'][window_idx]
+        Cpsth = torch.from_numpy(mats['PSTH'])
+        Cfem = torch.from_numpy(mats['FEM'])
+        
+        # Apply mask
+        valid = get_finite(Cpsth) & get_finite(Cfem) & spike_mask
+        Cpsth = index_cov(Cpsth, valid)
+        Cfem = index_cov(Cfem, valid)
+        
+        # Calculate Real Metrics
+        curr_k = min(rep_k, Cfem.shape[0])
+        Up_k = get_dominant_subspace(Cpsth, curr_k)
+        Uf_k = get_dominant_subspace(Cfem, curr_k)
+        
+        real_data['x'].append(directional_variance_capture(Cpsth, Uf_k)) # PSTH exp by FEM
+        real_data['y'].append(directional_variance_capture(Cfem, Up_k)) # FEM exp by PSTH
+        real_data['names'].append(outputs[i]['sess'])
+
+        # --- SHUFFLED DATA ---
+        if 'shuffled_mats' in outputs[i]:
+            # shuffled_mats is List[n_shuffles][n_windows][dict]
+            for s_idx, s_mats_all_wins in enumerate(outputs[i]['shuffled_mats']):
+                s_mats = s_mats_all_wins[window_idx]
+                print(s_mats.keys())
+                s_Cpsth = torch.from_numpy(s_mats['PSTH'])
+                s_Cfem = torch.from_numpy(s_mats['FEM'])
+
+                # Apply SAME mask as real data (comparing same neurons)
+                s_Cpsth = index_cov(s_Cpsth, valid)
+                s_Cfem = index_cov(s_Cfem, valid)
+
+                plt.figure()
+                plt.subplot(1,2,1)
+                plt.imshow(s_Cpsth)
+                plt.subplot(1,2,2)
+                plt.imshow(s_Cfem)
+                plt.show()
+
+                s_Up_k = get_dominant_subspace(s_Cpsth, curr_k)
+                s_Uf_k = get_dominant_subspace(s_Cfem, curr_k)
+                
+                shuff_data['x'].append(directional_variance_capture(s_Cpsth, s_Uf_k))
+                shuff_data['y'].append(directional_variance_capture(s_Cfem, s_Up_k))
+
+    return real_data, shuff_data
+
+# Execute
+real_sub, shuff_sub = run_subspace_with_shuffles(outputs, window_idx=1, rep_k=5)
+
+#%% Plot Subspace Alignment: Real vs Chance
+
+fig, ax = plt.subplots(figsize=(6, 6))
+
+# 1. Plot Shuffled Distribution (Null Hypothesis)
+# We use a 2D histogram or scatter for shuffles since there are many points
+ax.scatter(shuff_sub['x'], shuff_sub['y'], color='gray', s=10, alpha=0.2, label='Shuffled (Chance)')
+
+# Optional: Plot centroid of shuffles
+mx_s = np.mean(shuff_sub['x'])
+my_s = np.mean(shuff_sub['y'])
+ax.plot(mx_s, my_s, 'kx', markersize=10, markeredgewidth=2, label='Chance Mean')
+
+# 2. Plot Real Data
+ax.scatter(real_sub['x'], real_sub['y'], color='purple', s=100, edgecolors='white', label='Real Sessions')
+
+# Formatting
+ax.plot([0, 1], [0, 1], 'k--', alpha=0.5)
+ax.set_xlim(0, 1.0)
+ax.set_ylim(0, 1.0)
+ax.set_xlabel('PSTH Var explained by FEM Subspace')
+ax.set_ylabel('FEM Var explained by PSTH Subspace')
+ax.set_title('Subspace Alignment vs. Chance')
+ax.legend()
+plt.tight_layout()
+plt.show()
+
+# Print Statistics
+print(f"Mean Real Overlap (FEM | PSTH): {np.mean(real_sub['y']):.3f}")
+print(f"Mean Null Overlap (FEM | PSTH): {np.mean(shuff_sub['y']):.3f}")
+
+fig, ax = plt.subplots(figsize=(6, 6))
+
+# 1. Plot Shuffled Distribution (Null Hypothesis)
+# We use a 2D histogram or scatter for shuffles since there are many points
+ax.scatter(shuff_sub['x'], shuff_sub['y'], color='gray', s=10, alpha=0.2, label='Shuffled (Chance)')
+
+# Optional: Plot centroid of shuffles
+mx_s = np.mean(shuff_sub['x'])
+my_s = np.mean(shuff_sub['y'])
+ax.plot(mx_s, my_s, 'kx', markersize=10, markeredgewidth=2, label='Chance Mean')
+
+# 2. Plot Real Data
+ax.scatter(real_sub['x'], real_sub['y'], color='purple', s=100, edgecolors='white', label='Real Sessions')
+
+# Formatting
+ax.plot([0, 1], [0, 1], 'k--', alpha=0.5)
+ax.set_xlim(0, 1.0)
+ax.set_ylim(0, 1.0)
+ax.set_xlabel('PSTH Var explained by FEM Subspace')
+ax.set_ylabel('FEM Var explained by PSTH Subspace')
+ax.set_title('Subspace Alignment vs. Chance')
+ax.legend()
+plt.tight_layout()
+plt.show()
+
+# Print Statistics
+print(f"Mean Real Overlap (FEM | PSTH): {np.mean(real_sub['y']):.3f}")
+print(f"Mean Null Overlap (FEM | PSTH): {np.mean(shuff_sub['y']):.3f}")
 # %%
