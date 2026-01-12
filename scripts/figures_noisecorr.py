@@ -4,65 +4,23 @@ import matplotlib.pyplot as plt
 from scipy.stats import wilcoxon
 from statsmodels.stats.multitest import multipletests
 
-
-# ----------------------------
-# style
-# ----------------------------
-def set_pub_style():
-    plt.rcParams.update({
-        "figure.dpi": 150,
-        "savefig.dpi": 300,
-        "font.size": 10,
-        "axes.titlesize": 11,
-        "axes.labelsize": 10,
-        "legend.fontsize": 9,
-        "xtick.labelsize": 9,
-        "ytick.labelsize": 9,
-        "axes.spines.top": False,
-        "axes.spines.right": False,
-        "axes.grid": True,
-        "grid.alpha": 0.25,
-        "grid.linewidth": 0.8,
-    })
-
-
-# ----------------------------
-# stats helpers
-# ----------------------------
-def fisher_z_mean(rho, eps=1e-6):
-    """Mean Fisher z across correlations (rho), robust to |rho|~1."""
-    rho = np.asarray(rho, dtype=np.float64).reshape(-1)
-    rho = rho[np.isfinite(rho)]
-    if rho.size == 0:
-        return np.nan
-    rho = np.clip(rho, -1 + eps, 1 - eps)
-    return float(np.mean(np.arctanh(rho)))
-
-def bootstrap_mean_ci(x, nboot=5000, ci=0.95, rng=0):
-    """Bootstrap CI for mean of x (1D)."""
-    x = np.asarray(x, dtype=float).reshape(-1)
-    x = x[np.isfinite(x)]
-    if x.size < 2:
-        return np.nan, (np.nan, np.nan)
-    rg = np.random.default_rng(rng)
-    boots = np.empty(nboot, dtype=float)
-    for b in range(nboot):
-        boots[b] = np.mean(rg.choice(x, size=x.size, replace=True))
-    lo, hi = np.percentile(boots, [(1-ci)/2*100, (1+(ci))/2*100])
-    return float(np.mean(x)), (float(lo), float(hi))
-
-def iqr_25_75(x):
-    x = np.asarray(x, dtype=float).reshape(-1)
-    x = x[np.isfinite(x)]
-    if x.size == 0:
-        return (np.nan, np.nan)
-    q25, q75 = np.percentile(x, [25, 75])
-    return float(q25), float(q75)
-
-def _safe_mean(x):
-    x = np.asarray(x, dtype=float).reshape(-1)
-    x = x[np.isfinite(x)]
-    return float(np.mean(x)) if x.size else np.nan
+# Import shared utilities (use relative import for same-directory scripts)
+try:
+    from figure_common import (
+        set_pub_style,
+        bootstrap_mean_ci,
+        iqr_25_75,
+        _safe_mean,
+        fisher_z_mean,
+    )
+except ImportError:
+    from scripts.figure_common import (
+        set_pub_style,
+        bootstrap_mean_ci,
+        iqr_25_75,
+        _safe_mean,
+        fisher_z_mean,
+    )
 
 
 # ----------------------------

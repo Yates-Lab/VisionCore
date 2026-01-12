@@ -3,25 +3,11 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-# ----------------------------
-# style
-# ----------------------------
-def set_pub_style():
-    plt.rcParams.update({
-        "figure.dpi": 150,
-        "savefig.dpi": 300,
-        "font.size": 10,
-        "axes.titlesize": 11,
-        "axes.labelsize": 10,
-        "legend.fontsize": 9,
-        "xtick.labelsize": 9,
-        "ytick.labelsize": 9,
-        "axes.spines.top": False,
-        "axes.spines.right": False,
-        "axes.grid": True,
-        "grid.alpha": 0.25,
-        "grid.linewidth": 0.8,
-    })
+# Import shared utilities (use relative import for same-directory scripts)
+try:
+    from figure_common import set_pub_style
+except ImportError:
+    from scripts.figure_common import set_pub_style
 
 # ----------------------------
 # numerics / PSD utilities

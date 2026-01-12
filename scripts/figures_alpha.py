@@ -4,90 +4,25 @@ import matplotlib.pyplot as plt
 from scipy.stats import spearmanr
 from statsmodels.stats.multitest import multipletests
 
-
-# ----------------------------
-# style (match your other modules)
-# ----------------------------
-def set_pub_style():
-    plt.rcParams.update({
-        "figure.dpi": 150,
-        "savefig.dpi": 300,
-        "font.size": 10,
-        "axes.titlesize": 11,
-        "axes.labelsize": 10,
-        "legend.fontsize": 9,
-        "xtick.labelsize": 9,
-        "ytick.labelsize": 9,
-        "axes.spines.top": False,
-        "axes.spines.right": False,
-        "axes.grid": True,
-        "grid.alpha": 0.25,
-        "grid.linewidth": 0.8,
-    })
-
-
-# ----------------------------
-# helpers
-# ----------------------------
-def _finite(x):
-    x = np.asarray(x, dtype=float).reshape(-1)
-    return x[np.isfinite(x)]
-
-def iqr_25_75(x):
-    x = _finite(x)
-    if x.size == 0:
-        return (np.nan, np.nan)
-    q25, q75 = np.percentile(x, [25, 75])
-    return float(q25), float(q75)
-
-def median_iqr(x):
-    x = _finite(x)
-    if x.size == 0:
-        return np.nan, (np.nan, np.nan)
-    med = float(np.median(x))
-    q25, q75 = np.percentile(x, [25, 75])
-    return med, (float(q25), float(q75))
-
-def bootstrap_mean_ci(x, nboot=5000, ci=0.95, rng=0):
-    x = _finite(x)
-    if x.size < 2:
-        return np.nan, (np.nan, np.nan)
-    rg = np.random.default_rng(rng)
-    boots = np.empty(nboot, dtype=float)
-    for b in range(nboot):
-        boots[b] = np.mean(rg.choice(x, size=x.size, replace=True))
-    lo, hi = np.percentile(boots, [(1-ci)/2*100, (1+(ci))/2*100])
-    return float(np.mean(x)), (float(lo), float(hi))
-
-def align_shuffle(shuff, n_units):
-    """
-    Ensure shuffle array is [S, N] (shuffles x units) or [N, S] depending on input.
-    Returns [S, N].
-    """
-    shuff = np.asarray(shuff, dtype=float)
-    if shuff.ndim != 2:
-        raise ValueError(f"shuff_alphas must be 2D, got {shuff.shape}")
-    if shuff.shape[0] == n_units:
-        return shuff.T
-    if shuff.shape[1] == n_units:
-        return shuff
-    # heuristic fallback: pick orientation whose 2nd dim is closer to n_units
-    return shuff.T if abs(shuff.shape[0] - n_units) < abs(shuff.shape[1] - n_units) else shuff
-
-def emp_p_one_sided(null, obs, direction="greater"):
-    """
-    Empirical p-value with +1 smoothing.
-      direction='greater': p = P(null >= obs)
-      direction='less'   : p = P(null <= obs)
-    """
-    null = _finite(null)
-    if null.size == 0 or not np.isfinite(obs):
-        return np.nan
-    if direction == "greater":
-        return (np.sum(null >= obs) + 1) / (null.size + 1)
-    if direction == "less":
-        return (np.sum(null <= obs) + 1) / (null.size + 1)
-    raise ValueError("direction must be 'greater' or 'less'")
+# Import shared utilities (use relative import for same-directory scripts)
+try:
+    from figure_common import (
+        set_pub_style,
+        _finite,
+        median_iqr,
+        bootstrap_mean_ci,
+        align_shuffle,
+        emp_p_one_sided,
+    )
+except ImportError:
+    from scripts.figure_common import (
+        set_pub_style,
+        _finite,
+        median_iqr,
+        bootstrap_mean_ci,
+        align_shuffle,
+        emp_p_one_sided,
+    )
 
 
 # ----------------------------

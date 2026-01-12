@@ -22,13 +22,41 @@ We ask whether this model explains a substantial fraction of the observed varian
 and—critically—whether the variance it captures is preferentially aligned with the FEM-related covariance or with the PSTH-related covariance. Together, these analyses allow us to move from a scalar variance decomposition to a geometric, population-level understanding of how eye movements, stimulus structure,
 and model predictions shape neural variability.
 
-TODO: we need to generate code to support these analyses with shuffled trial identities so we can 
+TODO: we need to generate code to support these analyses with shuffled trial identities so we can
 assess whether any of our results are artifactual
 
 
 """
 
 #%% Setup and Imports
+import contextlib
+
+class TeeWriter:
+    """Write to both a file and stdout simultaneously."""
+    def __init__(self, file_handle):
+        self.file = file_handle
+        self.stdout = __import__('sys').stdout
+
+    def write(self, text):
+        self.file.write(text)
+        self.stdout.write(text)
+
+    def flush(self):
+        self.file.flush()
+        self.stdout.flush()
+
+@contextlib.contextmanager
+def tee_to_file(filepath, mode='w'):
+    """Context manager to tee print output to both file and stdout."""
+    import sys
+    with open(filepath, mode) as f:
+        tee = TeeWriter(f)
+        old_stdout = sys.stdout
+        sys.stdout = tee
+        try:
+            yield f
+        finally:
+            sys.stdout = old_stdout
 
 # this is to suppress errors in the attempts at compilation that happen for one of the loaded models because it crashed
 import sys
@@ -170,24 +198,6 @@ fig.savefig("../figures/mcfarland/fano_paper_figure.pdf", bbox_inches="tight", d
 fig, axs = plot_supp_var_mean_panels(metrics, savepath="../figures/mcfarland/var_mean_panels.pdf")
 fig, axs = plot_supp_fano_hist_panels(metrics, savepath="../figures/mcfarland/fano_hist_panels.pdf")
 
-w = stats["window_ms"]
-order = np.argsort(w)
-
-for idx in order:
-    print(f"\nWindow {int(w[idx])} ms (N valid neurons = {stats['n_valid'][idx]})")
-    print(f"  Uncorr: gmean={stats['g_unc'][idx]:.3f}, IQR=[{stats['iqr_unc'][idx,0]:.3f}, {stats['iqr_unc'][idx,1]:.3f}]")
-    print(f"  Corr:   gmean={stats['g_cor'][idx]:.3f}, IQR=[{stats['iqr_cor'][idx,0]:.3f}, {stats['iqr_cor'][idx,1]:.3f}]")
-    print(f"  Ratio corr/uncorr = {stats['ratio'][idx]:.3f} ({stats['pct_red'][idx]:.1f}% reduction)")
-    print(f"  Wilcoxon p={stats['p_wil'][idx]:.3g}, FDR p={stats['p_wil_fdr'][idx]:.3g}")
-
-    print(f"  Shuffle null ratio 95% CI = [{stats['null_ratio_ci95'][idx,0]:.3f}, {stats['null_ratio_ci95'][idx,1]:.3f}]")
-    print(f"  Empirical p (null ratio <= real ratio) = {stats['p_emp_ratio'][idx]:.3g}")
-
-    print(f"  Slope-FF uncorr={stats['slope_unc'][idx]:.3f}, corr={stats['slope_cor'][idx]:.3f}, ratio={stats['slope_ratio'][idx]:.3f}")
-    lo, hi = stats["slope_diff_ci"][idx]
-    print(f"  Slope diff (corr-uncorr) = {stats['slope_diff'][idx]:.3f} with bootstrap 95% CI [{lo:.3f}, {hi:.3f}]")
-    print(f"  Bootstrap one-sided p(diff>=0) = {stats['p_slope_one'][idx]:.3g}")
-
 #%% plot noise correlations
 
 from scripts.figures_noisecorr import (
@@ -210,9 +220,6 @@ plot_supp_noisecorr_hist_panels(metrics, savepath="../figures/mcfarland/supp_noi
 plot_supp_noisecorr_shuffle_delta_panels(metrics, savepath="../figures/mcfarland/supp_noisecorr_shuffle_delta_panels.pdf")
 plot_supp_noisecorr_2d_panels(metrics, savepath="../figures/mcfarland/supp_noisecorr_2d_panels.pdf")
 plot_supp_noisecorr_shuffle_corrected_panels(metrics, savepath="../figures/mcfarland/supp_noisecorr_shuffle_corrected_panels.pdf")
-
-# print stats block for the manuscript / notes
-print_noisecorr_stats(nc_stats)
 
 #%% Plot FEM rate modulation and relationships to noise metrics
 
@@ -238,9 +245,6 @@ plot_supp_alpha_vs_metrics(metrics, which="uncorr", savepath="../figures/mcfarla
 plot_supp_alpha_vs_metrics(metrics, which="corr",   savepath="../figures/mcfarland/supp_ffcorr_vs_1minusalpha.pdf")
 plot_supp_alpha_vs_metrics(metrics, which="delta",  savepath="../figures/mcfarland/supp_deltaff_vs_1minusalpha.pdf")
 
-# print stats for manuscript
-print_alpha_stats(alpha_stats)
-
 #%% Subspace Structure Alignment
 
 from scripts.figures_subspace import (
@@ -260,8 +264,6 @@ S = compute_subspace_stats(
     n_shuffles_diag=1000,
 )
 
-print_subspace_report(S)
-
 fig, _ = plot_subspace_main_figure(S, title="Subspace structure and alignment")
 fig.savefig("../figures/mcfarland/subspace_main.pdf", bbox_inches="tight", dpi=300)
 
@@ -269,7 +271,25 @@ fig, _ = plot_subspace_vs_shuffle_figure(S, title="Subspace alignment vs chance"
 fig.savefig("../figures/mcfarland/subspace_vs_shuffle_supp.pdf", bbox_inches="tight", dpi=300)
 
 
-#%% CNN performance. 
+#%% Create unified main figure (Panels C-K)
+
+from scripts.figure_main_lotc import create_main_figure
+
+# Create the unified figure with all analysis panels
+# Using window_idx=0 for single-window panels (typically 10ms window)
+fig_main, axs_main = create_main_figure(
+    metrics=metrics,
+    fano_stats=stats,
+    nc_stats=nc_stats,
+    alpha_stats=alpha_stats,
+    subspace_stats=S,
+    window_idx=0,  # 10ms window
+    figsize=(11, 9),
+    savepath="../figures/mcfarland/main_figure_CK.pdf",
+)
+
+
+#%% CNN performance.
 
 
 from mcfarland_sim import bootstrap_mean_ci
@@ -306,5 +326,84 @@ mu = np.nanmean(cc[ix])
 bootstrap_mean_ci(cc[ix], seed=0)
 plt.axvline(mu, color='r', linestyle='--')
 plt.title(f"CCNorm (mu={mu:.2f}, n={np.sum(ix)})")
+
+#%% Write all statistics to lotc_stats.txt
+# This section prints all analysis statistics to both console and a text file
+
+STATS_OUTPUT_FILE = "lotc_stats.txt"
+
+with tee_to_file(STATS_OUTPUT_FILE, mode='w'):
+    print("=" * 80)
+    print("LOTC MODEL ANALYSIS STATISTICS")
+    print("=" * 80)
+    print(f"Generated from: fixrsvp_lotc_model.py")
+    print()
+
+    # --- Fano Factor Statistics ---
+    print("\n" + "=" * 80)
+    print("FANO FACTOR STATISTICS")
+    print("=" * 80)
+
+    w = stats["window_ms"]
+    order = np.argsort(w)
+
+    for idx in order:
+        print(f"\nWindow {int(w[idx])} ms (N valid neurons = {stats['n_valid'][idx]})")
+        print(f"  Uncorr: gmean={stats['g_unc'][idx]:.3f}, IQR=[{stats['iqr_unc'][idx,0]:.3f}, {stats['iqr_unc'][idx,1]:.3f}]")
+        print(f"  Corr:   gmean={stats['g_cor'][idx]:.3f}, IQR=[{stats['iqr_cor'][idx,0]:.3f}, {stats['iqr_cor'][idx,1]:.3f}]")
+        print(f"  Ratio corr/uncorr = {stats['ratio'][idx]:.3f} ({stats['pct_red'][idx]:.1f}% reduction)")
+        print(f"  Wilcoxon p={stats['p_wil'][idx]:.3g}, FDR p={stats['p_wil_fdr'][idx]:.3g}")
+        print(f"  Shuffle null ratio 95% CI = [{stats['null_ratio_ci95'][idx,0]:.3f}, {stats['null_ratio_ci95'][idx,1]:.3f}]")
+        print(f"  Empirical p (null ratio <= real ratio) = {stats['p_emp_ratio'][idx]:.3g}")
+        print(f"  Slope-FF uncorr={stats['slope_unc'][idx]:.3f}, corr={stats['slope_cor'][idx]:.3f}, ratio={stats['slope_ratio'][idx]:.3f}")
+        lo, hi = stats["slope_diff_ci"][idx]
+        print(f"  Slope diff (corr-uncorr) = {stats['slope_diff'][idx]:.3f} with bootstrap 95% CI [{lo:.3f}, {hi:.3f}]")
+        print(f"  Bootstrap one-sided p(diff>=0) = {stats['p_slope_one'][idx]:.3g}")
+
+    # --- Noise Correlation Statistics ---
+    print("\n" + "=" * 80)
+    print("NOISE CORRELATION STATISTICS")
+    print("=" * 80)
+    print_noisecorr_stats(nc_stats)
+
+    # --- Alpha (FEM Modulation) Statistics ---
+    print("\n" + "=" * 80)
+    print("ALPHA (FEM MODULATION FRACTION) STATISTICS")
+    print("=" * 80)
+    print_alpha_stats(alpha_stats)
+
+    # --- Subspace Statistics ---
+    print("\n" + "=" * 80)
+    print("SUBSPACE STRUCTURE STATISTICS")
+    print("=" * 80)
+    print_subspace_report(S)
+
+    # --- CNN Performance Statistics ---
+    print("\n" + "=" * 80)
+    print("CNN MODEL PERFORMANCE STATISTICS")
+    print("=" * 80)
+
+    ix_reliable = (bps > 0.2) & (ccmax > 0.85)
+    mu_ccnorm = np.nanmean(cc[ix_reliable])
+    _, (ci_lo, ci_hi) = bootstrap_mean_ci(cc[ix_reliable], seed=0)
+
+    print(f"\nModel Performance Summary:")
+    print(f"  Total neurons analyzed: {len(cc)}")
+    print(f"  Reliable neurons (bps > 0.2, ccmax > 0.85): {np.sum(ix_reliable)}")
+    print(f"  Mean CC_Norm on reliable neurons: {mu_ccnorm:.3f}")
+    print(f"  Bootstrap 95% CI: [{ci_lo:.3f}, {ci_hi:.3f}]")
+
+    print("\n  Performance by reliability bin:")
+    for i in range(len(bins)-1):
+        ix_bin = (ccmax > bins[i]) & (ccmax <= bins[i+1])
+        n_bin = np.sum(ix_bin)
+        mean_cc_bin = np.nanmean(cc[ix_bin])
+        print(f"    CC_Max [{bins[i]:.1f}, {bins[i+1]:.1f}]: n={n_bin}, mean CC_Norm={mean_cc_bin:.3f}")
+
+    print("\n" + "=" * 80)
+    print("END OF STATISTICS")
+    print("=" * 80)
+
+print(f"\nStatistics saved to: {STATS_OUTPUT_FILE}")
 
 #%%

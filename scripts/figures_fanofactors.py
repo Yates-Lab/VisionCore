@@ -1,62 +1,26 @@
+# scripts/figures_fanofactors.py
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import wilcoxon
 from statsmodels.stats.multitest import multipletests
 
-# ----------------------------
-# styling
-# ----------------------------
-def set_pub_style():
-    plt.rcParams.update({
-        "figure.dpi": 150,
-        "savefig.dpi": 300,
-        "font.size": 10,
-        "axes.titlesize": 11,
-        "axes.labelsize": 10,
-        "legend.fontsize": 9,
-        "xtick.labelsize": 9,
-        "ytick.labelsize": 9,
-        "axes.spines.top": False,
-        "axes.spines.right": False,
-        "axes.grid": True,
-        "grid.alpha": 0.25,
-        "grid.linewidth": 0.8,
-    })
-
-# ----------------------------
-# helpers
-# ----------------------------
-def geomean(x, axis=None, eps=1e-12):
-    x = np.asarray(x, dtype=float)
-    x = np.where(x <= 0, np.nan, x)
-    return np.exp(np.nanmean(np.log(x + eps), axis=axis))
-
-def iqr_25_75(x):
-    x = np.asarray(x, dtype=float)
-    x = x[np.isfinite(x)]
-    if x.size == 0:
-        return np.array([np.nan, np.nan])
-    return np.percentile(x, [25, 75])
-
-def paired_valid(a, b):
-    a = np.asarray(a, dtype=float).reshape(-1)
-    b = np.asarray(b, dtype=float).reshape(-1)
-    ok = np.isfinite(a) & np.isfinite(b) & (a > 0) & (b > 0)
-    return a[ok], b[ok], ok
-
-def align_shuffle(shuff, n_neurons):
-    shuff = np.asarray(shuff, dtype=float)
-    if shuff.ndim != 2:
-        raise ValueError(f"shuffle must be 2D, got shape {shuff.shape}")
-    # want [S, N]
-    if shuff.shape[1] == n_neurons:
-        return shuff
-    if shuff.shape[0] == n_neurons:
-        return shuff.T
-    # fallback: transpose if it makes N closer
-    if abs(shuff.shape[0] - n_neurons) < abs(shuff.shape[1] - n_neurons):
-        return shuff.T
-    return shuff
+# Import shared utilities (use relative import for same-directory scripts)
+try:
+    from figure_common import (
+        set_pub_style,
+        iqr_25_75,
+        geomean,
+        paired_valid,
+        align_shuffle,
+    )
+except ImportError:
+    from scripts.figure_common import (
+        set_pub_style,
+        iqr_25_75,
+        geomean,
+        paired_valid,
+        align_shuffle,
+    )
 
 def fit_slope_through_origin(x, y):
     """
