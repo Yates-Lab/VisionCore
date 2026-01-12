@@ -29,37 +29,10 @@ assess whether any of our results are artifactual
 """
 
 #%% Setup and Imports
-import contextlib
-
-class TeeWriter:
-    """Write to both a file and stdout simultaneously."""
-    def __init__(self, file_handle):
-        self.file = file_handle
-        self.stdout = __import__('sys').stdout
-
-    def write(self, text):
-        self.file.write(text)
-        self.stdout.write(text)
-
-    def flush(self):
-        self.file.flush()
-        self.stdout.flush()
-
-@contextlib.contextmanager
-def tee_to_file(filepath, mode='w'):
-    """Context manager to tee print output to both file and stdout."""
-    import sys
-    with open(filepath, mode) as f:
-        tee = TeeWriter(f)
-        old_stdout = sys.stdout
-        sys.stdout = tee
-        try:
-            yield f
-        finally:
-            sys.stdout = old_stdout
-
 # this is to suppress errors in the attempts at compilation that happen for one of the loaded models because it crashed
 import sys
+
+from figure_common import TeeWriter, tee_to_file
 sys.path.append('..')
 import numpy as np
 
