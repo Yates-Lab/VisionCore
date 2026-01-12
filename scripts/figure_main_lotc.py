@@ -111,9 +111,9 @@ def create_main_figure(
     # --- Panel K: Subspace summary scatter ---
     _plot_subspace_summary(axs['K'], subspace_stats)
     
-    # Add panel labels (lowercase)
+    # Add panel labels (lowercase) with extra whitespace above plots
     for letter, ax in axs.items():
-        ax.text(-0.12, 1.08, letter.lower(), transform=ax.transAxes,
+        ax.text(-0.15, 1.15, letter.lower(), transform=ax.transAxes,
                 fontsize=14, fontweight='bold', va='top', ha='left')
     
     if savepath:
@@ -143,7 +143,6 @@ def _plot_alpha_histogram(ax, m, window_ms):
     
     ax.set_xlabel('Fraction rate modulation\ndue to FEM (1 - α)')
     ax.set_ylabel('Count')
-    ax.set_title(f'Window {window_ms}ms')
     ax.set_xlim(0, 1)
     ax.legend(frameon=False, fontsize=8)
 
@@ -179,7 +178,6 @@ def _plot_mean_variance(ax, m, window_ms):
 
     ax.set_xlabel('Mean Rate (spk/s)')
     ax.set_ylabel('Variance')
-    ax.set_title(f'Window {window_ms}ms')
     ax.legend(frameon=False, fontsize=7, loc='upper left')
 
 
@@ -203,7 +201,6 @@ def _plot_fano_vs_window(ax, stats):
 
     ax.set_xlabel('Counting Window (ms)')
     ax.set_ylabel('Slope Fano (Var vs Mean)')
-    ax.set_title('Population Fano (Churchland slope)')
     ax.legend(frameon=False, fontsize=7)
 
 
@@ -231,54 +228,53 @@ def _plot_noisecorr_scatter(ax, m, window_ms):
 
     ax.set_xlabel('ρ (uncorrected)')
     ax.set_ylabel('ρ (corrected)')
-    ax.set_title(f'Window {window_ms}ms')
     ax.legend(frameon=False, fontsize=8, loc='upper left')
 
 
 def _plot_noisecorr_vs_window(ax, stats):
-    """Panel G: Mean Fisher-z noise correlations vs window."""
+    """Panel G: Mean raw noise correlations vs window."""
     w = np.asarray(stats['window_ms'], dtype=float)
     order = np.argsort(w)
     w = w[order]
 
-    z_u = np.asarray(stats['z_u_mean'])[order]
-    z_c = np.asarray(stats['z_c_mean'])[order]
-    z_u_ci = np.asarray(stats['z_u_ci'])[order]
-    z_c_ci = np.asarray(stats['z_c_ci'])[order]
+    # Use raw rho means with bootstrap CIs across datasets
+    rho_u = np.asarray(stats['rho_u_mean'])[order]
+    rho_c = np.asarray(stats['rho_c_mean'])[order]
+    rho_u_ci = np.asarray(stats['rho_u_ci'])[order]
+    rho_c_ci = np.asarray(stats['rho_c_ci'])[order]
 
-    u_yerr = np.vstack([z_u - z_u_ci[:, 0], z_u_ci[:, 1] - z_u])
-    c_yerr = np.vstack([z_c - z_c_ci[:, 0], z_c_ci[:, 1] - z_c])
+    u_yerr = np.vstack([rho_u - rho_u_ci[:, 0], rho_u_ci[:, 1] - rho_u])
+    c_yerr = np.vstack([rho_c - rho_c_ci[:, 0], rho_c_ci[:, 1] - rho_c])
 
-    ax.errorbar(w + 0.5, z_u, yerr=u_yerr, fmt='o-', capsize=3, lw=1.5, color=COLOR_UNCORR, label='Uncorrected (mean z)')
-    ax.errorbar(w, z_c, yerr=c_yerr, fmt='o-', capsize=3, lw=1.5, color=COLOR_CORR, label='Corrected (mean z)')
+    ax.errorbar(w + 0.5, rho_u, yerr=u_yerr, fmt='o-', capsize=3, lw=1.5, color=COLOR_UNCORR, label='Uncorrected')
+    ax.errorbar(w, rho_c, yerr=c_yerr, fmt='o-', capsize=3, lw=1.5, color=COLOR_CORR, label='Corrected')
     ax.axhline(0, color='k', lw=1, alpha=0.35)
 
     ax.set_xlabel('Window (ms)')
-    ax.set_ylabel('Mean Fisher z(noise corr)')
-    ax.set_title('Noise correlations')
+    ax.set_ylabel('Mean noise correlation (ρ)')
     ax.legend(frameon=False, fontsize=7)
 
 
 def _plot_effect_size_vs_shuffle(ax, stats):
-    """Panel H: Effect size (delta z) vs shuffle control."""
+    """Panel H: Effect size (delta rho) vs shuffle control."""
     w = np.asarray(stats['window_ms'], dtype=float)
     order = np.argsort(w)
     w = w[order]
 
-    dz = np.asarray(stats['dz_mean'])[order]
-    dz_ci = np.asarray(stats['dz_ci'])[order]
-    null_ci = np.asarray(stats['null_dz_ci95'])[order]
+    # Use raw delta rho with bootstrap CIs across datasets
+    drho = np.asarray(stats['drho_mean'])[order]
+    drho_ci = np.asarray(stats['drho_ci'])[order]
+    null_ci = np.asarray(stats['null_drho_ci95'])[order]
 
-    dz_yerr = np.vstack([dz - dz_ci[:, 0], dz_ci[:, 1] - dz])
+    drho_yerr = np.vstack([drho - drho_ci[:, 0], drho_ci[:, 1] - drho])
 
-    ax.errorbar(w, dz, yerr=dz_yerr, fmt='o-', capsize=3, lw=1.5, label='Real Δz = zC - zU')
+    ax.errorbar(w, drho, yerr=drho_yerr, fmt='o-', capsize=3, lw=1.5, color=COLOR_CORR, label='Real Δρ = ρC - ρU')
     ax.fill_between(w, null_ci[:, 0], null_ci[:, 1], alpha=0.18, color='gray',
-                    label='Shuffle null 95% CI (Δz)')
+                    label='Shuffle null 95% CI (Δρ)')
     ax.axhline(0, color='k', lw=1, alpha=0.35)
 
     ax.set_xlabel('Window (ms)')
-    ax.set_ylabel('Δ mean Fisher z')
-    ax.set_title('Effect size vs shuffle control')
+    ax.set_ylabel('Δ mean noise corr (ρ)')
     ax.legend(frameon=False, fontsize=7)
 
 
@@ -325,7 +321,6 @@ def _plot_eigenspectra(ax, S, max_dims=50):
 
     ax.set_xlabel('Dimension (PC)')
     ax.set_ylabel('Eigenspectra magnitude')
-    ax.set_title('Eigenspectra magnitude')
     ax.set_xlim(1, 100)
     ax.set_ylim(1e-6, 1)
     ax.legend(frameon=False, fontsize=7)
@@ -333,6 +328,8 @@ def _plot_eigenspectra(ax, S, max_dims=50):
 
 def _plot_subspace_viz(ax, S):
     """Panel J: Subspace alignment visualization (participation ratio)."""
+    import matplotlib.cm as cm
+
     # Show participation ratio distribution or similar
     per = S.get('per', {})
     pr_fem = per.get('pr_fem', [])
@@ -356,11 +353,21 @@ def _plot_subspace_viz(ax, S):
     pr_psth = pr_psth[sort_idx]
 
     # Bar plot showing PR for PSTH vs FEM
-    sessions = np.arange(len(pr_fem))
+    n_sessions = len(pr_fem)
+    sessions = np.arange(n_sessions)
     width = 0.35
 
+    # Use Blues colormap for PSTH bars (normalized by sorted position)
+    cmap = cm.get_cmap('Blues')
+    # Map session index to color (0.2 to 0.9 range to avoid too light/dark)
+    colors_psth = [cmap(0.2 + 0.7 * i / max(n_sessions - 1, 1)) for i in range(n_sessions)]
+
     if len(pr_fem) == len(pr_psth):
-        ax.bar(sessions - width/2, pr_psth, width, label='PSTH', alpha=0.7, color=COLOR_UNCORR)
+        # Plot PSTH bars with Blues colormap
+        for i, (sess, pr_val) in enumerate(zip(sessions, pr_psth)):
+            ax.bar(sess - width/2, pr_val, width, alpha=0.85, color=colors_psth[i],
+                   label='PSTH' if i == 0 else None)
+        # Plot FEM bars with green
         ax.bar(sessions + width/2, pr_fem, width, label='FEM', alpha=0.7, color=COLOR_CORR)
         ax.set_xlabel('Session (sorted by PSTH dim.)')
     else:
@@ -371,18 +378,24 @@ def _plot_subspace_viz(ax, S):
         ax.set_xlabel('Session')
 
     ax.set_ylabel('Participation ratio')
-    ax.set_title('Subspace dimensionality')
     ax.legend(frameon=False, fontsize=7)
 
 
 def _plot_subspace_summary(ax, S):
     """Panel K: Subspace alignment summary (X vs Y with shuffle controls)."""
+    import matplotlib.cm as cm
+
     per = S.get('per', {})
     null = S.get('null', {})
 
     x = np.asarray(per.get('var_p_given_f', []), dtype=float)  # PSTH var captured by FEM
     y = np.asarray(per.get('var_f_given_p', []), dtype=float)  # FEM var captured by PSTH
-    ok = np.isfinite(x) & np.isfinite(y)
+
+    # Get PSTH participation ratio for coloring (same as panel J)
+    pr_psth = np.asarray(per.get('pr_psth', []), dtype=float)
+
+    ok = np.isfinite(x) & np.isfinite(y) & np.isfinite(pr_psth)
+    x_ok, y_ok, pr_ok = x[ok], y[ok], pr_psth[ok]
 
     # Shuffle controls
     xs = np.asarray(null.get('var_p_given_f', []), dtype=float).reshape(-1)
@@ -395,16 +408,25 @@ def _plot_subspace_summary(ax, S):
         ax.scatter(xs, ys, s=10, alpha=0.15, color='gray', label='Shuffled (chance)')
         ax.plot(np.mean(xs), np.mean(ys), 'kx', ms=10, mew=2, label='Chance mean')
 
-    # Plot real sessions
-    ax.scatter(x[ok], y[ok], s=80, alpha=0.9, edgecolors='white', linewidths=0.8,
-               label='Real sessions', zorder=5)
+    # Plot real sessions with Blues colormap based on PSTH PR (sorted order)
+    if x_ok.size > 0:
+        # Sort by PSTH PR to match panel J ordering
+        sort_idx = np.argsort(pr_ok)
+        x_sorted = x_ok[sort_idx]
+        y_sorted = y_ok[sort_idx]
+
+        n_sessions = len(x_sorted)
+        cmap = cm.get_cmap('Blues')
+        colors = [cmap(0.2 + 0.7 * i / max(n_sessions - 1, 1)) for i in range(n_sessions)]
+
+        ax.scatter(x_sorted, y_sorted, s=80, alpha=0.9, c=colors, edgecolors='white',
+                   linewidths=0.8, label='Real sessions', zorder=5)
 
     ax.plot([0, 1], [0, 1], 'k--', alpha=0.5, lw=1)
     ax.set_xlim(0, 1.02)
     ax.set_ylim(0, 1.02)
-    ax.set_xlabel('X: PSTH var captured by FEM subspace')
-    ax.set_ylabel('Y: FEM var captured by PSTH subspace')
-    ax.set_title('Real vs chance')
+    ax.set_xlabel('PSTH var captured by FEM subspace')
+    ax.set_ylabel('FEM var captured by PSTH subspace')
 
     # Annotate means
     mx, my = np.nanmean(x), np.nanmean(y)

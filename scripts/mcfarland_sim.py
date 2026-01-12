@@ -2985,9 +2985,14 @@ def extract_metrics(outputs, min_total_spikes=50, min_var=1e-3, eps_rho=1e-6,
         rhos_uncorr, rhos_corr = [], []
 
         # per-dataset summaries (preferred for CI)
-        z_u_by_ds = []  # uncorrected
-        z_c_by_ds = []  # corrected
-        delta_by_ds = []
+        z_u_by_ds = []  # uncorrected Fisher z
+        z_c_by_ds = []  # corrected Fisher z
+        delta_by_ds = []  # delta in z-space
+
+        # per-dataset RAW mean rho (for panels using raw correlations)
+        rho_u_mean_by_ds = []
+        rho_c_mean_by_ds = []
+        rho_delta_mean_by_ds = []
 
         # shuffle FF blocks (your existing behavior)
         shuff_alphas_blocks = []
@@ -2995,8 +3000,10 @@ def extract_metrics(outputs, min_total_spikes=50, min_var=1e-3, eps_rho=1e-6,
         shuff_ff_corr_blocks = []
 
         # shuffle null summaries (concatenated across datasets)
-        shuff_delta_meanz_all = []  # delta = z_cs - z_u
+        shuff_delta_mean_all = []   # delta = rho_cs - rho_u (array per shuffle - legacy)
+        shuff_delta_meanz_all = []  # delta = z_cs - z_u (scalar per shuffle)
         shuff_zc_meanz_all = []     # optional: corrected z under shuffle
+        shuff_rho_delta_mean_all = []  # scalar: mean(rho_cs) - mean(rho_u) per shuffle
 
         # diagnostics
         diag = dict(
@@ -3112,11 +3119,21 @@ def extract_metrics(outputs, min_total_spikes=50, min_var=1e-3, eps_rho=1e-6,
             rhos_uncorr.append(rho_u)
             rhos_corr.append(rho_c)
 
+            # Fisher z summaries (per-dataset)
             z_u = fisher_z_mean(rho_u, eps=eps_rho)
             z_c = fisher_z_mean(rho_c, eps=eps_rho)
             z_u_by_ds.append(z_u)
             z_c_by_ds.append(z_c)
             delta_by_ds.append(z_c - z_u)
+
+            # Raw mean rho summaries (per-dataset)
+            rho_u_finite = rho_u[np.isfinite(rho_u)]
+            rho_c_finite = rho_c[np.isfinite(rho_c)]
+            mean_rho_u = float(np.mean(rho_u_finite)) if rho_u_finite.size > 0 else np.nan
+            mean_rho_c = float(np.mean(rho_c_finite)) if rho_c_finite.size > 0 else np.nan
+            rho_u_mean_by_ds.append(mean_rho_u)
+            rho_c_mean_by_ds.append(mean_rho_c)
+            rho_delta_mean_by_ds.append(mean_rho_c - mean_rho_u)
 
             diag["real"]["clipped_total"] += int(infoU["n_clipped_high"] + infoU["n_clipped_low"] +
                                                 infoC["n_clipped_high"] + infoC["n_clipped_low"])
@@ -3159,11 +3176,18 @@ def extract_metrics(outputs, min_total_spikes=50, min_var=1e-3, eps_rho=1e-6,
                 RCs, vCs, infoS = cov_to_corr_safe(CnoiseC_s_psd, min_var=min_var, eps=eps_rho)
 
                 rho_cs = get_upper_triangle(RCs)
+
                 z_cs = fisher_z_mean(rho_cs, eps=eps_rho)
+
+                # Raw mean rho for this shuffle
+                rho_cs_finite = rho_cs[np.isfinite(rho_cs)]
+                mean_rho_cs = float(np.mean(rho_cs_finite)) if rho_cs_finite.size > 0 else np.nan
 
                 shuff_rho_c.append(rho_cs)
                 shuff_zc_meanz_all.append(z_cs)
+                shuff_delta_mean_all.append(rho_cs - rho_u)
                 shuff_delta_meanz_all.append(z_cs - z_u)
+                shuff_rho_delta_mean_all.append(mean_rho_cs - mean_rho_u)  # scalar delta in raw rho
 
                 diag["shuff"]["n_shuffles_total"] += 1
                 diag["shuff"]["n_pairs_used_total"] += int(np.sum(np.isfinite(rho_cs)))
@@ -3209,20 +3233,28 @@ def extract_metrics(outputs, min_total_spikes=50, min_var=1e-3, eps_rho=1e-6,
             "rho_u_meanz": fisher_z_mean(rho_u_all, eps=eps_rho),
             "rho_c_meanz": fisher_z_mean(rho_c_all, eps=eps_rho),
 
-            # per-dataset summaries (preferred for CI/error bars)
+            # per-dataset summaries in Fisher z (preferred for CI/error bars)
             "rho_u_meanz_by_ds": np.asarray(z_u_by_ds, dtype=np.float64),
             "rho_c_meanz_by_ds": np.asarray(z_c_by_ds, dtype=np.float64),
             "rho_delta_meanz_by_ds": np.asarray(delta_by_ds, dtype=np.float64),
+
+            # per-dataset summaries in RAW rho (for panels using raw correlations)
+            "rho_u_mean_by_ds": np.asarray(rho_u_mean_by_ds, dtype=np.float64),
+            "rho_c_mean_by_ds": np.asarray(rho_c_mean_by_ds, dtype=np.float64),
+            "rho_delta_mean_by_ds": np.asarray(rho_delta_mean_by_ds, dtype=np.float64),
 
             # shuffle FF/alpha (as before)
             "shuff_uncorr": cat_shuff_uncorr,
             "shuff_corr":   cat_shuff_corr,
             "shuff_alphas": cat_shuff_alphas,
 
-            # shuffle null summaries for noise corr
+            # shuffle null summaries for noise corr (Fisher z)
             "shuff_rho_corr": np.asarray(shuff_rho_c, dtype=np.float64),
             "shuff_rho_c_meanz": np.asarray(shuff_zc_meanz_all, dtype=np.float64),
             "shuff_rho_delta_meanz": np.asarray(shuff_delta_meanz_all, dtype=np.float64),
+
+            # shuffle null summaries for noise corr (RAW rho)
+            "shuff_rho_delta_mean": np.asarray(shuff_rho_delta_mean_all, dtype=np.float64),
 
             # covariance matrices
             "Ctotal": Ctotals,

@@ -54,6 +54,13 @@ def compute_all_noisecorr_stats(
     rho_u_iqr = np.full((nW, 2), np.nan)
     rho_c_iqr = np.full((nW, 2), np.nan)
 
+    # Raw rho bootstrap CIs (per-dataset mean rho, then bootstrap across datasets)
+    rho_u_ci = np.full((nW, 2), np.nan)
+    rho_c_ci = np.full((nW, 2), np.nan)
+    drho_mean = np.full(nW, np.nan)  # raw delta rho = rho_c - rho_u per dataset
+    drho_ci = np.full((nW, 2), np.nan)
+    null_drho_ci95 = np.full((nW, 2), np.nan)  # shuffle null on raw delta
+
     # Fisher z summaries (preferred for inference)
     z_u_mean = np.full(nW, np.nan)
     z_c_mean = np.full(nW, np.nan)
@@ -75,15 +82,47 @@ def compute_all_noisecorr_stats(
     p_emp_dz = np.full(nW, np.nan)       # empirical p that null <= observed (for reduction)
 
     for i, m in enumerate(metrics):
-        # pooled-pairs rho summaries (careful: not independent, but ok for descriptive stats)
+        # pooled-pairs rho summaries (for IQR descriptive stats)
         ru = np.asarray(m.get("rho_uncorr", []), dtype=float)
         rc = np.asarray(m.get("rho_corr", []), dtype=float)
-        rho_u_mean[i] = _safe_mean(ru)
-        rho_c_mean[i] = _safe_mean(rc)
+        ru = ru[np.isfinite(ru)]
+        rc = rc[np.isfinite(rc)]
+
         rho_u_iqr[i] = iqr_25_75(ru)
         rho_c_iqr[i] = iqr_25_75(rc)
 
-        # per-dataset mean-z summaries (recommended)
+        # --- RAW rho per-dataset summaries (for proper CIs) ---
+        rho_u_ds = np.asarray(m.get("rho_u_mean_by_ds", []), dtype=float)
+        rho_c_ds = np.asarray(m.get("rho_c_mean_by_ds", []), dtype=float)
+        drho_ds = np.asarray(m.get("rho_delta_mean_by_ds", []), dtype=float)
+
+        rho_u_ds = rho_u_ds[np.isfinite(rho_u_ds)]
+        rho_c_ds = rho_c_ds[np.isfinite(rho_c_ds)]
+        drho_ds = drho_ds[np.isfinite(drho_ds)]
+
+        # Mean across datasets
+        rho_u_mean[i] = float(np.mean(rho_u_ds)) if rho_u_ds.size else _safe_mean(ru)
+        rho_c_mean[i] = float(np.mean(rho_c_ds)) if rho_c_ds.size else _safe_mean(rc)
+        drho_mean[i] = float(np.mean(drho_ds)) if drho_ds.size else (rho_c_mean[i] - rho_u_mean[i])
+
+        # Bootstrap CIs across datasets (proper inference)
+        if rho_u_ds.size >= 3:
+            _, (lo, hi) = bootstrap_mean_ci(rho_u_ds, nboot=nboot, rng=40_000 + i)
+            rho_u_ci[i] = [lo, hi]
+        if rho_c_ds.size >= 3:
+            _, (lo, hi) = bootstrap_mean_ci(rho_c_ds, nboot=nboot, rng=50_000 + i)
+            rho_c_ci[i] = [lo, hi]
+        if drho_ds.size >= 3:
+            _, (lo, hi) = bootstrap_mean_ci(drho_ds, nboot=nboot, rng=60_000 + i)
+            drho_ci[i] = [lo, hi]
+
+        # Shuffle null on raw delta (scalar per shuffle from extract_metrics)
+        shuff_drho = np.asarray(m.get("shuff_rho_delta_mean", []), dtype=float)
+        shuff_drho = shuff_drho[np.isfinite(shuff_drho)]
+        if shuff_drho.size > 0:
+            null_drho_ci95[i] = np.percentile(shuff_drho, [2.5, 97.5])
+
+        # --- per-dataset mean-z summaries (for Fisher z panels) ---
         zu = np.asarray(m.get("rho_u_meanz_by_ds", []), dtype=float)
         zc = np.asarray(m.get("rho_c_meanz_by_ds", []), dtype=float)
         dz = np.asarray(m.get("rho_delta_meanz_by_ds", []), dtype=float)
@@ -136,6 +175,13 @@ def compute_all_noisecorr_stats(
         rho_c_mean=rho_c_mean,
         rho_u_iqr=rho_u_iqr,
         rho_c_iqr=rho_c_iqr,
+
+        # raw rho with bootstrap CIs (for panels using raw means)
+        rho_u_ci=rho_u_ci,
+        rho_c_ci=rho_c_ci,
+        drho_mean=drho_mean,
+        drho_ci=drho_ci,
+        null_drho_ci95=null_drho_ci95,
 
         # inferential (per-dataset z)
         z_u_mean=z_u_mean,
