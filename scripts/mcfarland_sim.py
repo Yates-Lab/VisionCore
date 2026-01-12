@@ -1716,50 +1716,74 @@ class DualWindowAnalysis:
         
         return Crate, Erate, Ceye, bin_centers, count_e
 
-    # run_sweep
-    def run_sweep(self, window_sizes_ms, t_hist_ms=10, n_bins=15):
+    def run_sweep(self, window_sizes_ms, t_hist_ms=10, n_bins=15, n_shuffles=0, seed=42):
         t_hist_bins = int(t_hist_ms / (self.dt * 1000))
         results = []
         mats_save = []
 
-        print(f"Starting Sweep (Hist={t_hist_ms}ms)...")
+        print(f"Starting Sweep (Hist={t_hist_ms}ms) with {n_shuffles} shuffles...")
+        
+        # Generator for shuffling
+        rng_shuffle = torch.Generator(device=self.device)
+        rng_shuffle.manual_seed(seed)
 
         for win_ms in tqdm(window_sizes_ms):
             t_count_bins = int(win_ms / (self.dt * 1000))
             t_count_bins = max(1, t_count_bins)
 
-            # extract windows
+            # 1. Extract Windows
             SpikeCounts, EyeTraj, T_idx, _ = self._extract_windows(t_count_bins, np.maximum(t_hist_bins, t_count_bins))
-            n_samples = SpikeCounts.shape[0]
-            if SpikeCounts is None or n_samples < 100: continue # arbitrary threshold (how much data do we need?)
-
-            # total covariance
-            ix = np.isfinite(SpikeCounts.sum(1).detach().cpu().numpy())
-            Ctotal = torch.cov(SpikeCounts[ix].T, correction=1).detach().cpu().numpy() # total covariance
-
-            # calculate eye conditioned covariance
-            Crate, Erate, Ceye, bin_centers, count_e = self._calculate_Crate(SpikeCounts, EyeTraj, T_idx, n_bins=n_bins, Ctotal=Ctotal)
             
-            # PSTH covariance
+            if SpikeCounts is None:
+                continue
+                
+            n_samples = SpikeCounts.shape[0]
+            if n_samples < 100: 
+                continue 
+
+            # 2. Total Covariance (Fixed)
+            ix = np.isfinite(SpikeCounts.sum(1).detach().cpu().numpy())
+            Ctotal = torch.cov(SpikeCounts[ix].T, correction=1).detach().cpu().numpy() 
+
+            # 3. PSTH Covariance (Fixed)
+            # This is now calculated ONCE, guaranteeing identity between Real and Shuffled conditions.
             Cpsth, PSTH_A, PSTH_B = self._split_half_psth_covariance(SpikeCounts, T_idx, min_trials_per_time=10, seed=0)
 
-            # covariance due to fixational eye movements
-            Cfem = Crate - Cpsth
-            Cfem = 0.5 * (Cfem + Cfem.T) # symmetrize
+            # 4. Real Analysis (Crate)
+            Crate, Erate, Ceye, bin_centers, count_e = self._calculate_Crate(
+                SpikeCounts, EyeTraj, T_idx, n_bins=n_bins, Ctotal=Ctotal
+            )
+            
+            # 5. Shuffled Analysis (Loop)
+            # We only re-calculate Crate (the intercept). Cfem_shuff will be derived later as (Crate_shuff - Cpsth).
+            shuffled_intercepts = []
+            
+            if n_shuffles > 0:
+                for k in range(n_shuffles):
+                    # Permute EyeTraj relative to SpikeCounts
+                    # This breaks the causal link but keeps valid trajectory statistics
+                    perm = torch.randperm(n_samples, generator=rng_shuffle, device=self.device)
+                    EyeTraj_shuff = EyeTraj[perm]
+                    
+                    # Calculate Intercept for shuffled data
+                    # We pass Ctotal=None to avoid NaN-ing out violations (shuffles are noisy and might violate bounds)
+                    Crate_shuff, _, _, _, _ = self._calculate_Crate(
+                        SpikeCounts, EyeTraj_shuff, T_idx, n_bins=n_bins, Ctotal=None
+                    )
+                    shuffled_intercepts.append(Crate_shuff)
 
-            # noise covariance
+            # 6. Derived Real Metrics
+            Cfem = Crate - Cpsth
+            Cfem = 0.5 * (Cfem + Cfem.T) 
+
             CnoiseU = Ctotal - Cpsth
             CnoiseC = Ctotal - Crate
-
-            # symmetrize
             CnoiseU = 0.5 * (CnoiseU + CnoiseU.T)
             CnoiseC = 0.5 * (CnoiseC + CnoiseC.T)
             
-            # fano factors
             ff_uncorr = np.diag(CnoiseU) / Erate
             ff_corr = np.diag(CnoiseC) / Erate
 
-            # noise correlation
             NoiseCorrU = cov_to_corr(CnoiseU)
             NoiseCorrC = cov_to_corr(CnoiseC)
 
@@ -1790,25 +1814,121 @@ class DualWindowAnalysis:
                 "PSTH": Cpsth,
                 "FEM": Cfem,
                 "Intercept": Crate,
+                "Shuffled_Intercepts": shuffled_intercepts, # List of (N_cells, N_cells) arrays
                 "NoiseCorrU": NoiseCorrU,
                 "NoiseCorrC": NoiseCorrC,
                 "PSTH_A": PSTH_A,
                 "PSTH_B": PSTH_B,
             })
 
+            # Store summary for plotting individual pairs
             win_key = float(win_ms)
             self.window_summaries[win_key] = {
                 "bin_centers": bin_centers,
-                "binned_covs": Ceye,          # SECOND MOMENTS (kept name for compatibility)
+                "binned_covs": Ceye,           
                 "bin_counts": count_e,
-                "Sigma_Intercept": Crate,          # COVARIANCE
-                "Sigma_PSTH": Cpsth,            # COVARIANCE
+                "Sigma_Intercept": Crate,          
+                "Sigma_PSTH": Cpsth,            
                 "Sigma_Total": Ctotal,
                 "Sigma_FEM": Cfem,
                 "mean_counts": Erate,
             }
 
         return results, mats_save
+    
+    # run_sweep
+    # def run_sweep(self, window_sizes_ms, t_hist_ms=10, n_bins=15):
+    #     t_hist_bins = int(t_hist_ms / (self.dt * 1000))
+    #     results = []
+    #     mats_save = []
+
+    #     print(f"Starting Sweep (Hist={t_hist_ms}ms)...")
+
+    #     for win_ms in tqdm(window_sizes_ms):
+    #         t_count_bins = int(win_ms / (self.dt * 1000))
+    #         t_count_bins = max(1, t_count_bins)
+
+    #         # extract windows
+    #         SpikeCounts, EyeTraj, T_idx, _ = self._extract_windows(t_count_bins, np.maximum(t_hist_bins, t_count_bins))
+    #         n_samples = SpikeCounts.shape[0]
+    #         if SpikeCounts is None or n_samples < 100: continue # arbitrary threshold (how much data do we need?)
+
+    #         # total covariance
+    #         ix = np.isfinite(SpikeCounts.sum(1).detach().cpu().numpy())
+    #         Ctotal = torch.cov(SpikeCounts[ix].T, correction=1).detach().cpu().numpy() # total covariance
+
+    #         # calculate eye conditioned covariance
+    #         Crate, Erate, Ceye, bin_centers, count_e = self._calculate_Crate(SpikeCounts, EyeTraj, T_idx, n_bins=n_bins, Ctotal=Ctotal)
+            
+    #         # PSTH covariance
+    #         Cpsth, PSTH_A, PSTH_B = self._split_half_psth_covariance(SpikeCounts, T_idx, min_trials_per_time=10, seed=0)
+
+    #         # covariance due to fixational eye movements
+    #         Cfem = Crate - Cpsth
+    #         Cfem = 0.5 * (Cfem + Cfem.T) # symmetrize
+
+    #         # noise covariance
+    #         CnoiseU = Ctotal - Cpsth
+    #         CnoiseC = Ctotal - Crate
+
+    #         # symmetrize
+    #         CnoiseU = 0.5 * (CnoiseU + CnoiseU.T)
+    #         CnoiseC = 0.5 * (CnoiseC + CnoiseC.T)
+            
+    #         # fano factors
+    #         ff_uncorr = np.diag(CnoiseU) / Erate
+    #         ff_corr = np.diag(CnoiseC) / Erate
+
+    #         # noise correlation
+    #         NoiseCorrU = cov_to_corr(CnoiseU)
+    #         NoiseCorrC = cov_to_corr(CnoiseC)
+
+    #         alpha = np.diag(Cpsth) / np.diag(Crate)
+
+    #         if np.isnan(Cfem).any():
+    #             rank = np.nan
+    #         else:
+    #             evals = np.linalg.eigvalsh(Cfem)[::-1]
+    #             pos = evals[evals > 0]
+    #             rank = (np.sum(pos[:2]) / np.sum(pos)) if len(pos) > 2 else 1.0
+
+    #         results.append({
+    #             "window_ms": win_ms,
+    #             "ff_uncorr": ff_uncorr,
+    #             "ff_corr": ff_corr,
+    #             "ff_uncorr_mean": np.nanmean(ff_uncorr),
+    #             "ff_corr_mean": np.nanmean(ff_corr),
+    #             "alpha": alpha,
+    #             "fem_rank_ratio": rank,
+    #             "n_samples": n_samples,
+    #             'Erates': Erate,
+    #             'count_e': count_e
+    #         })
+
+    #         mats_save.append({
+    #             "Total": Ctotal,
+    #             "PSTH": Cpsth,
+    #             "FEM": Cfem,
+    #             "Intercept": Crate,
+    #             "NoiseCorrU": NoiseCorrU,
+    #             "NoiseCorrC": NoiseCorrC,
+    #             "PSTH_A": PSTH_A,
+    #             "PSTH_B": PSTH_B,
+    #         })
+
+    #         win_key = float(win_ms)
+    #         self.window_summaries[win_key] = {
+    #             "bin_centers": bin_centers,
+    #             "binned_covs": Ceye,          # SECOND MOMENTS (kept name for compatibility)
+    #             "bin_counts": count_e,
+    #             "Sigma_Intercept": Crate,          # COVARIANCE
+    #             "Sigma_PSTH": Cpsth,            # COVARIANCE
+    #             "Sigma_Total": Ctotal,
+    #             "Sigma_FEM": Cfem,
+    #             "mean_counts": Erate,
+    #         }
+
+    #     return results, mats_save
 
     # utility for analyzing the analysis at the resolution of a single neuron or pair
     def inspect_neuron_pair(self, i, j, win_ms, ax=None, show=True):
@@ -1868,12 +1988,10 @@ class DualWindowAnalysis:
 from eval.eval_stack_multidataset import load_model, load_single_dataset, run_bps_analysis, run_qc_analysis
 from eval.eval_stack_utils import run_model, rescale_rhat, ccnorm_split_half_variable_trials
 
-
-        
 def run_mcfarland_on_dataset(model, dataset_idx, windows = [10, 20, 40, 80],
         plot=False, total_spikes_threshold=200, valid_time_bins=120, dt=1/120,
         rescale=True, batch_size=128,
-        n_shuffles=0, seed=42, save_full_surrogates=True):
+        n_shuffles=0, seed=42):
     '''
     Run the Covariance Decomposition on a dataset.
 
@@ -2008,7 +2126,7 @@ def run_mcfarland_on_dataset(model, dataset_idx, windows = [10, 20, 40, 80],
     analyzer = DualWindowAnalysis(robs_used, eyepos_used, valid_mask_used, dt=dt)
 
     # 2. Run Sweep
-    results, last_mats = analyzer.run_sweep(windows, t_hist_ms=50, n_bins=15)
+    results, last_mats = analyzer.run_sweep(windows, t_hist_ms=50, n_bins=15, n_shuffles=n_shuffles, seed=seed)
     
     output['neuron_mask'] = neuron_mask
     output['bps_results'] = bps_results
@@ -2065,70 +2183,6 @@ def run_mcfarland_on_dataset(model, dataset_idx, windows = [10, 20, 40, 80],
     
     output['results_residuals'] = results_residuals
     output['last_mats_residuals'] = last_mats_residuals
-
-
-    # --- 2. Surrogate Analysis (Roll + Flip) ---
-    if n_shuffles > 0:
-        print(f"Running {n_shuffles} Shuffles (Roll + Flip)...")
-        shuffled_results = []
-        shuffled_mats = []
-        
-        rng_shuffle = np.random.default_rng(seed)
-        n_trials = robs_used.shape[0]
-        n_time = robs_used.shape[1]
-        
-        for k in tqdm(range(n_shuffles), desc="Shuffling"):
-            
-            # Start with a copy of the original data (preserving NaNs)
-            eyepos_shuff = eyepos_used.copy()
-            do_flip = rng_shuffle.random(size=n_trials) > 0.5
-            
-            for tr in range(n_trials):
-                # 1. Identify valid indices (where data is NOT NaN)
-                # Check sum across x,y to catch any NaN
-                valid_idx = np.where(np.isfinite(np.sum(eyepos_used[tr], axis=1)))[0]
-                
-                if len(valid_idx) == 0:
-                    continue # Should be filtered out already, but safe to skip
-                
-                # Extract the valid chunk
-                chunk = eyepos_used[tr, valid_idx, :]
-                # plt.plot(chunk)
-                n_chunk = len(chunk)
-                
-                # 2. Random Roll (Shift)
-                # Pick shift between 10% and 90% of VALID length
-                if n_chunk > 10:
-                    shift = rng_shuffle.integers(low=int(n_chunk*0.1), high=int(n_chunk*0.9))
-                    chunk = np.roll(chunk, shift=shift, axis=0)
-                
-                # 3. Random Flip
-                if do_flip[tr]:
-                     chunk = np.flip(chunk, axis=0)
-                
-                # 4. Insert back into the valid slots
-                # This ensures NaNs remain exactly where they were
-                eyepos_shuff[tr, valid_idx, :] = chunk
-                # plt.plot(chunk)
-                # plt.show()
-            
-            
-            
-            analyzer_shuff = DualWindowAnalysis(robs_used, eyepos_shuff, valid_mask_used, 
-                                                dt=dt)
-            
-            res_shuff, mats_shuff = analyzer_shuff.run_sweep(windows, t_hist_ms=t_hist_ms, n_bins=15)
-            
-            shuffled_results.append(res_shuff)
-            
-            # Store Full Matrices (Optional)
-            if save_full_surrogates:
-                # mats_shuff is a list of dicts (one dict per window size)
-                shuffled_mats.append(mats_shuff)
-            
-        output['shuffled_results'] = shuffled_results
-        if save_full_surrogates:
-            output['shuffled_mats'] = shuffled_mats
 
     if plot:
         window_idx = 1
@@ -2274,80 +2328,879 @@ def run_mcfarland_on_dataset(model, dataset_idx, windows = [10, 20, 40, 80],
 #                     })
 #     return metrics
 
-def extract_metrics(outputs, min_total_spikes=50):
+# def extract_metrics(outputs, min_total_spikes=50):
+#     """
+#     Extracts metrics for both Real and Shuffled data.
+    
+#     Returns metrics list where 'shuff_*' keys contain matrices of shape:
+#     (Total_Valid_Neurons, N_shuffles)
+#     """
+#     n_windows = len(outputs[0]['results'])
+#     metrics = []
+    
+#     for i in range(n_windows):
+        
+#         # Real Data Containers
+#         ff_uncorrs, ff_corrs, erates, alphas = [], [], [], []
+#         rhos_uncorr, rhos_corr = [], []
+        
+#         # Shuffled Data Containers (Blocks of (N_neurons, N_shuffles))
+#         shuff_alphas_blocks = []
+#         shuff_ff_uncorr_blocks = [] 
+#         shuff_ff_corr_blocks = []
+        
+#         for j in range(len(outputs)):
+#             # --- REAL DATA ---
+#             res = outputs[j]['results'][i]
+#             mats = outputs[j]['last_mats'][i]
+            
+#             window_ms = res['window_ms']
+#             Erates = res['Erates']
+#             n_samples = res['n_samples']
+            
+#             # Filter
+#             total_spikes = Erates * n_samples
+#             valid = total_spikes > min_total_spikes
+            
+#             # Store Real Metrics
+#             ff_uncorrs.append(res['ff_uncorr'][valid])
+#             ff_corrs.append(res['ff_corr'][valid])
+#             erates.append(Erates[valid])
+#             alphas.append(res['alpha'][valid])
+            
+#             # Covariances
+#             rho_uncorr = get_upper_triangle(index_cov(mats['NoiseCorrU'], valid))
+#             rho_corr = get_upper_triangle(index_cov(mats['NoiseCorrC'], valid))
+#             rhos_uncorr.append(rho_uncorr)
+#             rhos_corr.append(rho_corr)
+
+#             # --- SHUFFLED DATA ---
+#             if 'Shuffled_Intercepts' in mats and len(mats['Shuffled_Intercepts']) > 0:
+                
+#                 Ctotal = mats['Total']
+#                 Cpsth = mats['PSTH']
+                
+#                 # Pre-calculate constants for this dataset
+#                 var_psth = np.diag(Cpsth)
+                
+#                 # FF Uncorrected is constant across shuffles (depends only on Ctotal, Cpsth)
+#                 # We calculate it once here
+#                 ff_uncorr_const = res['ff_uncorr'][valid]
+                
+#                 # Containers for columns (shuffles) for this dataset
+#                 ds_shuff_alphas_cols = []
+#                 ds_shuff_ff_uncorr_cols = []
+#                 ds_shuff_ff_corr_cols = []
+
+#                 for Crate_s in mats['Shuffled_Intercepts']:
+#                     # 1. Calculate Alpha
+#                     var_rate_s = np.diag(Crate_s)
+#                     with np.errstate(divide='ignore', invalid='ignore'):
+#                         alpha_s = var_psth / var_rate_s
+                    
+#                     ds_shuff_alphas_cols.append(alpha_s[valid])
+
+#                     # 2. Calculate Fano Factors
+#                     # Corrected (Varies per shuffle)
+#                     CnoiseC_s = Ctotal - Crate_s
+#                     CnoiseC_s = 0.5 * (CnoiseC_s + CnoiseC_s.T)
+#                     ff_corr_s = np.diag(CnoiseC_s) / Erates
+                    
+#                     ds_shuff_ff_corr_cols.append(ff_corr_s[valid])
+                    
+#                     # Uncorrected (Constant, but repeated for shape consistency)
+#                     ds_shuff_ff_uncorr_cols.append(ff_uncorr_const)
+                
+#                 # Stack columns to make (N_valid_in_dataset, N_shuffles)
+#                 if len(ds_shuff_alphas_cols) > 0:
+#                     shuff_alphas_blocks.append(np.stack(ds_shuff_alphas_cols, axis=1))
+#                     shuff_ff_uncorr_blocks.append(np.stack(ds_shuff_ff_uncorr_cols, axis=1))
+#                     shuff_ff_corr_blocks.append(np.stack(ds_shuff_ff_corr_cols, axis=1))
+
+#         # Concatenate across datasets (Axis 0 = Neurons)
+#         if len(shuff_alphas_blocks) > 0:
+#             cat_shuff_alphas = np.concatenate(shuff_alphas_blocks, axis=0)
+#             cat_shuff_uncorr = np.concatenate(shuff_ff_uncorr_blocks, axis=0)
+#             cat_shuff_corr = np.concatenate(shuff_ff_corr_blocks, axis=0)
+#         else:
+#             cat_shuff_alphas = np.array([])
+#             cat_shuff_uncorr = np.array([])
+#             cat_shuff_corr = np.array([])
+
+#         metrics.append({
+#             'window_ms': window_ms,
+#             'uncorr': np.concatenate(ff_uncorrs),
+#             'corr': np.concatenate(ff_corrs),
+#             'erate': np.concatenate(erates),
+#             'alpha': np.concatenate(alphas),
+#             'rho_uncorr': np.concatenate(rhos_uncorr),
+#             'rho_corr': np.concatenate(rhos_corr),
+            
+#             # Shuffled Stats: (Total_Valid_Neurons, N_shuffles)
+#             'shuff_uncorr': cat_shuff_uncorr, 
+#             'shuff_corr': cat_shuff_corr,
+#             'shuff_alphas': cat_shuff_alphas, 
+#         })
+        
+#     return metrics
+
+import numpy as np
+
+# ----------------------------
+# guard-railed covariance->correlation
+# ----------------------------
+def cov_to_corr_safe(C, min_var=1e-3, eps=1e-6, set_diag_zero=True):
     """
-    Extracts metrics for both Real and Shuffled data.
+    Converts covariance to correlation with guard rails.
+
+    - Any neuron with variance <= min_var or non-finite variance becomes invalid.
+    - Correlations involving invalid neurons are NaN.
+    - Correlations are clipped to [-1+eps, 1-eps] to avoid atanh blowups.
+    - Diagonal can be set to 0 (standard for noise corr).
+    
+    Returns
+    -------
+    R : (N,N) float array
+    diag_var : (N,) float array of variances
+    valid_neuron : (N,) bool array
+    info : dict of diagnostics
+    """
+    C = np.asarray(C, dtype=np.float64)
+    if C.ndim != 2 or C.shape[0] != C.shape[1]:
+        raise ValueError(f"C must be square (N,N), got {C.shape}")
+
+    N = C.shape[0]
+    diag_var = np.diag(C).copy()
+
+    valid_neuron = np.isfinite(diag_var) & (diag_var > min_var)
+    std = np.full(N, np.nan, dtype=np.float64)
+    std[valid_neuron] = np.sqrt(diag_var[valid_neuron])
+
+    outer = np.outer(std, std)  # rows/cols of invalid neurons become NaN
+
+    with np.errstate(divide='ignore', invalid='ignore'):
+        R = C / outer
+
+    # clip *finite* entries only (leave NaNs)
+    finite = np.isfinite(R)
+    # count near-boundary before clip
+    n_finite = int(finite.sum())
+    n_over = int(np.sum(finite & (R > (1 - eps))))
+    n_under = int(np.sum(finite & (R < (-1 + eps))))
+
+    R = np.where(finite, np.clip(R, -1 + eps, 1 - eps), np.nan)
+
+    if set_diag_zero:
+        np.fill_diagonal(R, 0.0)
+
+    info = dict(
+        N=N,
+        n_valid_neuron=int(valid_neuron.sum()),
+        n_invalid_neuron=int((~valid_neuron).sum()),
+        n_finite_entries=n_finite,
+        n_clipped_high=n_over,
+        n_clipped_low=n_under,
+    )
+    return R, diag_var, valid_neuron, info
+
+
+# # ----------------------------
+# # robust summaries for correlation distributions
+# # ----------------------------
+# def fisher_z_mean(rho, eps=1e-6):
+#     """
+#     Mean Fisher z of correlations (robust mean for rho).
+#     Returns mean(z); you can back-transform via tanh(mean_z) if desired.
+#     """
+#     rho = np.asarray(rho, dtype=np.float64).reshape(-1)
+#     rho = rho[np.isfinite(rho)]
+#     if rho.size == 0:
+#         return np.nan
+#     rho = np.clip(rho, -1 + eps, 1 - eps)
+#     z = np.arctanh(rho)
+#     return np.nanmean(z)
+
+# def fisher_z_ci_from_samples(z_samples, ci=0.95):
+#     """
+#     CI on mean-z or on per-shuffle mean-z distributions (already in z space).
+#     """
+#     z_samples = np.asarray(z_samples, dtype=np.float64).reshape(-1)
+#     z_samples = z_samples[np.isfinite(z_samples)]
+#     if z_samples.size == 0:
+#         return np.nan, (np.nan, np.nan)
+#     alpha = (1 - ci) / 2
+#     lo, hi = np.percentile(z_samples, [100*alpha, 100*(1-alpha)])
+#     return np.nanmean(z_samples), (lo, hi)
+
+
+# def project_to_psd(C, eps=0.0):
+#     C = 0.5 * (C + C.T)
+#     w, V = np.linalg.eigh(C)
+#     w = np.maximum(w, eps)
+#     return (V * w) @ V.T
+
+# def cov_diagnostics(C, name="C"):
+#     C = 0.5*(C+C.T)
+#     d = np.diag(C)
+#     w = np.linalg.eigvalsh(C)
+#     off = C.copy()
+#     np.fill_diagonal(off, np.nan)
+#     return dict(
+#         name=name,
+#         diag_min=float(np.nanmin(d)),
+#         diag_med=float(np.nanmedian(d)),
+#         diag_neg_frac=float(np.mean(d <= 0)),
+#         off_med=float(np.nanmedian(off)),
+#         off_q01=float(np.nanpercentile(off, 1)),
+#         off_q99=float(np.nanpercentile(off, 99)),
+#         eig_min=float(np.min(w)),
+#         eig_neg_frac=float(np.mean(w < 0)),
+#     )
+
+
+
+# # ----------------------------
+# # extract_metrics with shuffle nulls for noise correlations
+# # ----------------------------
+# def extract_metrics(outputs, min_total_spikes=50, min_var=1e-3, eps_rho=1e-6):
+#     """
+#     Extracts per-window metrics for REAL data and SHUFFLE controls.
+
+#     Adds proper shuffle correction for noise correlations by computing, for each shuffle,
+#     a summary statistic:
+#         shuff_rho_c_meanz : mean Fisher-z of corrected noise correlations
+#     (optionally also uncorrected if you want it)
+
+#     Guard rails:
+#       - Uses cov_to_corr_safe(Cnoise*, min_var=min_var, eps=eps_rho)
+#       - Drops neurons with too few spikes (min_total_spikes)
+#       - Correlations clipped to avoid atanh blowups
+#       - Returns diagnostics to track invalid neurons/pairs and clipping rates.
+
+#     Returns
+#     -------
+#     metrics : list of dict, one per window_ms, with keys including:
+#       - 'rho_uncorr', 'rho_corr' : concatenated upper triangle rho arrays (real)
+#       - 'rho_u_meanz', 'rho_c_meanz' : Fisher mean-z summaries (real)
+#       - 'rho_u_meanz_by_ds', 'rho_c_meanz_by_ds' : per-dataset mean-z (better for CI)
+#       - 'shuff_rho_c_meanz' : array of per-shuffle mean-z (concatenated across datasets)
+#       - plus your existing FF-related keys
+#       - 'diag' : diagnostics about validity/clipping/pair counts
+#     """
+#     n_windows = len(outputs[0]['results'])
+#     metrics = []
+
+#     for i in range(n_windows):
+
+#         # Real data containers (concatenated across datasets)
+#         ff_uncorrs, ff_corrs, erates, alphas = [], [], [], []
+#         rhos_uncorr, rhos_corr = [], []
+
+#         # Real per-dataset summaries (for proper CIs)
+#         rho_u_meanz_by_ds = []
+#         rho_c_meanz_by_ds = []
+
+#         # Shuffle containers (concatenated across datasets)
+#         shuff_alphas_blocks = []
+#         shuff_ff_uncorr_blocks = []
+#         shuff_ff_corr_blocks = []
+
+#         # Shuffle noise-corr summaries (per shuffle)
+#         shuff_rho_c_meanz_all = []  # concat across datasets
+#         # If you later want an uncorrected shuffle too, you can add shuff_rho_u_meanz_all.
+
+#         # Diagnostics accumulation
+#         diag = dict(
+#             window_ms=None,
+#             real=dict(n_ds=0, n_pairs_total=0, n_pairs_finite=0, n_pairs_used=0,
+#                       n_invalid_neuron_total=0, n_clipped_total=0),
+#             shuff=dict(n_shuffles_total=0, n_pairs_total=0, n_pairs_used=0,
+#                        n_invalid_neuron_total=0, n_clipped_total=0),
+#         )
+
+#         for j in range(len(outputs)):
+#             # --- REAL DATA ---
+#             res = outputs[j]['results'][i]
+#             mats = outputs[j]['last_mats'][i]
+
+#             window_ms = res['window_ms']
+#             Erates = np.asarray(res['Erates'], dtype=np.float64).reshape(-1)
+#             n_samples = res['n_samples']
+
+#             diag["window_ms"] = window_ms
+
+#             # Filter by total spikes (per neuron)
+#             total_spikes = Erates * n_samples
+#             valid = total_spikes > min_total_spikes
+#             if valid.sum() < 5:
+#                 # Too few neurons in this dataset/window for stable corr
+#                 continue
+
+#             diag["real"]["n_ds"] += 1
+
+#             # Store real FF metrics
+#             ff_uncorrs.append(np.asarray(res['ff_uncorr'])[valid])
+#             ff_corrs.append(np.asarray(res['ff_corr'])[valid])
+#             erates.append(Erates[valid])
+#             alphas.append(np.asarray(res['alpha'])[valid])
+
+#             # 
+#             # Build real noise covariances
+#             Ctotal = np.asarray(mats['Total'], dtype=np.float64)
+#             Cpsth  = np.asarray(mats['PSTH'],  dtype=np.float64)
+#             Crate  = np.asarray(mats['Intercept'],  dtype=np.float64)  # <-- you need the real Crate saved
+
+#             CnoiseU = 0.5 * ((Ctotal - Cpsth) + (Ctotal - Cpsth).T)
+#             CnoiseC = 0.5 * ((Ctotal - Crate) + (Ctotal - Crate).T)
+
+#             # Fixed neuron set across conditions
+#             valid_spikes = (Erates * n_samples) > min_total_spikes
+#             validU = valid_spikes & np.isfinite(np.diag(CnoiseU)) & (np.diag(CnoiseU) > min_var)
+#             validC = valid_spikes & np.isfinite(np.diag(CnoiseC)) & (np.diag(CnoiseC) > min_var)
+#             valid_fixed = validU & validC
+
+#             # If too few neurons, skip dataset/window
+#             if valid_fixed.sum() < 5:
+#                 continue
+
+#             # PSD project (for correlation only)
+#             CnoiseU_psd = project_to_psd(CnoiseU, eps=0.0)
+#             CnoiseC_psd = project_to_psd(CnoiseC, eps=0.0)
+
+#             RU, *_ = cov_to_corr_safe(CnoiseU_psd, min_var=min_var, eps=eps_rho)
+#             RC, *_ = cov_to_corr_safe(CnoiseC_psd, min_var=min_var, eps=eps_rho)
+
+#             rho_u = get_upper_triangle(index_cov(RU, valid_fixed))
+#             rho_c = get_upper_triangle(index_cov(RC, valid_fixed))
+
+#             z_u = fisher_z_mean(rho_u, eps=eps_rho)
+#             z_c = fisher_z_mean(rho_c, eps=eps_rho)
+#             delta_real = z_c - z_u
+
+#             # Shuffle null on *delta*
+#             delta_null = []
+#             for Crate_s in mats['Shuffled_Intercepts']:
+#                 Crate_s = np.asarray(Crate_s, dtype=np.float64)
+#                 CnoiseC_s = 0.5 * ((Ctotal - Crate_s) + (Ctotal - Crate_s).T)
+
+#                 CnoiseC_s_psd = project_to_psd(CnoiseC_s, eps=0.0)
+#                 RCs, *_ = cov_to_corr_safe(CnoiseC_s_psd, min_var=min_var, eps=eps_rho)
+
+#                 rho_cs = get_upper_triangle(index_cov(RCs, valid_fixed))
+#                 z_cs = fisher_z_mean(rho_cs, eps=eps_rho)
+
+#                 delta_null.append(z_cs - z_u)
+
+#             delta_null = np.asarray(delta_null, dtype=float)
+            
+
+#             rhos_uncorr.append(rho_u)
+#             rhos_corr.append(rho_c)
+
+#             # per-dataset fisher means (for CI across datasets)
+#             rho_u_meanz_by_ds.append(z_u)
+#             rho_c_meanz_by_ds.append(z_c)
+
+#             # # diagnostics (real)
+#             # diag["real"]["n_invalid_neuron_total"] += int(np.size(valid_pair_neurons) - np.sum(valid_pair_neurons))
+#             # diag["real"]["n_clipped_total"] += int(infoU.get("n_clipped_high", 0) + infoU.get("n_clipped_low", 0)
+#             #                                      + infoC.get("n_clipped_high", 0) + infoC.get("n_clipped_low", 0))
+#             # diag["real"]["n_pairs_total"] += int(np.sum(valid_pair_neurons) * (np.sum(valid_pair_neurons) - 1) / 2)
+#             # diag["real"]["n_pairs_used"] += int(np.sum(np.isfinite(rho_uncorr)) + np.sum(np.isfinite(rho_corr)))
+
+#             # --- SHUFFLED DATA ---
+#             # Proper shuffle null for correlations must build CnoiseC_s and convert to corr
+#             if 'Shuffled_Intercepts' in mats and len(mats['Shuffled_Intercepts']) > 0:
+
+#                 Ctotal = np.asarray(mats['Total'], dtype=np.float64)
+#                 Cpsth  = np.asarray(mats['PSTH'], dtype=np.float64)
+
+#                 # For alpha + FFs (your existing behavior)
+#                 var_psth = np.diag(Cpsth)
+#                 ff_uncorr_const = np.asarray(res['ff_uncorr'], dtype=np.float64)  # full length
+
+#                 ds_shuff_alphas_cols = []
+#                 ds_shuff_ff_uncorr_cols = []
+#                 ds_shuff_ff_corr_cols = []
+
+#                 for Crate_s in mats['Shuffled_Intercepts']:
+#                     Crate_s = np.asarray(Crate_s, dtype=np.float64)
+
+#                     # 1) alpha
+#                     var_rate_s = np.diag(Crate_s)
+#                     with np.errstate(divide='ignore', invalid='ignore'):
+#                         alpha_s = var_psth / var_rate_s
+#                     ds_shuff_alphas_cols.append(alpha_s[valid])
+
+#                     # 2) FFs
+#                     CnoiseC_s = Ctotal - Crate_s
+#                     CnoiseC_s = 0.5 * (CnoiseC_s + CnoiseC_s.T)
+#                     ff_corr_s = np.diag(CnoiseC_s) / Erates  # full length
+#                     ds_shuff_ff_corr_cols.append(ff_corr_s[valid])
+
+#                     ds_shuff_ff_uncorr_cols.append(ff_uncorr_const[valid])  # shape consistency
+
+#                     # 3) Noise correlation null summary (THIS is the missing piece)
+#                     R_s, _, v_s, info_s = cov_to_corr_safe(CnoiseC_s, min_var=min_var, eps=eps_rho)
+
+#                     # enforce same neuron inclusion rule as real: spike-valid AND variance-valid
+#                     valid_s = valid & v_s
+#                     rho_corr_s = get_upper_triangle(index_cov(R_s, valid_s))
+
+#                     shuff_rho_c_meanz_all.append(fisher_z_mean(rho_corr_s, eps=eps_rho))
+
+#                     # diagnostics (shuffle)
+#                     diag["shuff"]["n_shuffles_total"] += 1
+#                     diag["shuff"]["n_invalid_neuron_total"] += int(np.size(valid_s) - np.sum(valid_s))
+#                     diag["shuff"]["n_clipped_total"] += int(info_s.get("n_clipped_high", 0) + info_s.get("n_clipped_low", 0))
+#                     diag["shuff"]["n_pairs_total"] += int(np.sum(valid_s) * (np.sum(valid_s) - 1) / 2)
+#                     diag["shuff"]["n_pairs_used"] += int(np.sum(np.isfinite(rho_corr_s)))
+
+#                 # Stack columns -> (N_valid, N_shuffles)
+#                 if len(ds_shuff_alphas_cols) > 0:
+#                     shuff_alphas_blocks.append(np.stack(ds_shuff_alphas_cols, axis=1))
+#                     shuff_ff_uncorr_blocks.append(np.stack(ds_shuff_ff_uncorr_cols, axis=1))
+#                     shuff_ff_corr_blocks.append(np.stack(ds_shuff_ff_corr_cols, axis=1))
+
+#         # concatenate across datasets (neurons)
+#         if len(shuff_alphas_blocks) > 0:
+#             cat_shuff_alphas = np.concatenate(shuff_alphas_blocks, axis=0)
+#             cat_shuff_uncorr = np.concatenate(shuff_ff_uncorr_blocks, axis=0)
+#             cat_shuff_corr   = np.concatenate(shuff_ff_corr_blocks, axis=0)
+#         else:
+#             cat_shuff_alphas = np.array([])
+#             cat_shuff_uncorr = np.array([])
+#             cat_shuff_corr   = np.array([])
+
+#         # concatenate rhos (real)
+#         rho_u_all = np.concatenate(rhos_uncorr) if len(rhos_uncorr) else np.array([])
+#         rho_c_all = np.concatenate(rhos_corr)   if len(rhos_corr) else np.array([])
+
+#         metrics.append({
+#             "window_ms": diag["window_ms"],
+
+#             # FF + rate metrics (your existing outputs)
+#             "uncorr": np.concatenate(ff_uncorrs) if len(ff_uncorrs) else np.array([]),
+#             "corr":   np.concatenate(ff_corrs)   if len(ff_corrs) else np.array([]),
+#             "erate":  np.concatenate(erates)     if len(erates) else np.array([]),
+#             "alpha":  np.concatenate(alphas)     if len(alphas) else np.array([]),
+
+#             # Real noise correlations (raw for 2D hists)
+#             "rho_uncorr": rho_u_all,
+#             "rho_corr":   rho_c_all,
+
+#             # Robust real summaries (z space)
+#             "rho_u_meanz": fisher_z_mean(rho_u_all, eps=eps_rho),
+#             "rho_c_meanz": fisher_z_mean(rho_c_all, eps=eps_rho),
+
+#             # Per-dataset summaries (preferred for error bars)
+#             "rho_u_meanz_by_ds": np.asarray(rho_u_meanz_by_ds, dtype=np.float64),
+#             "rho_c_meanz_by_ds": np.asarray(rho_c_meanz_by_ds, dtype=np.float64),
+
+#             # Shuffled stats (neurons x shuffles) — existing
+#             "shuff_uncorr": cat_shuff_uncorr,
+#             "shuff_corr":   cat_shuff_corr,
+#             "shuff_alphas": cat_shuff_alphas,
+
+#             # Shuffled noise-corr null summaries (one per shuffle)
+#             "shuff_rho_c_meanz": np.asarray(shuff_rho_c_meanz_all, dtype=np.float64),
+
+#             # Diagnostics
+#             "diag": diag,
+#             "params": dict(min_total_spikes=min_total_spikes, min_var=min_var, eps_rho=eps_rho),
+#         })
+
+#     return metrics
+
+import numpy as np
+
+# ----------------------------
+# robust summaries for correlation distributions
+# ----------------------------
+def fisher_z_mean(rho, eps=1e-6):
+    rho = np.asarray(rho, dtype=np.float64).reshape(-1)
+    rho = rho[np.isfinite(rho)]
+    if rho.size == 0:
+        return np.nan
+    rho = np.clip(rho, -1 + eps, 1 - eps)
+    return np.nanmean(np.arctanh(rho))
+
+def project_to_psd(C, eps=0.0):
+    C = np.asarray(C, dtype=np.float64)
+    C = 0.5 * (C + C.T)
+    w, V = np.linalg.eigh(C)
+    w = np.maximum(w, eps)
+    return (V * w) @ V.T
+
+# def cov_diagnostics(C, name="C"):
+#     C = np.asarray(C, dtype=np.float64)
+#     C = 0.5 * (C + C.T)
+#     d = np.diag(C)
+#     w = np.linalg.eigvalsh(C)
+#     off = C.copy()
+#     np.fill_diagonal(off, np.nan)
+#     return dict(
+#         name=name,
+#         N=int(C.shape[0]),
+#         diag_min=float(np.nanmin(d)),
+#         diag_med=float(np.nanmedian(d)),
+#         diag_neg_frac=float(np.mean(d <= 0)),
+#         off_med=float(np.nanmedian(off)),
+#         off_q01=float(np.nanpercentile(off, 1)),
+#         off_q99=float(np.nanpercentile(off, 99)),
+#         eig_min=float(np.min(w)),
+#         eig_med=float(np.median(w)),
+#         eig_neg_frac=float(np.mean(w < 0)),
+#     )
+
+def cov_diagnostics(C, name="C", max_abs_warn=1e6):
+    out = {"name": name, "status": "ok"}
+    try:
+        C = np.asarray(C, dtype=np.float64)
+        out["shape"] = tuple(C.shape)
+
+        if C.ndim != 2 or C.shape[0] != C.shape[1]:
+            out["status"] = "fail:not_square"
+            return out
+
+        # symmetrize
+        C = 0.5 * (C + C.T)
+
+        finite = np.isfinite(C)
+        out["finite_frac"] = float(finite.mean())
+        out["n_nonfinite"] = int(np.size(C) - finite.sum())
+
+        # scale sanity
+        absmax = np.nanmax(np.abs(C)) if finite.any() else np.nan
+        out["abs_max"] = float(absmax)
+        if np.isfinite(absmax) and absmax > max_abs_warn:
+            out["status"] = "warn:huge_scale"
+
+        d = np.diag(C)
+        df = np.isfinite(d)
+        out["diag_finite_frac"] = float(df.mean())
+        out["diag_min"] = float(np.nanmin(d)) if df.any() else np.nan
+        out["diag_med"] = float(np.nanmedian(d)) if df.any() else np.nan
+        out["diag_neg_frac"] = float(np.mean((d <= 0) & df)) if df.any() else np.nan
+
+        # off-diagonal summary
+        off = C.copy()
+        np.fill_diagonal(off, np.nan)
+        off_f = np.isfinite(off)
+        out["off_med"] = float(np.nanmedian(off)) if off_f.any() else np.nan
+        out["off_q01"] = float(np.nanpercentile(off, 1)) if off_f.any() else np.nan
+        out["off_q99"] = float(np.nanpercentile(off, 99)) if off_f.any() else np.nan
+
+        # eigen diagnostics (can fail)
+        try:
+            # replace non-finite with 0 for eig attempt only (still marked in finite_frac)
+            C_eig = np.where(np.isfinite(C), C, 0.0)
+            w = np.linalg.eigvalsh(C_eig)
+            out["eig_min"] = float(np.min(w))
+            out["eig_med"] = float(np.median(w))
+            out["eig_neg_frac"] = float(np.mean(w < 0))
+        except Exception as e:
+            out["status"] = "warn:eig_failed"
+            out["eig_error"] = type(e).__name__
+
+        return out
+
+    except Exception as e:
+        out["status"] = "fail:exception"
+        out["error"] = type(e).__name__
+        return out
+
+def cov_to_corr_safe(C, min_var=1e-3, eps=1e-6, set_diag_zero=True):
+    """
+    Cov -> Corr with variance guard rails and clipping diagnostics.
+    Returns:
+      R, valid_neuron_mask, info
+    """
+    C = np.asarray(C, dtype=np.float64)
+    C = 0.5 * (C + C.T)
+    d = np.diag(C).copy()
+
+    valid = np.isfinite(d) & (d > min_var)
+    std = np.full_like(d, np.nan, dtype=np.float64)
+    std[valid] = np.sqrt(d[valid])
+
+    denom = np.outer(std, std)
+
+    with np.errstate(divide='ignore', invalid='ignore'):
+        R = C / denom
+
+    finite = np.isfinite(R)
+    # how many would exceed bounds prior to clipping?
+    n_over = int(np.sum(finite & (R > (1 - eps))))
+    n_under = int(np.sum(finite & (R < (-1 + eps))))
+
+    R = np.where(finite, np.clip(R, -1 + eps, 1 - eps), np.nan)
+
+    if set_diag_zero:
+        np.fill_diagonal(R, 0.0)
+
+    info = dict(
+        n_valid_neuron=int(valid.sum()),
+        n_invalid_neuron=int((~valid).sum()),
+        n_clipped_high=n_over,
+        n_clipped_low=n_under,
+    )
+    return R, valid, info
+
+
+# ----------------------------
+# extract_metrics with correct shuffle nulls for noise correlations
+# ----------------------------
+def extract_metrics(outputs, min_total_spikes=50, min_var=1e-3, eps_rho=1e-6,
+                    psd_eps=0.0, diag_n_shuffles=0):
+    """
+    Extracts per-window metrics for REAL data and SHUFFLE controls.
+
+    Noise-corr shuffle null is computed on the EFFECT:
+        delta = mean_z(corrected) - mean_z(uncorrected)
+    where mean_z is Fisher z mean of upper-triangle correlations
+    computed on a FIXED neuron set (intersection across U/C).
+
+    Parameters
+    ----------
+    min_total_spikes : neuron inclusion by spikes in this window
+    min_var          : variance floor for cov->corr normalization
+    eps_rho          : clip correlations to [-1+eps, 1-eps]
+    psd_eps          : eigenvalue floor for PSD projection (0 is typical)
+    diag_n_shuffles  : store diagnostics for up to this many shuffles per dataset/window
+                       (0 disables to keep it light)
+
+    Requires
+    --------
+    - mats keys: 'Total', 'PSTH', 'Intercept', optionally 'Shuffled_Intercepts'
+    - helper funcs: index_cov(M, mask) and get_upper_triangle(M)
     """
     n_windows = len(outputs[0]['results'])
     metrics = []
-    
+
     for i in range(n_windows):
-        
-        # Real Data Containers
+
+        # --- aggregated real metrics across datasets ---
         ff_uncorrs, ff_corrs, erates, alphas = [], [], [], []
         rhos_uncorr, rhos_corr = [], []
-        
-        # Shuffled Data Containers (List of arrays, will concatenate later)
-        shuff_ff_uncorr_means = [] 
-        shuff_ff_corr_means = []
-        shuff_alphas = [] # This might be large, be careful
-        
-        for j in range(len(outputs)):
-            # --- REAL DATA ---
-            res = outputs[j]['results'][i]
-            mats = outputs[j]['last_mats'][i]
-            
-            window_ms = res['window_ms']
-            Erates = res['Erates']
-            n_samples = res['n_samples']
-            
-            # Filter
-            total_spikes = Erates * n_samples
-            valid = total_spikes > min_total_spikes
-            
-            ff_uncorrs.append(res['ff_uncorr'][valid])
-            ff_corrs.append(res['ff_corr'][valid])
-            erates.append(Erates[valid])
-            alphas.append(res['alpha'][valid])
-            
-            # Covariances
-            rho_uncorr = get_upper_triangle(index_cov(mats['NoiseCorrU'], valid))
-            rho_corr = get_upper_triangle(index_cov(mats['NoiseCorrC'], valid))
-            rhos_uncorr.append(rho_uncorr)
-            rhos_corr.append(rho_corr)
 
-            # --- SHUFFLED DATA ---
-            if 'shuffled_results' in outputs[j] and len(outputs[j]['shuffled_results']) > 0:
-                # shuffled_results is List[n_shuffles] of List[n_windows] of dicts
-                
-                # 1. Extract means per shuffle (useful for Fano plots)
-                # s_res is a dict for a specific shuffle and specific window
-                curr_shuffles = [s[i] for s in outputs[j]['shuffled_results']]
-                
-                # Extract scalar means across shuffles for this dataset
-                s_ff_u_mean = [s['ff_uncorr_mean'] for s in curr_shuffles]
-                s_ff_c_mean = [s['ff_corr_mean'] for s in curr_shuffles]
-                
-                shuff_ff_uncorr_means.append(s_ff_u_mean)
-                shuff_ff_corr_means.append(s_ff_c_mean)
+        # per-dataset summaries (preferred for CI)
+        z_u_by_ds = []
+        z_c_by_ds = []
+        delta_by_ds = []
+
+        # shuffle FF blocks (your existing behavior)
+        shuff_alphas_blocks = []
+        shuff_ff_uncorr_blocks = []
+        shuff_ff_corr_blocks = []
+
+        # shuffle null summaries (concatenated across datasets)
+        shuff_delta_meanz_all = []  # delta = z_cs - z_u
+        shuff_zc_meanz_all = []     # optional: corrected z under shuffle
+
+        # diagnostics
+        diag = dict(
+            window_ms=None,
+            n_ds_used=0,
+            real=dict(
+                n_neuron_used_total=0,
+                n_pairs_used_total=0,
+                clipped_total=0,
+                cov_stats=[],
+            ),
+            shuff=dict(
+                n_shuffles_total=0,
+                n_pairs_used_total=0,
+                clipped_total=0,
+                cov_stats_examples=[],  # only if diag_n_shuffles > 0
+            ),
+            params=dict(
+                min_total_spikes=min_total_spikes,
+                min_var=min_var,
+                eps_rho=eps_rho,
+                psd_eps=psd_eps,
+                diag_n_shuffles=diag_n_shuffles,
+            )
+        )
+
+        for j in range(len(outputs)):
+            res = outputs[j]["results"][i]
+            mats = outputs[j]["last_mats"][i]
+
+            window_ms = res["window_ms"]
+            diag["window_ms"] = window_ms
+
+            Erates = np.asarray(res["Erates"], dtype=np.float64).reshape(-1)
+            n_samples = float(res["n_samples"])
+
+            # spike-count validity
+            total_spikes = Erates * n_samples
+            valid_spikes = total_spikes > min_total_spikes
+            if valid_spikes.sum() < 5:
+                continue
+
+            # store FF metrics (neuron-level) on spike-valid neurons
+            ff_uncorrs.append(np.asarray(res["ff_uncorr"], dtype=np.float64)[valid_spikes])
+            ff_corrs.append(np.asarray(res["ff_corr"], dtype=np.float64)[valid_spikes])
+            erates.append(Erates[valid_spikes])
+            alphas.append(np.asarray(res["alpha"], dtype=np.float64)[valid_spikes])
+
+            # --- build noise covariances ---
+            Ctotal = np.asarray(mats["Total"], dtype=np.float64)
+            Cpsth  = np.asarray(mats["PSTH"], dtype=np.float64)
+            Crate  = np.asarray(mats["Intercept"], dtype=np.float64)  # <-- your real Crate
+
+            CnoiseU = 0.5 * ((Ctotal - Cpsth) + (Ctotal - Cpsth).T)
+            CnoiseC = 0.5 * ((Ctotal - Crate) + (Ctotal - Crate).T)
+
+            # diagnostics on raw covariances (before PSD)
+            diag["real"]["cov_stats"].append(cov_diagnostics(CnoiseU, name=f"ds{j}_CnoiseU"))
+            diag["real"]["cov_stats"].append(cov_diagnostics(CnoiseC, name=f"ds{j}_CnoiseC"))
+
+            # fixed neuron set across U/C, based on diagonal validity
+            dU = np.diag(CnoiseU)
+            dC = np.diag(CnoiseC)
+            validU = valid_spikes & np.isfinite(dU) & (dU > min_var)
+            validC = valid_spikes & np.isfinite(dC) & (dC > min_var)
+            valid_fixed = validU & validC
+
+            nN = int(valid_fixed.sum())
+            if nN < 5:
+                continue
+
+            diag["n_ds_used"] += 1
+            diag["real"]["n_neuron_used_total"] += nN
+            diag["real"]["n_pairs_used_total"] += int(nN * (nN - 1) / 2)
+
+            # PSD projection for correlation computation only
+            CnoiseU_psd = project_to_psd(CnoiseU, eps=psd_eps)
+            CnoiseC_psd = project_to_psd(CnoiseC, eps=psd_eps)
+
+            RU, vU, infoU = cov_to_corr_safe(CnoiseU_psd, min_var=min_var, eps=eps_rho)
+            RC, vC, infoC = cov_to_corr_safe(CnoiseC_psd, min_var=min_var, eps=eps_rho)
+
+            # enforce our fixed mask (don’t let cov_to_corr redefine inclusion)
+            rho_u = get_upper_triangle(index_cov(RU, valid_fixed))
+            rho_c = get_upper_triangle(index_cov(RC, valid_fixed))
+
+            rhos_uncorr.append(rho_u)
+            rhos_corr.append(rho_c)
+
+            z_u = fisher_z_mean(rho_u, eps=eps_rho)
+            z_c = fisher_z_mean(rho_c, eps=eps_rho)
+            z_u_by_ds.append(z_u)
+            z_c_by_ds.append(z_c)
+            delta_by_ds.append(z_c - z_u)
+
+            diag["real"]["clipped_total"] += int(infoU["n_clipped_high"] + infoU["n_clipped_low"] +
+                                                infoC["n_clipped_high"] + infoC["n_clipped_low"])
+
+            # --- shuffle null on delta (z_cs - z_u) ---
+            shuffs = mats.get("Shuffled_Intercepts", [])
+            if shuffs is None or len(shuffs) == 0:
+                continue
+
+            # For your existing shuffle FF/alpha outputs (same as your old code)
+            var_psth = np.diag(Cpsth)
+            ff_uncorr_const = np.asarray(res["ff_uncorr"], dtype=np.float64)
+
+            ds_shuff_alphas_cols = []
+            ds_shuff_ff_uncorr_cols = []
+            ds_shuff_ff_corr_cols = []
+
+            # shuffle diagnostics examples
+            shuff_diag_kept = 0
+
+            for s_idx, Crate_s in enumerate(shuffs):
+                Crate_s = np.asarray(Crate_s, dtype=np.float64)
+
+                # alpha
+                var_rate_s = np.diag(Crate_s)
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    alpha_s = var_psth / var_rate_s
+                ds_shuff_alphas_cols.append(alpha_s[valid_spikes])
+
+                # corrected FF for this shuffle
+                CnoiseC_s = 0.5 * ((Ctotal - Crate_s) + (Ctotal - Crate_s).T)
+                ff_corr_s = np.diag(CnoiseC_s) / Erates
+                ds_shuff_ff_corr_cols.append(ff_corr_s[valid_spikes])
+                ds_shuff_ff_uncorr_cols.append(ff_uncorr_const[valid_spikes])
+
+                # shuffle noise-corr effect (delta)
+                CnoiseC_s_psd = project_to_psd(CnoiseC_s, eps=psd_eps)
+                RCs, vCs, infoS = cov_to_corr_safe(CnoiseC_s_psd, min_var=min_var, eps=eps_rho)
+
+                rho_cs = get_upper_triangle(index_cov(RCs, valid_fixed))
+                z_cs = fisher_z_mean(rho_cs, eps=eps_rho)
+
+                shuff_zc_meanz_all.append(z_cs)
+                shuff_delta_meanz_all.append(z_cs - z_u)
+
+                diag["shuff"]["n_shuffles_total"] += 1
+                diag["shuff"]["n_pairs_used_total"] += int(np.sum(np.isfinite(rho_cs)))
+                diag["shuff"]["clipped_total"] += int(infoS["n_clipped_high"] + infoS["n_clipped_low"])
+
+                if diag_n_shuffles > 0 and shuff_diag_kept < diag_n_shuffles:
+                    diag["shuff"]["cov_stats_examples"].append(cov_diagnostics(CnoiseC_s, name=f"ds{j}_shuff{s_idx}_CnoiseC"))
+                    shuff_diag_kept += 1
+
+            # stack shuffle FF/alpha columns -> (N_valid_spikes, N_shuffles)
+            if len(ds_shuff_alphas_cols) > 0:
+                shuff_alphas_blocks.append(np.stack(ds_shuff_alphas_cols, axis=1))
+                shuff_ff_uncorr_blocks.append(np.stack(ds_shuff_ff_uncorr_cols, axis=1))
+                shuff_ff_corr_blocks.append(np.stack(ds_shuff_ff_corr_cols, axis=1))
+
+        # --- concatenate across datasets for this window ---
+        rho_u_all = np.concatenate(rhos_uncorr) if len(rhos_uncorr) else np.array([])
+        rho_c_all = np.concatenate(rhos_corr)   if len(rhos_corr) else np.array([])
+
+        if len(shuff_alphas_blocks) > 0:
+            cat_shuff_alphas = np.concatenate(shuff_alphas_blocks, axis=0)
+            cat_shuff_uncorr = np.concatenate(shuff_ff_uncorr_blocks, axis=0)
+            cat_shuff_corr   = np.concatenate(shuff_ff_corr_blocks, axis=0)
+        else:
+            cat_shuff_alphas = np.array([])
+            cat_shuff_uncorr = np.array([])
+            cat_shuff_corr   = np.array([])
 
         metrics.append({
-            'window_ms': window_ms,
-            # Real Data (Concatenated per neuron/pair)
-            'uncorr': np.concatenate(ff_uncorrs),
-            'corr': np.concatenate(ff_corrs),
-            'erate': np.concatenate(erates),
-            'alpha': np.concatenate(alphas),
-            'rho_uncorr': np.concatenate(rhos_uncorr),
-            'rho_corr': np.concatenate(rhos_corr),
-            
-            # Shuffled Data (List of lists: [n_datasets] -> [n_shuffles])
-            # We keep structure to calculate CIs per dataset if needed
-            'shuff_uncorr_means': shuff_ff_uncorr_means, # Mean FF per shuffle
-            'shuff_corr_means': shuff_ff_corr_means,     # Mean FF per shuffle
+            "window_ms": diag["window_ms"],
+
+            # FF/rate metrics
+            "uncorr": np.concatenate(ff_uncorrs) if len(ff_uncorrs) else np.array([]),
+            "corr":   np.concatenate(ff_corrs)   if len(ff_corrs) else np.array([]),
+            "erate":  np.concatenate(erates)     if len(erates) else np.array([]),
+            "alpha":  np.concatenate(alphas)     if len(alphas) else np.array([]),
+
+            # real noise corr raw
+            "rho_uncorr": rho_u_all,
+            "rho_corr":   rho_c_all,
+
+            # robust pooled summaries (z space)
+            "rho_u_meanz": fisher_z_mean(rho_u_all, eps=eps_rho),
+            "rho_c_meanz": fisher_z_mean(rho_c_all, eps=eps_rho),
+
+            # per-dataset summaries (preferred for CI/error bars)
+            "rho_u_meanz_by_ds": np.asarray(z_u_by_ds, dtype=np.float64),
+            "rho_c_meanz_by_ds": np.asarray(z_c_by_ds, dtype=np.float64),
+            "rho_delta_meanz_by_ds": np.asarray(delta_by_ds, dtype=np.float64),
+
+            # shuffle FF/alpha (as before)
+            "shuff_uncorr": cat_shuff_uncorr,
+            "shuff_corr":   cat_shuff_corr,
+            "shuff_alphas": cat_shuff_alphas,
+
+            # shuffle null summaries for noise corr
+            "shuff_rho_c_meanz": np.asarray(shuff_zc_meanz_all, dtype=np.float64),
+            "shuff_rho_delta_meanz": np.asarray(shuff_delta_meanz_all, dtype=np.float64),
+
+            # diagnostics
+            "diag": diag,
         })
-        
+
     return metrics
+
+
 
 
 #%%

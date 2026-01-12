@@ -67,14 +67,14 @@ model, dataset_configs = get_model_and_dataset_configs()
 model = model.to(device)
 
 #%% Run main analysis on all datasets
-run_analysis = True
-n_shuffles = 10
+run_analysis = False
+n_shuffles = 100
 
 if run_analysis:
     outputs = []
     analyzers = []
 
-    for dataset_idx in range(5): #range(len(model.names)):
+    for dataset_idx in range(len(model.names)):
         print(f"Running on dataset {dataset_idx}")
         try: # some datasets do not have fixrsvp
             output, analyzer = run_mcfarland_on_dataset(model, dataset_idx, plot=False, n_shuffles=n_shuffles)
@@ -99,126 +99,41 @@ with open('mcfarland_analyzers.pkl', 'rb') as f:
 
 
 #%% Extract relevant metrics for plotting
-metrics = extract_metrics(outputs, min_total_spikes=1000)
-
-# plot Fano Factors
-
-from mcfarland_sim import plot_slope_estimation, bootstrap_slope_ci
-
-window_ms = np.array([outputs[0]['results'][i]['window_ms'] for i in range(len(outputs[0]['results']))])
-n = len(window_ms)
-
-ff_u_slope = np.zeros(n)
-ff_c_slope = np.zeros(n)
-
-# bootstrap CI storage (lo, hi)
-ff_u_ci = np.zeros((2, n))
-ff_c_ci = np.zeros((2, n))
-
-# optional "aleatoric" variability: IQR of per-neuron fano = var/mean
-ff_u_iqr = np.zeros((2, n))
-ff_c_iqr = np.zeros((2, n))
-
-fig, axs = plt.subplots(1, n, figsize=(3*n, 3))
-
-for i in range(n):    
-
-    # Uncorrected
-    res_u, x_u, y_u = plot_slope_estimation(
-        axs[i],
-        metrics[i]['erate'],
-        metrics[i]['uncorr'] * metrics[i]['erate'],
-        "",
-        "tab:blue",
-        label='Uncorrected'
-    )
-    ff_u_slope[i] = res_u.slope
-
-    # Bootstrap CI for slope (epistemic, fewer assumptions)
-    slope_hat, lo, hi, _ = bootstrap_slope_ci(x_u, y_u, nboot=5000, ci=0.95, rng=123 + i)
-    ff_u_ci[:, i] = [lo, hi]
-
-    # "Aleatoric" / population variability proxy: spread of per-neuron fano
-    fano_u = y_u / x_u
-    ff_u_iqr[:, i] = np.quantile(fano_u, [0.25, 0.75])
-
-    # Corrected
-    res_c, x_c, y_c = plot_slope_estimation(
-        axs[i],
-        metrics[i]['erate'],
-        metrics[i]['corr'] * metrics[i]['erate'],
-        f"Window {metrics[i]['window_ms']}ms",
-        "tab:orange",
-        label='Corrected'
-    )
-    ff_c_slope[i] = res_c.slope
-
-    slope_hat, lo, hi, _ = bootstrap_slope_ci(x_c, y_c, nboot=5000, ci=0.95, rng=999 + i)
-    ff_c_ci[:, i] = [lo, hi]
-
-    fano_c = y_c / x_c
-    ff_c_iqr[:, i] = np.quantile(fano_c, [0.25, 0.75])
-
-# save figure
-fig.savefig('../figures/mcfarland/population_fano_window.pdf', bbox_inches='tight', dpi=300) 
-
-# Sort by window_ms so lines don’t zig-zag
-order = np.argsort(window_ms)
-window_ms = window_ms[order]
-
-ff_u_slope = ff_u_slope[order]
-ff_c_slope = ff_c_slope[order]
-ff_u_ci = ff_u_ci[:, order]
-ff_c_ci = ff_c_ci[:, order]
-ff_u_iqr = ff_u_iqr[:, order]
-ff_c_iqr = ff_c_iqr[:, order]
-
-#%% plot population summary
-# Convert (lo,hi) to asymmetric yerr for matplotlib: (2, n) = [lower_err; upper_err]
-u_yerr = np.vstack([ff_u_slope - ff_u_ci[0], ff_u_ci[1] - ff_u_slope])
-c_yerr = np.vstack([ff_c_slope - ff_c_ci[0], ff_c_ci[1] - ff_c_slope])
-
-fig, axs = plt.subplots(1, 2, figsize=(8, 4), sharex=True, sharey=True)
-axs[0].errorbar(window_ms, ff_u_slope, yerr=u_yerr, fmt='o-', capsize=3, label='Uncorrected slope (95% bootstrap CI)')
-axs[0].errorbar(window_ms, ff_c_slope, yerr=c_yerr, fmt='o-', capsize=3, label='Corrected slope (95% bootstrap CI)')
-axs[0].axhline(1.0, color='k', linestyle='--', alpha=0.5)
-axs[0].set_xlabel("Window (ms)")
-axs[0].set_ylabel("Fano / slope")
-axs[0].legend()
-axs[0].grid(True, alpha=0.3)
-axs[0].set_title("Population Fano")
+metrics = extract_metrics(outputs, min_total_spikes=1000, min_var=.1, eps_rho=1e-3)
 
 
-def geomean(x):
-    return np.exp(np.mean(np.log(x)))
+#%% Fano factors
+from scripts.figures_fanofactors import compute_all_fano_stats, plot_fano_paper_figure, plot_supp_var_mean_panels, plot_supp_fano_hist_panels, plot_supp_shuffle_ratio_hist_one_window
 
-ff_u_geomean = np.zeros(n)
-ff_c_geomean = np.zeros(n)
-for i in range(n):
+stats = compute_all_fano_stats(metrics, alternative="less", fdr_q=0.05, nboot_slope=5000)
+fig, axs = plot_fano_paper_figure(stats, title="Fixational eye-movement correction reduces variability")
+fig.savefig("../figures/mcfarland/fano_paper_figure.pdf", bbox_inches="tight", dpi=300)
 
-    x = metrics[i]['uncorr']
-    y = metrics[i]['corr']
-    ix = np.isfinite(x) & np.isfinite(y)
-    ff_u_geomean[i] = geomean(x[ix])
-    ff_c_geomean[i] = geomean(y[ix])
+fig, axs = plot_supp_var_mean_panels(metrics, savepath="../figures/mcfarland/var_mean_panels.pdf")
+fig, axs = plot_supp_fano_hist_panels(metrics, savepath="../figures/mcfarland/fano_hist_panels.pdf")
 
 
-axs[1].fill_between(window_ms, ff_u_iqr[0], ff_u_iqr[1], alpha=0.12, label='Uncorr per-neuron Fano IQR')
-axs[1].fill_between(window_ms, ff_c_iqr[0], ff_c_iqr[1], alpha=0.12, label='Corr per-neuron Fano IQR')
-axs[1].plot(window_ms, ff_u_geomean, 'o-', label='Uncorrected geomean')
-axs[1].plot(window_ms, ff_c_geomean, 'o-', label='Corrected geomean')
-axs[1].legend()
-axs[1].grid(True, alpha=0.3)
-axs[1].set_xlabel("Window (ms)")
-axs[1].set_ylabel("Fano / geomean")
-axs[1].set_title("Per-neuron Fano")
-axs[1].axhline(1.0, color='k', linestyle='--', alpha=0.5)
+w = stats["window_ms"]
+order = np.argsort(w)
 
-# save fig
-fig.savefig('../figures/mcfarland/fano_scaling_summary.pdf', bbox_inches='tight', dpi=300) 
+for idx in order:
+    print(f"\nWindow {int(w[idx])} ms (N valid neurons = {stats['n_valid'][idx]})")
+    print(f"  Uncorr: gmean={stats['g_unc'][idx]:.3f}, IQR=[{stats['iqr_unc'][idx,0]:.3f}, {stats['iqr_unc'][idx,1]:.3f}]")
+    print(f"  Corr:   gmean={stats['g_cor'][idx]:.3f}, IQR=[{stats['iqr_cor'][idx,0]:.3f}, {stats['iqr_cor'][idx,1]:.3f}]")
+    print(f"  Ratio corr/uncorr = {stats['ratio'][idx]:.3f} ({stats['pct_red'][idx]:.1f}% reduction)")
+    print(f"  Wilcoxon p={stats['p_wil'][idx]:.3g}, FDR p={stats['p_wil_fdr'][idx]:.3g}")
 
+    print(f"  Shuffle null ratio 95% CI = [{stats['null_ratio_ci95'][idx,0]:.3f}, {stats['null_ratio_ci95'][idx,1]:.3f}]")
+    print(f"  Empirical p (null ratio <= real ratio) = {stats['p_emp_ratio'][idx]:.3g}")
+
+    print(f"  Slope-FF uncorr={stats['slope_unc'][idx]:.3f}, corr={stats['slope_cor'][idx]:.3f}, ratio={stats['slope_ratio'][idx]:.3f}")
+    lo, hi = stats["slope_diff_ci"][idx]
+    print(f"  Slope diff (corr-uncorr) = {stats['slope_diff'][idx]:.3f} with bootstrap 95% CI [{lo:.3f}, {hi:.3f}]")
+    print(f"  Bootstrap one-sided p(diff>=0) = {stats['p_slope_one'][idx]:.3g}")
 
 #%% plot noise correlations
+window_ms = np.array([m['window_ms'] for m in metrics])
+n = len(window_ms)
 
 fig, axs = plt.subplots(1, n, figsize=(3*n, 3), sharex=True, sharey=True)
 bins = np.linspace(-.5, .5, 100)
@@ -288,6 +203,55 @@ plt.tight_layout()
 fig2.savefig('../figures/mcfarland/noise_correlations_mean.pdf', bbox_inches='tight', dpi=300) 
 
 
+#%%
+window_ms = np.array([m["window_ms"] for m in metrics])
+mu_u = np.array([np.nanmean(m["rho_u_meanz_by_ds"]) for m in metrics])  # mean of mean-z across datasets
+mu_c = np.array([np.nanmean(m["rho_c_meanz_by_ds"]) for m in metrics])
+
+# bootstrap CI across datasets (recommended)
+def bootstrap_ci(x, nboot=5000, ci=0.95, rng=0):
+    x = np.asarray(x, dtype=float)
+    x = x[np.isfinite(x)]
+    if x.size < 2:
+        return np.nan, (np.nan, np.nan)
+    rg = np.random.default_rng(rng)
+    boots = np.array([np.mean(rg.choice(x, size=x.size, replace=True)) for _ in range(nboot)])
+    lo, hi = np.percentile(boots, [(1-ci)/2*100, (1+(ci))/2*100])
+    return np.mean(x), (lo, hi)
+
+lo_u, hi_u, lo_c, hi_c = [], [], [], []
+for i, m in enumerate(metrics):
+    _, (lu, hu) = bootstrap_ci(m["rho_u_meanz_by_ds"], rng=10_000+i)
+    _, (lc, hc) = bootstrap_ci(m["rho_c_meanz_by_ds"], rng=20_000+i)
+    lo_u.append(lu); hi_u.append(hu); lo_c.append(lc); hi_c.append(hc)
+
+lo_u = np.array(lo_u); hi_u = np.array(hi_u)
+lo_c = np.array(lo_c); hi_c = np.array(hi_c)
+
+# plot in z-space (recommended)
+import matplotlib.pyplot as plt
+plt.figure(figsize=(5,3))
+plt.errorbar(window_ms, mu_u, yerr=np.vstack([mu_u-lo_u, hi_u-mu_u]), fmt="o-", capsize=3, label="Uncorrected (mean z)")
+plt.errorbar(window_ms, mu_c, yerr=np.vstack([mu_c-lo_c, hi_c-mu_c]), fmt="o-", capsize=3, label="Corrected (mean z)")
+plt.axhline(0, color="k", lw=1, alpha=0.3)
+plt.xlabel("Window (ms)")
+plt.ylabel("Mean Fisher z(noise corr)")
+plt.legend(frameon=False)
+plt.tight_layout()
+
+#%%
+# null distribution is m["shuff_rho_c_meanz"] (mean-z per shuffle)
+null = m["shuff_rho_c_meanz"]
+null = null[np.isfinite(null)]
+null_ci = np.percentile(null, [2.5, 97.5])
+
+# compare observed corrected mean-z to null
+obs = np.nanmean(m["rho_c_meanz_by_ds"])  # or fisher_z_mean(m["rho_corr"])
+p_emp = (np.sum(null <= obs) + 1) / (null.size + 1)
+
+print(f"Observed mean-z (corrected) = {obs:.3f}")
+print(f"Null CI = [{null_ci[0]:.3f}, {null_ci[1]:.3f}]")
+print(f"Empirical p (null <= obs) = {p_emp:.3g}")
 
 #%% Plot histogram of alpha
 fig, ax = plt.subplots(1, n, figsize=(3*n, 3))
@@ -770,37 +734,36 @@ def run_subspace_with_shuffles(outputs, window_idx=1, rep_k=5, min_total_spikes=
         real_data['names'].append(outputs[i]['sess'])
 
         # --- SHUFFLED DATA ---
-        if 'shuffled_mats' in outputs[i]:
-            # shuffled_mats is List[n_shuffles][n_windows][dict]
-            for s_idx, s_mats_all_wins in enumerate(outputs[i]['shuffled_mats']):
-                s_mats = s_mats_all_wins[window_idx]
-                print(s_mats.keys())
-                s_Cpsth = torch.from_numpy(s_mats['PSTH'])
-                s_Cfem = torch.from_numpy(s_mats['FEM'])
+        if len(mats['Shuffled_Intercepts']) > 0:
+            for s_idx, s_Crate in enumerate(mats['Shuffled_Intercepts']):
+                
+                s_Crate = torch.from_numpy(s_Crate)
+                s_Cpsth = torch.from_numpy(mats['PSTH'])
+                s_Cfem = s_Crate - s_Cpsth
 
                 # Apply SAME mask as real data (comparing same neurons)
                 s_Cpsth = index_cov(s_Cpsth, valid)
                 s_Cfem = index_cov(s_Cfem, valid)
 
-                v = Cpsth.amax()
-                plt.figure()
-                plt.subplot(2,2,1)
-                plt.imshow(s_Cpsth, interpolation='none', vmin=-v, vmax=v)
-                plt.title('Shuffled PSTH')
-                plt.axis('off')
-                plt.subplot(2,2,2)
-                plt.imshow(s_Cfem, interpolation='none', vmin=-v, vmax=v)
-                plt.title('Shuffled FEM')
-                plt.axis('off')
-                plt.subplot(2,2,3)
-                plt.imshow(Cpsth, interpolation='none', vmin=-v, vmax=v)
-                plt.title('Real PSTH')
-                plt.axis('off')
-                plt.subplot(2,2,4)
-                plt.imshow(Cfem, interpolation='none', vmin=-v, vmax=v)
-                plt.title('Real FEM')
-                plt.axis('off')
-                plt.show()
+                # v = Cpsth.amax()
+                # plt.figure()
+                # plt.subplot(2,2,1)
+                # plt.imshow(s_Cpsth, interpolation='none', vmin=-v, vmax=v)
+                # plt.title('Shuffled PSTH')
+                # plt.axis('off')
+                # plt.subplot(2,2,2)
+                # plt.imshow(s_Cfem, interpolation='none', vmin=-v, vmax=v)
+                # plt.title('Shuffled FEM')
+                # plt.axis('off')
+                # plt.subplot(2,2,3)
+                # plt.imshow(Cpsth, interpolation='none', vmin=-v, vmax=v)
+                # plt.title('Real PSTH')
+                # plt.axis('off')
+                # plt.subplot(2,2,4)
+                # plt.imshow(Cfem, interpolation='none', vmin=-v, vmax=v)
+                # plt.title('Real FEM')
+                # plt.axis('off')
+                # plt.show()
 
                 s_Up_k = get_dominant_subspace(s_Cpsth, curr_k)
                 s_Uf_k = get_dominant_subspace(s_Cfem, curr_k)
