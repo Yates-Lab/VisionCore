@@ -2978,15 +2978,15 @@ def extract_metrics(outputs, min_total_spikes=50, min_var=1e-3, eps_rho=1e-6,
     n_windows = len(outputs[0]['results'])
     metrics = []
 
-    for i in range(n_windows):
+    for i in range(n_windows): # loop over window sizes
 
         # --- aggregated real metrics across datasets ---
         ff_uncorrs, ff_corrs, erates, alphas = [], [], [], []
         rhos_uncorr, rhos_corr = [], []
 
         # per-dataset summaries (preferred for CI)
-        z_u_by_ds = []
-        z_c_by_ds = []
+        z_u_by_ds = []  # uncorrected
+        z_c_by_ds = []  # corrected
         delta_by_ds = []
 
         # shuffle FF blocks (your existing behavior)
@@ -3023,6 +3023,12 @@ def extract_metrics(outputs, min_total_spikes=50, min_var=1e-3, eps_rho=1e-6,
             )
         )
 
+        Ctotals = []
+        Cpsths = []
+        Crates = []
+        CnoiseUs = []
+        CnoiseCs = []
+
         for j in range(len(outputs)):
             res = outputs[j]["results"][i]
             mats = outputs[j]["last_mats"][i]
@@ -3039,12 +3045,6 @@ def extract_metrics(outputs, min_total_spikes=50, min_var=1e-3, eps_rho=1e-6,
             if valid_spikes.sum() < 5:
                 continue
 
-            # store FF metrics (neuron-level) on spike-valid neurons
-            ff_uncorrs.append(np.asarray(res["ff_uncorr"], dtype=np.float64)[valid_spikes])
-            ff_corrs.append(np.asarray(res["ff_corr"], dtype=np.float64)[valid_spikes])
-            erates.append(Erates[valid_spikes])
-            alphas.append(np.asarray(res["alpha"], dtype=np.float64)[valid_spikes])
-
             # --- build noise covariances ---
             Ctotal = np.asarray(mats["Total"], dtype=np.float64)
             Cpsth  = np.asarray(mats["PSTH"], dtype=np.float64)
@@ -3053,16 +3053,42 @@ def extract_metrics(outputs, min_total_spikes=50, min_var=1e-3, eps_rho=1e-6,
             CnoiseU = 0.5 * ((Ctotal - Cpsth) + (Ctotal - Cpsth).T)
             CnoiseC = 0.5 * ((Ctotal - Crate) + (Ctotal - Crate).T)
 
-            # diagnostics on raw covariances (before PSD)
-            diag["real"]["cov_stats"].append(cov_diagnostics(CnoiseU, name=f"ds{j}_CnoiseU"))
-            diag["real"]["cov_stats"].append(cov_diagnostics(CnoiseC, name=f"ds{j}_CnoiseC"))
-
             # fixed neuron set across U/C, based on diagonal validity
             dU = np.diag(CnoiseU)
             dC = np.diag(CnoiseC)
             validU = valid_spikes & np.isfinite(dU) & (dU > min_var)
             validC = valid_spikes & np.isfinite(dC) & (dC > min_var)
             valid_fixed = validU & validC
+
+            # index covariance matrices to fixed neuron set
+            CnoiseU = index_cov(CnoiseU, valid_fixed)
+            CnoiseC = index_cov(CnoiseC, valid_fixed)
+            Cpsth = index_cov(Cpsth, valid_fixed)
+            Crate = index_cov(Crate, valid_fixed)
+            Ctotal = index_cov(Ctotal, valid_fixed)
+            Erates = Erates[valid_fixed]
+
+            Ctotals.append(Ctotal)
+            Cpsths.append(Cpsth)
+            Crates.append(Crate)
+            CnoiseUs.append(CnoiseU)
+            CnoiseCs.append(CnoiseC)
+            
+
+            # fano factors
+            ff_uncorr = np.diag(CnoiseU) / Erates
+            ff_corr = np.diag(CnoiseC) / Erates
+
+            # store FF metrics (neuron-level) on spike-valid neurons
+            ff_uncorrs.append(np.asarray(ff_uncorr, dtype=np.float64))
+            ff_corrs.append(np.asarray(ff_corr, dtype=np.float64))
+            erates.append(Erates)
+            alphas.append(np.asarray(res["alpha"][valid_fixed], dtype=np.float64))
+
+
+            # diagnostics on raw covariances (before PSD)
+            diag["real"]["cov_stats"].append(cov_diagnostics(CnoiseU, name=f"ds{j}_CnoiseU"))
+            diag["real"]["cov_stats"].append(cov_diagnostics(CnoiseC, name=f"ds{j}_CnoiseC"))
 
             nN = int(valid_fixed.sum())
             if nN < 5:
@@ -3080,8 +3106,8 @@ def extract_metrics(outputs, min_total_spikes=50, min_var=1e-3, eps_rho=1e-6,
             RC, vC, infoC = cov_to_corr_safe(CnoiseC_psd, min_var=min_var, eps=eps_rho)
 
             # enforce our fixed mask (don’t let cov_to_corr redefine inclusion)
-            rho_u = get_upper_triangle(index_cov(RU, valid_fixed))
-            rho_c = get_upper_triangle(index_cov(RC, valid_fixed))
+            rho_u = get_upper_triangle(RU)
+            rho_c = get_upper_triangle(RC)
 
             rhos_uncorr.append(rho_u)
             rhos_corr.append(rho_c)
@@ -3102,37 +3128,40 @@ def extract_metrics(outputs, min_total_spikes=50, min_var=1e-3, eps_rho=1e-6,
 
             # For your existing shuffle FF/alpha outputs (same as your old code)
             var_psth = np.diag(Cpsth)
-            ff_uncorr_const = np.asarray(res["ff_uncorr"], dtype=np.float64)
 
             ds_shuff_alphas_cols = []
             ds_shuff_ff_uncorr_cols = []
             ds_shuff_ff_corr_cols = []
+            shuff_rho_c = []
 
             # shuffle diagnostics examples
             shuff_diag_kept = 0
 
             for s_idx, Crate_s in enumerate(shuffs):
                 Crate_s = np.asarray(Crate_s, dtype=np.float64)
+                Crate_s = index_cov(Crate_s, valid_fixed)
 
                 # alpha
                 var_rate_s = np.diag(Crate_s)
                 with np.errstate(divide="ignore", invalid="ignore"):
                     alpha_s = var_psth / var_rate_s
-                ds_shuff_alphas_cols.append(alpha_s[valid_spikes])
+                
+                ds_shuff_alphas_cols.append(alpha_s)
 
                 # corrected FF for this shuffle
                 CnoiseC_s = 0.5 * ((Ctotal - Crate_s) + (Ctotal - Crate_s).T)
                 ff_corr_s = np.diag(CnoiseC_s) / Erates
-                ds_shuff_ff_corr_cols.append(ff_corr_s[valid_spikes])
-                ds_shuff_ff_uncorr_cols.append(ff_uncorr_const[valid_spikes])
+                ds_shuff_ff_corr_cols.append(ff_corr_s)
+                ds_shuff_ff_uncorr_cols.append(ff_uncorr)
 
                 # shuffle noise-corr effect (delta)
                 CnoiseC_s_psd = project_to_psd(CnoiseC_s, eps=psd_eps)
                 RCs, vCs, infoS = cov_to_corr_safe(CnoiseC_s_psd, min_var=min_var, eps=eps_rho)
 
-                rho_cs = get_upper_triangle(index_cov(RCs, valid_fixed))
+                rho_cs = get_upper_triangle(RCs)
                 z_cs = fisher_z_mean(rho_cs, eps=eps_rho)
 
+                shuff_rho_c.append(rho_cs)
                 shuff_zc_meanz_all.append(z_cs)
                 shuff_delta_meanz_all.append(z_cs - z_u)
 
@@ -3191,8 +3220,16 @@ def extract_metrics(outputs, min_total_spikes=50, min_var=1e-3, eps_rho=1e-6,
             "shuff_alphas": cat_shuff_alphas,
 
             # shuffle null summaries for noise corr
+            "shuff_rho_corr": np.asarray(shuff_rho_c, dtype=np.float64),
             "shuff_rho_c_meanz": np.asarray(shuff_zc_meanz_all, dtype=np.float64),
             "shuff_rho_delta_meanz": np.asarray(shuff_delta_meanz_all, dtype=np.float64),
+
+            # covariance matrices
+            "Ctotal": Ctotals,
+            "Cpsth": Cpsths,
+            "Crate": Crates,
+            "CnoiseU": CnoiseUs,
+            "CnoiseC": CnoiseCs,
 
             # diagnostics
             "diag": diag,
