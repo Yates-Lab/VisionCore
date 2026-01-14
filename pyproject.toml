@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "VisionCore"
+version = "0.0.0"
+description = "Machine learning toolkit for the Yates lab"
+readme = "README.md"
+requires-python = "==3.12.*"
+dependencies = [
+    "torch>=2.7.0",
+    "numpy",
+    "pandas",
+    "polars",
+    "matplotlib",
+    "tqdm",
+    "h5py",
+    "pyyaml",
+    "mat73",
+    "ipykernel>=6.29.5",
+    "scipy",
+    "scikit-learn",
+    "lightning",
+    "wandb",
+    "loguru",
+    "scikit-image",
+    "LogGabor",
+    "plenoptic",
+
+]
+
+[project.optional-dependencies]
+data = [
+    "DataYatesV1",
+    "DataRowleyV1V2",
+]
+
+[tool.uv.sources]
+DataYatesV1 = {path = "../DataYatesV1", editable = true}
+DataRowleyV1V2 = {path = "../DataRowleyV1V2", editable = true}
+
+# loggabor and slip import these packages during setup.py execution but don't declare them as build dependencies
+[tool.uv.extra-build-dependencies]
+loggabor = ["SLIP", "matplotlib", "NeuroTools"]
+slip = ["numpy", "matplotlib", "NeuroTools"]
+
+[tool.setuptools]
+packages = ["models", "training", "eval"]
+

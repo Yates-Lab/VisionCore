@@ -1,14 +1,11 @@
-
 #%%
-
 
 import sys
 
-from figure_common import TeeWriter, tee_to_file
-sys.path.append('..')
+sys.path.append('./scripts')
 import numpy as np
 
-from DataYatesV1 import enable_autoreload, get_free_device, get_session, get_complete_sessions
+from DataYatesV1 import enable_autoreload, get_free_device
 from models.data import prepare_data
 from models.config_loader import load_dataset_configs
 
