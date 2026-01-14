@@ -158,13 +158,15 @@ def _make_missing_pct(cfg):
         torch.Tensor
             Binary mask tensor of shape [n_frames, 1] where 1 indicates valid frames
         """
-        cids = dset.metadata['cids']
+        cids = np.unique(dset.metadata['sess'].get_spike_clusters())
         times = dset.covariates['t_bins']
 
-        missing_pct_fun = dset.metadata['sess'].get_missing_pct(cids) # missing percent interpolating function
+        missing_pct_fun = dset.metadata['sess'].get_missing_pct_interp(cids) # missing percent interpolating function
         missing_pct = missing_pct_fun(times)
 
         mask = missing_pct < threshold
+        mask[:,np.where(np.median(missing_pct, 0) < threshold)[0]] = True
+
         return mask
     
     return missing_pct
