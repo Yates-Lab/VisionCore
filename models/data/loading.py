@@ -74,13 +74,9 @@ def get_embedded_datasets(sess, types=None, keys_lags=None, train_val_split=None
     # Load and preprocess each dataset type
     dsets = []
     for dset_type in types:
-        if isinstance(dset_type, DictDataset):
-            dset = dset_type
-        else:
-            # Load dataset from file
-            # dset = DictDataset.load(sess.sess_dir / 'shifter' / f'{dset_type}_shifted.dset') #old dsets, issue with gaborium
-            dset = DictDataset.load(sess.sess_dir / 'shifter' / f'{dset_type}_shifted.dset')
-
+        
+        dset = dset_type
+        
         # Apply preprocessing
         dset = pre_func(dset)
 
@@ -387,17 +383,14 @@ def prepare_data(dataset_config: Dict[str, Any], strict: bool = True):
     lab = dataset_config.get("lab", "yates")  # Default to yates for backward compatibility
 
     # Handle different session naming conventions
-    if lab == "yates":
+    if lab.lower() == "yates":
         from DataYatesV1.utils.io import get_session
-        # Yates lab: Subject_YYYY-MM-DD
-        sess = get_session(*sess_name.split("_"))
-    elif lab == "rowley":
-        from DataRowleyV1V2.utils.io import get_session
-        # Rowley lab: YYYY-MM-DD_Subject
-        date, subject = sess_name.split("_", 1)
-        sess = get_session(subject, date)
+    elif lab.lower() == "rowley":
+        from DataRowleyV1V2.data.registry import get_session
     else:
         raise ValueError(f"Unknown lab: {lab}")
+    
+    sess = get_session(*sess_name.split("_"))
 
     # -------------------------------------------------------------------------
     # Calculate downsampling factor if sampling config is present
@@ -454,18 +447,7 @@ def prepare_data(dataset_config: Dict[str, Any], strict: bool = True):
 
     for dt in dset_types:
         try:
-            dset_path = sess.sess_dir / "datasets" / f"{dt}.dset"
-            # check if file exists and continue
-            if not dset_path.exists():
-                if strict:
-                    raise FileNotFoundError(f"Dataset {dset_path} does not exist.")
-                else:
-                    print(f"WARNING: Dataset {dset_path} does not exist. Skipping.")
-                    continue
-                
-            dset = DictDataset.load(dset_path)
-            dset.metadata['name'] = dt # add name to metadata for later identification
-            dset.metadata['sess'] = sess
+            dset = sess.get_dataset(dt, config=dataset_config)
 
             # -------------------------------------------------------------
             # Apply downsampling if specified
