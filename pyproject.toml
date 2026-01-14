@@ -25,7 +25,25 @@ dependencies = [
     "wandb",
     "loguru",
     "scikit-image",
+    "LogGabor",
+    "plenoptic",
+
 ]
+
+[project.optional-dependencies]
+data = [
+    "DataYatesV1",
+    "DataRowleyV1V2",
+]
+
+[tool.uv.sources]
+DataYatesV1 = {path = "../DataYatesV1", editable = true}
+DataRowleyV1V2 = {path = "../DataRowleyV1V2", editable = true}
+
+# loggabor and slip import these packages during setup.py execution but don't declare them as build dependencies
+[tool.uv.extra-build-dependencies]
+loggabor = ["SLIP", "matplotlib", "NeuroTools"]
+slip = ["numpy", "matplotlib", "NeuroTools"]
 
 [tool.setuptools]
 packages = ["models", "training", "eval"]
