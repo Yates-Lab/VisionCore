@@ -158,36 +158,14 @@ def _make_missing_pct(cfg):
         torch.Tensor
             Binary mask tensor of shape [n_frames, 1] where 1 indicates valid frames
         """
-        truncation = np.load(dset.metadata['sess'].sess_dir / 'qc' / 'amp_truncation' / 'truncation.npz')
-        spike_times = dset.metadata['sess'].ks_results.spike_times
-        
-        spike_clusters = dset.metadata['sess'].ks_results.spike_clusters
-        
-        if 'cids' in dset.metadata:
-            cids = dset.metadata['cids']
-        else:
-            cids = np.unique(spike_clusters)
+        cids = dset.metadata['cids']
+        times = dset.covariates['t_bins']
 
-        n_units = len(cids)
-        n_tbins = len(dset.covariates['t_bins'])
-        mask = np.zeros((n_tbins, n_units), dtype=bool)
-        for i, cid in enumerate(cids):
-            st = spike_times[spike_clusters == cid]
-            windows = st[truncation['window_blocks'][truncation['cid'] == cid]]
-            mpcts = truncation['mpcts'][truncation['cid'] == cid]
+        missing_pct_fun = dset.metadata['sess'].get_missing_pct(cids) # missing percent interpolating function
+        missing_pct = missing_pct_fun(times)
 
-            if np.median(mpcts) < threshold:
-                valid = mpcts < threshold
-                # print(f"  {valid.sum()} / {valid.size} windows below threshold")
-                # print(f"  {windows[valid].min()} - {windows[valid].max()}")
-            else:
-                valid = np.ones(mpcts.size, dtype=bool)
-                # print(f"  All windows included")
-
-            valid_tbins = np.where(mask_valid_timestamps(windows, valid, dset.covariates['t_bins']))[0]
-            mask[valid_tbins, i] = True
-
-        return torch.from_numpy(mask).bool()
+        mask = missing_pct < threshold
+        return mask
     
     return missing_pct
 
