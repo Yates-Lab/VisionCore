@@ -41,7 +41,13 @@ def get_fixrsvp_stack(full_size=600, frames_per_im=3,
         radius = 1.5,
         ppd = 37.50476617, prefix='im'):
     '''
-    Utility for getting different types of stimuli.
+    Utility for getting different types of stimuli for simulation.
+    Input:
+        full_size: size of the stimulus in pixels (int, assumes square)
+        frames_per_im: number of frames to show each image for (int)
+                Each image will be repeated this number of times. This is how we change the frame rate.
+        bkgnd: background pixel value (float)
+        radius: radius of the Gaussian texture (float)
     '''
     center_pix = [full_size / 2, full_size / 2]
     from DataYatesV1.exp.support import get_rsvp_fix_stim, get_face_library, get_backimage_directory
@@ -1442,7 +1448,11 @@ class DualWindowAnalysis:
         i, j = torch.triu_indices(N_samples, N_samples, offset=1)
         dist = dist_matrix[i, j]
 
-        bin_edges = np.percentile(dist.cpu().numpy(), np.arange(0, 100, 100/(n_bins+1)))
+        if isinstance(n_bins, int):
+            bin_edges = np.percentile(dist.cpu().numpy(), np.arange(0, 100, 100/(n_bins+1)))
+        else:
+            bin_edges = n_bins
+            
 
         bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
         n_bins = len(bin_edges) - 1
@@ -1518,7 +1528,7 @@ class DualWindowAnalysis:
         # symmetrize
         MM = 0.5 * (MM + np.swapaxes(MM, -1, -2))
 
-        return MM, bin_centers, count_e
+        return MM, bin_centers, count_e, bin_edges
     
     # unbiased PSTH covariance (split-half cross-covariance)
     def _split_half_psth_covariance(self, S, T_idx, min_trials_per_time=10, seed=0):
@@ -1630,7 +1640,7 @@ class DualWindowAnalysis:
             return y_decr[0]
         else:
             return y_incr[0]
-
+        
     def _fit_intercepts_vectorized(self, Ceye, count_e):
         """
         Fits the intercept (d->0) for every element of the covariance matrix.
@@ -1670,7 +1680,164 @@ class DualWindowAnalysis:
 
         return C_intercept
     
-    def _calculate_Crate(self, SpikeCounts, EyeTraj, T_idx, n_bins=25, Ctotal=None):
+    def _fit_intercepts_linear(self, Ceye, bin_centers, count_e, d_max=0.4, min_bins=3, eps=1e-12):
+        """
+        Weighted local linear regression intercept for each (i,j):
+            y(d) ~ b0 + b1*d   for d in (0, d_max]
+        weights w = count_e.
+
+        Returns:
+            C_intercept: (n_cells, n_cells)
+        """
+        n_bins, n_cells, _ = Ceye.shape
+        C_intercept = np.full((n_cells, n_cells), np.nan, dtype=Ceye.dtype)
+
+        x = np.asarray(bin_centers, dtype=np.float64)
+        w_all = np.asarray(count_e, dtype=np.float64)
+
+        # choose local bins
+        use = np.isfinite(x) & (x > 0) & (x <= d_max) & np.isfinite(w_all) & (w_all > 0)
+        idx = np.where(use)[0]
+        if idx.size < min_bins:
+            # not enough support: safest is to fall back to first finite bin
+            k0 = np.where(np.isfinite(x) & np.isfinite(w_all) & (w_all > 0))[0]
+            if k0.size > 0:
+                return Ceye[k0[0]].copy()
+            return C_intercept  # all NaN
+
+        x_loc = x[idx]
+        w_loc = w_all[idx]
+        # Precompute weighted design matrix pieces for speed
+        # X = [1, x]
+        S0 = np.sum(w_loc)
+        S1 = np.sum(w_loc * x_loc)
+        S2 = np.sum(w_loc * x_loc * x_loc)
+        det = (S0 * S2 - S1 * S1)
+
+        if det < eps:
+            # degenerate x; fall back
+            return Ceye[idx[0]].copy()
+
+        for i in range(n_cells):
+            # diagonal
+            y = Ceye[idx, i, i]
+            v = np.isfinite(y)
+            if np.sum(v) >= min_bins:
+                ww = w_loc[v]; xx = x_loc[v]; yy = y[v]
+                S0v = np.sum(ww); S1v = np.sum(ww * xx); S2v = np.sum(ww * xx * xx)
+                T0 = np.sum(ww * yy); T1 = np.sum(ww * xx * yy)
+                detv = (S0v * S2v - S1v * S1v)
+                if detv >= eps:
+                    b0 = (T0 * S2v - T1 * S1v) / detv
+                    C_intercept[i, i] = b0
+
+            for j in range(i + 1, n_cells):
+                y = Ceye[idx, i, j]
+                v = np.isfinite(y)
+                if np.sum(v) < min_bins:
+                    continue
+                ww = w_loc[v]; xx = x_loc[v]; yy = y[v]
+                S0v = np.sum(ww); S1v = np.sum(ww * xx); S2v = np.sum(ww * xx * xx)
+                T0 = np.sum(ww * yy); T1 = np.sum(ww * xx * yy)
+                detv = (S0v * S2v - S1v * S1v)
+                if detv < eps:
+                    continue
+                b0 = (T0 * S2v - T1 * S1v) / detv
+                C_intercept[i, j] = b0
+                C_intercept[j, i] = b0
+
+        return C_intercept
+
+    def _fit_intercepts_bspline(self, Ceye, bin_centers, count_e, d_max=0.4, k=3, n_knots=6, lam=1e-6, min_bins=5):
+        """
+        Weighted B-spline regression for each (i,j) on bins with d in (0, d_max],
+        returning intercept f(0). Uses ridge regularization on spline coefficients.
+
+        Args:
+            k: spline degree (3 = cubic)
+            n_knots: number of *interior* knots across (0, d_max]
+            lam: ridge regularization strength (stabilizes extrapolation to 0)
+        """
+        import numpy as np
+        from scipy.interpolate import BSpline
+
+        n_bins, n_cells, _ = Ceye.shape
+        C_intercept = np.full((n_cells, n_cells), np.nan, dtype=Ceye.dtype)
+
+        x = np.asarray(bin_centers, dtype=np.float64)
+        w_all = np.asarray(count_e, dtype=np.float64)
+
+        use = np.isfinite(x) & (x > 0) & (x <= d_max) & np.isfinite(w_all) & (w_all > 0)
+        idx = np.where(use)[0]
+        if idx.size < min_bins:
+            k0 = np.where(np.isfinite(x) & np.isfinite(w_all) & (w_all > 0))[0]
+            if k0.size > 0:
+                return Ceye[k0[0]].copy()
+            return C_intercept
+
+        x_loc = x[idx]
+        w_loc = w_all[idx]
+
+        # Build a clamped knot vector on [0, d_max]
+        # interior knots uniformly spaced in (0, d_max)
+        t_interior = np.linspace(0, d_max, n_knots + 2)[1:-1]
+        # clamp with multiplicity k+1 at endpoints
+        t = np.concatenate([np.zeros(k+1), t_interior, np.full(k+1, d_max)])
+
+        n_basis = len(t) - (k + 1)
+
+        def design_matrix(xv):
+            # Evaluate each basis spline at xv
+            B = np.zeros((xv.size, n_basis), dtype=np.float64)
+            for b in range(n_basis):
+                c = np.zeros(n_basis); c[b] = 1.0
+                spl = BSpline(t, c, k, extrapolate=True)
+                B[:, b] = spl(xv)
+            return B
+
+        Bx = design_matrix(x_loc)  # (m, n_basis)
+
+        # Weighted ridge normal equations pieces that don't depend on y
+        # Solve (B^T W B + lam I) a = B^T W y
+        W = w_loc[:, None]
+        BtWB = (Bx.T @ (W * Bx))
+        BtWB_reg = BtWB + lam * np.eye(n_basis)
+
+        # For intercept: evaluate basis at x=0
+        B0 = design_matrix(np.array([0.0]))[0]  # (n_basis,)
+
+        # Pre-factorization per-cell-pair is overkill; n_basis is small so just solve directly.
+
+        for i in range(n_cells):
+            y = Ceye[idx, i, i]
+            v = np.isfinite(y)
+            if np.sum(v) >= min_bins:
+                Bv = Bx[v]
+                wv = w_loc[v]
+                rhs = Bv.T @ (wv * y[v])
+                A = (Bv.T @ (wv[:, None] * Bv)) + lam * np.eye(n_basis)
+                coef = np.linalg.solve(A, rhs)
+                C_intercept[i, i] = B0 @ coef
+
+            for j in range(i + 1, n_cells):
+                y = Ceye[idx, i, j]
+                v = np.isfinite(y)
+                if np.sum(v) < min_bins:
+                    continue
+                Bv = Bx[v]
+                wv = w_loc[v]
+                rhs = Bv.T @ (wv * y[v])
+                A = (Bv.T @ (wv[:, None] * Bv)) + lam * np.eye(n_basis)
+                coef = np.linalg.solve(A, rhs)
+                val0 = B0 @ coef
+                C_intercept[i, j] = val0
+                C_intercept[j, i] = val0
+
+        return C_intercept
+
+
+
+    def _calculate_Crate(self, SpikeCounts, EyeTraj, T_idx, n_bins=25, Ctotal=None, intercept_mode='linear'):
         """
         Calculate the eye-conditioned covariance matrix (Crate) using split-half cross-validation.
 
@@ -1698,25 +1865,31 @@ class DualWindowAnalysis:
         count_e: np.ndarray (n_bins,)
             Number of pairs in each bin
         """
-        MM, bin_centers, count_e = self._calculate_second_moment(SpikeCounts, EyeTraj, T_idx, n_bins=n_bins)
+        MM, bin_centers, count_e, bin_edges = self._calculate_second_moment(SpikeCounts, EyeTraj, T_idx, n_bins=n_bins)
         Erate = torch.nanmean(SpikeCounts, 0).detach().cpu().numpy() # raw means
         Ceye = MM - Erate[:,None] * Erate[None,:] # raw rate covariances conditioned on eye trajectory
 
-        Crate = self._fit_intercepts_vectorized(Ceye, count_e) # fit intercepts
+        if intercept_mode == 'linear':
+            Crate = self._fit_intercepts_linear(Ceye, bin_centers, count_e) # fit intercepts
+        elif intercept_mode == 'bspline':
+            Crate = self._fit_intercepts_bspline(Ceye, bin_centers, count_e) # fit intercepts
+        elif intercept_mode == 'isotonic':
+            Crate = self._fit_intercepts_vectorized(Ceye, count_e) # fit intercepts
+        else:
+            Crate = Ceye[0].copy()
 
         if Ctotal is not None:
-            print("Ctotal is not None")
             # find neurons that violate the physical limit that the signal covariance cannot exceed the total covariance
             bad_mask = np.diag(Crate) > .99*np.diag(Ctotal)
-            print(f"  Found {bad_mask.sum()} neurons violating physical limit")
+            # print(f"  Found {bad_mask.sum()} neurons violating physical limit")
             Crate[bad_mask,:] = np.nan
             Crate[:,bad_mask] = np.nan
             Ceye[:,bad_mask,:] = np.nan
             Ceye[:,:,bad_mask] = np.nan
         
-        return Crate, Erate, Ceye, bin_centers, count_e
+        return Crate, Erate, Ceye, bin_centers, count_e, bin_edges
 
-    def run_sweep(self, window_sizes_ms, t_hist_ms=10, n_bins=15, n_shuffles=0, seed=42):
+    def run_sweep(self, window_sizes_ms, t_hist_ms=10, n_bins=15, n_shuffles=0, seed=42, intercept_mode='linear'):
         t_hist_bins = int(t_hist_ms / (self.dt * 1000))
         results = []
         mats_save = []
@@ -1750,8 +1923,8 @@ class DualWindowAnalysis:
             Cpsth, PSTH_A, PSTH_B = self._split_half_psth_covariance(SpikeCounts, T_idx, min_trials_per_time=10, seed=0)
 
             # 4. Real Analysis (Crate)
-            Crate, Erate, Ceye, bin_centers, count_e = self._calculate_Crate(
-                SpikeCounts, EyeTraj, T_idx, n_bins=n_bins, Ctotal=Ctotal
+            Crate, Erate, Ceye, bin_centers, count_e, bin_edges = self._calculate_Crate(
+                SpikeCounts, EyeTraj, T_idx, n_bins=n_bins, Ctotal=Ctotal, intercept_mode=intercept_mode
             )
             
             # 5. Shuffled Analysis (Loop)
@@ -1766,9 +1939,8 @@ class DualWindowAnalysis:
                     EyeTraj_shuff = EyeTraj[perm]
                     
                     # Calculate Intercept for shuffled data
-                    # We pass Ctotal=None to avoid NaN-ing out violations (shuffles are noisy and might violate bounds)
-                    Crate_shuff, _, _, _, _ = self._calculate_Crate(
-                        SpikeCounts, EyeTraj_shuff, T_idx, n_bins=n_bins, Ctotal=None
+                    Crate_shuff, _, _, _, _, _ = self._calculate_Crate(
+                        SpikeCounts, EyeTraj_shuff, T_idx, n_bins=bin_edges, Ctotal=Ctotal, intercept_mode=intercept_mode
                     )
                     shuffled_intercepts.append(Crate_shuff)
 

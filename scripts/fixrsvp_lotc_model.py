@@ -68,14 +68,14 @@ model, dataset_configs = get_model_and_dataset_configs()
 model = model.to(device)
 
 #%% Run main analysis on all datasets
-run_analysis = False
+run_analysis = True
 n_shuffles = 100
 
 if run_analysis:
     outputs = []
     analyzers = []
 
-    for dataset_idx in range(len(model.names)):
+    for dataset_idx in [0]:#range(len(model.names)):
         print(f"Running on dataset {dataset_idx}")
         try: # some datasets do not have fixrsvp
             output, analyzer = run_mcfarland_on_dataset(model, dataset_idx, plot=False, n_shuffles=n_shuffles)
@@ -91,12 +91,18 @@ if run_analysis:
     with open('mcfarland_analyzers.pkl', 'wb') as f:
         dill.dump(analyzers, f)
 
+# exit if called from terminal
+if __name__ == '__main__':
+    print("DONE!")
+    sys.exit()
+
 #%% Load outputs and analyzers from local file
 import dill
 with open('mcfarland_outputs.pkl', 'rb') as f:
     outputs = dill.load(f)
 with open('mcfarland_analyzers.pkl', 'rb') as f:
     analyzers = dill.load(f)
+
 
 
 #%% Extract relevant metrics for plotting
@@ -380,3 +386,4 @@ with tee_to_file(STATS_OUTPUT_FILE, mode='w'):
 print(f"\nStatistics saved to: {STATS_OUTPUT_FILE}")
 
 #%%
+

@@ -235,7 +235,6 @@ class CombinedEmbeddedDataset(torch.utils.data.Dataset):
         
         # Validate that all datasets are DictDatasets and move them to the specified device
         for dset in dsets:
-            assert isinstance(dset, DictDataset), 'dsets must be a list of DictDatasets'
             dset.to(device)
         
         # Convert single indices array to list for consistent handling
