@@ -1,0 +1,27 @@
+Metadata-Version: 2.4
+Name: VisionCore
+Version: 0.0.0
+Summary: Machine learning toolkit for the Yates lab
+Requires-Python: ==3.12.*
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: torch>=2.7.0
+Requires-Dist: numpy
+Requires-Dist: pandas
+Requires-Dist: polars
+Requires-Dist: matplotlib
+Requires-Dist: tqdm
+Requires-Dist: h5py
+Requires-Dist: pyyaml
+Requires-Dist: mat73
+Requires-Dist: ipykernel>=6.29.5
+Requires-Dist: scipy
+Requires-Dist: scikit-learn
+Requires-Dist: lightning
+Requires-Dist: wandb
+Requires-Dist: loguru
+Requires-Dist: scikit-image
+Dynamic: license-file
+
+# VisionCore
+multidataset training for digital twin models of visual cortex

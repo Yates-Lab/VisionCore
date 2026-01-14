@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "VisionCore"
+version = "0.0.0"
+description = "Machine learning toolkit for the Yates lab"
+readme = "README.md"
+requires-python = "==3.12.*"
+dependencies = [
+    "torch>=2.7.0",
+    "numpy",
+    "pandas",
+    "polars",
+    "matplotlib",
+    "tqdm",
+    "h5py",
+    "pyyaml",
+    "mat73",
+    "ipykernel>=6.29.5",
+    "scipy",
+    "scikit-learn",
+    "lightning",
+    "wandb",
+    "loguru",
+    "scikit-image",
+]
+
+[tool.setuptools]
+packages = ["models", "training", "eval"]
+
