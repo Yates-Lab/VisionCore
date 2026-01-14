@@ -2166,7 +2166,14 @@ def run_mcfarland_on_dataset(model, dataset_idx, windows = [10, 20, 40, 80],
     ccnorm[bad] = np.nan
 
     output['ccnorm'] = {'ccnorm': ccnorm, 'ccabs': ccabs, 'ccmax': ccmax, 'cchalf_mean': cchalf_mean, 'cchalf_n': cchalf_n}
-
+    
+    output['model_traces'] = {
+        'robs': robs_used.astype(np.float32),      # Observed spikes 
+        'rhat': rhat_used.astype(np.float32),      # Predicted rates (rescaled)
+        'eyepos': eyepos_used.astype(np.float32),  # Eye position 
+        'dfs': dfs_used.astype(np.float32)         # Data filters
+    }
+    
     # redo variance analysis on residuals. We use this to establish variance explained metrics and subspace alignment.
     residuals = robs_used - rhat_used
 

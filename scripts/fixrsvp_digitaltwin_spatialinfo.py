@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 
 from DataYatesV1 import enable_autoreload, get_free_device
 from eval.eval_stack_multidataset import load_model, load_single_dataset, scan_checkpoints
@@ -22,23 +23,11 @@ from spatial_info import spatial_ssi_population, make_movie
 enable_autoreload()
 device = get_free_device()
 
-#%% Load model and dataset
-checkpoint_dir = "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_120_long/checkpoints"
-models_by_type = scan_checkpoints(checkpoint_dir, verbose=False)
+from utils import get_model_and_dataset_configs
 
-model_type = 'resnet_none_convgru'
-model, model_info = load_model(
-    model_type=model_type,
-    model_index=0,
-    checkpoint_path=None,
-    checkpoint_dir=checkpoint_dir,
-    device='cpu'
-)
-model.model.eval()
-model.model.convnet.use_checkpointing = True  # Enable checkpointing to save GPU memory
+#%% Get model and data
+model, dataset_configs = get_model_and_dataset_configs()
 model = model.to(device)
-
-
 
 import dill
 with open('mcfarland_outputs.pkl', 'rb') as f:
@@ -50,9 +39,7 @@ sessions = [outputs[i]['sess'] for i in range(len(outputs))]
 #%% Helper functions
 
 
-import numpy as np
-import matplotlib as mpl
-import matplotlib.pyplot as plt
+
 
 def plot_spatial_info_figure(full_stack, iframe, f, Pr, eyepos, itrial, I_t_null, I_t,
                              crop=(slice(250, 350), slice(250, 350)),
