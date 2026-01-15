@@ -30,7 +30,7 @@ model, dataset_configs = get_model_and_dataset_configs()
 model = model.to(device)
 
 import dill
-with open('mcfarland_outputs.pkl', 'rb') as f:
+with open('mcfarland_outputs_mono.pkl', 'rb') as f:
     outputs = dill.load(f)
 
 readout = get_spatial_readout(model, outputs).to(device)
@@ -268,34 +268,38 @@ max_T = 540
 for name in sessions:
     dataset_idx = model.names.index(name)
     
-    train_data, val_data, dataset_config = load_single_dataset(model, dataset_idx)
+    try:
+            train_data, val_data, dataset_config = load_single_dataset(model, dataset_idx)
 
-    # Get fixrsvp trial indices
-    inds = torch.concatenate([
-        train_data.get_dataset_inds('fixrsvp'),
-        val_data.get_dataset_inds('fixrsvp')
-    ], dim=0)
+            # Get fixrsvp trial indices
+            inds = torch.concatenate([
+                train_data.get_dataset_inds('fixrsvp'),
+                val_data.get_dataset_inds('fixrsvp')
+            ], dim=0)
 
-    dataset = train_data.shallow_copy()
-    dataset.inds = inds
+            dataset = train_data.shallow_copy()
+            dataset.inds = inds
 
-    dset_idx = inds[:,0].unique().item()
-    trial_inds = dataset.dsets[dset_idx].covariates['trial_inds'].numpy()
-    trials = np.unique(trial_inds)
-    NT = len(trials)
+            dset_idx = inds[:,0].unique().item()
+            trial_inds = dataset.dsets[dset_idx].covariates['trial_inds'].numpy()
+            trials = np.unique(trial_inds)
+            NT = len(trials)
 
-    fixation = np.hypot(
-        dataset.dsets[dset_idx]['eyepos'][:,0].numpy(), 
-        dataset.dsets[dset_idx]['eyepos'][:,1].numpy()
-    ) < 1
+            fixation = np.hypot(
+                dataset.dsets[dset_idx]['eyepos'][:,0].numpy(), 
+                dataset.dsets[dset_idx]['eyepos'][:,1].numpy()
+            ) < 1
 
-    for itrial in range(NT):
-        ix = (trials[itrial] == trial_inds) & fixation
-        ix = (trials[itrial] == trial_inds) & fixation
-        eyepos = dataset.dsets[dset_idx]['eyepos'][ix]
-        eyetrace = np.zeros((max_T, 2))*np.nan
-        eyetrace[:len(eyepos)] = eyepos.numpy()
-        eyetraces.append(eyetrace)
+            for itrial in range(NT):
+                ix = (trials[itrial] == trial_inds) & fixation
+                ix = (trials[itrial] == trial_inds) & fixation
+                eyepos = dataset.dsets[dset_idx]['eyepos'][ix]
+                eyetrace = np.zeros((max_T, 2))*np.nan
+                eyetrace[:len(eyepos)] = eyepos.numpy()
+                eyetraces.append(eyetrace)
+
+    except Exception as e:
+        print(f"Failed to load dataset {name}: {e}")
 
 #%%
 eyepos = np.stack(eyetraces)
@@ -370,7 +374,7 @@ plt.plot(eyepos[itrial])
 plt.show()
 
 
-for iframe in range(full_stack.shape[0]):
+for iframe in [0]:#range(full_stack.shape[0]):
     print(f"Frame {iframe}")
     y, y_null, eye_stim, eye_stim_null = get_trial_stim_and_rates(eyepos[itrial], full_stack[[iframe]].repeat(fix_dur[itrial]+n_lags+1, axis=0), out_size=out_size, n_lags=n_lags, scale=scale)
     ispike, irate, I_t = spatial_ssi_population(y)
