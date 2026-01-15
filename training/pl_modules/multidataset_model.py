@@ -13,7 +13,7 @@ import pytorch_lightning as pl
 from models.losses import MaskedLoss, PoissonBPSAggregator
 from training.regularizers import create_regularizers, get_excluded_params_for_weight_decay
 from training.schedulers import LinearWarmupCosineAnnealingLR, LinearWarmupCosineAnnealingWarmRestartsLR
-from schedulefree import AdamWScheduleFree
+# from schedulefree import AdamWScheduleFree
 
 def _adamw_param_groups_named(named_params, wd, excluded_names, core_keys=("frontend","convnet","modulator"),
                               core_lr=None, head_lr=1e-3):
@@ -300,8 +300,8 @@ class MultiDatasetModel(pl.LightningModule):
         """Set up for training epoch."""
         super().on_train_epoch_start()
         optimizer = self.optimizers()
-        if isinstance(optimizer, AdamWScheduleFree):
-            optimizer.train()
+        # if isinstance(optimizer, AdamWScheduleFree):
+        #     optimizer.train()
 
     def forward(self, stim, ds_idx, beh=None, history=None):
         """
