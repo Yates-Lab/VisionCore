@@ -1,0 +1,16 @@
+● datayates-webapp.service - DataYates Web Application
+     Loaded: loaded (/etc/systemd/system/datayates-webapp.service; enabled; vendor preset: enabled)
+     Active: inactive (dead) since Sat 2025-10-25 16:24:29 PDT; 69ms ago
+    Process: 3473050 ExecStart=/bin/bash -c source /usr/local/anaconda3/etc/profile.d/conda.sh && conda activate env && uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4 (code=exited, status=0/SUCCESS)
+   Main PID: 3473050 (code=exited, status=0/SUCCESS)
+
+Oct 25 16:24:29 yoru datayates-webapp[3473076]: INFO:     Finished server process [3473076]
+Oct 25 16:24:29 yoru datayates-webapp[3473078]: INFO:     Waiting for application shutdown.
+Oct 25 16:24:29 yoru datayates-webapp[3473078]: INFO:     Application shutdown complete.
+Oct 25 16:24:29 yoru datayates-webapp[3473078]: INFO:     Finished server process [3473078]
+Oct 25 16:24:29 yoru datayates-webapp[3473077]: INFO:     Waiting for application shutdown.
+Oct 25 16:24:29 yoru datayates-webapp[3473077]: INFO:     Application shutdown complete.
+Oct 25 16:24:29 yoru datayates-webapp[3473077]: INFO:     Finished server process [3473077]
+Oct 25 16:24:29 yoru datayates-webapp[3473050]: INFO:     Stopping parent process [3473050]
+Oct 25 16:24:29 yoru systemd[1]: datayates-webapp.service: Succeeded.
+Oct 25 16:24:29 yoru systemd[1]: Stopped DataYates Web Application.
