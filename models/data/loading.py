@@ -445,7 +445,7 @@ def prepare_data(dataset_config: Dict[str, Any], strict: bool = True):
 
     preprocessed_dsets = []
 
-    for dt in dset_types:
+    for dt in dset_types.copy():
         try:
             dset = sess.get_dataset(dt, config=dataset_config)
 
