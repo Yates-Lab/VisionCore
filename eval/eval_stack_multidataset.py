@@ -665,6 +665,10 @@ def run_bps_analysis(model, train_data, val_data, dataset_idx, model_name=None, 
             # Apply rescaling if requested
             if rescale:
                 from .eval_stack_utils import rescale_rhat, bits_per_spike
+                
+                print(f"Rescaling {stim_type} rhat. Shapes: {result['robs'].shape}, {result['rhat'].shape}, {result['dfs'].shape}")
+                if result['dfs'].shape[1] == 1:
+                    result['dfs'] = result['dfs'].expand(-1, result['robs'].shape[1])
                 rhat_rescaled, _ = rescale_rhat(result['robs'], result['rhat'], result['dfs'], mode='affine')
                 bps_rescaled = bits_per_spike(rhat_rescaled, result['robs'], result['dfs'])
                 result['rhat'] = rhat_rescaled

@@ -120,7 +120,7 @@ def aggregate_metrics(outputs, window_idx=1):
 #%%
 
 print("Loading outputs...")
-outputs = load_data()
+outputs = load_data(pkl_path='mcfarland_outputs_mono.pkl')
 
 print("Aggregating metrics...")
 metrics, traces = aggregate_metrics(outputs, window_idx=1) # 20ms window typically
@@ -263,6 +263,8 @@ for i in range(sx*sy):
     axs.flatten()[i].set_title(f'{rhos[top[i]]:.2f} {ccnorm[top[i]]:.2f} {ccmax[top[i]]:.2f}')
     # axs.flatten()[i].axis('off')
 
+fig.savefig("../figures/mcfarland/digital_twin_performance_panel_examples_top.pdf", bbox_inches='tight', dpi=300)
+
 # same for median
 fig, axs = plt.subplots(sy, sx, figsize=(2*sx, 2*sy), sharex=True, sharey=False)
 for i in range(sx*sy):
@@ -272,6 +274,8 @@ for i in range(sx*sy):
     axs.flatten()[i].plot(tbins, robss[:,med[i]]/dt, 'k')
     axs.flatten()[i].plot(tbins, rhats[:,med[i]]/dt, 'r')
     axs.flatten()[i].set_title(f'{rhos[top[i]]:.2f} {ccnorm[top[i]]:.2f} {ccmax[top[i]]:.2f}')
+
+fig.savefig("../figures/mcfarland/digital_twin_performance_panel_examples_median.pdf", bbox_inches='tight', dpi=300)
 
 #%% plot variance explained by model compared to variance explained by PSTH
 
@@ -291,7 +295,7 @@ ax.set_xlabel('Variance explained by PSTH')
 ax.set_ylabel('Variance explained by Model')
 
 
-# next, all datasets together (colored by 1-alpha)
+# Main figure Panel: next, all datasets together (colored by 1-alpha)
 fig, ax = plt.subplots(1,1, figsize=(3,2.5))
 
 sc = ax.scatter(
@@ -309,6 +313,7 @@ ax.set_ylim(0, .4)
 
 cbar = fig.colorbar(sc, ax=ax)
 cbar.set_label('1 - alpha')
+fig.savefig("../figures/mcfarland/digital_twin_performance_panel_var_explained.pdf", bbox_inches='tight', dpi=300)
 
 #%% wilcoxon rank sum test
 y = var_explained_psth[good]
@@ -339,14 +344,22 @@ r_rb = rank_biserial_from_wilcoxon(x, y)
 print(f"Rank-biserial r = {r_rb:.3f}")
 
 
-plt.figure()
+# Relationship between 1-alpha and model improvement
+fig = plt.figure()
 plt.plot(1-alpha[good],x/y, '.')
 plt.axhline(1, color='k', linestyle='--', alpha=0.5)
 plt.ylim(0, 5)
 plt.xlabel('1 - alpha')
 plt.ylabel('Var explained by model / Var explained by PSTH')
+fig.savefig("../figures/mcfarland/digital_twin_performance_panel_improvement.pdf", bbox_inches='tight', dpi=300)
 
-
+fig, ax = plt.subplots(1,1, figsize=(3,2.5))
+ax.hist(ccnorm[good], bins=np.linspace(0, 1, 20), color='gray')
+# title is median and IQR
+ax.set_title(f"Median = {np.median(ccnorm[good]):.2f}, IQR = {np.quantile(ccnorm[good], 0.25):.2f} - {np.quantile(ccnorm[good], 0.75):.2f}")
+ax.set_xlabel('Normalized Correlation')
+ax.set_ylabel('Count')
+fig.savefig("../figures/mcfarland/digital_twin_performance_panel_ccnorm.pdf", bbox_inches='tight', dpi=300)
 
 #%%
 

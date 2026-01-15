@@ -64,8 +64,12 @@ from utils import get_model_and_dataset_configs
 
 
 #%% Get model and data
-model, dataset_configs = get_model_and_dataset_configs()
+# mode = "frozencore"
+mode = "standard"
+model, dataset_configs = get_model_and_dataset_configs(mode)
 model = model.to(device)
+
+#%%
 
 #%% Run main analysis on all datasets
 run_analysis = True
@@ -75,7 +79,7 @@ if run_analysis:
     outputs = []
     analyzers = []
 
-    for dataset_idx in [0]:#range(len(model.names)):
+    for dataset_idx in range(len(model.names)):
         print(f"Running on dataset {dataset_idx}")
         try: # some datasets do not have fixrsvp
             output, analyzer = run_mcfarland_on_dataset(model, dataset_idx, plot=False, n_shuffles=n_shuffles)
@@ -86,9 +90,9 @@ if run_analysis:
 
     # Save outputs and analyzers in a local file to load so I don't have to always run this every time
     import dill
-    with open('mcfarland_outputs.pkl', 'wb') as f:
+    with open(f'mcfarland_outputs_{mode}.pkl', 'wb') as f:
         dill.dump(outputs, f)
-    with open('mcfarland_analyzers.pkl', 'wb') as f:
+    with open(f'mcfarland_analyzers_{mode}.pkl', 'wb') as f:
         dill.dump(analyzers, f)
 
 # exit if called from terminal
@@ -103,7 +107,35 @@ with open('mcfarland_outputs.pkl', 'rb') as f:
 with open('mcfarland_analyzers.pkl', 'rb') as f:
     analyzers = dill.load(f)
 
+#%%
+from eval.eval_stack_multidataset import load_model, load_single_dataset, run_bps_analysis, run_qc_analysis
+from eval.eval_stack_utils import run_model, rescale_rhat, ccnorm_split_half_variable_trials
 
+dataset_idx = 1
+print(f"Dataset {dataset_idx}: {model.names[dataset_idx]}")
+train_data, val_data, dataset_config = load_single_dataset(model, dataset_idx)
+dataset_name = model.names[dataset_idx]
+
+#%%
+bps_results = run_bps_analysis(
+        model, train_data, val_data, dataset_idx,
+        batch_size=256, rescale=True, recalc=True
+    )
+
+#%%
+plt.figure()
+for i, type in enumerate(['gaborium', 'backimage']):
+    plt.subplot(1,2,i+1)
+    plt.plot(bps_results[type]['bps'], '.')
+    plt.title(type)
+    plt.ylim(-.1, 1)
+    plt.xlabel('Neuron Index')
+    plt.ylabel('BPS')
+
+#%%
+n_shuffles = 10
+dataset_idx = 1
+output, analyzer = run_mcfarland_on_dataset(model, dataset_idx, plot=True, n_shuffles=n_shuffles)
 
 #%% Extract relevant metrics for plotting
 metrics = extract_metrics(outputs, min_total_spikes=1000, min_var=.1, eps_rho=1e-3)

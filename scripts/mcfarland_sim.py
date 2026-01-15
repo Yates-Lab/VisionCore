@@ -2198,9 +2198,9 @@ def run_mcfarland_on_dataset(model, dataset_idx, windows = [10, 20, 40, 80],
             batch_size=batch_size, rescale=rescale
         )
     
-    qc_results = run_qc_analysis(
-            dataset_name, dataset_config['cids'], dataset_idx
-        )
+    # qc_results = run_qc_analysis(
+    #         dataset_name, dataset_config['cids'], dataset_idx
+    #     )
         
     sess = train_data.dsets[0].metadata['sess']
     # ppd = train_data.dsets[0].metadata['ppd']
@@ -2302,7 +2302,7 @@ def run_mcfarland_on_dataset(model, dataset_idx, windows = [10, 20, 40, 80],
     
     output['neuron_mask'] = neuron_mask
     output['bps_results'] = bps_results
-    output['qc_results'] = qc_results
+    # output['qc_results'] = qc_results
     output['windows'] = windows
     output['cids_used'] = output['cids'][neuron_mask]
     output['results'] = results

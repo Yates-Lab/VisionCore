@@ -45,7 +45,8 @@ device = get_free_device()
 #%% Load an example model (this will be provided in the logging)
 print("Discovering available models...")
 # checkpoint_dir = "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage_history/checkpoints"
-checkpoint_dir = "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage_8/checkpoints"
+# checkpoint_dir = "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage_8/checkpoints"
+checkpoint_dir ="/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_120_long/checkpoints"
 models_by_type = scan_checkpoints(checkpoint_dir, verbose=False)
 
 print(f"Found {len(models_by_type)} model types:")

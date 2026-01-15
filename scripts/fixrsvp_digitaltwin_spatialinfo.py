@@ -30,7 +30,7 @@ model, dataset_configs = get_model_and_dataset_configs()
 model = model.to(device)
 
 import dill
-with open('mcfarland_outputs.pkl', 'rb') as f:
+with open('mcfarland_outputs_mono.pkl', 'rb') as f:
     outputs = dill.load(f)
 
 readout = get_spatial_readout(model, outputs).to(device)
@@ -40,7 +40,9 @@ sessions = [outputs[i]['sess'] for i in range(len(outputs))]
 
 
 
-
+"""
+Plotting code for making a nice figure with the spatial information over time on an image
+"""
 def plot_spatial_info_figure(full_stack, iframe, f, Pr, eyepos, itrial, I_t_null, I_t,
                              crop=(slice(250, 350), slice(250, 350)),
                              outpath=None, dpi=300):
@@ -174,6 +176,7 @@ def plot_spatial_info_figure(full_stack, iframe, f, Pr, eyepos, itrial, I_t_null
     return fig
 
 
+
 def radial_power_spectra_np(imgs, ppd, nbins=None, window=True, return_2d=False, eps=0.0):
     """
     imgs: (N,H,W) float/uint, any range
@@ -236,6 +239,16 @@ def radial_power_spectra_np(imgs, ppd, nbins=None, window=True, return_2d=False,
     f_centers = 0.5 * (edges[:-1] + edges[1:])
     return (f_centers, P_radial, P2d_out) if return_2d else (f_centers, P_radial)
 
+"""
+This is the key simulation
+Inputs:
+    eyepos: (T,2) eye positions in degrees
+    full_stack: (N,H,W) stimulus stack (N frames)
+    out_size: (H_out, W_out) size of output stimulus
+    n_lags: number of time lags to use
+    scale: scale factor for stimulus
+    plot: whether to plot the eyeposition and stimulus frame
+"""
 def get_trial_stim_and_rates(eyepos, full_stack,
                              out_size=(151, 151), n_lags=32, scale=1.0, plot=False):
 
@@ -255,49 +268,54 @@ def get_trial_stim_and_rates(eyepos, full_stack,
         plt.plot(eyepos[:,0].numpy(), eyepos[:,1].numpy(), 'r')
         plt.show()
 
-    y = compute_rate_map_batched(model, readout, eye_stim)
-    y_null = compute_rate_map_batched(model, readout, eye_stim_null)
+    # Compute rates on normalized stimulus
+    # TODO: This assumes pixelnorm was called (which it almost certainly was, but we should do this better...)
+    y = compute_rate_map_batched(model, readout, (eye_stim - 127.0)/255.0)
+    y_null = compute_rate_map_batched(model, readout, (eye_stim_null - 127.0)/255.0)
 
     return y, y_null, eye_stim, eye_stim_null
 
-#%%
-
+#%% This cell just loops over datasets and extracts all the fixation eye traces
 eyetraces = []
 max_T = 540
 
 for name in sessions:
     dataset_idx = model.names.index(name)
     
-    train_data, val_data, dataset_config = load_single_dataset(model, dataset_idx)
+    try:
+            train_data, val_data, dataset_config = load_single_dataset(model, dataset_idx)
 
-    # Get fixrsvp trial indices
-    inds = torch.concatenate([
-        train_data.get_dataset_inds('fixrsvp'),
-        val_data.get_dataset_inds('fixrsvp')
-    ], dim=0)
+            # Get fixrsvp trial indices
+            inds = torch.concatenate([
+                train_data.get_dataset_inds('fixrsvp'),
+                val_data.get_dataset_inds('fixrsvp')
+            ], dim=0)
 
-    dataset = train_data.shallow_copy()
-    dataset.inds = inds
+            dataset = train_data.shallow_copy()
+            dataset.inds = inds
 
-    dset_idx = inds[:,0].unique().item()
-    trial_inds = dataset.dsets[dset_idx].covariates['trial_inds'].numpy()
-    trials = np.unique(trial_inds)
-    NT = len(trials)
+            dset_idx = inds[:,0].unique().item()
+            trial_inds = dataset.dsets[dset_idx].covariates['trial_inds'].numpy()
+            trials = np.unique(trial_inds)
+            NT = len(trials)
 
-    fixation = np.hypot(
-        dataset.dsets[dset_idx]['eyepos'][:,0].numpy(), 
-        dataset.dsets[dset_idx]['eyepos'][:,1].numpy()
-    ) < 1
+            fixation = np.hypot(
+                dataset.dsets[dset_idx]['eyepos'][:,0].numpy(), 
+                dataset.dsets[dset_idx]['eyepos'][:,1].numpy()
+            ) < 1
 
-    for itrial in range(NT):
-        ix = (trials[itrial] == trial_inds) & fixation
-        ix = (trials[itrial] == trial_inds) & fixation
-        eyepos = dataset.dsets[dset_idx]['eyepos'][ix]
-        eyetrace = np.zeros((max_T, 2))*np.nan
-        eyetrace[:len(eyepos)] = eyepos.numpy()
-        eyetraces.append(eyetrace)
+            for itrial in range(NT):
+                ix = (trials[itrial] == trial_inds) & fixation
+                ix = (trials[itrial] == trial_inds) & fixation
+                eyepos = dataset.dsets[dset_idx]['eyepos'][ix]
+                eyetrace = np.zeros((max_T, 2))*np.nan
+                eyetrace[:len(eyepos)] = eyepos.numpy()
+                eyetraces.append(eyetrace)
 
-#%%
+    except Exception as e:
+        print(f"Failed to load dataset {name}: {e}")
+
+#%% Organize the eye traces for later use
 eyepos = np.stack(eyetraces)
 fix_dur = [np.where(np.isnan(e).any(axis=1))[0][0] for e in eyepos]
 
@@ -331,7 +349,8 @@ frames_per_im = 1
 full_stack = make_stimulus_stack(type=type,
         frame=frame, frames_per_im=frames_per_im)
 
-#%%
+
+#%% Plot all images
 N = full_stack.shape[0]
 sx = int(np.sqrt(N))
 sy = int(np.ceil(N / sx))
@@ -346,6 +365,7 @@ for i in range(sx*sy):
     axs.flatten()[i].set_title(f'{i}')
 plt.show()
 
+# calcualte the power spectrum for each image
 f, Pr = radial_power_spectra_np(full_stack, ppd=ppd, window=True)       # (B,), (N,B)
 fig, axs = plt.subplots(sy, sx, figsize=(2*sx, 2*sy), sharex=True, sharey=False)
 for i in range(sx*sy):
@@ -361,38 +381,137 @@ for i in range(sx*sy):
 
 plt.show()
 
-#%%
+
+#%% Find a long fixation to use
 trial_list = np.argsort(fix_dur)[::-1]
-itrial = trial_list[0]
+itrial = trial_list[1]
 
 plt.figure()
 plt.plot(eyepos[itrial])
 plt.show()
 
+#%% run one image to get a sense
+iframe = 29
+y, y_null, eye_stim, eye_stim_null = get_trial_stim_and_rates(eyepos[itrial], full_stack[[iframe]].repeat(fix_dur[itrial]+n_lags+1, axis=0), out_size=out_size, n_lags=n_lags, scale=scale)
 
-for iframe in range(full_stack.shape[0]):
-    print(f"Frame {iframe}")
-    y, y_null, eye_stim, eye_stim_null = get_trial_stim_and_rates(eyepos[itrial], full_stack[[iframe]].repeat(fix_dur[itrial]+n_lags+1, axis=0), out_size=out_size, n_lags=n_lags, scale=scale)
-    ispike, irate, I_t = spatial_ssi_population(y)
-    ispike_null, irate_null, I_t_null = spatial_ssi_population(y_null)
+#%% Compute information from rate maps
+ispike, irate, I_t = spatial_ssi_population(y)
+ispike_null, irate_null, I_t_null = spatial_ssi_population(y_null)
 
-    fig = plot_spatial_info_figure(
-        full_stack, iframe, f, Pr,
-        eyepos, itrial,
-        I_t_null, I_t,
-        outpath=f"../figures/spatial_info/spatial_info_{iframe}.png"
-    )
-    fig.show()
+#%% make a movie of this trial
+n_units = 25 # number of units to show
+units_to_show = np.argsort(I_t.mean(0)-I_t_null.mean(0)).numpy()[::-1][:n_units] # the ones with the most gain in spatial info
+make_movie(y, save_path=f'spatial_info_fixrsvpstatic_{iframe}_{itrial}_activations', n_units_to_show=units_to_show)
 
 
+#%% make a movie of the stimulus itself
+import imageio.v2 as imageio
 
-#%%
+frames = eye_stim[:,0,-1,:,:]
+# normalize from 0 to 1
+frames = (255*(frames - frames.min()) / (frames.max() - frames.min())).numpy().astype(np.uint8)
+imageio.mimsave(f'../figures/spatial_info_fixrsvpstatic_{iframe}_{itrial}_stimulus.mp4', frames, fps=30, format="FFMPEG")
+# make_movie(eye_stim, save_path=, n_units_to_show=units_to_show)
+
+#%% plot rates for some of the units that were shown in the movie
+for cc in units_to_show:
+    plt.plot(y[:,cc,25,[15, 25, 35]], 'b')
+    plt.plot(y_null[:,cc,25,[15, 25, 35]], 'r')
+    plt.title(f'Unit {cc}')
+    plt.show()
+
+# y2 = compute_rate_map_batched(model, readout, )
+
+#%% Loop over all frames and run the analysis for a single eye trace
+rerun=False # this is slow
+if rerun:
+    for iframe in range(full_stack.shape[0]):
+        print(f"Frame {iframe}")
+        y, y_null, eye_stim, eye_stim_null = get_trial_stim_and_rates(eyepos[itrial], full_stack[[iframe]].repeat(fix_dur[itrial]+n_lags+1, axis=0), out_size=out_size, n_lags=n_lags, scale=scale)
+        ispike, irate, I_t = spatial_ssi_population(y)
+        ispike_null, irate_null, I_t_null = spatial_ssi_population(y_null)
+
+        fig = plot_spatial_info_figure(
+            full_stack, iframe, f, Pr,
+            eyepos, itrial,
+            I_t_null, I_t,
+            outpath=f"../figures/spatial_info/spatial_info_{iframe}_{itrial}.png"
+        )
+        fig.show()
 
 
-#%%
+#%% Try again on natural images
+frames_per_im = 1
+full_stack = make_stimulus_stack(type='nat',
+        frame=None, frames_per_im=frames_per_im)
 
 
-#%%
+#%% Plot all images and power spectra
+N = full_stack.shape[0]
+sx = int(np.sqrt(N))
+sy = int(np.ceil(N / sx))
+fig, axs = plt.subplots(sy, sx, figsize=(2*sx, 2*sy), sharex=True, sharey=False)
+for i in range(sx*sy):
+    if i >= N:
+        axs.flatten()[i].axis('off')
+        continue
+    im = full_stack[i]
+    axs.flatten()[i].imshow(im, cmap='gray')
+    axs.flatten()[i].axis('off')
+    axs.flatten()[i].set_title(f'{i}')
+plt.show()
+
+# calcualte the power spectrum for each image
+f, Pr = radial_power_spectra_np(full_stack, ppd=ppd, window=True)       # (B,), (N,B)
+fig, axs = plt.subplots(sy, sx, figsize=(2*sx, 2*sy), sharex=True, sharey=False)
+for i in range(sx*sy):
+    if i >= N:
+        axs.flatten()[i].axis('off')
+        continue
+    axs.flatten()[i].plot(f, Pr[i])
+    axs.flatten()[i].set_title(f'{i}')
+    axs.flatten()[i].set_xscale('log')
+    axs.flatten()[i].set_yscale('log')
+    axs.flatten()[i].set_xlabel('Spatial Frequency (c/deg)')
+    axs.flatten()[i].set_ylabel('Power')
+
+plt.show()
+
+
+
+#%% run one image to get a sense
+iframe = 24
+y, y_null, eye_stim, eye_stim_null = get_trial_stim_and_rates(eyepos[itrial], full_stack[[iframe]].repeat(fix_dur[itrial]+n_lags+1, axis=0), out_size=out_size, n_lags=n_lags, scale=scale)
+
+#%% Compute information from rate maps
+ispike, irate, I_t = spatial_ssi_population(y)
+ispike_null, irate_null, I_t_null = spatial_ssi_population(y_null)
+
+#%% make a movie of this trial
+n_units = 25 # number of units to show
+units_to_show = np.argsort(I_t.mean(0)-I_t_null.mean(0)).numpy()[::-1][:n_units] # the ones with the most gain in spatial info
+make_movie(y, save_path=f'spatial_info_natstatic_{iframe}_{itrial}_activations', n_units_to_show=units_to_show)
+
+
+#%% make a movie of the stimulus itself
+import imageio.v2 as imageio
+
+frames = eye_stim[:,0,-1,:,:]
+# normalize from 0 to 1
+frames = (255*(frames - frames.min()) / (frames.max() - frames.min())).numpy().astype(np.uint8)
+imageio.mimsave(f'../figures/spatial_info_natstatic_{iframe}_{itrial}_stimulus.mp4', frames, fps=30, format="FFMPEG")
+# make_movie(eye_stim, save_path=, n_units_to_show=units_to_show)
+
+#%% plot rates for some of the units that were shown in the movie
+for cc in units_to_show:
+    plt.plot(y[:,cc,25,[15, 25, 35]], 'b')
+    plt.plot(y_null[:,cc,25,[15, 25, 35]], 'r')
+    plt.title(f'Unit {cc}')
+    plt.show()
+
+
+
+#%% Compute power spectrum of all stimuli
 f, Pr, P2d = radial_power_spectra_np(full_stack, ppd, return_2d=True)   # plus (N,H,W)
 
 
@@ -482,6 +601,16 @@ plt.title('Spatial Info (Time)')
 
 #%%
 
+itrial = 1
+plt.plot(eyepos[itrial])
+
+frames_per_im = 1
+full_stack = make_stimulus_stack(type='nat',
+        frame=None, frames_per_im=frames_per_im)
+
+
+
+#%%
 y, y_null, eye_stim, eye_stim_null = get_trial_stim_and_rates(eyepos[itrial], full_stack, out_size, n_lags, scale)
 
 # compute spatial info
