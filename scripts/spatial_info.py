@@ -186,7 +186,7 @@ def make_movie(y, save_path='', n_units_to_show=100):
 
     writer = FFMpegWriter(fps=15, codec='libx264', bitrate=8000)
 
-    save_path = f'../figures/fixrsvp_spatial_activations_{save_path}.mp4'
+    save_path = f'../figures/{save_path}.mp4'
     with writer.saving(fig, save_path, dpi=100):
         for t in range(T):
             ax.clear()
