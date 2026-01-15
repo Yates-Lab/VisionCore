@@ -14,7 +14,7 @@ import matplotlib.patheffects as pe
 import contextlib
 
 #%%
-dataset_configs_path = '/home/tejas/VisionCore/experiments/dataset_configs/multi_basic_240_all.yaml'
+dataset_configs_path = '/home/tejas/VisionCore/experiments/dataset_configs/multi_basic_240_rsvp.yaml'
 dataset_configs = load_dataset_configs(dataset_configs_path)
 
 date = "2022-03-04"
@@ -64,9 +64,6 @@ for itrial in tqdm(range(NT)):
     if np.sum(ix) == 0:
         continue
     
-    stim_inds = np.where(ix)[0]
-    stim_inds = stim_inds[:,None] - np.array(dataset_config['keys_lags']['stim'])[None,:]
-
 
     psth_inds = dataset.dsets[dset_idx].covariates['psth_inds'][ix].numpy()
     fix_dur[itrial] = len(psth_inds)
@@ -89,73 +86,6 @@ plt.xlim(0, 160)
 plt.subplot(1,2,2)
 plt.imshow(np.nanmean(robs,2)[ind])
 plt.xlim(0, 160)
-
-#%%
-# import os
-# from DataYatesV1.models.config_loader import load_dataset_configs
-# from DataYatesV1.utils.data import prepare_data
-# import torch
-# import numpy as np
-# import matplotlib.pyplot as plt
-# from tqdm import tqdm
-# import warnings
-# from DataYatesV1 import  get_complete_sessions
-# import matplotlib.patheffects as pe
-
-# date = "2022-03-04"
-# subject = "Allen"
-
-# dataset_configs_path = "/mnt/sata/YatesMarmoV1/conv_model_fits/data_configs/multi_dataset_basic_for_metrics_rsvp"
-# yaml_files = [
-#     f for f in os.listdir(dataset_configs_path) if f.endswith(".yaml") and "base" not in f and date in f and subject in f
-# ]
-# dataset_configs = load_dataset_configs(yaml_files, dataset_configs_path)
-# from DataYatesV1.utils.data import prepare_data
-# train_dset, val_dset, dataset_config = prepare_data(dataset_configs[0])
-
-
-# inds = train_dset.get_dataset_inds('fixrsvp')
-# dataset = train_dset.shallow_copy()
-# dataset.inds = inds
-
-# dset_idx = inds[:,0].unique().item()
-# trial_inds = dataset.dsets[dset_idx].covariates['trial_inds'].numpy()
-# trials = np.unique(trial_inds)
-
-# NC = dataset.dsets[dset_idx]['robs'].shape[1]
-# T = np.max(dataset.dsets[dset_idx].covariates['psth_inds'][:].numpy()).item() + 1
-# NT = len(trials)
-
-# fixation = np.hypot(dataset.dsets[dset_idx]['eyepos'][:,0].numpy(), dataset.dsets[dset_idx]['eyepos'][:,1].numpy()) < 1
-
-# robs = np.nan*np.zeros((NT, T, NC))
-# eyepos = np.nan*np.zeros((NT, T, 2))
-# fix_dur =np.nan*np.zeros((NT,))
-
-# for itrial in tqdm(range(NT)):
-#     ix = trials[itrial] == trial_inds
-#     ix = ix & fixation
-#     if np.sum(ix) == 0:
-#         continue
-    
-#     psth_inds = dataset.dsets[dset_idx].covariates['psth_inds'][ix].numpy()
-#     fix_dur[itrial] = len(psth_inds)
-#     robs[itrial][psth_inds] = dataset.dsets[dset_idx]['robs'][ix].numpy()
-#     eyepos[itrial][psth_inds] = dataset.dsets[dset_idx]['eyepos'][ix].numpy()
-    
-
-# good_trials = fix_dur > 20
-# robs = robs[good_trials]
-# eyepos = eyepos[good_trials]
-# fix_dur = fix_dur[good_trials]
-
-# ind = np.argsort(fix_dur)[::-1]
-# plt.subplot(1,2,1)
-# plt.imshow(eyepos[ind,:,0])
-# # plt.xlim(0, 160)
-# # plt.subplot(1,2,2)
-# # plt.imshow(np.nanmean(robs,2)[ind])
-# # plt.xlim(0, 160)
 #%%
 from tejas.metrics.gaborium import get_rf_contour_metrics
 rf_contour_metrics = get_rf_contour_metrics(date, subject)
@@ -195,7 +125,8 @@ def get_iix_projection_on_orthogonal_line(eyepos, start_time, end_time, max_orie
     if universal_eyepos:
         all_lags = []
         for i in range(len(rf_contour_metrics)):
-            all_lags.append(rf_contour_metrics[i]['ste_peak_lag'])
+            if i in cids:
+                all_lags.append(rf_contour_metrics[i]['ste_peak_lag'])
         peak_lag = np.median(all_lags).astype(int)
 
     time_window_len = end_time - start_time
@@ -255,7 +186,8 @@ def plot_eyepos(iix, start_time, end_time, max_orientation, cc, universal_eyepos
         if universal_eyepos:
             all_lags = []
             for i in range(len(rf_contour_metrics)):
-                all_lags.append(rf_contour_metrics[i]['ste_peak_lag'])
+                if i in cids:
+                    all_lags.append(rf_contour_metrics[i]['ste_peak_lag'])
             peak_lag = np.median(all_lags).astype(int)
 
         start_time = max(start_time - peak_lag, 0)
