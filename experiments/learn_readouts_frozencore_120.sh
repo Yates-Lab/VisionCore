@@ -11,9 +11,14 @@
 # Usage:
 #   ./experiments/learn_readouts_frozencore_120.sh
 
-# Activate conda environment
-source ~/miniconda3/etc/profile.d/conda.sh
-conda activate yatesfv
+# Activate environment based on user
+if [ "$USER" = "ryanress" ]; then
+    source /home/ryanress/VisionCore/.venv/bin/activate
+else
+    source /home/jake/miniconda3/etc/profile.d/conda.sh
+    conda activate yatesfv
+fi
+
 
 # ---------- DDP / NCCL (2x PCIe, no NVLink) ----------
 export NCCL_DEBUG=ERROR
