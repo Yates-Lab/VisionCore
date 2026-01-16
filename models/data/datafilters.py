@@ -165,7 +165,10 @@ def _make_missing_pct(cfg):
         missing_pct = missing_pct_fun(times)
 
         mask = missing_pct < threshold
-        mask[:,np.where(np.median(missing_pct, 0) < threshold)[0]] = True
+
+        med = np.median(missing_pct, axis=0)  # [N]
+        multi_units = med >= threshold
+        mask[:, multi_units] = True  # don't exclude clear multiunits
 
         return mask
     

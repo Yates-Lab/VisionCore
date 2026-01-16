@@ -538,5 +538,6 @@ class CombinedEmbeddedDataset(torch.utils.data.Dataset):
         for key in target_keys:
             if protect_keys is not None and key in protect_keys:
                 continue
-            if torch.can_cast(self.keys_dtypes[key], dtype):
+            # Only update dtype if the original was floating point (matching DictDataset.cast behavior)
+            if self.keys_dtypes[key].is_floating_point and torch.can_cast(self.keys_dtypes[key], dtype):
                 self.keys_dtypes[key] = dtype

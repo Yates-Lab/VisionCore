@@ -9,7 +9,6 @@ import matplotlib.pyplot as plt
 
 from mcfarland_sim import get_fixrsvp_stack, eye_deg_to_norm, shift_movie_with_eye
 
-
 def embed_time_lags(movie, n_lags=32):
     """
     Embed time lags into a movie tensor.

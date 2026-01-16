@@ -509,8 +509,9 @@ def prepare_data(dataset_config: Dict[str, Any], strict: bool = True):
                         dset[expose_as] = concatenated
                         # print(f"Concatenated {len(var_list)} variables for {expose_as}, final shape: {concatenated.shape}")
 
-            print(f"stim shape: {dset.covariates['stim'].shape}")
             preprocessed_dsets.append(dset)
+            print(f"stim shape: {dset.covariates['stim'].shape}")
+            
 
         except Exception as e:
             if strict:
@@ -525,6 +526,10 @@ def prepare_data(dataset_config: Dict[str, Any], strict: bool = True):
     # -------------------------------------------------------------------------
     # Combine datasets
     # -------------------------------------------------------------------------
+    print(f"Combining {len(preprocessed_dsets)} datasets")
+    for dset in preprocessed_dsets:
+        print(f"  {dset.metadata['name']}: {dset.covariates['stim'].shape}")
+        
     train_dset, val_dset = get_embedded_datasets(
         sess,
         types            = preprocessed_dsets,           # pass in the preprocessed datasets
