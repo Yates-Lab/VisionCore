@@ -729,7 +729,7 @@ class PyramidSimulator:
         Returns:
         --------
         responses : torch.Tensor
-            Simulated responses of shape (T, n_units)
+            Simulated responses of shape (T, num_scales, num_ori, H, W)
         """
         # Ensure movie has correct shape
         if movie.dim() == 3:
@@ -3263,7 +3263,12 @@ def fisher_z_mean(rho, eps=1e-6):
     Returns mean(z); you can back-transform via tanh(mean_z) if desired.
     """
     # DO NOT USE
-    return rho
+    rho = np.asarray(rho, dtype=np.float64).reshape(-1)
+    rho = rho[np.isfinite(rho)]
+    if rho.size == 0:
+        return np.nan
+    rho = np.clip(rho, -1 + eps, 1 - eps)
+    return  np.nanmean(rho)
     # rho = np.asarray(rho, dtype=np.float64).reshape(-1)
     # rho = rho[np.isfinite(rho)]
     # if rho.size == 0:
