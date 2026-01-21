@@ -69,10 +69,79 @@ mode = "standard"
 model, dataset_configs = get_model_and_dataset_configs(mode)
 model = model.to(device)
 
-#%%
+# #%% DEBUGGING
+
+# from eval.eval_stack_multidataset import load_single_dataset
+# has_fixrsvp = []
+# does_not_have_fixrsvp = []
+# for dataset_idx in range(len(model.names)):
+    
+#     train_data, val_data, dataset_config = load_single_dataset(model, dataset_idx)
+#     dset_names = [d.metadata['name'] for d in train_data.dsets]
+#     if 'fixrsvp'in dset_names:
+#         has_fixrsvp.append(dataset_idx)
+#     else:
+#         does_not_have_fixrsvp.append(dataset_idx)
+
+# print(f"Has fixrsvp: {has_fixrsvp}")
+# print(f"Does not have fixrsvp: {does_not_have_fixrsvp}")
+
+# #%%
+# from copy import deepcopy
+# import contextlib
+# dataset_idx = 19
+# n_shuffles = 10
+# dataset_config = deepcopy(model.model.dataset_configs[dataset_idx])
+# dataset_config['types'] = ['backimage', 'fixrsvp']
+# # with contextlib.redirect_stdout(None):
+# train_data, val_data, dataset_config = prepare_data(dataset_config, strict=False)
+
+# sess = train_data.dsets[0].metadata['sess']
+# ppd = train_data.dsets[0].metadata['ppd']
+# cids = dataset_config['cids']
+# print(f"Running on {sess.name}")
+
+# # get fixrsvp inds and make one dataaset object
+# inds = torch.concatenate([
+#         train_data.get_dataset_inds('fixrsvp'),
+#         val_data.get_dataset_inds('fixrsvp')
+#     ], dim=0)
+
+# dataset = train_data.shallow_copy()
+# dataset.inds = inds
+
+# #%%
+
+# # output, analyzer = run_mcfarland_on_dataset(model, dataset_idx, plot=False, n_shuffles=n_shuffles)
+
+# #%%
+# #%%
+# from eval.eval_stack_multidataset import load_model, load_single_dataset, run_bps_analysis, run_qc_analysis
+# from eval.eval_stack_utils import run_model, rescale_rhat, ccnorm_split_half_variable_trials
+
+# dataset_idx = 1
+# print(f"Dataset {dataset_idx}: {model.names[dataset_idx]}")
+# train_data, val_data, dataset_config = load_single_dataset(model, dataset_idx)
+# dataset_name = model.names[dataset_idx]
+
+# #%%
+# bps_results = run_bps_analysis(
+#         model, train_data, val_data, dataset_idx,
+#         batch_size=256, rescale=True, recalc=True
+#     )
+
+# #%%
+# plt.figure()
+# for i, type in enumerate(['gaborium', 'backimage']):
+#     plt.subplot(1,2,i+1)
+#     plt.plot(bps_results[type]['bps'], '.')
+#     plt.title(type)
+#     plt.ylim(-.1, 1)
+#     plt.xlabel('Neuron Index')
+#     plt.ylabel('BPS')
 
 #%% Run main analysis on all datasets
-run_analysis = True
+run_analysis = False
 n_shuffles = 100
 
 if run_analysis:
@@ -90,58 +159,29 @@ if run_analysis:
 
     # Save outputs and analyzers in a local file to load so I don't have to always run this every time
     import dill
-    with open(f'mcfarland_outputs_{mode}.pkl', 'wb') as f:
+    with open(f'dmcfarland_outputs_{mode}.pkl', 'wb') as f:
         dill.dump(outputs, f)
-    with open(f'mcfarland_analyzers_{mode}.pkl', 'wb') as f:
+    with open(f'dmcfarland_analyzers_{mode}.pkl', 'wb') as f:
         dill.dump(analyzers, f)
 
-# exit if called from terminal
+# # exit if called from terminal
 if __name__ == '__main__':
     print("DONE!")
     sys.exit()
 
 #%% Load outputs and analyzers from local file
 import dill
-with open('mcfarland_outputs.pkl', 'rb') as f:
+with open(f'mcfarland_outputs_{mode}.pkl', 'rb') as f:
     outputs = dill.load(f)
-with open('mcfarland_analyzers.pkl', 'rb') as f:
+with open(f'mcfarland_analyzers_{mode}.pkl', 'rb') as f:
     analyzers = dill.load(f)
 
-#%%
-from eval.eval_stack_multidataset import load_model, load_single_dataset, run_bps_analysis, run_qc_analysis
-from eval.eval_stack_utils import run_model, rescale_rhat, ccnorm_split_half_variable_trials
-
-dataset_idx = 1
-print(f"Dataset {dataset_idx}: {model.names[dataset_idx]}")
-train_data, val_data, dataset_config = load_single_dataset(model, dataset_idx)
-dataset_name = model.names[dataset_idx]
-
-#%%
-bps_results = run_bps_analysis(
-        model, train_data, val_data, dataset_idx,
-        batch_size=256, rescale=True, recalc=True
-    )
-
-#%%
-plt.figure()
-for i, type in enumerate(['gaborium', 'backimage']):
-    plt.subplot(1,2,i+1)
-    plt.plot(bps_results[type]['bps'], '.')
-    plt.title(type)
-    plt.ylim(-.1, 1)
-    plt.xlabel('Neuron Index')
-    plt.ylabel('BPS')
-
-#%%
-n_shuffles = 10
-dataset_idx = 1
-output, analyzer = run_mcfarland_on_dataset(model, dataset_idx, plot=True, n_shuffles=n_shuffles)
-
 #%% Extract relevant metrics for plotting
-metrics = extract_metrics(outputs, min_total_spikes=1000, min_var=.1, eps_rho=1e-3)
+metrics = extract_metrics(outputs, min_total_spikes=500, min_var=0, eps_rho=1e-3)
 
 
 #%% Plot covariance decomposition for all sessions
+from mcfarland_sim import project_to_psd
 
 # import cmasher as cmr
 # cmap = plt.get_cmap('cmr.prinsenvlag')   # MPL
@@ -153,11 +193,19 @@ for i in range(len(metrics[0]['Ctotal'])):
     Ctotal = metrics[window_idx]['Ctotal'][i]
     Cpsth = metrics[window_idx]['Cpsth'][i]
     Crate = metrics[window_idx]['Crate'][i]
+    Cfem = metrics[window_idx]['Cfem'][i]
     CnoiseU = metrics[window_idx]['CnoiseU'][i]
     CnoiseC = metrics[window_idx]['CnoiseC'][i]
 
+    # project to psd
+    Ctotal = project_to_psd(Ctotal)
+    Cpsth = project_to_psd(Cpsth)
+    Crate = project_to_psd(Crate)
+    Cfem = project_to_psd(Cfem)
+    CnoiseU = project_to_psd(CnoiseU)
+    CnoiseC = project_to_psd(CnoiseC)
+
     v = np.max(Ctotal.flatten()) * .5
-    Cfem = Crate - Cpsth
 
     fig, axs = plt.subplots(1,3, figsize=(20,5))
     ax = axs[0]

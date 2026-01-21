@@ -729,7 +729,7 @@ class PyramidSimulator:
         Returns:
         --------
         responses : torch.Tensor
-            Simulated responses of shape (T, n_units)
+            Simulated responses of shape (T, num_scales, num_ori, H, W)
         """
         # Ensure movie has correct shape
         if movie.dim() == 3:
@@ -1530,6 +1530,144 @@ class DualWindowAnalysis:
 
         return MM, bin_centers, count_e, bin_edges
     
+    def _naive_psth_covariance(self, S, T_idx, min_trials_per_time=10):
+        """
+        Computes the covariance of the trial-averaged PSTH (Naive Estimator).
+        
+        Bias: BIASED UP (Upper Bound).
+        Includes the standard error of the mean: C_naive = C_signal + (1/N)*C_noise
+        """
+        unique_times = np.unique(T_idx.detach().cpu().numpy())
+        N_cells = S.shape[1]
+        
+        # 1. Compute PSTH (Mean across trials per time point)
+        psth_list = []
+        
+        for t in unique_times:
+            # Get all trials for this time point
+            mask = (T_idx == t)
+            
+            # Check trial count constraint
+            if mask.sum() < min_trials_per_time:
+                continue
+                
+            # Compute mean (PSTH for this time bin)
+            # S[mask] shape is (n_trials, n_cells) -> mean is (n_cells,)
+            mu_t = S[mask].mean(0).detach().cpu().numpy()
+            psth_list.append(mu_t)
+
+        if len(psth_list) < 2:
+            return np.full((N_cells, N_cells), np.nan), None, None
+
+        # Stack into (T_valid, N_cells) matrix
+        PSTH = np.stack(psth_list)
+        
+        # 2. Compute Covariance of the Means
+        # Center the data
+        PSTH_centered = PSTH - PSTH.mean(0, keepdims=True)
+        
+        # Standard sample covariance formula (divide by T-1)
+        C_naive = (PSTH_centered.T @ PSTH_centered) / (PSTH.shape[0] - 1)
+        
+        # Symmetrize (numerical hygiene)
+        C_naive = 0.5 * (C_naive + C_naive.T)
+
+        return C_naive, PSTH, PSTH
+    
+    # unbiased PSTH covariance
+    def _bagged_split_half_psth_covariance(self, S, T_idx, n_boot=20, min_trials_per_time=10, seed=42, global_mean=None):
+        """
+        Computes the Split-Half PSTH covariance averaged over multiple random splits (Bagging).
+        
+        Args:
+            S (torch.Tensor): Spike counts (N_samples, N_cells)
+            T_idx (torch.Tensor): Time indices (N_samples,)
+            global_mean (np.ndarray, optional): 
+                The global mean firing rate vector (Erate) used to center Crate.
+                If provided, this function subtracts global_mean from the split-halves
+                instead of their local means. This ensures that C_rate and C_psth 
+                share the same centering logic, eliminating bias due to drift.
+        """
+        rng = np.random.default_rng(seed)
+        unique_times = np.unique(T_idx.detach().cpu().numpy())
+        N_cells = S.shape[1]
+        
+        # Pre-calculate indices for speed
+        time_groups = {}
+        for t in unique_times:
+            ix_t = np.where((T_idx == t).detach().cpu().numpy())[0]
+            if len(ix_t) >= min_trials_per_time:
+                time_groups[t] = ix_t
+
+        if len(time_groups) < 2:
+             return np.full((N_cells, N_cells), np.nan), None, None
+
+        C_accum = np.zeros((N_cells, N_cells))
+        valid_boots = 0
+
+        # Mean PSTH accumulator for visualization
+        PSTH_mean_accum = np.zeros((len(time_groups), N_cells))
+
+        # Prepare global mean for broadcasting if provided
+        mu_global = None
+        if global_mean is not None:
+            # Ensure shape is (1, N_cells) for broadcasting against (T, N_cells)
+            mu_global = np.asarray(global_mean).reshape(1, -1)
+
+        for k in range(n_boot):
+            PSTH_A_list = []
+            PSTH_B_list = []
+            
+            sorted_times = sorted(time_groups.keys())
+            
+            for t in sorted_times:
+                ix_t = time_groups[t]
+                
+                # Shuffle and Split
+                perm = rng.permutation(ix_t)
+                mid = len(ix_t) // 2
+                
+                # Compute means for this time point (on GPU, move to CPU numpy)
+                mu_A = S[perm[:mid]].mean(0).detach().cpu().numpy()
+                mu_B = S[perm[mid:]].mean(0).detach().cpu().numpy()
+                
+                PSTH_A_list.append(mu_A)
+                PSTH_B_list.append(mu_B)
+            
+            # Stack to (T, Cells)
+            XA = np.stack(PSTH_A_list)
+            XB = np.stack(PSTH_B_list)
+            
+            PSTH_mean_accum += (XA + XB) / 2.0
+            
+            # --- CENTERING LOGIC ---
+            if mu_global is not None:
+                # Global centering: Matches C_rate logic (includes drift variance)
+                XA_c = XA - mu_global
+                XB_c = XB - mu_global
+            else:
+                # Local centering: Standard covariance (High-pass filters drift)
+                XA_c = XA - XA.mean(0, keepdims=True)
+                XB_c = XB - XB.mean(0, keepdims=True)
+            
+            # Unbiased Cross-Covariance
+            n_time = XA.shape[0]
+            C_k = (XA_c.T @ XB_c) / (n_time - 1)
+            
+            # Symmetrize
+            C_k = 0.5 * (C_k + C_k.T)
+            
+            C_accum += C_k
+            valid_boots += 1
+            
+        if valid_boots == 0:
+            return np.full((N_cells, N_cells), np.nan), None, None
+
+        C_final = C_accum / valid_boots
+        PSTH_final = PSTH_mean_accum / valid_boots
+        
+        return C_final, PSTH_final, PSTH_final
+    
     # unbiased PSTH covariance (split-half cross-covariance)
     def _split_half_psth_covariance(self, S, T_idx, min_trials_per_time=10, seed=0):
         '''
@@ -1680,14 +1818,83 @@ class DualWindowAnalysis:
 
         return C_intercept
     
-    def _fit_intercepts_linear(self, Ceye, bin_centers, count_e, d_max=0.4, min_bins=3, eps=1e-12):
-        """
-        Weighted local linear regression intercept for each (i,j):
-            y(d) ~ b0 + b1*d   for d in (0, d_max]
-        weights w = count_e.
+    # def _fit_intercepts_linear(self, Ceye, bin_centers, count_e, d_max=0.4, min_bins=3, eps=1e-12):
+    #     """
+    #     Weighted local linear regression intercept for each (i,j):
+    #         y(d) ~ b0 + b1*d   for d in (0, d_max]
+    #     weights w = count_e.
 
-        Returns:
-            C_intercept: (n_cells, n_cells)
+    #     Returns:
+    #         C_intercept: (n_cells, n_cells)
+    #     """
+    #     n_bins, n_cells, _ = Ceye.shape
+    #     C_intercept = np.full((n_cells, n_cells), np.nan, dtype=Ceye.dtype)
+
+    #     x = np.asarray(bin_centers, dtype=np.float64)
+    #     w_all = np.asarray(count_e, dtype=np.float64)
+
+    #     # choose local bins
+    #     use = np.isfinite(x) & (x > 0) & (x <= d_max) & np.isfinite(w_all) & (w_all > 0)
+    #     idx = np.where(use)[0]
+    #     if idx.size < min_bins:
+    #         # not enough support: safest is to fall back to first finite bin
+    #         k0 = np.where(np.isfinite(x) & np.isfinite(w_all) & (w_all > 0))[0]
+    #         if k0.size > 0:
+    #             return Ceye[k0[0]].copy()
+    #         return C_intercept  # all NaN
+
+    #     x_loc = x[idx]
+    #     w_loc = w_all[idx]
+    #     # Precompute weighted design matrix pieces for speed
+    #     # X = [1, x]
+    #     S0 = np.sum(w_loc)
+    #     S1 = np.sum(w_loc * x_loc)
+    #     S2 = np.sum(w_loc * x_loc * x_loc)
+    #     det = (S0 * S2 - S1 * S1)
+
+    #     if det < eps:
+    #         # degenerate x; fall back
+    #         return Ceye[idx[0]].copy()
+
+    #     for i in range(n_cells):
+    #         # diagonal
+    #         y = Ceye[idx, i, i]
+    #         v = np.isfinite(y)
+    #         if np.sum(v) >= min_bins:
+    #             ww = w_loc[v]; xx = x_loc[v]; yy = y[v]
+    #             S0v = np.sum(ww); S1v = np.sum(ww * xx); S2v = np.sum(ww * xx * xx)
+    #             T0 = np.sum(ww * yy); T1 = np.sum(ww * xx * yy)
+    #             detv = (S0v * S2v - S1v * S1v)
+    #             if detv >= eps:
+    #                 b0 = (T0 * S2v - T1 * S1v) / detv
+    #                 C_intercept[i, i] = b0
+
+    #         for j in range(i + 1, n_cells):
+    #             y = Ceye[idx, i, j]
+    #             v = np.isfinite(y)
+    #             if np.sum(v) < min_bins:
+    #                 continue
+    #             ww = w_loc[v]; xx = x_loc[v]; yy = y[v]
+    #             S0v = np.sum(ww); S1v = np.sum(ww * xx); S2v = np.sum(ww * xx * xx)
+    #             T0 = np.sum(ww * yy); T1 = np.sum(ww * xx * yy)
+    #             detv = (S0v * S2v - S1v * S1v)
+    #             if detv < eps:
+    #                 continue
+    #             b0 = (T0 * S2v - T1 * S1v) / detv
+    #             C_intercept[i, j] = b0
+    #             C_intercept[j, i] = b0
+
+    #     return C_intercept
+    def _fit_intercepts_linear(self, Ceye, bin_centers, count_e, d_max=0.4, min_bins=3, eps=1e-8, eval_at_first_bin=True):
+        """
+        Weighted local linear regression with physical constraints.
+        
+        Safeguards:
+        1. Slope Constraint: Forces slope <= 0. If correlation increases with distance (noise), 
+           we assume the true function is flat (return weighted mean).
+        2. Extrapolation Control: If eval_at_first_bin=True, returns the fitted value 
+           at the first valid bin center (Lower Bound) rather than d=0 (Upper Bound).
+        3. Scale Invariance: Uses correlation check for determinant stability.
         """
         n_bins, n_cells, _ = Ceye.shape
         C_intercept = np.full((n_cells, n_cells), np.nan, dtype=Ceye.dtype)
@@ -1695,58 +1902,107 @@ class DualWindowAnalysis:
         x = np.asarray(bin_centers, dtype=np.float64)
         w_all = np.asarray(count_e, dtype=np.float64)
 
-        # choose local bins
-        use = np.isfinite(x) & (x > 0) & (x <= d_max) & np.isfinite(w_all) & (w_all > 0)
-        idx = np.where(use)[0]
+        # Identify global valid bins used for indices
+        use_mask = np.isfinite(x) & (x > 0) & (x <= d_max) & np.isfinite(w_all) & (w_all > 0)
+        idx = np.where(use_mask)[0]
+        
+        # Fallback if insufficient data
         if idx.size < min_bins:
-            # not enough support: safest is to fall back to first finite bin
+            # Fallback: Just return the raw first valid bin if it exists
             k0 = np.where(np.isfinite(x) & np.isfinite(w_all) & (w_all > 0))[0]
             if k0.size > 0:
                 return Ceye[k0[0]].copy()
-            return C_intercept  # all NaN
+            return C_intercept 
 
         x_loc = x[idx]
         w_loc = w_all[idx]
-        # Precompute weighted design matrix pieces for speed
-        # X = [1, x]
-        S0 = np.sum(w_loc)
-        S1 = np.sum(w_loc * x_loc)
-        S2 = np.sum(w_loc * x_loc * x_loc)
-        det = (S0 * S2 - S1 * S1)
+        
+        # Determine evaluation point (x_eval)
+        # If eval_at_first_bin is True, we evaluate at x_loc[0] (Lower Bound)
+        # If False, we evaluate at 0.0 (extrapolated Upper Bound)
+        x_eval = x_loc[0] if eval_at_first_bin else 0.0
 
-        if det < eps:
-            # degenerate x; fall back
+        # --- Precompute Design Matrix Statistics ---
+        # We solve: argmin sum w * (y - (b0 + b1*x))^2
+        # Analytic solution involves S0, Sx, Sxx
+        S0 = np.sum(w_loc)
+        Sx = np.sum(w_loc * x_loc)
+        Sxx = np.sum(w_loc * x_loc**2)
+        
+        # Denominator for Cramer's rule (Determinant of X^T W X)
+        # Det = S0 * Sxx - Sx^2
+        det = S0 * Sxx - Sx**2
+        
+        # Robustness Check: Normalize determinant to detect true collinearity vs scaling
+        # If variance of X is 0, we can't fit a line.
+        # Var(X)_weighted = (Sxx/S0) - (Sx/S0)^2 = det / S0^2
+        if S0 == 0 or (det / (S0 * S0)) < eps:
+            # Degenerate x (only 1 unique bin center with data?): Fallback to mean
+            # We handle this inside the loop by checking det again, or just returning raw bin 0
             return Ceye[idx[0]].copy()
 
+        # Iterate over all pairs (Upper Triangular)
         for i in range(n_cells):
-            # diagonal
-            y = Ceye[idx, i, i]
-            v = np.isfinite(y)
-            if np.sum(v) >= min_bins:
-                ww = w_loc[v]; xx = x_loc[v]; yy = y[v]
-                S0v = np.sum(ww); S1v = np.sum(ww * xx); S2v = np.sum(ww * xx * xx)
-                T0 = np.sum(ww * yy); T1 = np.sum(ww * xx * yy)
-                detv = (S0v * S2v - S1v * S1v)
-                if detv >= eps:
-                    b0 = (T0 * S2v - T1 * S1v) / detv
-                    C_intercept[i, i] = b0
+            # 1. Diagonal Elements
+            self._fit_single_pair(Ceye, C_intercept, idx, w_loc, x_loc, x_eval, 
+                                  S0, Sx, Sxx, det, i, i)
 
+            # 2. Off-Diagonal Elements
             for j in range(i + 1, n_cells):
-                y = Ceye[idx, i, j]
-                v = np.isfinite(y)
-                if np.sum(v) < min_bins:
-                    continue
-                ww = w_loc[v]; xx = x_loc[v]; yy = y[v]
-                S0v = np.sum(ww); S1v = np.sum(ww * xx); S2v = np.sum(ww * xx * xx)
-                T0 = np.sum(ww * yy); T1 = np.sum(ww * xx * yy)
-                detv = (S0v * S2v - S1v * S1v)
-                if detv < eps:
-                    continue
-                b0 = (T0 * S2v - T1 * S1v) / detv
-                C_intercept[i, j] = b0
-                C_intercept[j, i] = b0
+                self._fit_single_pair(Ceye, C_intercept, idx, w_loc, x_loc, x_eval, 
+                                      S0, Sx, Sxx, det, i, j)
+                # Symmetry
+                C_intercept[j, i] = C_intercept[i, j]
 
         return C_intercept
+
+    def _fit_single_pair(self, Ceye, C_intercept, idx, w_loc, x_loc, x_eval, 
+                         S0, Sx, Sxx, det, i, j):
+        """Helper to solve linear system for a single pair (i,j)"""
+        y = Ceye[idx, i, j]
+        
+        # Check y validity (redundant if Ceye is clean, but safe)
+        if not np.isfinite(y).all():
+            # If we have NaNs in the y-vector for this specific pair, 
+            # we must re-calculate sums just for valid points.
+            # (Slow path, but rarely hit if data is clean)
+            v = np.isfinite(y)
+            if np.sum(v) < 3: # min_bins hardcoded here or passed in
+                return
+            
+            wv, xv, yv = w_loc[v], x_loc[v], y[v]
+            s0 = np.sum(wv); sx = np.sum(wv * xv); sxx = np.sum(wv * xv**2)
+            d = s0 * sxx - sx**2
+            if d <= 0: return
+            
+            sy = np.sum(wv * yv)
+            sxy = np.sum(wv * xv * yv)
+            
+            beta1 = (s0 * sxy - sx * sy) / d
+            beta0 = (sxx * sy - sx * sxy) / d
+        else:
+            # Fast path: use precomputed x-stats
+            Sy = np.sum(w_loc * y)
+            Sxy = np.sum(w_loc * x_loc * y)
+            
+            beta1 = (S0 * Sxy - Sx * Sy) / det
+            beta0 = (Sxx * Sy - Sx * Sxy) / det
+
+        # # --- Physical Constraints ---
+        # # Constraint: Correlation should decay with distance (beta1 <= 0).
+        # # If beta1 > 0, it means correlation *increases* as eyes move apart.
+        # # This is likely noise. The most conservative valid fit is Flat (Mean).
+        # if beta1 > 0:
+        #     beta1 = 0.0
+        #     # Re-calculate beta0 as weighted mean (since y = b0)
+        #     if not np.isfinite(y).all():
+        #         v = np.isfinite(y)
+        #         beta0 = np.average(y[v], weights=w_loc[v])
+        #     else:
+        #         beta0 = Sy / S0
+        
+        # Calculate result
+        C_intercept[i, j] = beta0 + beta1 * x_eval
 
     def _fit_intercepts_bspline(self, Ceye, bin_centers, count_e, d_max=0.4, k=3, n_knots=6, lam=1e-6, min_bins=5):
         """
@@ -1870,7 +2126,7 @@ class DualWindowAnalysis:
         Ceye = MM - Erate[:,None] * Erate[None,:] # raw rate covariances conditioned on eye trajectory
 
         if intercept_mode == 'linear':
-            Crate = self._fit_intercepts_linear(Ceye, bin_centers, count_e) # fit intercepts
+            Crate = self._fit_intercepts_linear(Ceye, bin_centers, count_e, eval_at_first_bin=True) # conservative (evaluate at first bin)
         elif intercept_mode == 'bspline':
             Crate = self._fit_intercepts_bspline(Ceye, bin_centers, count_e) # fit intercepts
         elif intercept_mode == 'isotonic':
@@ -1914,21 +2170,27 @@ class DualWindowAnalysis:
             if n_samples < 100: 
                 continue 
 
-            # 2. Total Covariance (Fixed)
+            # 2. Total Covariance
             ix = np.isfinite(SpikeCounts.sum(1).detach().cpu().numpy())
             Ctotal = torch.cov(SpikeCounts[ix].T, correction=1).detach().cpu().numpy() 
 
-            # 3. PSTH Covariance (Fixed)
-            # This is now calculated ONCE, guaranteeing identity between Real and Shuffled conditions.
-            Cpsth, PSTH_A, PSTH_B = self._split_half_psth_covariance(SpikeCounts, T_idx, min_trials_per_time=10, seed=0)
-
-            # 4. Real Analysis (Crate)
+            # 3. Rate Covariance (using real eye traces)
             Crate, Erate, Ceye, bin_centers, count_e, bin_edges = self._calculate_Crate(
                 SpikeCounts, EyeTraj, T_idx, n_bins=n_bins, Ctotal=Ctotal, intercept_mode=intercept_mode
             )
+
+            # 4. PSTH Covariance
+            Cpsth, PSTH_A, PSTH_B = self._bagged_split_half_psth_covariance(
+                SpikeCounts, 
+                T_idx, 
+                n_boot=20, 
+                min_trials_per_time=10, 
+                seed=seed, 
+                global_mean=Erate
+            )
             
             # 5. Shuffled Analysis (Loop)
-            # We only re-calculate Crate (the intercept). Cfem_shuff will be derived later as (Crate_shuff - Cpsth).
+            # We re-calculate Crate (the intercept). Cfem_shuff will be derived later as (Crate_shuff - Cpsth).
             shuffled_intercepts = []
             
             if n_shuffles > 0:
@@ -2997,19 +3259,61 @@ import numpy as np
 # robust summaries for correlation distributions
 # ----------------------------
 def fisher_z_mean(rho, eps=1e-6):
+    """Mean Fisher z of correlations (robust mean for rho).
+    Returns mean(z); you can back-transform via tanh(mean_z) if desired.
+    """
+    # DO NOT USE
     rho = np.asarray(rho, dtype=np.float64).reshape(-1)
     rho = rho[np.isfinite(rho)]
     if rho.size == 0:
         return np.nan
     rho = np.clip(rho, -1 + eps, 1 - eps)
-    return np.nanmean(np.arctanh(rho))
+    return  np.nanmean(rho)
+    # rho = np.asarray(rho, dtype=np.float64).reshape(-1)
+    # rho = rho[np.isfinite(rho)]
+    # if rho.size == 0:
+    #     return np.nan
+    # rho = np.clip(rho, -1 + eps, 1 - eps)
+    # return np.nanmean(np.arctanh(rho))
 
-def project_to_psd(C, eps=0.0):
+def project_to_psd(C, eps=0.0, max_reg_attempts=5):
+    """Project a matrix to the nearest positive semi-definite matrix.
+
+    Parameters
+    ----------
+    C : array_like
+        Input covariance matrix.
+    eps : float, optional
+        Minimum eigenvalue floor. Default 0.0.
+    max_reg_attempts : int, optional
+        Number of regularization attempts if eigh fails. Default 5.
+
+    Returns
+    -------
+    C_psd : ndarray
+        The nearest PSD matrix.
+    """
     C = np.asarray(C, dtype=np.float64)
     C = 0.5 * (C + C.T)
-    w, V = np.linalg.eigh(C)
-    w = np.maximum(w, eps)
-    return (V * w) @ V.T
+
+    # Check for NaN/Inf and replace with zeros (or could raise)
+    if not np.isfinite(C).all():
+        C = np.nan_to_num(C, nan=0.0, posinf=0.0, neginf=0.0)
+
+    # Try eigendecomposition with increasing regularization if needed
+    reg = 0.0
+    for attempt in range(max_reg_attempts):
+        try:
+            C_reg = C + reg * np.eye(C.shape[0])
+            w, V = np.linalg.eigh(C_reg)
+            w = np.maximum(w, eps)
+            return (V * w) @ V.T
+        except np.linalg.LinAlgError:
+            # Increase regularization: 1e-10, 1e-8, 1e-6, 1e-4, 1e-2
+            reg = 10 ** (-10 + 2 * attempt)
+
+    # Last resort: return symmetrized input with diagonal regularization
+    return C + 1e-2 * np.eye(C.shape[0])
 
 # def cov_diagnostics(C, name="C"):
 #     C = np.asarray(C, dtype=np.float64)
@@ -3214,6 +3518,7 @@ def extract_metrics(outputs, min_total_spikes=50, min_var=1e-3, eps_rho=1e-6,
         Crates = []
         CnoiseUs = []
         CnoiseCs = []
+        Cfems = []
 
         for j in range(len(outputs)):
             res = outputs[j]["results"][i]
@@ -3238,6 +3543,8 @@ def extract_metrics(outputs, min_total_spikes=50, min_var=1e-3, eps_rho=1e-6,
 
             CnoiseU = 0.5 * ((Ctotal - Cpsth) + (Ctotal - Cpsth).T)
             CnoiseC = 0.5 * ((Ctotal - Crate) + (Ctotal - Crate).T)
+            Cfem = Crate - Cpsth
+            Cfem = 0.5 * (Cfem + Cfem.T)
 
             # fixed neuron set across U/C, based on diagonal validity
             dU = np.diag(CnoiseU)
@@ -3257,6 +3564,7 @@ def extract_metrics(outputs, min_total_spikes=50, min_var=1e-3, eps_rho=1e-6,
             Ctotals.append(Ctotal)
             Cpsths.append(Cpsth)
             Crates.append(Crate)
+            Cfems.append(Cfem)
             CnoiseUs.append(CnoiseU)
             CnoiseCs.append(CnoiseC)
             
@@ -3337,10 +3645,15 @@ def extract_metrics(outputs, min_total_spikes=50, min_var=1e-3, eps_rho=1e-6,
                 Crate_s = np.asarray(Crate_s, dtype=np.float64)
                 Crate_s = index_cov(Crate_s, valid_fixed)
 
-                # alpha
+                
                 var_rate_s = np.diag(Crate_s)
+                var_rate_s = np.maximum(var_rate_s, 1e-3)
+                bad_denom = var_rate_s < 1e-2
+
                 with np.errstate(divide="ignore", invalid="ignore"):
                     alpha_s = var_psth / var_rate_s
+
+                alpha_s[bad_denom] = np.nan
                 
                 ds_shuff_alphas_cols.append(alpha_s)
 
@@ -3441,6 +3754,7 @@ def extract_metrics(outputs, min_total_spikes=50, min_var=1e-3, eps_rho=1e-6,
             "Crate": Crates,
             "CnoiseU": CnoiseUs,
             "CnoiseC": CnoiseCs,
+            "Cfem": Cfems,
 
             # diagnostics
             "diag": diag,

@@ -132,7 +132,7 @@ def _make_missing_pct(cfg):
     Parameters
     ----------
     cfg : dict
-        Configuration dictionary with 'threshold' parameter
+        Configuration dictionary with 'threshold' and 'cids' parameters
         
     Returns
     -------
@@ -156,16 +156,19 @@ def _make_missing_pct(cfg):
         Returns
         -------
         torch.Tensor
-            Binary mask tensor of shape [n_frames, 1] where 1 indicates valid frames
+            Binary mask tensor of shape [n_frames, n_units] where 1 indicates valid frames
         """
-        cids = np.unique(dset.metadata['sess'].get_spike_clusters())
+        cids = dset.metadata['sess'].get_cluster_ids()
         times = dset.covariates['t_bins']
 
         missing_pct_fun = dset.metadata['sess'].get_missing_pct_interp(cids) # missing percent interpolating function
         missing_pct = missing_pct_fun(times)
 
         mask = missing_pct < threshold
-        mask[:,np.where(np.median(missing_pct, 0) < threshold)[0]] = True
+
+        med = np.median(missing_pct, axis=0)  # [N]
+        multi_units = med >= threshold
+        mask[:, multi_units] = True  # don't exclude clear multiunits
 
         return mask
     
