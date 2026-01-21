@@ -30,7 +30,7 @@ import contextlib
 
 #%%
 subject = 'Allen'
-date = '2022-03-04'
+date = '2022-04-13'
 
 dataset_configs_path = '/home/tejas/VisionCore/experiments/dataset_configs/multi_basic_240_rsvp.yaml'
 dataset_configs = load_dataset_configs(dataset_configs_path)
@@ -91,12 +91,12 @@ for itrial in tqdm(range(NT)):
     robs[itrial][psth_inds] = dataset.dsets[dset_idx]['robs'][ix].numpy()
     dfs[itrial][psth_inds] = dataset.dsets[dset_idx]['dfs'][ix].numpy()
     eyepos[itrial][psth_inds] = dataset.dsets[dset_idx]['eyepos'][ix].numpy()
-
-time_window_cutoff = 300
+time_window_start = 100
+time_window_end = 110
 good_trials = fix_dur > 20
-robs = robs[good_trials][:,:time_window_cutoff,:]
+robs = robs[good_trials][:,time_window_start:time_window_end,:]
 # dfs = dfs[good_trials]
-eyepos = eyepos[good_trials][:,:time_window_cutoff,:]
+eyepos = eyepos[good_trials][:,time_window_start:time_window_end,:]
 fix_dur = fix_dur[good_trials]
 
 
@@ -119,10 +119,11 @@ use_time_encoding = True
 time_enc_dim = 8
 time_enc_scale = 1.0
 ridge_alpha = 10.0
-window_len = 20 # 20
+window_len_input = 10
+window_len_output = 10
 window_stride = 1
 min_valid_fraction = 0.8
-num_epochs = 15
+num_epochs = 10
 batch_size = 64
 learning_rate = 1e-3
 lag_bins = 0
@@ -177,15 +178,23 @@ def apply_lag(robs_in, eyepos_in, lag):
 
 robs_aligned, eyepos_aligned = apply_lag(robs, eyepos, lag_bins)
 time_len = robs_aligned.shape[1]
-if window_len is None:
-    window_len = time_len
+if window_len_input is None:
+    window_len_input = time_len
+if window_len_output is None:
+    window_len_output = window_len_input
+if window_len_output > window_len_input:
+    raise ValueError("window_len_output must be <= window_len_input.")
+output_offset = (window_len_input - window_len_output) // 2
+if output_offset < 0:
+    raise ValueError("window_len_input must be >= window_len_output.")
 if use_trajectory_loss and loss_on_center:
     raise ValueError("loss_on_center must be False when use_trajectory_loss=True.")
-if loss_on_center and require_odd_window and window_len % 2 == 0:
+if loss_on_center and require_odd_window and window_len_output % 2 == 0:
     raise ValueError("window_len must be odd when loss_on_center=True.")
 
 if center_per_trial:
-    eyepos_mean = np.nanmean(eyepos_aligned, axis=1)
+    global_mean = np.nanmean(eyepos_aligned[train_trials], axis=(0, 1))
+    eyepos_mean = np.tile(global_mean[None, :], (num_trials, 1))
     eyepos_centered = eyepos_aligned - eyepos_mean[:, None, :]
 else:
     eyepos_mean = np.zeros((num_trials, 2))
@@ -283,7 +292,8 @@ class WindowedEyeposDataset(torch.utils.data.Dataset):
         X,
         Y,
         trials,
-        window_len,
+        window_len_input,
+        window_len_output,
         stride,
         min_valid_fraction,
         device,
@@ -302,11 +312,15 @@ class WindowedEyeposDataset(torch.utils.data.Dataset):
             self.X = self.X.to(self.device, non_blocking=True)
             self.Y = self.Y.to(self.device, non_blocking=True)
             self.valid_mask = self.valid_mask.to(self.device, non_blocking=True)
-        self.window_len = window_len
+        self.window_len_input = window_len_input
+        self.window_len_output = window_len_output
+        self.output_offset = (window_len_input - window_len_output) // 2
         self.indices = []
         for trial in trials:
-            for start in range(0, X.shape[1] - window_len + 1, stride):
-                window_mask = self.valid_mask[trial, start:start + window_len]
+            for start in range(0, X.shape[1] - window_len_input + 1, stride):
+                out_start = start + self.output_offset
+                out_end = out_start + window_len_output
+                window_mask = self.valid_mask[trial, out_start:out_end]
                 if window_mask.float().mean() >= min_valid_fraction:
                     self.indices.append((trial, start))
 
@@ -315,12 +329,14 @@ class WindowedEyeposDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         trial, start = self.indices[idx]
-        X_win = self.X[trial, start:start + self.window_len, :]
-        Y_win = self.Y[trial, start:start + self.window_len, :]
-        mask = self.valid_mask[trial, start:start + self.window_len].float()
+        X_win = self.X[trial, start:start + self.window_len_input, :]
+        out_start = start + self.output_offset
+        out_end = out_start + self.window_len_output
+        Y_win = self.Y[trial, out_start:out_end, :]
+        mask = self.valid_mask[trial, out_start:out_end].float()
         time_idx = torch.arange(
-            start,
-            start + self.window_len,
+            out_start,
+            out_end,
             dtype=torch.int64,
             device=self.device if self.cache_on_gpu else None,
         )
@@ -350,6 +366,8 @@ class TransformerEyepos(torch.nn.Module):
 
 
 def masked_mse(pred, target, mask):
+    if pred.shape[1] != target.shape[1]:
+        raise ValueError("pred and target must have same time dimension.")
     err = (pred - target) ** 2
     # err = torch.sqrt(err.sum(dim=-1))
     err = err.sum(dim=-1)
@@ -377,6 +395,8 @@ def trajectory_loss(
     vel_thresh,
     event_weight,
 ):
+    if pred.shape[1] != target.shape[1]:
+        raise ValueError("pred and target must have same time dimension.")
     pos_loss = masked_mse(pred, target, mask)
 
     if lambda_vel <= 0 and lambda_accel <= 0:
@@ -412,6 +432,15 @@ def trajectory_loss(
         + lambda_accel * accel_loss
     )
 
+
+def slice_pred_to_output(pred, window_len_input, window_len_output):
+    if window_len_output > window_len_input:
+        raise ValueError("window_len_output must be <= window_len_input.")
+    if pred.shape[1] == window_len_output:
+        return pred
+    output_offset = (window_len_input - window_len_output) // 2
+    return pred[:, output_offset:output_offset + window_len_output, :]
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -419,7 +448,8 @@ train_dataset = WindowedEyeposDataset(
     robs_feat_model,
     y_target,
     train_trials,
-    window_len,
+    window_len_input,
+    window_len_output,
     window_stride,
     min_valid_fraction,
     device,
@@ -429,7 +459,8 @@ val_dataset = WindowedEyeposDataset(
     robs_feat_model,
     y_target,
     val_trials,
-    window_len,
+    window_len_input,
+    window_len_output,
     window_stride,
     min_valid_fraction,
     device,
@@ -467,7 +498,7 @@ optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 for epoch in range(num_epochs):
     model.train()
     train_losses = []
-    center_idx = window_len // 2
+    center_idx = window_len_output // 2
     for X_batch, y_batch, mask_batch, time_idx in train_loader:
         X_batch = X_batch.to(device)
         y_batch = y_batch.to(device)
@@ -475,6 +506,7 @@ for epoch in range(num_epochs):
         time_idx = time_idx.to(device)
         optimizer.zero_grad()
         pred = model(X_batch)
+        pred = slice_pred_to_output(pred, window_len_input, window_len_output)
         if use_trajectory_loss:
             loss = trajectory_loss(
                 pred,
@@ -496,7 +528,7 @@ for epoch in range(num_epochs):
 
     model.eval()
     val_losses = []
-    center_idx = window_len // 2
+    center_idx = window_len_output // 2
     with torch.no_grad():
         for X_batch, y_batch, mask_batch, time_idx in val_loader:
             X_batch = X_batch.to(device)
@@ -504,6 +536,7 @@ for epoch in range(num_epochs):
             mask_batch = mask_batch.to(device)
             time_idx = time_idx.to(device)
             pred = model(X_batch)
+            pred = slice_pred_to_output(pred, window_len_input, window_len_output)
             if use_trajectory_loss:
                 loss = trajectory_loss(
                     pred,
@@ -532,6 +565,10 @@ for epoch in range(num_epochs):
 def plot_trial_trace(
     model,
     robs_feat_input,
+    robs_feat_ridge,
+    ridge_w,
+    ridge_mean,
+    ridge_std,
     eyepos_actual,
     eyepos_mean,
     train_trials,
@@ -541,6 +578,7 @@ def plot_trial_trace(
     device=None,
     center_per_trial=False,
     show_mean_trace=False,
+    show_ridge=False,
 ):
     if split not in {"train", "val"}:
         raise ValueError("split must be 'train' or 'val'.")
@@ -558,20 +596,22 @@ def plot_trial_trace(
 
     model.eval()
     pred_pos = np.full_like(y, np.nan)
-    half_window = window_len // 2
-    max_start = max(0, X.shape[0] - window_len)
+    half_input = window_len_input // 2
+    max_start = max(0, X.shape[0] - window_len_input)
+    output_offset = (window_len_input - window_len_output) // 2
     with torch.no_grad():
         for t in range(X.shape[0]):
-            start = min(max(t - half_window, 0), max_start)
-            end = start + window_len
+            start = min(max(t - half_input, 0), max_start)
+            end = start + window_len_input
             X_win = X[start:end]
-            if X_win.shape[0] != window_len:
+            if X_win.shape[0] != window_len_input:
                 continue
             X_t = torch.from_numpy(np.nan_to_num(X_win, nan=0.0)).float()[None, ...]
             X_t = X_t.to(device)
             pred_win = model(X_t).squeeze(0).cpu().numpy()
-            center_idx = t - start
-            pred_pos[t] = pred_win[center_idx]
+            center_idx = (t - start) - output_offset
+            if 0 <= center_idx < window_len_output:
+                pred_pos[t] = pred_win[center_idx]
 
     if center_per_trial:
         pred_pos = pred_pos + eyepos_mean[trial]
@@ -579,11 +619,32 @@ def plot_trial_trace(
     pred_plot = pred_pos.copy()
     pred_plot[~valid] = np.nan
 
+    ridge_plot = None
+    if show_ridge:
+        X_ridge = robs_feat_ridge[trial]
+        valid_ridge = (~np.isnan(X_ridge).any(axis=-1)) & (~np.isnan(y).any(axis=-1))
+        X_flat = X_ridge.reshape(-1, X_ridge.shape[-1])
+        X_flat = (X_flat - ridge_mean) / ridge_std
+        ridge_pred = (X_flat @ ridge_w).reshape(y.shape[0], -1)
+        if center_per_trial:
+            ridge_pred = ridge_pred + eyepos_mean[trial]
+        ridge_pred[~valid_ridge] = np.nan
+        ridge_plot = ridge_pred
+
     fig, axes = plt.subplots(3, 1, figsize=(10, 8))
     t = np.arange(y.shape[0])
     valid_xy = ~np.isnan(y).any(axis=-1)
     axes[0].plot(t[valid_xy], y[valid_xy, 0], color="black", label="actual")
     axes[0].plot(t, pred_plot[:, 0], color="tab:blue", alpha=0.8, label="pred")
+    if ridge_plot is not None:
+        axes[0].plot(
+            t,
+            ridge_plot[:, 0],
+            color="tab:green",
+            alpha=0.8,
+            linestyle="--",
+            label="ridge",
+        )
     axes[0].set_ylabel("eye x")
     #set ylim to 0-1
     axes[0].set_ylim(-1, 1)
@@ -596,6 +657,15 @@ def plot_trial_trace(
 
     axes[1].plot(t[valid_xy], y[valid_xy, 1], color="black", label="actual")
     axes[1].plot(t, pred_plot[:, 1], color="tab:orange", alpha=0.8, label="pred")
+    if ridge_plot is not None:
+        axes[1].plot(
+            t,
+            ridge_plot[:, 1],
+            color="tab:green",
+            alpha=0.8,
+            linestyle="--",
+            label="ridge",
+        )
     if show_mean_trace:
         #horizontal line at mean of eyepos_mean
         axes[1].axhline(eyepos_mean[trial, 1], color="gray", linestyle="--", alpha=0.5, label="mean")
@@ -614,6 +684,15 @@ def plot_trial_trace(
         alpha=0.8,
         label="pred",
     )
+    if ridge_plot is not None:
+        axes[2].plot(
+            ridge_plot[valid_xy, 0],
+            ridge_plot[valid_xy, 1],
+            color="tab:green",
+            alpha=0.8,
+            linestyle="--",
+            label="ridge",
+        )
     
     axes[2].set_xlabel("eye x")
     axes[2].set_ylabel("eye y")
@@ -633,6 +712,10 @@ trial_idx += 1
 fig, axes = plot_trial_trace(
     model,
     robs_feat_model,
+    robs_feat,
+    ridge_w,
+    X_mean,
+    X_std,
     eyepos_aligned,
     eyepos_mean,
     train_trials,
@@ -641,6 +724,7 @@ fig, axes = plot_trial_trace(
     split="train",
     center_per_trial=center_per_trial,
     show_mean_trace=True,
+    show_ridge=True,
 )
 
 #%%
@@ -649,6 +733,10 @@ trial_idx += 1
 fig, axes = plot_trial_trace(
     model,
     robs_feat_model,
+    robs_feat,
+    ridge_w,
+    X_mean,
+    X_std,
     eyepos_aligned,
     eyepos_mean,
     train_trials,
@@ -657,6 +745,7 @@ fig, axes = plot_trial_trace(
     split="val",
     center_per_trial=center_per_trial,
     show_mean_trace=True,
+    show_ridge=True,
 )
 
 #%%
