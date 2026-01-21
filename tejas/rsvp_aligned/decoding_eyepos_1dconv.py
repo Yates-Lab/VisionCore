@@ -1,8 +1,4 @@
 #%%
-
-#things to try:
-# 1. try using all cells instead of just the visual responsive ones
-# 2. look at the image content in fixrsvp and find the highest frequency images and see if decoding is better for those images
 import os
 from pathlib import Path
 # Device options
@@ -129,7 +125,10 @@ time_enc_dim = 8
 time_enc_scale = 1.0
 ridge_alpha = 100.0
 
-ridge_window_len_input = 10
+# input_window_start =40
+# input_window_end = 70
+# output_window_start = 50
+# output_window_end = 60
 
 window_len_input = 10 #10
 window_len_output = 10
@@ -144,10 +143,7 @@ standardize_inputs = False
 cache_data_on_gpu = False
 dataloader_num_workers = 4
 dataloader_pin_memory = True
-transformer_dim = 64
-transformer_heads = 4
-transformer_layers = 2
-transformer_dropout = 0.1
+# ConvNeXt 1D (tiny) uses fixed dims/depths in model class
 loss_on_center = False
 require_odd_window = True
 use_trajectory_loss = True
@@ -227,52 +223,16 @@ else:
     robs_feat = robs_aligned
 
 
-def build_ridge_samples(X, Y, trials, window_len):
-    num_trials, time_len, num_feats = X.shape
-    half = window_len // 2
-    X_list = []
-    Y_list = []
-    for trial in trials:
-        for t in range(time_len):
-            start = t - half
-            end = start + window_len
-            if start < 0 or end > time_len:
-                continue
-            X_win = X[trial, start:end, :]
-            y_t = Y[trial, t, :]
-            if np.isnan(X_win).any() or np.isnan(y_t).any():
-                continue
-            X_list.append(X_win.reshape(-1))
-            Y_list.append(y_t)
-    if len(X_list) == 0:
-        return np.empty((0, window_len * num_feats)), np.empty((0, 2))
-    return np.stack(X_list, axis=0), np.stack(Y_list, axis=0)
-
-
-def predict_ridge_trial_global(
-    robs_in,
-    ridge_w,
-    ridge_mean,
-    ridge_std,
-    window_len,
-    trial_idx,
-):
-    time_len = robs_in.shape[1]
-    pred = np.full((time_len, 2), np.nan)
-    half = window_len // 2
-    X_trial = robs_in[trial_idx]
-    for t in range(time_len):
-        start = t - half
-        end = start + window_len
-        if start < 0 or end > time_len:
-            continue
-        X_win = X_trial[start:end]
-        if np.isnan(X_win).any():
-            continue
-        x_flat = X_win.reshape(-1)
-        x_std = (x_flat - ridge_mean) / ridge_std
-        pred[t] = x_std @ ridge_w
-    return pred
+def build_timepoint_samples(X, Y, trials):
+    X_t = X[trials]
+    Y_t = Y[trials]
+    valid_y = ~np.isnan(Y_t).any(axis=-1)
+    valid_x = ~np.isnan(X_t).any(axis=-1)
+    mask = valid_y & valid_x
+    X_flat = X_t.reshape(-1, X_t.shape[-1])
+    Y_flat = Y_t.reshape(-1, Y_t.shape[-1])
+    mask_flat = mask.reshape(-1)
+    return X_flat[mask_flat], Y_flat[mask_flat]
 
 
 def standardize_train(X_train, X_val):
@@ -304,13 +264,9 @@ def r2_score(y_true, y_pred):
     return 1.0 - (ss_res / ss_tot)
 
 
-# Ridge baseline (global model with context window)
-X_train, y_train = build_ridge_samples(
-    robs_feat, y_target, train_trials, ridge_window_len_input
-)
-X_val, y_val = build_ridge_samples(
-    robs_feat, y_target, val_trials, ridge_window_len_input
-)
+# Ridge baseline
+X_train, y_train = build_timepoint_samples(robs_feat, y_target, train_trials)
+X_val, y_val = build_timepoint_samples(robs_feat, y_target, val_trials)
 X_train, X_val, X_mean, X_std = standardize_train(X_train, X_val)
 
 ridge_w = fit_ridge(X_train, y_train, ridge_alpha)
@@ -395,26 +351,52 @@ class WindowedEyeposDataset(torch.utils.data.Dataset):
         return X_win, Y_win, mask, time_idx
 
 
-class TransformerEyepos(torch.nn.Module):
-    def __init__(self, input_dim, model_dim, num_heads, num_layers, dropout_rate):
+class ConvNeXtBlock1D(torch.nn.Module):
+    def __init__(self, dim):
         super().__init__()
-        self.input_proj = torch.nn.Linear(input_dim, model_dim)
-        encoder_layer = torch.nn.TransformerEncoderLayer(
-            d_model=model_dim,
-            nhead=num_heads,
-            dim_feedforward=model_dim * 4,
-            dropout=dropout_rate,
-            batch_first=True,
+        self.dwconv = torch.nn.Conv1d(
+            dim, dim, kernel_size=7, padding=3, groups=dim
         )
-        self.encoder = torch.nn.TransformerEncoder(
-            encoder_layer, num_layers=num_layers
-        )
-        self.head = torch.nn.Linear(model_dim, 2)
+        self.norm = torch.nn.LayerNorm(dim, eps=1e-6)
+        self.pwconv1 = torch.nn.Linear(dim, 4 * dim)
+        self.act = torch.nn.GELU()
+        self.pwconv2 = torch.nn.Linear(4 * dim, dim)
 
     def forward(self, x):
-        x = self.input_proj(x)
-        x = self.encoder(x)
-        return self.head(x)
+        residual = x
+        x = self.dwconv(x)
+        x = x.transpose(1, 2)
+        x = self.norm(x)
+        x = self.pwconv1(x)
+        x = self.act(x)
+        x = self.pwconv2(x)
+        x = x.transpose(1, 2)
+        return x + residual
+
+
+class ConvNeXt1D(torch.nn.Module):
+    def __init__(self, input_dim):
+        super().__init__()
+        depths = [3, 3, 9, 3]
+        dims = [96, 192, 384, 768]
+        self.stem = torch.nn.Conv1d(input_dim, dims[0], kernel_size=1)
+        stages = []
+        in_dim = dims[0]
+        for stage_idx, (depth, dim) in enumerate(zip(depths, dims)):
+            if stage_idx > 0:
+                stages.append(torch.nn.Conv1d(in_dim, dim, kernel_size=1))
+                in_dim = dim
+            blocks = [ConvNeXtBlock1D(dim) for _ in range(depth)]
+            stages.append(torch.nn.Sequential(*blocks))
+        self.stages = torch.nn.Sequential(*stages)
+        self.head = torch.nn.Conv1d(dims[-1], 2, kernel_size=1)
+
+    def forward(self, x):
+        x = x.transpose(1, 2)
+        x = self.stem(x)
+        x = self.stages(x)
+        x = self.head(x)
+        return x.transpose(1, 2)
 
 
 def masked_mse(pred, target, mask):
@@ -538,14 +520,8 @@ val_loader = torch.utils.data.DataLoader(
     persistent_workers=loader_num_workers > 0,
 )
 
-model = TransformerEyepos(
-    robs_feat_model.shape[2],
-    model_dim=transformer_dim,
-    num_heads=transformer_heads,
-    num_layers=transformer_layers,
-    dropout_rate=transformer_dropout,
-).to(device)
-optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+model = ConvNeXt1D(robs_feat_model.shape[2]).to(device)
+optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
 for epoch in range(num_epochs):
     model.train()
@@ -621,7 +597,6 @@ def plot_trial_trace(
     ridge_w,
     ridge_mean,
     ridge_std,
-    ridge_window_len_input,
     eyepos_actual,
     eyepos_mean,
     train_trials,
@@ -631,7 +606,6 @@ def plot_trial_trace(
     device=None,
     center_per_trial=False,
     show_ridge=False,
-    show_pred=False,
 ):
     if split not in {"train", "val"}:
         raise ValueError("split must be 'train' or 'val'.")
@@ -674,15 +648,11 @@ def plot_trial_trace(
 
     ridge_plot = None
     if show_ridge:
-        ridge_pred = predict_ridge_trial_global(
-            robs_feat_ridge,
-            ridge_w,
-            ridge_mean,
-            ridge_std,
-            ridge_window_len_input,
-            trial,
-        )
-        valid_ridge = ~np.isnan(y).any(axis=-1)
+        X_ridge = robs_feat_ridge[trial]
+        valid_ridge = (~np.isnan(X_ridge).any(axis=-1)) & (~np.isnan(y).any(axis=-1))
+        X_flat = X_ridge.reshape(-1, X_ridge.shape[-1])
+        X_flat = (X_flat - ridge_mean) / ridge_std
+        ridge_pred = (X_flat @ ridge_w).reshape(y.shape[0], -1)
         if center_per_trial:
             ridge_pred = ridge_pred + eyepos_mean[trial]
         ridge_pred[~valid_ridge] = np.nan
@@ -692,8 +662,7 @@ def plot_trial_trace(
     t = np.arange(y.shape[0])
     valid_xy = ~np.isnan(y).any(axis=-1)
     axes[0].plot(t[valid_xy], y[valid_xy, 0], color="black", label="actual")
-    if show_pred:
-        axes[0].plot(t, pred_plot[:, 0], color="tab:blue", alpha=0.8, label="pred")
+    axes[0].plot(t, pred_plot[:, 0], color="tab:blue", alpha=0.8, label="pred")
     if ridge_plot is not None:
         axes[0].plot(
             t,
@@ -709,9 +678,7 @@ def plot_trial_trace(
     axes[0].legend(frameon=False)
 
     axes[1].plot(t[valid_xy], y[valid_xy, 1], color="black", label="actual")
-    if show_pred:
-        axes[1].plot(t, pred_plot[:, 1], color="tab:orange", alpha=0.8, label="pred")
-    
+    axes[1].plot(t, pred_plot[:, 1], color="tab:orange", alpha=0.8, label="pred")
     if ridge_plot is not None:
         axes[1].plot(
             t,
@@ -728,14 +695,13 @@ def plot_trial_trace(
     axes[1].sharex(axes[0])
 
     axes[2].plot(y[valid_xy, 0], y[valid_xy, 1], color="black", label="actual")
-    if show_pred:
-        axes[2].plot(
-            pred_plot[valid_xy, 0],
-            pred_plot[valid_xy, 1],
-            color="tab:purple",
-            alpha=0.8,
-            label="pred",
-        )
+    axes[2].plot(
+        pred_plot[valid_xy, 0],
+        pred_plot[valid_xy, 1],
+        color="tab:purple",
+        alpha=0.8,
+        label="pred",
+    )
     if ridge_plot is not None:
         axes[2].plot(
             ridge_plot[valid_xy, 0],
@@ -762,6 +728,7 @@ def plot_trial_trace(
 #%%
 # trial_idx = 0
 # trial_idx = 0
+trial_idx = 0
 trial_idx += 1
 fig, axes = plot_trial_trace(
     model,
@@ -770,7 +737,6 @@ fig, axes = plot_trial_trace(
     ridge_w,
     X_mean,
     X_std,
-    ridge_window_len_input,
     eyepos_aligned,
     eyepos_mean,
     train_trials,
@@ -779,7 +745,6 @@ fig, axes = plot_trial_trace(
     split="train",
     center_per_trial=center_per_trial,
     show_ridge=False,
-    show_pred=True,
 )
 
 #%%
@@ -792,7 +757,6 @@ fig, axes = plot_trial_trace(
     ridge_w,
     X_mean,
     X_std,
-    ridge_window_len_input,
     eyepos_aligned,
     eyepos_mean,
     train_trials,
@@ -801,7 +765,6 @@ fig, axes = plot_trial_trace(
     split="val",
     center_per_trial=center_per_trial,
     # show_ridge=True,
-    show_pred=True,
 )
 
 #%%
