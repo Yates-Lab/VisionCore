@@ -8,12 +8,23 @@ from models.config_loader import load_dataset_configs
 from models.data import prepare_data
 import torch
 import numpy as np
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 import warnings
 from DataYatesV1 import  get_complete_sessions
 import matplotlib.patheffects as pe 
+
+mpl.rcParams['pdf.fonttype'] = 42
+mpl.rcParams['ps.fonttype'] = 42
+mpl.rcParams['pdf.compression'] = 0
+mpl.rcParams['image.interpolation'] = 'none'
+mpl.rcParams['image.resample'] = False
 import contextlib
+
+#jake plot the line instead of the points
+#declan don't raster until after going into illustrator
+
 
 
 
@@ -407,12 +418,17 @@ def plot_eyepos_clusters(
     show=True,
     show_unclustered_points=True,
     plot_time_traces=False,
+    bins_x_axis=False,
+    use_peak_lag=True
 ):
    
     all_lags = []
     for i in range(len(rf_contour_metrics)):
         all_lags.append(rf_contour_metrics[i]['ste_peak_lag'])
-    peak_lag = np.median(all_lags).astype(int)
+    if use_peak_lag:
+        peak_lag = np.median(all_lags).astype(int)
+    else:
+        peak_lag = 0
 
     # Handle list input (treat len-1 list like single plot)
     is_list_input = isinstance(iix, list)
@@ -451,7 +467,10 @@ def plot_eyepos_clusters(
                 continue
             # assert not microsaccade_exists(eyepos[iix[idx], start_time:end_time, :], threshold=0.1)
             if plot_time_traces:
-                t_vals = np.arange(start_time, end_time)
+                if bins_x_axis:
+                    t_vals = np.arange(start_time, end_time)
+                else:
+                    t_vals = (np.arange(start_time, end_time) / 240) * 1000
                 ax_x.plot(
                     t_vals,
                     eyepos[iix[idx], start_time:end_time, 0],
@@ -480,17 +499,23 @@ def plot_eyepos_clusters(
         if plot_time_traces:
             ax_x.set_ylabel("X (degrees)")
             ax_y.set_ylabel("Y (degrees)")
-            ax_y.set_xlabel("Time (bins)")
-            ax_x.set_title(f'{start_time} to {end_time} bins')
+            ax_y.set_xlabel("Time (bins)" if bins_x_axis else "Time (ms)")
+            if bins_x_axis:
+                ax_x.set_title(f'{start_time} to {end_time} bins')
+            else:
+                ax_x.set_title(f'{round(start_time * 1/240 * 1000):.0f} to {round(end_time * 1/240 * 1000):.0f} ms')
 
-            ax_x.set_ylim(-0.6, 0.6)
-            ax_y.set_ylim(-0.6, 0.6)
+            ax_x.set_ylim(-1, 1)
+            ax_y.set_ylim(-1, 1)
         else:
             ax.set_xlim(np.nanmin(eyepos[iix, start_time:end_time, 0]), np.nanmax(eyepos[iix, start_time:end_time, 0]))
             ax.set_ylim(np.nanmin(eyepos[iix, start_time:end_time, 1]), np.nanmax(eyepos[iix, start_time:end_time, 1]))
             ax.set_xlabel('X (degrees)')
             ax.set_ylabel('Y (degrees)')
-            ax.set_title(f'{start_time} to {end_time} bins')
+            if bins_x_axis:
+                ax.set_title(f'{start_time} to {end_time} bins')
+            else:
+                ax.set_title(f'{round(start_time * 1/240 * 1000):.0f} to {round(end_time * 1/240 * 1000):.0f} ms')
         if show:
             plt.show()
         return (fig, axes) if plot_time_traces else (fig, ax)
@@ -550,7 +575,10 @@ def plot_eyepos_clusters(
                 continue
             assert not microsaccade_exists(eyepos[iix_single[idx], st_adj:et_adj, :], threshold=0.1)
             if plot_time_traces:
-                t_vals = np.arange(st_adj, et_adj)
+                if bins_x_axis:
+                    t_vals = np.arange(st_adj, et_adj)
+                else:
+                    t_vals = (np.arange(st_adj, et_adj) / 240) * 1000
                 ax.plot(
                     t_vals,
                     eyepos[iix_single[idx], st_adj:et_adj, 0],
@@ -578,11 +606,14 @@ def plot_eyepos_clusters(
                 ax.scatter(median_eyepos[0], median_eyepos[1], color=colors[idx], s=20, edgecolor='k', linewidth=0.7, zorder=3)
         
         if plot_time_traces:
-            ax.set_title(f'{st_adj} to {et_adj} bins')
+            if bins_x_axis:
+                ax.set_title(f'{st_adj} to {et_adj} bins')
+            else:
+                ax.set_title(f'{round(st_adj * 1/240 * 1000):.0f} to {round(et_adj * 1/240 * 1000):.0f} ms')
             if plot_idx == 0:
                 ax.set_ylabel('X (degrees)')
                 axes[1, plot_idx].set_ylabel('Y (degrees)')
-            axes[1, plot_idx].set_xlabel('Time (bins)')
+            axes[1, plot_idx].set_xlabel('Time (bins)' if bins_x_axis else 'Time (ms)')
             axes[1, plot_idx].set_ylim(-0.6, 0.6)
             axes[0, plot_idx].set_ylim(-0.6, 0.6)
         else:
@@ -605,14 +636,18 @@ def plot_population_raster(
     robs,
     iix,
     clusters,
+    start_time,
+    end_time,
     gap=100,
     show_psth=False,
     show_difference_psth=False,
+    smooth_psth_sigma=0,
     show=True,
     render="scatter",
     fig_width=None,
     fig_height=12,
     fig_dpi=400,
+    bins_x_axis=True,
 ):
     # robs shape: [trials, time, cells]
     
@@ -637,7 +672,7 @@ def plot_population_raster(
     total_time = int(np.sum([r.shape[1] for r in robs_list]))
 
     prev_total_time = 0
-    psth_height = num_cells * 1.5  # Adjust multiplier to change PSTH height
+    psth_height = num_cells * 4 # Adjust multiplier to change PSTH height
     psth_segments = {0: [], 1: []}  # Collect mean PSTH per segment
     
     # Pre-compute row positions based on max cluster trials across all segments
@@ -719,25 +754,55 @@ def plot_population_raster(
         fig_width = len(robs_list)
     fig, ax = plt.subplots(figsize=(fig_width, fig_height), dpi=fig_dpi)
 
-    if render == "img":
-        ax.imshow(
-            img,
-            interpolation="nearest",
-            cmap="gray_r",
-            aspect="auto",
-            vmin=0,
-            vmax=1,
-            extent=(0, total_time, total_rows, 0),
-        )
+    if bins_x_axis:
+        if render == "img":
+            ax.set_rasterization_zorder(1)
+            ax.imshow(
+                img,
+                interpolation="none",
+                cmap="gray_r",
+                aspect="auto",
+                vmin=0,
+                vmax=1,
+                extent=(0, total_time, total_rows, 0),
+                rasterized=True,
+                zorder=0,
+            )
+        else:
+            # Plot spikes as vertical ticks - linewidths controls horizontal thickness
+            ax.scatter(spike_x, spike_y, s=100, c='black', marker='|', linewidths=100)
     else:
-        # Plot spikes as vertical ticks - linewidths controls horizontal thickness
-        ax.scatter(spike_x, spike_y, s=0.6, c='black', marker='|', linewidths=2)
+        x_scale = 1000 / 240    
+        if render == "img":
+            ax.set_rasterization_zorder(1)
+            ax.imshow(
+                img,
+                interpolation="none",
+                cmap="gray_r",
+                aspect="auto",
+                vmin=0,
+                vmax=1,
+                extent=(0, total_time * x_scale, total_rows, 0),
+                rasterized=True,
+                zorder=0,
+            )
+        else:
+            # Plot spikes as vertical ticks - linewidths controls horizontal thickness
+            spike_x_plot = np.asarray(spike_x) * x_scale
+            ax.scatter(spike_x_plot, spike_y, s=0.6, c='black', marker='|', linewidths=2)
     
     # Plot PSTHs if enabled
     if show_psth and psth_row_start is not None:
         # Concatenate all segments
         psth0 = np.concatenate(psth_segments[0]) if psth_segments[0] else np.zeros(prev_total_time)
         psth1 = np.concatenate(psth_segments[1]) if psth_segments[1] else np.zeros(prev_total_time)
+        if smooth_psth_sigma and smooth_psth_sigma > 0:
+            radius = int(np.ceil(3 * smooth_psth_sigma))
+            x = np.arange(-radius, radius + 1)
+            kernel = np.exp(-0.5 * (x / smooth_psth_sigma) ** 2)
+            kernel /= np.sum(kernel)
+            psth0 = np.convolve(psth0, kernel, mode='same')
+            psth1 = np.convolve(psth1, kernel, mode='same')
         max_psth = max(np.nanmax(psth0), np.nanmax(psth1)) + 1e-10
         
         # Normalize and scale to fit in psth_height (inverted y-axis)
@@ -748,7 +813,10 @@ def plot_population_raster(
         psth0_scaled = offset0 + psth_height - (psth0 / max_psth) * psth_height
         psth1_scaled = offset1 + psth_height - (psth1 / max_psth) * psth_height
         
-        x_vals = np.arange(len(psth0))
+        if bins_x_axis:
+            x_vals = np.arange(len(psth0))
+        else:
+            x_vals = np.arange(len(psth0)) * x_scale
         ax.fill_between(x_vals, offset0 + psth_height, psth0_scaled, color='blue', alpha=0.5)
 
         if show_difference_psth:
@@ -760,7 +828,29 @@ def plot_population_raster(
     
     # Set axis limits
     # ax.set_xlim(0, end_time - start_time)
-    ax.set_xlim(0, total_time)
+    if bins_x_axis:
+        ax.set_xlim(0, total_time)
+    else:
+        x_max = total_time * x_scale
+        ax.set_xlim(0, x_max)
+        max_ms = x_max
+        if max_ms <= 120:
+            tick_step = 25
+        elif max_ms <= 250:
+            tick_step = 50
+        else:
+            tick_step = 100
+        start_time_val = np.asarray(start_time).ravel()
+        end_time_val = np.asarray(end_time).ravel()
+        start_time_val = start_time_val[0] if start_time_val.size else start_time
+        end_time_val = end_time_val[-1] if end_time_val.size else end_time
+        start_ms = start_time_val / 240 * 1000
+        end_ms = end_time_val / 240 * 1000
+        n_intervals = max(1, int(round(max_ms / tick_step)))
+        tick_positions = np.linspace(0, max_ms, n_intervals + 1)
+        tick_labels = np.linspace(start_ms, end_ms, n_intervals + 1)
+        ax.set_xticks(tick_positions)
+        ax.set_xticklabels([f"{tick:.0f}" for tick in tick_labels])
     ax.set_ylim(total_rows, 0)  # Inverted so trial 1 at top
     
     # Y-axis ticks with colored labels
@@ -777,17 +867,43 @@ def plot_population_raster(
 
     if len(robs_list) > 1:
         t = 0
+        section_boundaries = [0]
         for seg_robs in robs_list:
-            ax.axvline(x=t, color='red', linestyle='--')
+            if bins_x_axis:
+                ax.axvline(x=t, color='red', linestyle='--')
+            else:
+                ax.axvline(x=t * x_scale, color='red', linestyle='--')
             t += seg_robs.shape[1]
+            section_boundaries.append(t)
+        if bins_x_axis:
+            start_time_val = np.asarray(start_time).ravel()
+            start_time_val = start_time_val[0] if start_time_val.size else start_time
+            ax.set_xticks(section_boundaries)
+            ax.set_xticklabels([f"{start_time_val + val:g}" for val in section_boundaries])
+        else:
+            start_time_val = np.asarray(start_time).ravel()
+            start_time_val = start_time_val[0] if start_time_val.size else start_time
+            start_ms = start_time_val / 240 * 1000
+            section_positions = [val * x_scale for val in section_boundaries]
+            section_labels = [start_ms + (val / 240 * 1000) for val in section_boundaries]
+            ax.set_xticks(section_positions)
+            ax.set_xticklabels([f"{val:.0f}" for val in section_labels])
+    elif bins_x_axis:
+        start_time_val = np.asarray(start_time).ravel()
+        start_time_val = start_time_val[0] if start_time_val.size else start_time
+        tick_positions = np.array(ax.get_xticks())
+        tick_positions = tick_positions[(tick_positions >= 0) & (tick_positions <= total_time)]
+        ax.set_xticks(tick_positions)
+        ax.set_xticklabels([f"{start_time_val + val:g}" for val in tick_positions])
     
-    ax.set_xlabel('Time (bins)')
+    ax.set_xlabel('Time (bins)' if bins_x_axis else 'Time (ms)')
     ax.set_ylabel('Trial number')
     plt.title(f'session {subject}_{date}')
     if show:
         plt.show()
 
     return fig, ax, spike_x, spike_y
+
 
 #%%
 for session in get_complete_sessions():
@@ -975,17 +1091,20 @@ for session in get_complete_sessions():
 
 
     # len_of_each_segment = 25
-    len_of_each_segment = 40
-    total_start_time = 0
-    total_end_time = 175
-    max_distance_from_centroid = 0.1
+    # len_of_each_segment = 40
+    len_of_each_segment = 32
+    # total_start_time = 0
+    total_start_time = 46
+    # total_end_time = 175
+    total_end_time = 78
+    max_distance_from_centroid = 0.10
     num_clusters = 2
-    min_cluster_size = 4
-    cluster_size = 4
+    min_cluster_size = 5 #4
+    cluster_size = 5 #4
     sort_by_cluster_psth = True
     # distance_between_centroids = (0.3, 0.4)
     distance_between_centroids = (0.02, 0.3)
-    min_distance_between_inter_cluster_points = 0.02
+    min_distance_between_inter_cluster_points = 0#0.02
     return_top_k_combos = 10
 
 
@@ -1038,24 +1157,44 @@ for session in get_complete_sessions():
         fig1, ax1 = plot_eyepos_clusters(eyepos, iix_list[j], start_time_list, end_time_list, clusters=clusters_list[j], show=show)
     #     fig1.savefig(f"population_figures/eyepos_{subject}_{date}_{j}.png", dpi=300, bbox_inches="tight")
     #     plt.close(fig1)
-        fig2, ax2, spike_x, spike_y = plot_population_raster(robs_list, iix_list[j], clusters_list[j], show_psth = True, show_difference_psth = True, show=show)
+        fig2, ax2, spike_x, spike_y = plot_population_raster(robs_list, iix_list[j], clusters_list[j], start_time_list, end_time_list, show_psth = True, show_difference_psth = True, show=show)
     #     fig2.savefig(f"population_figures/population_raster_{subject}_{date}_{j}.png", dpi=300, bbox_inches="tight")
     #     plt.close(fig2)
+
+start_time_list = np.array(start_time_list)
+end_time_list = np.array(end_time_list)
     
 #%%
 
-
-for j in range(return_top_k_combos)[0:2]:
-    splice = slice(1, 2)
-    fig1, ax1 = plot_eyepos_clusters(eyepos, iix_list[j][splice], start_time_list[splice], end_time_list[splice], clusters=clusters_list[j][splice], show=show, show_unclustered_points=False, plot_time_traces=True)
-    # fig1.savefig(f"population_figures/eyepos_{subject}_{date}_{j}.png", dpi=300, bbox_inches="tight")
+for j in range(return_top_k_combos)[1:2]:
+    splice_start = 0
+    splice_end = 1
+    splice = slice(splice_start, splice_end)
+    new_start_time_list = start_time_list[splice] - 30 #+6
+    new_end_time_list = end_time_list[splice] + 30 #-2
+    use_bins_x_axis = False
+    new_robs_list = []
+    for i in range(splice_start, splice_end):
+        new_robs_list.append(robs[:, new_start_time_list[i - splice_start]:new_end_time_list[i - splice_start], :])
+    # fig1, ax1 = plot_eyepos_clusters(eyepos, iix_list[j][splice], start_time_list[splice], end_time_list[splice], clusters=clusters_list[j][splice], show=show, show_unclustered_points=False, plot_time_traces=True, bins_x_axis=False, use_peak_lag=False)
+    fig1, ax1 = plot_eyepos_clusters(eyepos, iix_list[j][splice], new_start_time_list, new_end_time_list, clusters=clusters_list[j][splice], show=show, show_unclustered_points=False, plot_time_traces=True, bins_x_axis=use_bins_x_axis, use_peak_lag=False)
+    # fig1.savefig(f"population_eyepos.pdf", dpi=1200, bbox_inches="tight")
     plt.show()
     plt.close(fig1)
+
+    fig1, ax1 = plot_eyepos_clusters(eyepos, iix_list[j][splice], new_start_time_list, new_end_time_list, clusters=clusters_list[j][splice], show=show, show_unclustered_points=False, plot_time_traces=False, bins_x_axis=use_bins_x_axis, use_peak_lag=False)
+    plt.show()
+    plt.close(fig1)
+
     
     
-    fig2, ax2, spike_x, spike_y = plot_population_raster(robs_list[splice], iix_list[j][splice], clusters_list[j][splice], 
-    show_psth = False, show_difference_psth = False, show=show, render = "img", fig_width = 5, fig_height = 40, fig_dpi = 400, gap= 50)
-    # fig2.savefig(f"population_figures/population_raster_{subject}_{date}_{j}.png", dpi=300, bbox_inches="tight")
+    fig2, ax2, spike_x, spike_y = plot_population_raster(robs_list[splice], iix_list[j][splice], clusters_list[j][splice], start_time_list[splice], end_time_list[splice], 
+    show_psth = True, show_difference_psth = False, show=show, render = "scatter", fig_width = 1, fig_height =20, fig_dpi = 400, gap= 50,
+    bins_x_axis=False)
+    # fig2, ax2, spike_x, spike_y = plot_population_raster(new_robs_list[splice], iix_list[j][splice], clusters_list[j][splice], new_start_time_list, new_end_time_list, 
+    # show_psth = True, show_difference_psth = False, show=show, render = "img", fig_width = 5, fig_height = 40, fig_dpi = 400, gap= 50,
+    # bins_x_axis=use_bins_x_axis, smooth_psth_sigma=0)
+    fig2.savefig(f"population_raster.pdf", dpi=1200, bbox_inches="tight")
     plt.show()
     plt.close(fig2)
 #%%
