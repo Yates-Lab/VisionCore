@@ -285,7 +285,7 @@ def plot_eyepos_colormap(eyepos, iix, start_time, end_time):
     plt.imshow(eyepos[iix,start_time:end_time,1])
     plt.colorbar()
     plt.show()
-def plot_robs(robs, iix, cc, num_psth = None, distances_along_line = None, alpha_raster =1, bins_x_axis = True):
+def plot_robs(robs, iix, cc, num_psth = None, distances_along_line = None, alpha_raster =1, bins_x_axis = True, render="line"):
         def _time_axis_params(n_time_bins, bins_x_axis):
             max_ms = (n_time_bins - 1) / 240 * 1000
             if bins_x_axis:
@@ -387,16 +387,31 @@ def plot_robs(robs, iix, cc, num_psth = None, distances_along_line = None, alpha
         n_time_bins = robs_original.shape[1]
         time_bins, tick_positions, tick_labels, x_max = _time_axis_params(n_time_bins, bins_x_axis)
         ax1.set_rasterization_zorder(1)
-        plot_raster_as_line(
-            ax1,
-            robs_original[np.sort(iix), :, cids.index(cc)],
-            time_bins,
-            height=tick_height,
-            color="k",
-            linewidth=tick_linewidth,
-            alpha=alpha_raster,
-        )
-        ax1.set_ylim(len(iix), 0)
+        if render == "img":
+            raster_extent = None
+            if not bins_x_axis:
+                raster_extent = (0, x_max, len(iix), 0)
+            ax1.imshow(
+                robs_original[np.sort(iix), :, cids.index(cc)],
+                alpha=alpha_raster,
+                aspect='auto',
+                cmap="gray_r",
+                extent=raster_extent,
+                interpolation='none',
+                rasterized=True,
+                zorder=0,
+            )
+        else:
+            plot_raster_as_line(
+                ax1,
+                robs_original[np.sort(iix), :, cids.index(cc)],
+                time_bins,
+                height=tick_height,
+                color="k",
+                linewidth=tick_linewidth,
+                alpha=alpha_raster,
+            )
+            ax1.set_ylim(len(iix), 0)
         ax1.set_title(f'{cc} before')
         ax1.set_xlabel('Time (bins)' if bins_x_axis else 'Time (ms)')
         ax1.set_ylabel('Trial')
@@ -439,16 +454,31 @@ def plot_robs(robs, iix, cc, num_psth = None, distances_along_line = None, alpha
         n_time_bins = robs.shape[1]
         time_bins, tick_positions, tick_labels, x_max = _time_axis_params(n_time_bins, bins_x_axis)
         ax1.set_rasterization_zorder(1)
-        plot_raster_as_line(
-            ax1,
-            robs[iix, :, cids.index(cc)],
-            time_bins,
-            height=tick_height,
-            color="k",
-            linewidth=tick_linewidth,
-            alpha=alpha_raster,
-        )
-        ax1.set_ylim(len(iix), 0)
+        if render == "img":
+            raster_extent = None
+            if not bins_x_axis:
+                raster_extent = (0, x_max, len(iix), 0)
+            ax1.imshow(
+                robs[iix, :, cids.index(cc)],
+                alpha=alpha_raster,
+                aspect='auto',
+                cmap="gray_r",
+                extent=raster_extent,
+                interpolation='none',
+                rasterized=True,
+                zorder=0,
+            )
+        else:
+            plot_raster_as_line(
+                ax1,
+                robs[iix, :, cids.index(cc)],
+                time_bins,
+                height=tick_height,
+                color="k",
+                linewidth=tick_linewidth,
+                alpha=alpha_raster,
+            )
+            ax1.set_ylim(len(iix), 0)
         ax1.set_title(f'{cc} after')
         ax1.set_xlabel('Time (bins)' if bins_x_axis else 'Time (ms)')
         ax1.set_ylabel('Trial (ordered)')
@@ -536,7 +566,7 @@ for cc in [154, 122, 115, 92, 29]:
         iix_list = []
         robs_list = []
         total_start_time = 0
-        total_end_time = 200
+        total_end_time = 250
         # total_end_time = 100
         distances_to_use = None
         for i in range(total_start_time, total_end_time, len_of_each_segment):
@@ -572,7 +602,7 @@ for cc in [154, 122, 115, 92, 29]:
         
         # plot_robs(robs[:, start_time:end_time, :], iix, cc)
         # plot_robs(robs[:, start_time:end_time, :], iix, cc, num_psth = 4)
-        plot_robs(robs_list, iix_list, cc, distances_along_line = distances_to_use, num_psth = 2)
+        plot_robs(robs_list, iix_list, cc, distances_along_line = distances_to_use, num_psth = 2, render="img")
         plt.show()
         # plot_robs(robs_list, iix_list, cc, num_psth = 4)
 

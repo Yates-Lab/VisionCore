@@ -45,7 +45,7 @@ from DataYatesV1.exp.support import get_rsvp_fix_stim
 # stack_images = get_fixrsvp_stack()
 #%%
 subject = 'Allen'
-date = '2022-04-13'
+date = '2022-03-04'
 
 #03-04, 03-30, 4-08, 04-13
 
@@ -201,7 +201,7 @@ window_len_input = 50 #70
 window_len_output = 50 #70
 window_stride = 1
 min_valid_fraction = 0.8
-num_epochs = 50
+num_epochs = 75
 batch_size = 64
 learning_rate = 1e-3
 lag_bins = 0
@@ -210,7 +210,7 @@ standardize_inputs = False
 cache_data_on_gpu = False
 dataloader_num_workers = 4
 dataloader_pin_memory = True
-augmentation_turn_off_percentage = 0.2
+augmentation_turn_off_percentage = 0.1
 augmentation_turn_on_percentage = 0.02 #0.05
 transformer_dim = 64 #64 best 16
 transformer_heads = 4 #4 #best 2
@@ -654,9 +654,9 @@ model = TransformerEyepos(
 ).to(device)
 # optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
-optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+# optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 # optimizer = schedulefree.AdamWScheduleFree(model.parameters(), lr=learning_rate)
-# optimizer = schedulefree.RAdamScheduleFree(model.parameters())
+optimizer = schedulefree.RAdamScheduleFree(model.parameters())
 
 for epoch in range(num_epochs):
     model.train()
@@ -960,7 +960,7 @@ pred_all = run_inference(
 
 #%%
 # trial_idx = 0
-trial_idx = 0
+# trial_idx = 0
 trial_idx += 1
 fig, axes = plot_trial_trace(
     model,

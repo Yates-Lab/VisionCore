@@ -45,7 +45,7 @@ from DataYatesV1.exp.support import get_rsvp_fix_stim
 # stack_images = get_fixrsvp_stack()
 #%%
 subject = 'Allen'
-date = '2022-03-04'
+date = '2022-04-08'
 
 #03-04, 03-30, 4-08, 04-13
 
@@ -878,7 +878,7 @@ def plot_trial_trace(
     axes[2].sharex(axes[0])
         
     #plot cross at eyepos_mean
-    axes[3].plot(eyepos_mean[trial, 0], eyepos_mean[trial, 1], color="red", marker="x", label="mean")
+    # axes[3].plot(eyepos_mean[trial, 0], eyepos_mean[trial, 1], color="red", marker="x", label="mean")
     axes[3].plot(y[valid_xy, 0], y[valid_xy, 1], color="black", label="actual")
     if show_pred:
         axes[3].plot(
@@ -960,7 +960,7 @@ pred_all = run_inference(
 
 #%%
 # trial_idx = 0
-trial_idx = 0
+# trial_idx = 0
 trial_idx += 1
 fig, axes = plot_trial_trace(
     model,
@@ -982,7 +982,7 @@ fig, axes = plot_trial_trace(
 )
 
 #%%
-# trial_idx = 16
+# trial_idx = 0
 trial_idx += 1
 fig, axes = plot_trial_trace(
     model,
