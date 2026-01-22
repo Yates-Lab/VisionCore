@@ -32,11 +32,21 @@ mpl.rcParams['image.interpolation'] = 'none'
 mpl.rcParams['image.resample'] = False
 import contextlib
 
+
+#%%
+
+from scripts.mcfarland_sim import get_fixrsvp_stack
+from DataYatesV1.exp.support import get_rsvp_fix_stim
+
+# support_images = get_rsvp_fix_stim()
+# stack_images = get_fixrsvp_stack()
 #%%
 subject = 'Allen'
 date = '2022-03-04'
 
-dataset_configs_path = '/home/tejas/VisionCore/experiments/dataset_configs/multi_basic_240_rsvp.yaml'
+#4-08 and 3-04 are good and 3-30 is good too
+
+dataset_configs_path = '/home/tejas/VisionCore/experiments/dataset_configs/multi_basic_240_rsvp_all_cells.yaml'
 dataset_configs = load_dataset_configs(dataset_configs_path)
 
 # date = "2022-03-04"
@@ -73,6 +83,7 @@ NT = len(trials)
 
 fixation = np.hypot(dataset.dsets[dset_idx]['eyepos'][:,0].numpy(), dataset.dsets[dset_idx]['eyepos'][:,1].numpy()) < 1
 
+ims = get_fixrsvp_stack(frames_per_im=1)
 # Loop over trials and align responses
 robs = np.nan*np.zeros((NT, T, NC))
 dfs = np.nan*np.zeros((NT, T, NC))
@@ -144,18 +155,37 @@ standardize_inputs = False
 cache_data_on_gpu = False
 dataloader_num_workers = 4
 dataloader_pin_memory = True
-transformer_dim = 64
-transformer_heads = 4
+augmentation_turn_off_percentage = 0.2
+augmentation_turn_on_percentage = 0.02 #0.05
+transformer_dim = 64 #64 best 16
+transformer_heads = 4 #4 #best 2
 transformer_layers = 2
-transformer_dropout = 0.1
+transformer_dropout = 0.1 #0.1 #best 0.3
+weight_decay = 1e-4 #best 1e-2
 loss_on_center = False
 require_odd_window = True
 use_trajectory_loss = True
 lambda_pos = 1.0
-lambda_vel = 0 #4
+lambda_vel = 4 #4
 lambda_accel = 0 #0.1
-velocity_event_thresh = 0 #0.02
-velocity_event_weight = 20
+velocity_event_thresh = 0.02 #0.02
+velocity_event_weight = 0
+
+# augmentation_turn_off_percentage = 0
+# augmentation_turn_on_percentage = 0
+# transformer_dim = 16 #64 best 16
+# transformer_heads = 2 #4 #best 2
+# transformer_layers = 2
+# transformer_dropout = 0.3 #0.1 #best 0.3
+# weight_decay = 1e-2 #best 1e-2
+# loss_on_center = False
+# require_odd_window = True
+# use_trajectory_loss = True
+# lambda_pos = 1.0
+# lambda_vel = 0 #4
+# lambda_accel = 0 #0.1
+# velocity_event_thresh = 0.02 #0.02
+# velocity_event_weight = 0
 
 num_trials = robs.shape[0]
 trial_indices = np.arange(num_trials)
@@ -350,9 +380,15 @@ class WindowedEyeposDataset(torch.utils.data.Dataset):
         min_valid_fraction,
         device,
         cache_on_gpu,
+        augment=False,
+        turn_off_percentage=0.0,
+        turn_on_percentage=0.0,
     ):
         self.device = device
         self.cache_on_gpu = cache_on_gpu
+        self.augment = augment
+        self.turn_off_percentage = turn_off_percentage
+        self.turn_on_percentage = turn_on_percentage
         X_raw = torch.from_numpy(X)
         Y_raw = torch.from_numpy(Y)
         valid_y = ~torch.isnan(Y_raw).any(axis=-1)
@@ -386,6 +422,16 @@ class WindowedEyeposDataset(torch.utils.data.Dataset):
         out_end = out_start + self.window_len_output
         Y_win = self.Y[trial, out_start:out_end, :]
         mask = self.valid_mask[trial, out_start:out_end].float()
+        if self.augment and (self.turn_off_percentage > 0.0 or self.turn_on_percentage > 0.0):
+            X_win = X_win.clone()
+            if self.turn_off_percentage > 0.0:
+                on_mask = X_win > 0
+                off_draw = torch.rand_like(X_win, dtype=torch.float32)
+                X_win = torch.where(on_mask & (off_draw < self.turn_off_percentage), torch.zeros_like(X_win), X_win)
+            if self.turn_on_percentage > 0.0:
+                off_mask = X_win == 0
+                on_draw = torch.rand_like(X_win, dtype=torch.float32)
+                X_win = torch.where(off_mask & (on_draw < self.turn_on_percentage), torch.ones_like(X_win), X_win)
         time_idx = torch.arange(
             out_start,
             out_end,
@@ -506,6 +552,9 @@ train_dataset = WindowedEyeposDataset(
     min_valid_fraction,
     device,
     cache_data_on_gpu,
+    augment=True,
+    turn_off_percentage=augmentation_turn_off_percentage,
+    turn_on_percentage=augmentation_turn_on_percentage,
 )
 val_dataset = WindowedEyeposDataset(
     robs_feat_model,
@@ -517,6 +566,9 @@ val_dataset = WindowedEyeposDataset(
     min_valid_fraction,
     device,
     cache_data_on_gpu,
+    augment=False,
+    turn_off_percentage=0.0,
+    turn_on_percentage=0.0,
 )
 
 loader_num_workers = 0 if cache_data_on_gpu else dataloader_num_workers
@@ -761,7 +813,7 @@ def plot_trial_trace(
 
 #%%
 # trial_idx = 0
-# trial_idx = 0
+trial_idx = 0
 trial_idx += 1
 fig, axes = plot_trial_trace(
     model,
@@ -784,7 +836,7 @@ fig, axes = plot_trial_trace(
 
 #%%
 # trial_idx = 0
-trial_idx += 1
+trial_idx -= 1
 fig, axes = plot_trial_trace(
     model,
     robs_feat_model,

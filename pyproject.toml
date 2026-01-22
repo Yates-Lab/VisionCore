@@ -47,5 +47,5 @@ loggabor = ["SLIP", "matplotlib", "NeuroTools"]
 slip = ["numpy", "matplotlib", "NeuroTools"]
 
 [tool.setuptools]
-packages = ["models", "training", "eval", "tejas"]
+packages = ["models", "training", "eval", "tejas", "scripts"]
 
