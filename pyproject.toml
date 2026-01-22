@@ -28,7 +28,7 @@ dependencies = [
     "scikit-image",
     "LogGabor",
     "plenoptic",
-
+    "schedulefree>=1.4.1",
 ]
 
 [project.optional-dependencies]

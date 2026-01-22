@@ -24,6 +24,7 @@ Requires-Dist: loguru
 Requires-Dist: scikit-image
 Requires-Dist: LogGabor
 Requires-Dist: plenoptic
+Requires-Dist: schedulefree>=1.4.1
 Provides-Extra: data
 Requires-Dist: DataYatesV1; extra == "data"
 Requires-Dist: DataRowleyV1V2; extra == "data"

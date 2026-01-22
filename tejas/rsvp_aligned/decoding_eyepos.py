@@ -1,8 +1,9 @@
 #%%
-
-#things to try:
+# #things to try:
 # 1. try using all cells instead of just the visual responsive ones
 # 2. look at the image content in fixrsvp and find the highest frequency images and see if decoding is better for those images
+# 3. about if inference is being done correctly right now...
+# 
 import os
 from pathlib import Path
 # Device options
@@ -33,7 +34,7 @@ mpl.rcParams['pdf.compression'] = 0
 mpl.rcParams['image.interpolation'] = 'none'
 mpl.rcParams['image.resample'] = False
 import contextlib
-
+import schedulefree
 
 #%%
 
@@ -46,7 +47,7 @@ from DataYatesV1.exp.support import get_rsvp_fix_stim
 subject = 'Allen'
 date = '2022-03-04'
 
-#03-04, 03-30, 04-13, 4-08
+#03-04, 03-30, 4-08, 04-13
 
 #4-08 and 3-04 are good and 3-30 is good too
 
@@ -156,10 +157,10 @@ fix_dur = fix_dur[good_trials]
 ind = np.argsort(fix_dur)[::-1]
 plt.subplot(1,2,1)
 plt.imshow(eyepos[ind,:,0])
-plt.xlim(0, 160)
+# plt.xlim(0, 160)
 plt.subplot(1,2,2)
 plt.imshow(np.nanmean(robs,2)[ind])
-plt.xlim(0, 160)
+# plt.xlim(0, 160)
 plt.show()
 
 plt.plot(np.nanstd(robs, (2,0)))
@@ -196,11 +197,11 @@ ridge_alpha = 10.0
 ridge_window_len_input = 10
 
 window_len_input = 50 #70
-# window_len_output = 12 #10
+# window_len_output = 50 #10
 window_len_output = 50 #70
 window_stride = 1
 min_valid_fraction = 0.8
-num_epochs = 50
+num_epochs = 75
 batch_size = 64
 learning_rate = 1e-3
 lag_bins = 0
@@ -651,10 +652,15 @@ model = TransformerEyepos(
     num_layers=transformer_layers,
     dropout_rate=transformer_dropout,
 ).to(device)
-optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+# optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+
+# optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+# optimizer = schedulefree.AdamWScheduleFree(model.parameters(), lr=learning_rate)
+optimizer = schedulefree.RAdamScheduleFree(model.parameters())
 
 for epoch in range(num_epochs):
     model.train()
+    optimizer.train() if optimizer.__class__.__module__.startswith("schedulefree") else None
     train_losses = []
     center_idx = window_len_output // 2
     for X_batch, y_batch, mask_batch, time_idx in train_loader:
@@ -685,6 +691,7 @@ for epoch in range(num_epochs):
         train_losses.append(loss.item())
 
     model.eval()
+    optimizer.eval() if optimizer.__class__.__module__.startswith("schedulefree") else None
     val_losses = []
     center_idx = window_len_output // 2
     with torch.no_grad():
@@ -812,6 +819,7 @@ def plot_trial_trace(
     axes[0].set_ylabel("eye x")
     #set ylim to 0-1
     axes[0].set_ylim(-1, 1)
+    axes[0].set_xlim(time_window_start,time_window_end)
     axes[0].legend(frameon=False)
 
     axes[1].plot(t[valid_xy], y[valid_xy, 1], color="black", label="actual")
@@ -830,6 +838,7 @@ def plot_trial_trace(
     axes[1].set_ylabel("eye y")
     axes[1].set_xlabel("time bin")
     axes[1].set_ylim(-1, 1)
+    axes[1].set_xlim(time_window_start,time_window_end)
     axes[1].legend(frameon=False)
     axes[1].sharex(axes[0])
 
@@ -889,8 +898,8 @@ fig, axes = plot_trial_trace(
 )
 
 #%%
-# trial_idx = 16
-trial_idx += 1
+# trial_idx = 0
+trial_idx -= 1
 fig, axes = plot_trial_trace(
     model,
     robs_feat_model,
