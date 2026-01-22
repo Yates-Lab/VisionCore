@@ -45,7 +45,7 @@ from DataYatesV1.exp.support import get_rsvp_fix_stim
 # stack_images = get_fixrsvp_stack()
 #%%
 subject = 'Allen'
-date = '2022-03-04'
+date = '2022-04-13'
 
 #03-04, 03-30, 4-08, 04-13
 
@@ -201,7 +201,7 @@ window_len_input = 50 #70
 window_len_output = 50 #70
 window_stride = 1
 min_valid_fraction = 0.8
-num_epochs = 75
+num_epochs = 50
 batch_size = 64
 learning_rate = 1e-3
 lag_bins = 0
@@ -654,9 +654,9 @@ model = TransformerEyepos(
 ).to(device)
 # optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
-# optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 # optimizer = schedulefree.AdamWScheduleFree(model.parameters(), lr=learning_rate)
-optimizer = schedulefree.RAdamScheduleFree(model.parameters())
+# optimizer = schedulefree.RAdamScheduleFree(model.parameters())
 
 for epoch in range(num_epochs):
     model.train()
@@ -878,7 +878,7 @@ def plot_trial_trace(
     axes[2].sharex(axes[0])
         
     #plot cross at eyepos_mean
-    axes[3].plot(eyepos_mean[trial, 0], eyepos_mean[trial, 1], color="red", marker="x", label="mean")
+    # axes[3].plot(eyepos_mean[trial, 0], eyepos_mean[trial, 1], color="red", marker="x", label="mean")
     axes[3].plot(y[valid_xy, 0], y[valid_xy, 1], color="black", label="actual")
     if show_pred:
         axes[3].plot(
@@ -982,7 +982,7 @@ fig, axes = plot_trial_trace(
 )
 
 #%%
-# trial_idx = 16
+# trial_idx = 0
 trial_idx += 1
 fig, axes = plot_trial_trace(
     model,

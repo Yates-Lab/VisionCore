@@ -306,6 +306,42 @@ def plot_robs(robs, iix, cc, num_psth = None, distances_along_line = None, alpha
                 tick_labels = [f'{tick:.0f}' for tick in tick_positions]
                 x_max = max_ms
             return time_bins, tick_positions, tick_labels, x_max
+        tick_height = 0.2
+        tick_linewidth =4
+
+        def plot_raster_as_line(ax, raster_data, time_bins, height=1.0, color="k", linewidth=0.5, alpha=1.0):
+            mask = np.isfinite(raster_data) & (raster_data > 0)
+            row_idx, col_idx = np.where(mask)
+            if row_idx.size == 0:
+                return None
+            values = raster_data[row_idx, col_idx]
+            unique_vals = np.unique(values)
+            vmin = unique_vals[0]
+            vmax = unique_vals[-1]
+            handles = []
+            for val in unique_vals:
+                sel = values == val
+                if not np.any(sel):
+                    continue
+                if vmax > vmin:
+                    norm = (val - vmin) / (vmax - vmin)
+                    alpha_val = (0.2 + 0.8 * norm) * alpha
+                else:
+                    alpha_val = alpha
+                x_vals = time_bins[col_idx[sel]]
+                x = np.vstack([x_vals, x_vals, np.full(sel.sum(), np.nan)])
+                y = np.vstack([row_idx[sel], row_idx[sel] + height, np.full(sel.sum(), np.nan)])
+                handles.append(
+                    ax.plot(
+                        x.ravel(order="F"),
+                        y.ravel(order="F"),
+                        color=color,
+                        linewidth=linewidth,
+                        alpha=alpha_val,
+                        rasterized=True,
+                    )[0]
+                )
+            return handles[-1] if handles else None
         # Handle lists - stitch together along time axis with padding
         if isinstance(robs, list):
             max_len = max([len(iix_segment) for iix_segment in iix])
@@ -350,20 +386,17 @@ def plot_robs(robs, iix, cc, num_psth = None, distances_along_line = None, alpha
 
         n_time_bins = robs_original.shape[1]
         time_bins, tick_positions, tick_labels, x_max = _time_axis_params(n_time_bins, bins_x_axis)
-        raster_extent = None
-        if not bins_x_axis:
-            raster_extent = (0, x_max, len(iix), 0)
         ax1.set_rasterization_zorder(1)
-        ax1.imshow(
+        plot_raster_as_line(
+            ax1,
             robs_original[np.sort(iix), :, cids.index(cc)],
+            time_bins,
+            height=tick_height,
+            color="k",
+            linewidth=tick_linewidth,
             alpha=alpha_raster,
-            aspect='auto',
-            cmap="gray_r",
-            extent=raster_extent,
-            interpolation='none',
-            rasterized=True,
-            zorder=0,
         )
+        ax1.set_ylim(len(iix), 0)
         ax1.set_title(f'{cc} before')
         ax1.set_xlabel('Time (bins)' if bins_x_axis else 'Time (ms)')
         ax1.set_ylabel('Trial')
@@ -405,20 +438,17 @@ def plot_robs(robs, iix, cc, num_psth = None, distances_along_line = None, alpha
         ax1 = axes[0][1]
         n_time_bins = robs.shape[1]
         time_bins, tick_positions, tick_labels, x_max = _time_axis_params(n_time_bins, bins_x_axis)
-        raster_extent = None
-        if not bins_x_axis:
-            raster_extent = (0, x_max, len(iix), 0)
         ax1.set_rasterization_zorder(1)
-        ax1.imshow(
+        plot_raster_as_line(
+            ax1,
             robs[iix, :, cids.index(cc)],
+            time_bins,
+            height=tick_height,
+            color="k",
+            linewidth=tick_linewidth,
             alpha=alpha_raster,
-            aspect='auto',
-            cmap="gray_r",
-            extent=raster_extent,
-            interpolation='none',
-            rasterized=True,
-            zorder=0,
         )
+        ax1.set_ylim(len(iix), 0)
         ax1.set_title(f'{cc} after')
         ax1.set_xlabel('Time (bins)' if bins_x_axis else 'Time (ms)')
         ax1.set_ylabel('Trial (ordered)')
@@ -563,6 +593,7 @@ for cc in [154, 122, 115, 92, 29]:
 universal_eyepos = True
 trial_stitching = False
 for cc in [115, 92]:
+# for cc in [115]:
 
     def display(max_orientation):
         # plot_ori_tuning(gratings_info, cc)
@@ -629,10 +660,12 @@ for cc in [115, 92]:
         fig.savefig(f'sta_ste_single_cell_aligned_{cc}.pdf', dpi=1200, bbox_inches='tight')
         plt.show()
 
+        return robs_list, iix_list, distances_to_use
+
     
     max_orientation = gratings_info['oris'][np.argmax(gratings_info['ori_tuning'][cc])]
     print(f'for max orientation {max_orientation}')
-    display(max_orientation)
+    robs_list, iix_list, distances_to_use = display(max_orientation)
 
     # print(f'for max orientation 90')
     # display(90)
