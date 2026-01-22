@@ -24,6 +24,8 @@ from tqdm import tqdm
 import warnings
 from DataYatesV1 import  get_complete_sessions
 import matplotlib.patheffects as pe 
+from DataYatesV1.exp.fix_rsvp import FixRsvpTrial
+from DataYatesV1.utils.general import get_clock_functions
 
 mpl.rcParams['pdf.fonttype'] = 42
 mpl.rcParams['ps.fonttype'] = 42
@@ -75,6 +77,7 @@ dataset.inds = inds
 # Getting key variables
 dset_idx = inds[:,0].unique().item()
 trial_inds = dataset.dsets[dset_idx].covariates['trial_inds'].numpy()
+t_bins = dataset.dsets[dset_idx].covariates['t_bins'].numpy()
 trials = np.unique(trial_inds)
 
 NC = dataset.dsets[dset_idx]['robs'].shape[1]
@@ -83,7 +86,9 @@ NT = len(trials)
 
 fixation = np.hypot(dataset.dsets[dset_idx]['eyepos'][:,0].numpy(), dataset.dsets[dset_idx]['eyepos'][:,1].numpy()) < 1
 
-ims = get_fixrsvp_stack(frames_per_im=1)
+rsvp_images = get_fixrsvp_stack(frames_per_im=1)
+ptb2ephys, _ = get_clock_functions(sess.exp)
+image_ids = np.full((NT, T), -1, dtype=np.int64)
 # Loop over trials and align responses
 robs = np.nan*np.zeros((NT, T, NC))
 dfs = np.nan*np.zeros((NT, T, NC))
@@ -92,20 +97,49 @@ fix_dur =np.nan*np.zeros((NT,))
 
 for itrial in tqdm(range(NT)):
     # print(f"Trial {itrial}/{NT}")
-    ix = trials[itrial] == trial_inds
-    ix = ix & fixation
-    if np.sum(ix) == 0:
+    trial_mask = trials[itrial] == trial_inds
+    if np.sum(trial_mask) == 0:
         continue
     
+    trial_id = int(trials[itrial])
+    trial = FixRsvpTrial(sess.exp['D'][trial_id], sess.exp['S'])
+    trial_image_ids = trial.image_ids
+    if len(np.unique(trial_image_ids)) < 2:
+        continue
+    start_idx = np.where(trial_image_ids == 2)[0][0]
+    flip_times = ptb2ephys(trial.flip_times[start_idx:])
+
+    psth_inds_all = dataset.dsets[dset_idx].covariates['psth_inds'][trial_mask].numpy()
+    trial_bins_all = t_bins[trial_mask]
+    hist_idx_all = np.searchsorted(flip_times, trial_bins_all, side='right') - 1 + start_idx
+    image_ids[itrial][psth_inds_all] = trial_image_ids[hist_idx_all] - 1
+
+    ix = trial_mask & fixation
+    if np.sum(ix) == 0:
+        continue
+
     stim_inds = np.where(ix)[0]
     # stim_inds = stim_inds[:,None] - np.array(dataset_config['keys_lags']['stim'])[None,:]
-
-
     psth_inds = dataset.dsets[dset_idx].covariates['psth_inds'][ix].numpy()
     fix_dur[itrial] = len(psth_inds)
     robs[itrial][psth_inds] = dataset.dsets[dset_idx]['robs'][ix].numpy()
     dfs[itrial][psth_inds] = dataset.dsets[dset_idx]['dfs'][ix].numpy()
     eyepos[itrial][psth_inds] = dataset.dsets[dset_idx]['eyepos'][ix].numpy()
+
+    
+
+# check for if image_ids is correct.
+# # pick a trial
+# trial_id = int(trials[0])
+# trial = FixRsvpTrial(sess.exp['D'][trial_id], sess.exp['S'])
+# start_idx = np.where(trial.image_ids == 2)[0][0]
+# flip_times = ptb2ephys(trial.flip_times[start_idx:])
+# trial_bins = t_bins[trial_inds == trial_id]
+# hist_idx = np.searchsorted(flip_times, trial_bins, side='right') - 1 + start_idx
+
+# # This should be identical to the assigned row (before -1 shift)
+# np.all(trial.image_ids[hist_idx] - 1 == image_ids[0][dataset.dsets[dset_idx].covariates['psth_inds'][trial_inds == trial_id]])
+
 time_window_start = 75
 time_window_end =100
 
@@ -131,6 +165,24 @@ plt.plot(np.nanstd(robs, (2,0)))
 robs.shape #(79, 335, 133) [trials, time, cells]
 eyepos.shape #(79, 335, 2) [trials, time, xycoords]
 
+
+# sess = train_dset.dsets[0].metadata['sess']
+# trial_inds = dataset.dsets[dset_idx].covariates['trial_inds'].numpy()
+# trials = np.unique(trial_inds)
+
+# trial_id = int(trials[20])  # trial 20 for example
+# trial = FixRsvpTrial(sess.exp['D'][trial_id], sess.exp['S'])
+
+# image_ids_trial = trial.image_ids
+# flip_times_trial = trial.flip_times
+
+# # indices where image ID changes
+# change_idx = np.where(np.diff(image_ids_trial) != 0)[0] + 1
+# change_times = flip_times_trial[change_idx]
+
+# dt_change = np.median(np.diff(change_times))
+# print("Stim change interval (s):", dt_change) #0.050002098083496094
+# print("Stim change rate (Hz):", 1.0 / dt_change) #19.99916080181572
 #%%
 # Decoder setup
 rng = np.random.default_rng(0)
@@ -836,7 +888,7 @@ fig, axes = plot_trial_trace(
 
 #%%
 # trial_idx = 0
-trial_idx -= 1
+trial_idx += 1
 fig, axes = plot_trial_trace(
     model,
     robs_feat_model,
