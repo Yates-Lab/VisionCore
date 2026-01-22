@@ -46,6 +46,8 @@ from DataYatesV1.exp.support import get_rsvp_fix_stim
 subject = 'Allen'
 date = '2022-03-04'
 
+#03-04, 03-30, 04-13, 4-08
+
 #4-08 and 3-04 are good and 3-30 is good too
 
 dataset_configs_path = '/home/tejas/VisionCore/experiments/dataset_configs/multi_basic_240_rsvp_all_cells.yaml'
@@ -140,11 +142,10 @@ for itrial in tqdm(range(NT)):
 # # This should be identical to the assigned row (before -1 shift)
 # np.all(trial.image_ids[hist_idx] - 1 == image_ids[0][dataset.dsets[dset_idx].covariates['psth_inds'][trial_inds == trial_id]])
 
-time_window_start = 75
-time_window_end =100
-
-# time_window_start = 100
-# time_window_end =120
+# time_window_start = 75
+# time_window_end =100
+time_window_start = 0
+time_window_end =200
 good_trials = fix_dur > 20
 robs = robs[good_trials][:,time_window_start:time_window_end,:]
 # dfs = dfs[good_trials]
@@ -190,12 +191,13 @@ train_frac = 0.8
 use_time_encoding = True
 time_enc_dim = 8
 time_enc_scale = 1.0
-ridge_alpha = 100.0
+ridge_alpha = 10.0
 
 ridge_window_len_input = 10
 
-window_len_input = 10 #10
-window_len_output = 10
+window_len_input = 50 #70
+# window_len_output = 12 #10
+window_len_output = 50 #70
 window_stride = 1
 min_valid_fraction = 0.8
 num_epochs = 50
@@ -851,7 +853,7 @@ def plot_trial_trace(
         )
         
     #plot cross at eyepos_mean
-    axes[2].plot(eyepos_mean[trial, 0], eyepos_mean[trial, 1], color="red", marker="x", label="mean")
+    # axes[2].plot(eyepos_mean[trial, 0], eyepos_mean[trial, 1], color="red", marker="x", label="mean")
     axes[2].set_xlabel("eye x")
     axes[2].set_ylabel("eye y")
     axes[2].set_aspect("equal", adjustable="box")
@@ -887,7 +889,7 @@ fig, axes = plot_trial_trace(
 )
 
 #%%
-# trial_idx = 0
+# trial_idx = 16
 trial_idx += 1
 fig, axes = plot_trial_trace(
     model,
@@ -904,7 +906,7 @@ fig, axes = plot_trial_trace(
     trial_idx=trial_idx,
     split="val",
     center_per_trial=center_per_trial,
-    # show_ridge=True,
+    show_ridge=False,
     show_pred=True,
 )
 
