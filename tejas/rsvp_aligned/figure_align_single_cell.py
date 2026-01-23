@@ -8,8 +8,8 @@ mpl.rcParams['image.interpolation'] = 'none'
 mpl.rcParams['image.resample'] = False
 
 # (optional) pick a clean sans‐serif
-mpl.rcParams['font.family'] = 'sans-serif'
-mpl.rcParams['font.sans-serif'] = ['Arial', 'Helvetica', 'DejaVu Sans']
+# mpl.rcParams['font.familyx'] = 'sans-serif'
+# mpl.rcParams['font.sans-serif'] = ['Arial', 'Helvetica', 'DejaVu Sans']
 
 
 import torch
@@ -395,7 +395,7 @@ def plot_robs(robs, iix, cc, num_psth = None, distances_along_line = None, alpha
                 robs_original[np.sort(iix), :, cids.index(cc)],
                 alpha=alpha_raster,
                 aspect='auto',
-                cmap="gray_r",
+                # cmap="gray_r",
                 extent=raster_extent,
                 interpolation='none',
                 rasterized=True,
@@ -462,7 +462,7 @@ def plot_robs(robs, iix, cc, num_psth = None, distances_along_line = None, alpha
                 robs[iix, :, cids.index(cc)],
                 alpha=alpha_raster,
                 aspect='auto',
-                cmap="gray_r",
+                # cmap="gray_r",
                 extent=raster_extent,
                 interpolation='none',
                 rasterized=True,
@@ -602,7 +602,7 @@ for cc in [154, 122, 115, 92, 29]:
         
         # plot_robs(robs[:, start_time:end_time, :], iix, cc)
         # plot_robs(robs[:, start_time:end_time, :], iix, cc, num_psth = 4)
-        plot_robs(robs_list, iix_list, cc, distances_along_line = distances_to_use, num_psth = 2, render="img")
+        plot_robs(robs_list, iix_list, cc, distances_along_line = distances_to_use, num_psth = None, render="img")
         plt.show()
         # plot_robs(robs_list, iix_list, cc, num_psth = 4)
 

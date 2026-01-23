@@ -47,6 +47,8 @@ from DataYatesV1.exp.support import get_rsvp_fix_stim
 subject = 'Allen'
 date = '2022-04-08'
 
+#for 4-08 there is a weird right offset for trian and test inference...
+
 #03-04, 03-30, 4-08, 04-13
 
 #4-08 and 3-04 are good and 3-30 is good too
@@ -210,8 +212,9 @@ standardize_inputs = False
 cache_data_on_gpu = False
 dataloader_num_workers = 4
 dataloader_pin_memory = True
-augmentation_turn_off_percentage = 0.2
-augmentation_turn_on_percentage = 0.02 #0.05
+sample_poisson = False
+augmentation_turn_off_percentage = 0.2 #0.1
+augmentation_turn_on_percentage = 0.02 #0.02 #0.05
 transformer_dim = 64 #64 best 16
 transformer_heads = 4 #4 #best 2
 transformer_layers = 2
@@ -438,12 +441,14 @@ class WindowedEyeposDataset(torch.utils.data.Dataset):
         augment=False,
         turn_off_percentage=0.0,
         turn_on_percentage=0.0,
+        sample_poisson=False,
     ):
         self.device = device
         self.cache_on_gpu = cache_on_gpu
         self.augment = augment
         self.turn_off_percentage = turn_off_percentage
         self.turn_on_percentage = turn_on_percentage
+        self.sample_poisson = sample_poisson
         X_raw = torch.from_numpy(X)
         Y_raw = torch.from_numpy(Y)
         valid_y = ~torch.isnan(Y_raw).any(axis=-1)
@@ -487,6 +492,9 @@ class WindowedEyeposDataset(torch.utils.data.Dataset):
                 off_mask = X_win == 0
                 on_draw = torch.rand_like(X_win, dtype=torch.float32)
                 X_win = torch.where(off_mask & (on_draw < self.turn_on_percentage), torch.ones_like(X_win), X_win)
+        if self.augment and self.sample_poisson:
+            X_win[X_win > 0] = torch.poisson(X_win[X_win > 0])
+
         time_idx = torch.arange(
             out_start,
             out_end,
@@ -610,6 +618,7 @@ train_dataset = WindowedEyeposDataset(
     augment=True,
     turn_off_percentage=augmentation_turn_off_percentage,
     turn_on_percentage=augmentation_turn_on_percentage,
+    sample_poisson=sample_poisson,
 )
 val_dataset = WindowedEyeposDataset(
     robs_feat_model,
@@ -657,6 +666,7 @@ model = TransformerEyepos(
 # optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 # optimizer = schedulefree.AdamWScheduleFree(model.parameters(), lr=learning_rate)
 optimizer = schedulefree.RAdamScheduleFree(model.parameters())
+pred_all = None
 
 for epoch in range(num_epochs):
     model.train()
@@ -724,6 +734,55 @@ for epoch in range(num_epochs):
         f"train loss: {np.mean(train_losses):.4f} | "
         f"val loss: {np.mean(val_losses):.4f}"
     )
+
+def run_inference(
+    model,
+    robs_feat_input,
+    trials,
+    window_len_input,
+    window_len_output,
+    device=None,
+    batch_size=512,
+):
+    if device is None:
+        device = next(model.parameters()).device
+    model.eval()
+    pred_all = np.full((len(trials), robs_feat_input.shape[1], 2), np.nan)
+    half_input = window_len_input // 2
+    output_offset = (window_len_input - window_len_output) // 2
+    with torch.no_grad():
+        for i, trial in enumerate(trials):
+            X = robs_feat_input[trial]
+            time_len = X.shape[0]
+            if time_len < window_len_input:
+                continue
+            max_start = max(0, time_len - window_len_input)
+            starts = np.clip(np.arange(time_len) - half_input, 0, max_start)
+            idx = starts[:, None] + np.arange(window_len_input)[None, :]
+            X_win = X[idx]
+            center_idx = (np.arange(time_len) - starts) - output_offset
+            for b in range(0, time_len, batch_size):
+                X_batch = X_win[b:b + batch_size]
+                X_t = torch.from_numpy(np.nan_to_num(X_batch, nan=0.0)).float()
+                X_t = X_t.to(device)
+                pred_batch = model(X_t).cpu().numpy()
+                centers = center_idx[b:b + batch_size]
+                valid = (centers >= 0) & (centers < window_len_output)
+                if np.any(valid):
+                    rows = np.where(valid)[0]
+                    pred_all[i, b:b + batch_size][rows] = pred_batch[rows, centers[valid]]
+    return pred_all
+
+
+trials_all = np.concatenate([train_trials, val_trials])
+pred_all = run_inference(
+    model,
+    robs_feat_model,
+    trials_all,
+    window_len_input,
+    window_len_output,
+    device=device,
+)
 #%%
 
 #%%
@@ -760,7 +819,7 @@ def plot_trial_trace(
     if device is None:
         device = next(model.parameters()).device
 
-    model.eval()
+    # model.eval()
     # pred_pos = np.full_like(y, np.nan)
     # half_input = window_len_input // 2
     # max_start = max(0, X.shape[0] - window_len_input)
@@ -779,6 +838,7 @@ def plot_trial_trace(
     #         if 0 <= center_idx < window_len_output:
     #             pred_pos[t] = pred_win[center_idx]
 
+    
     # if center_per_trial:
     #     pred_pos = pred_pos + eyepos_mean[trial]
 
@@ -792,16 +852,19 @@ def plot_trial_trace(
     #         pos_t = torch.from_numpy(pred_pos)
     #         is_close = torch.allclose(ref_t, pos_t, rtol=1e-4, atol=1e-6, equal_nan=True)
     #         if not is_close:
-    #             max_diff = torch.nanmax(torch.abs(ref_t - pos_t)).item()
+    #             # max_diff = torch.nanmax(torch.abs(ref_t - pos_t)).item()
     #             print(f"pred_all mismatch for trial {trial}")
-    #             print(f"max abs diff: {max_diff}")
+    #             # print(f"max abs diff: {max_diff}")
     #             print(f"pred_ref: {pred_ref}")
     #             print(f"pred_pos: {pred_pos}")
+    #             raise ValueError("pred_all mismatch")
     # else:
     #     raise ValueError("pred_all and trials_all not defined")
 
     trial_match = np.where(trials_all == trial)[0]
     pred_pos = pred_all[int(trial_match[0])]
+    if center_per_trial:
+        pred_pos = pred_pos + eyepos_mean[trial]
 
     pred_plot = pred_pos.copy()
     pred_plot[~valid] = np.nan
@@ -909,57 +972,9 @@ def plot_trial_trace(
     return fig, axes
 
 #%%
-def run_inference(
-    model,
-    robs_feat_input,
-    trials,
-    window_len_input,
-    window_len_output,
-    device=None,
-    batch_size=512,
-):
-    if device is None:
-        device = next(model.parameters()).device
-    model.eval()
-    pred_all = np.full((len(trials), robs_feat_input.shape[1], 2), np.nan)
-    half_input = window_len_input // 2
-    output_offset = (window_len_input - window_len_output) // 2
-    with torch.no_grad():
-        for i, trial in enumerate(trials):
-            X = robs_feat_input[trial]
-            time_len = X.shape[0]
-            if time_len < window_len_input:
-                continue
-            max_start = max(0, time_len - window_len_input)
-            starts = np.clip(np.arange(time_len) - half_input, 0, max_start)
-            idx = starts[:, None] + np.arange(window_len_input)[None, :]
-            X_win = X[idx]
-            center_idx = (np.arange(time_len) - starts) - output_offset
-            for b in range(0, time_len, batch_size):
-                X_batch = X_win[b:b + batch_size]
-                X_t = torch.from_numpy(np.nan_to_num(X_batch, nan=0.0)).float()
-                X_t = X_t.to(device)
-                pred_batch = model(X_t).cpu().numpy()
-                centers = center_idx[b:b + batch_size]
-                valid = (centers >= 0) & (centers < window_len_output)
-                if np.any(valid):
-                    rows = np.where(valid)[0]
-                    pred_all[i, b:b + batch_size][rows] = pred_batch[rows, centers[valid]]
-    return pred_all
+
 
 #%%
-trials_all = np.concatenate([train_trials, val_trials])
-pred_all = run_inference(
-    model,
-    robs_feat_model,
-    trials_all,
-    window_len_input,
-    window_len_output,
-    device=device,
-)
-
-#%%
-# trial_idx = 0
 # trial_idx = 0
 trial_idx += 1
 fig, axes = plot_trial_trace(
