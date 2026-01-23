@@ -1,11 +1,10 @@
 #%%
 import numpy as np
 import matplotlib.pyplot as plt
-#%%
 import torch
 from pathlib import Path
 
-#%% Import the session loading utility
+# Import the session loading utility
 from DataRowleyV1V2.data.registry import get_session
 from DataYatesV1 import DictDataset
 
@@ -822,33 +821,52 @@ if dset is not None:
     print(f"  Number of random splits: {n_splits}")
     print(f"  This follows the mcfarland_sim approach more closely")
 
-    # save results for later comparison (figure)
-    # save to eg: ./figures/rowleydatatest-ccmax-PSTHLuke0804
+    # save results for later comparison
+    # save to eg: ./figures/rowleydatatest-ccmaxPSTHLuke0804
     # insert session name into filename
     figures_dir = Path("../figures")
-    figure_save_path = figures_dir / f"rowleydatatest-ccmax-PSTH-{sess.name}.png"
+    figure_save_path =  figures_dir / f"rowleydatatest-ccmax-PSTH-{sess.name}.png"
     fig.savefig(figure_save_path, dpi=150, bbox_inches='tight')
     print(f"  Figure saved to: {figure_save_path}")
 
-    # save high-ccmax cids for downstream McFarland analysis
-    try:
-        # align ccmax values to dataset neuron IDs (cids)
-        cids = np.array(dset.metadata.get('cids', np.arange(num_neurons)))
-    except Exception:
-        cids = np.arange(num_neurons)
-
-    # threshold on full ccmax_per_neuron (NaNs ignored) to get top 25%
-    ccmax_all = ccmax_per_neuron.copy()
-    high_thresh = .85#np.nanpercentile(ccmax_all, 75)
-    high_cc_mask_all = ccmax_all >= high_thresh
-    high_cc_cids = cids[high_cc_mask_all]
-
-    high_cc_path = figures_dir / f"{sess.name}_high_ccmax_cids.npy"
-    np.save(high_cc_path, high_cc_cids)
-    print(f"  Saved high-ccmax cids (N={high_cc_cids.size}) to: {high_cc_path}")
-
 else:
     print("No dataset loaded - cannot compute PSTH-based ccmax")
+
+
+#%% Save ccmax results for later comparison
+
+# Suppose:
+#   cids  : array of all cell IDs (len = NC)
+#   ccmax : array of same length
+
+    # Summary statistics
+    #valid_ccmax = ccmax_per_neuron[~np.isnan(ccmax_per_neuron)]
+    #valid_cchalf = ccmax_per_neuron_raw[~np.isnan(ccmax_per_neuron_raw)]
+
+# load cids from dset
+cids = dset['cids'].numpy()  # (NC,)
+
+valid_cids = cids[~np.isnan(ccmax_per_neuron)]
+
+ccmax_thresh = 0.85  # I think this is what Jake used
+high_cc_mask = valid_ccmax > ccmax_thresh
+high_cc_cids = valid_cids[high_cc_mask]
+
+print(f"{high_cc_cids.size} / {cids.size} cells pass ccmax > {ccmax_thresh}")
+
+# Save for use in McFarland analysis
+from pathlib import Path
+import numpy as np
+
+fig_dir = Path(__file__).resolve().parent.parent / "figures"
+fig_dir.mkdir(exist_ok=True)
+
+cc_file = fig_dir / f"{sess.name}_high_ccmax_cids.npy"
+np.save(cc_file, high_cc_cids)
+print(f"Saved high-ccmax cids to {cc_file}")
+
+
+
 
 
 
