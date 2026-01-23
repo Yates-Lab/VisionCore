@@ -45,13 +45,12 @@ from DataYatesV1.exp.support import get_rsvp_fix_stim
 # stack_images = get_fixrsvp_stack()
 #%%
 subject = 'Allen'
-date = '2022-04-08'
+date = '2022-03-04'
 
-#for 4-08 there is a weird right offset for trian and test inference...
+#03-04, 03-30, 03-02, 04-08, 04-13 (15 epochs), 04-01, 2-18
+#4-06 is okay too
 
-#03-04, 03-30, 4-08, 04-13
 
-#4-08 and 3-04 are good and 3-30 is good too
 
 dataset_configs_path = '/home/tejas/VisionCore/experiments/dataset_configs/multi_basic_240_rsvp_all_cells.yaml'
 dataset_configs = load_dataset_configs(dataset_configs_path)
@@ -975,7 +974,7 @@ def plot_trial_trace(
 
 
 #%%
-# trial_idx = 0
+trial_idx = 0
 trial_idx += 1
 fig, axes = plot_trial_trace(
     model,
