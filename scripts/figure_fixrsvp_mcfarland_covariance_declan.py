@@ -449,7 +449,7 @@ class DualWindowAnalysis:
 import pickle
 from pathlib import Path
 
-results_file = Path(__file__).resolve().parent.parent / "figures" / "mcfarland_fixrsvp_Luke2_2025-08-04.pkl"
+results_file = Path(__file__).resolve().parent.parent / "figures" / "mcfarland_fixrsvp_Luke_2025-08-04.pkl"
 with open(results_file, 'rb') as f:
     output_Luke = pickle.load(f)
 

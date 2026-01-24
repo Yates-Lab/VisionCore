@@ -1,9 +1,6 @@
 #%%
 
-from datetime import date
-from pathlib import Path
 import sys
-#from zipfile import Path
 
 sys.path.append('./scripts')
 import numpy as np
@@ -43,179 +40,7 @@ from models.data import prepare_data
 train_data, val_data, dataset_config = prepare_data(dataset_configs[0], strict=False)
 
 #%%
-# get fixrsvp inds and make one dataset object
-inds = torch.concatenate([
-    train_data.get_dataset_inds('fixrsvp'),
-    val_data.get_dataset_inds('fixrsvp')
-], dim=0)
-
-dataset = train_data.shallow_copy()
-dataset.inds = inds
-
-dset_idx = inds[:,0].unique().item()
-trial_inds = dataset.dsets[dset_idx].covariates['trial_inds'].numpy()
-trials = np.unique(trial_inds)
-
-NC = dataset.dsets[dset_idx]['robs'].shape[1]
-T = np.max(dataset.dsets[dset_idx].covariates['psth_inds'][:].numpy()).item() + 1
-NT = len(trials)
-
-fixation = np.hypot(dataset.dsets[dset_idx]['eyepos'][:,0].numpy(),
-                    dataset.dsets[dset_idx]['eyepos'][:,1].numpy()) < 1
-
-robs = np.nan*np.zeros((NT, T, NC))
-eyepos = np.nan*np.zeros((NT, T, 2))
-fix_dur = np.nan*np.zeros((NT,))
-
-for itrial in range(NT):
-    ix = trials[itrial] == trial_inds
-    ix = ix & fixation
-    if np.sum(ix) == 0:
-        continue
-    
-    psth_inds = dataset.dsets[dset_idx].covariates['psth_inds'][ix].numpy()
-    fix_dur[itrial] = len(psth_inds)
-    robs[itrial][psth_inds] = dataset.dsets[dset_idx]['robs'][ix].numpy()
-    eyepos[itrial][psth_inds] = dataset.dsets[dset_idx]['eyepos'][ix].numpy()
-#%%
-# after building `dataset` and `dset_idx` exactly as in figure_fixrsvp_mcfarland_covariance.py
-dset_idx = inds[:,0].unique().item()
-trial_inds = dataset.dsets[dset_idx].covariates['trial_inds'].numpy()
-trials = np.unique(trial_inds)
-
-NC = dataset.dsets[dset_idx]['robs'].shape[1]
-T = np.max(dataset.dsets[dset_idx].covariates['psth_inds'][:].numpy()).item() + 1
-NT = len(trials)
-
-fixation = np.hypot(dataset.dsets[dset_idx]['eyepos'][:,0].numpy(),
-                    dataset.dsets[dset_idx]['eyepos'][:,1].numpy()) < 1
-
-robs = np.nan*np.zeros((NT, T, NC))
-eyepos = np.nan*np.zeros((NT, T, 2))
-fix_dur = np.nan*np.zeros((NT,))
-
-for itrial in range(NT):
-    ix = trials[itrial] == trial_inds
-    ix = ix & fixation
-    if np.sum(ix) == 0:
-        continue
-    
-    psth_inds = dataset.dsets[dset_idx].covariates['psth_inds'][ix].numpy()
-    fix_dur[itrial] = len(psth_inds)
-    robs[itrial][psth_inds] = dataset.dsets[dset_idx]['robs'][ix].numpy()
-    eyepos[itrial][psth_inds] = dataset.dsets[dset_idx]['eyepos'][ix].numpy()
-
-
-#%%
-good_trials = fix_dur > 20
-robs_mc = robs[good_trials]
-eyepos_mc = eyepos[good_trials]
-
-dt = 1/240.0  # note: this example file used 240 Hz; if your YAML is 120 Hz, use 1/120
-valid_time_bins = min(240, robs_mc.shape[1])
-
-neuron_mask = np.where(np.nansum(robs_mc, axis=(0, 1)) > total_spikes_threshold)[0]
-
-valid_mask = (
-    np.isfinite(np.sum(robs_mc[:, :, neuron_mask], axis=2)) &
-    np.isfinite(np.sum(eyepos_mc, axis=2))
-)
-
-iix = np.arange(valid_time_bins)
-robs_used = robs_mc[:, iix][:, :, neuron_mask]
-eyepos_used = eyepos_mc[:, iix]
-valid_used = valid_mask[:, iix]
-
-analyzer_luke = DualWindowAnalysis(robs_used, eyepos_used, valid_used, dt=dt)
-
-
-# %% Run McFarland sweep on Luke fixrsvp
-windows_ms = [5, 10, 20, 40, 80]
-results_luke, last_mats_luke = analyzer_luke.run_sweep(windows_ms, t_hist_ms=50, n_bins=15)
-
-#%% Save Luke McFarland stats in a figure_fixrsvp-compatible format
-"""Package and save Luke_2025-08-04 McFarland stats.
-
-We mimic the `output` dict produced by
-figure_fixrsvp_mcfarland_covariance_binned.run_mcfarland_on_dataset so that
-figure scripts can later do:
-
-    import pickle
-    with open(path, 'rb') as f:
-        output_luke = pickle.load(f)
-    outputs = [output_luke]
-
-and reuse the existing plotting code with minimal changes.
-"""
-
-import os
-import pickle
-
-subject = 'Luke'
-
-date = '2025-08-04'
-# Use cids from the fixrsvp sub-dataset of the CombinedEmbeddedDataset
-try:
-    cids = np.array(dataset.dsets[dset_idx].metadata.get('cids', np.arange(robs_mc.shape[2])))
-except Exception:
-    cids = np.arange(robs_mc.shape[2])
-
-output = {
-    'sess': f'{subject}_{date}',
-    'cids': cids,
-    'neuron_mask': neuron_mask,
-    'windows': windows_ms,
-    'cids_used': cids[neuron_mask],
-    'results': results_luke,
-    'last_mats': last_mats_luke,
-}
-
-save_dir = Path('../figures')
-
-save_dir.mkdir(exist_ok=True)
-save_path = save_dir / f'mcfarland_fixrsvp_Luke2_{date}.pkl'
-
-with open(save_path, 'wb') as f:
-    pickle.dump(output, f)
-
-print(f"Saved Luke McFarland stats to {save_path}")
- #%% Prepare inputs for McFarland DualWindowAnalysis (bypassing CombinedEmbeddedDataset)
-# """Prepare Luke fixrsvp spikes/eye traces for McFarland covariance analysis.
-
-# We mirror figure_fixrsvp_mcfarland_covariance_binned.run_mcfarland_on_dataset, but
-# operate directly on dset_fix instead of a CombinedEmbeddedDataset.
-# """
-
-# # Basic parameters (match original analysis where possible)
-# windows_ms = [5, 10, 20, 40, 80]
-# total_spikes_threshold = 200
-# valid_time_bins = min(240, robs.shape[1])  # clamp to available time
-# dt = 1 / 240.0  # Rowley fixrsvp is 240 Hz
-
-# # Trial selection: require at least 20 valid bins (like original code)
-
-# good_trials = fix_dur > 20
-# robs_mc = robs[good_trials]
-# eyepos_mc = eyepos[good_trials]
-
-# print(f"McFarland prep: {robs_mc.shape[0]} trials, {robs_mc.shape[2]} neurons, {robs_mc.shape[1]} time bins")
-
-# # Neuron mask: keep neurons with enough spikes across all good trials
-# neuron_mask = np.where(np.nansum(robs_mc, axis=(0, 1)) > total_spikes_threshold)[0]
-# print(f"Using {len(neuron_mask)} neurons / {robs_mc.shape[2]} total (threshold {total_spikes_threshold} spikes)")
-
-# # Valid mask: finite spikes and eye positions
-# valid_mask = (
-#     np.isfinite(np.sum(robs_mc[:, :, neuron_mask], axis=2)) &
-#     np.isfinite(np.sum(eyepos_mc, axis=2))
-# )
-#%% Prepare inputs for McFarland DualWindowAnalysis (using CombinedEmbeddedDataset)
-# Get fixrsvp indices from the combined dataset
-inds = torch.concatenate([
-    train_data.get_dataset_inds('fixrsvp'),
-    val_data.get_dataset_inds('fixrsvp'),
-], dim=0)
-
+#%%#%%
 dataset = train_data.shallow_copy()
 dataset.inds = inds
 
@@ -262,7 +87,7 @@ good_trials = fix_dur > 20  # require at least 20 fixation+dfs bins
 robs_mc = robs_trial[good_trials]
 eyepos_mc = eyepos_trial[good_trials]
 dfs_mc = dfs_trial[good_trials]
-fix_dur = fix_dur[good_trials]
+fix_dur_mc = fix_dur[good_trials]  # Use a new variable name for masked fix_dur
 
 print(f"McFarland prep: {robs_mc.shape[0]} trials, {robs_mc.shape[2]} neurons, {robs_mc.shape[1]} time bins")
 
@@ -313,6 +138,10 @@ valid_mask = (
     np.isfinite(np.sum(eyepos_mc, axis=2))
 )
 
+eyepos_used = eyepos_mc[:, iix]
+analyzer_luke = DualWindowAnalysis(robs_used, eyepos_used, valid_used, dt=dt)
+eyepos_used = eyepos_mc[:, iix]
+
 # time index window
 iix = np.arange(valid_time_bins)
 robs_used = robs_mc[:, iix][:, :, neuron_mask]
@@ -323,31 +152,6 @@ print(f"robs_used shape: {robs_used.shape}")
 print(f"eyepos_used shape: {eyepos_used.shape}")
 print(f"valid_used shape: {valid_used.shape}")
 
-analyzer_luke = DualWindowAnalysis(robs_used, eyepos_used, valid_used, dt=dt)
-print("DualWindowAnalysis initialized for Luke_2025-08-04 fixrsvp")
-#%%
-
-robs_mc = robs[good_trials]
-eyepos_mc = eyepos[good_trials]
-fix_dur = fix_dur[good_trials]
-
-print(f"McFarland prep: {robs_mc.shape[0]} trials, {robs_mc.shape[2]} neurons, {robs_mc.shape[1]} time bins")
-
-# define valid_time_bins BEFORE using it
-valid_time_bins = min(240, robs_mc.shape[1])  # match original: clamp at 240 bins
-
-# then later:
-iix = np.arange(valid_time_bins)
-robs_used = robs_mc[:, iix][:, :, neuron_mask]
-eyepos_used = eyepos_mc[:, iix]
-valid_used = valid_mask[:, iix]
-
-print(f"robs_used shape: {robs_used.shape}")
-print(f"eyepos_used shape: {eyepos_used.shape}")
-print(f"valid_used shape: {valid_used.shape}")
-
-from mcfarland_sim import DualWindowAnalysis
-# Initialize analyzer (do not run sweep yet)
 analyzer_luke = DualWindowAnalysis(robs_used, eyepos_used, valid_used, dt=dt)
 print("DualWindowAnalysis initialized for Luke_2025-08-04 fixrsvp")
 
@@ -373,11 +177,14 @@ and reuse the existing plotting code with minimal changes.
 import os
 import pickle
 
+subject = 'Luke'
+date = '2025-08-04'
+
 # Try to get cids from metadata if present, otherwise fall back to a simple index
 try:
-    cids_luke = np.array(dset_fix.metadata.get('cids', np.arange(dset_fix['robs'].shape[1])))
+    cids_luke = np.array(dset.metadata.get('cids', np.arange(dset['robs'].shape[1])))
 except Exception:
-    cids_luke = np.arange(dset_fix['robs'].shape[1])
+    cids_luke = np.arange(dset['robs'].shape[1])
 
 output_luke = {
     'sess': f'{subject}_{date}',
@@ -398,7 +205,7 @@ with open(save_path, 'wb') as f:
 
 print(f"Saved Luke McFarland stats to {save_path}")
 
-#%% Example: look at one window (e.g. 20 ms)
+#%% Example: look at one window (e.g-----------===============================================. 20 ms)
 i = windows_ms.index(20)
 
 FF_uncorr = results_luke[i]['ff_uncorr']
@@ -419,18 +226,19 @@ plt.figure()
 plt.imshow(CnoiseC, vmin=-0.2, vmax=0.2); plt.title('Noise corr (FEM-corrected)'); plt.colorbar()
 plt.show()
 
-#%%
-good_trials = fix_dur > 40
-robs = robs[good_trials]
-eyepos = eyepos[good_trials]
-fix_dur = fix_dur[good_trials]
 
-ind = np.argsort(fix_dur)[::-1]
+# Example visualization using masked arrays
+good_trials_40 = fix_dur_mc > 40
+robs_40 = robs_mc[good_trials_40]
+eyepos_40 = eyepos_mc[good_trials_40]
+fix_dur_40 = fix_dur_mc[good_trials_40]
+
+ind = np.argsort(fix_dur_40)[::-1]
 plt.subplot(1,2,1)
-plt.imshow(eyepos[ind,:,0])
+plt.imshow(eyepos_40[ind,:,0])
 plt.xlim(0, 60)
 plt.subplot(1,2,2)
-plt.imshow(np.nanmean(robs,2)[ind])
+plt.imshow(np.nanmean(robs_40,2)[ind])
 plt.xlim(0, 60)
 
 
