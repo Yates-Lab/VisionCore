@@ -44,263 +44,148 @@ from DataYatesV1.exp.support import get_rsvp_fix_stim
 # support_images = get_rsvp_fix_stim()
 # stack_images = get_fixrsvp_stack()
 #%%
-# subject = 'Allen'
-# date = '2022-03-04'
+subject = 'Allen'
+date = '2022-03-04'
 
-# #03-04, 03-30, 03-02, 04-08, 04-13 (15 epochs), 04-01, 2-18
-# #4-06 is okay too
-
-
-
-# dataset_configs_path = '/home/tejas/VisionCore/experiments/dataset_configs/multi_basic_240_rsvp_all_cells.yaml'
-# dataset_configs = load_dataset_configs(dataset_configs_path)
-
-# # date = "2022-03-04"
-# # subject = "Allen"
-# dataset_idx = next(i for i, cfg in enumerate(dataset_configs) if cfg['session'] == f"{subject}_{date}")
-
-# with open(os.devnull, "w") as devnull, contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
-#     train_dset, val_dset, dataset_config = prepare_data(dataset_configs[dataset_idx], strict=False)
+#03-04, 03-30, 03-02, 04-08, 04-13 (15 epochs), 04-01, 2-18
+#4-06 is okay too
 
 
 
-# sess = train_dset.dsets[0].metadata['sess']
-# # ppd = train_data.dsets[0].metadata['ppd']
-# cids = dataset_config['cids']
-# print(f"Running on {sess.name}")
+dataset_configs_path = '/home/tejas/VisionCore/experiments/dataset_configs/multi_basic_240_rsvp_all_cells.yaml'
+dataset_configs = load_dataset_configs(dataset_configs_path)
 
-# # get fixrsvp inds and make one dataaset object
-# inds = torch.concatenate([
-#         train_dset.get_dataset_inds('fixrsvp'),
-#         val_dset.get_dataset_inds('fixrsvp')
-#     ], dim=0)
+# date = "2022-03-04"
+# subject = "Allen"
+dataset_idx = next(i for i, cfg in enumerate(dataset_configs) if cfg['session'] == f"{subject}_{date}")
 
-# dataset = train_dset.shallow_copy()
-# dataset.inds = inds
-
-# # Getting key variables
-# dset_idx = inds[:,0].unique().item()
-# trial_inds = dataset.dsets[dset_idx].covariates['trial_inds'].numpy()
-# t_bins = dataset.dsets[dset_idx].covariates['t_bins'].numpy()
-# trials = np.unique(trial_inds)
-
-# NC = dataset.dsets[dset_idx]['robs'].shape[1]
-# T = np.max(dataset.dsets[dset_idx].covariates['psth_inds'][:].numpy()).item() + 1
-# NT = len(trials)
-
-# fixation = np.hypot(dataset.dsets[dset_idx]['eyepos'][:,0].numpy(), dataset.dsets[dset_idx]['eyepos'][:,1].numpy()) < 1
-
-# rsvp_images = get_fixrsvp_stack(frames_per_im=1)
-# ptb2ephys, _ = get_clock_functions(sess.exp)
-# image_ids = np.full((NT, T), -1, dtype=np.int64)
-# # Loop over trials and align responses
-# robs = np.nan*np.zeros((NT, T, NC))
-# dfs = np.nan*np.zeros((NT, T, NC))
-# eyepos = np.nan*np.zeros((NT, T, 2))
-# fix_dur =np.nan*np.zeros((NT,))
-
-# for itrial in tqdm(range(NT)):
-#     # print(f"Trial {itrial}/{NT}")
-#     trial_mask = trials[itrial] == trial_inds
-#     if np.sum(trial_mask) == 0:
-#         continue
-    
-#     trial_id = int(trials[itrial])
-#     trial = FixRsvpTrial(sess.exp['D'][trial_id], sess.exp['S'])
-#     trial_image_ids = trial.image_ids
-#     if len(np.unique(trial_image_ids)) < 2:
-#         continue
-#     start_idx = np.where(trial_image_ids == 2)[0][0]
-#     flip_times = ptb2ephys(trial.flip_times[start_idx:])
-
-#     psth_inds_all = dataset.dsets[dset_idx].covariates['psth_inds'][trial_mask].numpy()
-#     trial_bins_all = t_bins[trial_mask]
-#     hist_idx_all = np.searchsorted(flip_times, trial_bins_all, side='right') - 1 + start_idx
-#     image_ids[itrial][psth_inds_all] = trial_image_ids[hist_idx_all] - 1
-
-#     ix = trial_mask & fixation
-#     if np.sum(ix) == 0:
-#         continue
-
-#     stim_inds = np.where(ix)[0]
-#     # stim_inds = stim_inds[:,None] - np.array(dataset_config['keys_lags']['stim'])[None,:]
-#     psth_inds = dataset.dsets[dset_idx].covariates['psth_inds'][ix].numpy()
-#     fix_dur[itrial] = len(psth_inds)
-#     robs[itrial][psth_inds] = dataset.dsets[dset_idx]['robs'][ix].numpy()
-#     dfs[itrial][psth_inds] = dataset.dsets[dset_idx]['dfs'][ix].numpy()
-#     eyepos[itrial][psth_inds] = dataset.dsets[dset_idx]['eyepos'][ix].numpy()
-
-    
-
-# # check for if image_ids is correct.
-# # # pick a trial
-# # trial_id = int(trials[0])
-# # trial = FixRsvpTrial(sess.exp['D'][trial_id], sess.exp['S'])
-# # start_idx = np.where(trial.image_ids == 2)[0][0]
-# # flip_times = ptb2ephys(trial.flip_times[start_idx:])
-# # trial_bins = t_bins[trial_inds == trial_id]
-# # hist_idx = np.searchsorted(flip_times, trial_bins, side='right') - 1 + start_idx
-
-# # # This should be identical to the assigned row (before -1 shift)
-# # np.all(trial.image_ids[hist_idx] - 1 == image_ids[0][dataset.dsets[dset_idx].covariates['psth_inds'][trial_inds == trial_id]])
-
-# # time_window_start = 75
-# # time_window_end =100
-# time_window_start = 0
-# time_window_end =200
-# good_trials = fix_dur > 20
-# robs = robs[good_trials][:,time_window_start:time_window_end,:]
-# # dfs = dfs[good_trials]
-# eyepos = eyepos[good_trials][:,time_window_start:time_window_end,:]
-# fix_dur = fix_dur[good_trials]
-
-
-# ind = np.argsort(fix_dur)[::-1]
-# plt.subplot(1,2,1)
-# plt.imshow(eyepos[ind,:,0])
-# # plt.xlim(0, 160)
-# plt.subplot(1,2,2)
-# plt.imshow(np.nanmean(robs,2)[ind])
-# # plt.xlim(0, 160)
-# plt.show()
-
-# plt.plot(np.nanstd(robs, (2,0)))
-# robs.shape #(79, 335, 133) [trials, time, cells]
-# eyepos.shape #(79, 335, 2) [trials, time, xycoords]
-
-
-# # sess = train_dset.dsets[0].metadata['sess']
-# # trial_inds = dataset.dsets[dset_idx].covariates['trial_inds'].numpy()
-# # trials = np.unique(trial_inds)
-
-# # trial_id = int(trials[20])  # trial 20 for example
-# # trial = FixRsvpTrial(sess.exp['D'][trial_id], sess.exp['S'])
-
-# # image_ids_trial = trial.image_ids
-# # flip_times_trial = trial.flip_times
-
-# # # indices where image ID changes
-# # change_idx = np.where(np.diff(image_ids_trial) != 0)[0] + 1
-# # change_times = flip_times_trial[change_idx]
-
-# # dt_change = np.median(np.diff(change_times))
-# # print("Stim change interval (s):", dt_change) #0.050002098083496094
-# # print("Stim change rate (Hz):", 1.0 / dt_change) #19.99916080181572
+with open(os.devnull, "w") as devnull, contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
+    train_dset, val_dset, dataset_config = prepare_data(dataset_configs[dataset_idx], strict=False)
 
 
 
-#%%
+sess = train_dset.dsets[0].metadata['sess']
+# ppd = train_data.dsets[0].metadata['ppd']
+cids = dataset_config['cids']
+print(f"Running on {sess.name}")
 
-# Load Rowley session
-subject = 'Luke'
-date = '2025-08-04'
-from DataRowleyV1V2.data.registry import get_session as get_rowley_session
+# get fixrsvp inds and make one dataaset object
+inds = torch.concatenate([
+        train_dset.get_dataset_inds('fixrsvp'),
+        val_dset.get_dataset_inds('fixrsvp')
+    ], dim=0)
 
+dataset = train_dset.shallow_copy()
+dataset.inds = inds
 
-print(f"Loading Rowley session: {subject}_{date}")
-sess = get_rowley_session(subject, date)
-print(f"Session loaded: {sess.name}")
-print(f"Session directory: {sess.processed_path}")
-
-# Load fixRSVP dataset
-eye_calibration = 'left_eye_x-0.5_y-0.3'
-dataset_type = 'fixrsvp'
-dset_path = Path(sess.processed_path) / 'datasets' / eye_calibration / f'{dataset_type}.dset'
-
-print(f"Loading dataset from: {dset_path}")
-if not dset_path.exists():
-    raise FileNotFoundError(f"Dataset not found: {dset_path}")
-
-# Load using DictDataset
-from DataYatesV1 import DictDataset
-rowley_dset = DictDataset.load(dset_path)
-
-print(f"Dataset loaded: {len(rowley_dset)} samples")
-print(f"Response shape: {rowley_dset['robs'].shape}")
-
-# Extract data
-trial_inds = rowley_dset['trial_inds'].numpy()
+# Getting key variables
+dset_idx = inds[:,0].unique().item()
+trial_inds = dataset.dsets[dset_idx].covariates['trial_inds'].numpy()
+t_bins = dataset.dsets[dset_idx].covariates['t_bins'].numpy()
 trials = np.unique(trial_inds)
-NC = rowley_dset['robs'].shape[1]
+
+NC = dataset.dsets[dset_idx]['robs'].shape[1]
+T = np.max(dataset.dsets[dset_idx].covariates['psth_inds'][:].numpy()).item() + 1
 NT = len(trials)
 
-# Determine max trial length
-max_T = 0
-for trial in trials:
-    trial_len = np.sum(trial_inds == trial)
-    max_T = max(max_T, trial_len)
+fixation = np.hypot(dataset.dsets[dset_idx]['eyepos'][:,0].numpy(), dataset.dsets[dset_idx]['eyepos'][:,1].numpy()) < 1
 
-print(f"Number of trials: {NT}")
-print(f"Number of neurons: {NC}")
-print(f"Max trial length: {max_T}")
+rsvp_images = get_fixrsvp_stack(frames_per_im=1)
+ptb2ephys, _ = get_clock_functions(sess.exp)
+image_ids = np.full((NT, T), -1, dtype=np.int64)
+# Loop over trials and align responses
+robs = np.nan*np.zeros((NT, T, NC))
+dfs = np.nan*np.zeros((NT, T, NC))
+eyepos = np.nan*np.zeros((NT, T, 2))
+fix_dur =np.nan*np.zeros((NT,))
 
-# Create trial-aligned arrays
-robs = np.nan * np.zeros((NT, max_T, NC))
-eyepos = np.nan * np.zeros((NT, max_T, 2))
-fix_dur = np.zeros(NT)
-
-# Define fixation criterion (eye position < 1 degree from center)
-eyepos_raw = rowley_dset['eyepos'].numpy()
-fixation = np.hypot(eyepos_raw[:, 0], eyepos_raw[:, 1]) < 1
-
-print("Aligning trials...")
 for itrial in tqdm(range(NT)):
-    trial_mask = (trial_inds == trials[itrial]) & fixation
+    # print(f"Trial {itrial}/{NT}")
+    trial_mask = trials[itrial] == trial_inds
     if np.sum(trial_mask) == 0:
         continue
     
-    trial_data = rowley_dset['robs'][trial_mask].numpy()
-    trial_eye = rowley_dset['eyepos'][trial_mask].numpy()
+    trial_id = int(trials[itrial])
+    trial = FixRsvpTrial(sess.exp['D'][trial_id], sess.exp['S'])
+    trial_image_ids = trial.image_ids
+    if len(np.unique(trial_image_ids)) < 2:
+        continue
+    start_idx = np.where(trial_image_ids == 2)[0][0]
+    flip_times = ptb2ephys(trial.flip_times[start_idx:])
+
+    psth_inds_all = dataset.dsets[dset_idx].covariates['psth_inds'][trial_mask].numpy()
+    trial_bins_all = t_bins[trial_mask]
+    hist_idx_all = np.searchsorted(flip_times, trial_bins_all, side='right') - 1 + start_idx
+    image_ids[itrial][psth_inds_all] = trial_image_ids[hist_idx_all] - 1
+
+    ix = trial_mask & fixation
+    if np.sum(ix) == 0:
+        continue
+
+    stim_inds = np.where(ix)[0]
+    # stim_inds = stim_inds[:,None] - np.array(dataset_config['keys_lags']['stim'])[None,:]
+    psth_inds = dataset.dsets[dset_idx].covariates['psth_inds'][ix].numpy()
+    fix_dur[itrial] = len(psth_inds)
+    robs[itrial][psth_inds] = dataset.dsets[dset_idx]['robs'][ix].numpy()
+    dfs[itrial][psth_inds] = dataset.dsets[dset_idx]['dfs'][ix].numpy()
+    eyepos[itrial][psth_inds] = dataset.dsets[dset_idx]['eyepos'][ix].numpy()
+
     
-    trial_len = trial_data.shape[0]
-    robs[itrial, :trial_len] = trial_data
-    eyepos[itrial, :trial_len] = trial_eye
-    fix_dur[itrial] = trial_len
 
-r_flat = np.nan_to_num(robs, nan=0.0).reshape(NT, -1)
-e_flat = np.nan_to_num(eyepos, nan=0.0).reshape(NT, -1)
-sig = np.concatenate([r_flat, e_flat], axis=1)
+# check for if image_ids is correct.
+# # pick a trial
+# trial_id = int(trials[0])
+# trial = FixRsvpTrial(sess.exp['D'][trial_id], sess.exp['S'])
+# start_idx = np.where(trial.image_ids == 2)[0][0]
+# flip_times = ptb2ephys(trial.flip_times[start_idx:])
+# trial_bins = t_bins[trial_inds == trial_id]
+# hist_idx = np.searchsorted(flip_times, trial_bins, side='right') - 1 + start_idx
 
-_, keep = np.unique(sig, axis=0, return_index=True)
-keep = np.sort(keep)
+# # This should be identical to the assigned row (before -1 shift)
+# np.all(trial.image_ids[hist_idx] - 1 == image_ids[0][dataset.dsets[dset_idx].covariates['psth_inds'][trial_inds == trial_id]])
 
-robs = robs[keep]
-eyepos = eyepos[keep]
-fix_dur = fix_dur[keep]
-NT = len(keep)
-#search for duplicate trials
-for itrial in range(NT):
-    for jtrial in range(itrial+1, NT):
-        if np.allclose(robs[itrial], robs[jtrial], equal_nan=True):
-            print(f"Duplicate trial found: {itrial} and {jtrial}")
-            raise ValueError("Duplicate trial found")
-            assert np.allclose(eyepos[itrial], eyepos[jtrial], equal_nan=True)
-
+# time_window_start = 75
+# time_window_end =100
 time_window_start = 0
 time_window_end =200
-
-# Filter for trials with sufficient duration
 good_trials = fix_dur > 20
 robs = robs[good_trials][:,time_window_start:time_window_end,:]
+# dfs = dfs[good_trials]
 eyepos = eyepos[good_trials][:,time_window_start:time_window_end,:]
 fix_dur = fix_dur[good_trials]
 
-print(f"\nFiltered to {len(fix_dur)} trials with >20 bins")
-print(f"Final robs shape: {robs.shape} (trials × time × neurons)")
-print(f"Final eyepos shape: {eyepos.shape} (trials × time × XY)")
 
-# Sort by fixation duration for visualization
 ind = np.argsort(fix_dur)[::-1]
-fig, axes = plt.subplots(1, 2, figsize=(12, 4))
-axes[0].imshow(eyepos[ind, :, 0])
-axes[0].set_title('Eye position X (sorted by trial length)')
-axes[0].set_xlabel('Time (bins)')
-axes[0].set_ylabel('Trial')
-axes[1].imshow(np.nanmean(robs, 2)[ind])
-axes[1].set_title('Population mean response')
-axes[1].set_xlabel('Time (bins)')
-plt.tight_layout()
+plt.subplot(1,2,1)
+plt.imshow(eyepos[ind,:,0])
+# plt.xlim(0, 160)
+plt.subplot(1,2,2)
+plt.imshow(np.nanmean(robs,2)[ind])
+# plt.xlim(0, 160)
 plt.show()
+
+plt.plot(np.nanstd(robs, (2,0)))
+robs.shape #(79, 335, 133) [trials, time, cells]
+eyepos.shape #(79, 335, 2) [trials, time, xycoords]
+
+
+# sess = train_dset.dsets[0].metadata['sess']
+# trial_inds = dataset.dsets[dset_idx].covariates['trial_inds'].numpy()
+# trials = np.unique(trial_inds)
+
+# trial_id = int(trials[20])  # trial 20 for example
+# trial = FixRsvpTrial(sess.exp['D'][trial_id], sess.exp['S'])
+
+# image_ids_trial = trial.image_ids
+# flip_times_trial = trial.flip_times
+
+# # indices where image ID changes
+# change_idx = np.where(np.diff(image_ids_trial) != 0)[0] + 1
+# change_times = flip_times_trial[change_idx]
+
+# dt_change = np.median(np.diff(change_times))
+# print("Stim change interval (s):", dt_change) #0.050002098083496094
+# print("Stim change rate (Hz):", 1.0 / dt_change) #19.99916080181572
 #%%
 # Decoder setup
 rng = np.random.default_rng(0)
@@ -337,9 +222,8 @@ weight_decay = 1e-4 #best 1e-2
 loss_on_center = False
 require_odd_window = True
 use_trajectory_loss = True
-use_2d_attention = False  # 2d_attention flag (axial time x neuron)
 lambda_pos = 1.0
-lambda_vel = 4 #4
+lambda_vel = 40 #4
 lambda_accel = 0 #0.1
 velocity_event_thresh = 0.02 #0.02
 velocity_event_weight = 0
@@ -533,16 +417,12 @@ if standardize_inputs:
 else:
     robs_z = robs_aligned
 
-if use_2d_attention:
-    # Use raw neuron features; time encoding handled via embeddings in the model.
-    robs_feat_model = robs_z
+if time_encoding is not None:
+    robs_feat_model = np.concatenate(
+        [robs_z, time_enc_scale * time_encoding], axis=2
+    )
 else:
-    if time_encoding is not None:
-        robs_feat_model = np.concatenate(
-            [robs_z, time_enc_scale * time_encoding], axis=2
-        )
-    else:
-        robs_feat_model = robs_z
+    robs_feat_model = robs_z
 
 
 class WindowedEyeposDataset(torch.utils.data.Dataset):
@@ -623,98 +503,54 @@ class WindowedEyeposDataset(torch.utils.data.Dataset):
         return X_win, Y_win, mask, time_idx
 
 
-class TransformerEyepos(torch.nn.Module):
-    def __init__(self, input_dim, model_dim, num_heads, num_layers, dropout_rate):
+class ConvNeXt1DBlock(torch.nn.Module):
+    def __init__(self, dim, dropout_rate, kernel_size=7, layer_scale_init_value=1e-6):
         super().__init__()
-        self.input_proj = torch.nn.Linear(input_dim, model_dim)
-        encoder_layer = torch.nn.TransformerEncoderLayer(
-            d_model=model_dim,
-            nhead=num_heads,
-            dim_feedforward=model_dim * 4,
-            dropout=dropout_rate,
-            batch_first=True,
+        self.dwconv = torch.nn.Conv1d(
+            dim, dim, kernel_size=kernel_size, padding=kernel_size // 2, groups=dim
         )
-        self.encoder = torch.nn.TransformerEncoder(
-            encoder_layer, num_layers=num_layers
+        self.norm = torch.nn.LayerNorm(dim, eps=1e-6)
+        self.pwconv1 = torch.nn.Linear(dim, 4 * dim)
+        self.act = torch.nn.GELU()
+        self.pwconv2 = torch.nn.Linear(4 * dim, dim)
+        self.gamma = (
+            torch.nn.Parameter(layer_scale_init_value * torch.ones(dim))
+            if layer_scale_init_value > 0
+            else None
         )
-        self.head = torch.nn.Linear(model_dim, 2)
+        self.dropout = torch.nn.Dropout(dropout_rate)
 
     def forward(self, x):
+        residual = x
+        x = self.dwconv(x)
+        x = x.transpose(1, 2)
+        x = self.norm(x)
+        x = self.pwconv1(x)
+        x = self.act(x)
+        x = self.pwconv2(x)
+        if self.gamma is not None:
+            x = x * self.gamma
+        x = self.dropout(x)
+        x = x.transpose(1, 2)
+        return residual + x
+
+
+class ConvNeXt1DEyepos(torch.nn.Module):
+    def __init__(self, input_dim, model_dim, num_layers, dropout_rate, kernel_size=7):
+        super().__init__()
+        self.input_proj = torch.nn.Conv1d(input_dim, model_dim, kernel_size=1)
+        self.blocks = torch.nn.ModuleList(
+            [ConvNeXt1DBlock(model_dim, dropout_rate, kernel_size=kernel_size) for _ in range(num_layers)]
+        )
+        self.head = torch.nn.Conv1d(model_dim, 2, kernel_size=1)
+
+    def forward(self, x):
+        x = x.transpose(1, 2)
         x = self.input_proj(x)
-        x = self.encoder(x)
-        return self.head(x)
-
-
-class AxialTransformerLayer(torch.nn.Module):
-    def __init__(self, model_dim, num_heads, dropout_rate):
-        super().__init__()
-        self.time_attn = torch.nn.MultiheadAttention(
-            model_dim, num_heads, dropout=dropout_rate, batch_first=True
-        )
-        self.neuron_attn = torch.nn.MultiheadAttention(
-            model_dim, num_heads, dropout=dropout_rate, batch_first=True
-        )
-        self.norm_time = torch.nn.LayerNorm(model_dim)
-        self.norm_neuron = torch.nn.LayerNorm(model_dim)
-        self.norm_ff = torch.nn.LayerNorm(model_dim)
-        self.ff = torch.nn.Sequential(
-            torch.nn.Linear(model_dim, model_dim * 4),
-            torch.nn.GELU(),
-            torch.nn.Dropout(dropout_rate),
-            torch.nn.Linear(model_dim * 4, model_dim),
-            torch.nn.Dropout(dropout_rate),
-        )
-
-    def forward(self, x):
-        bsz, time_len, num_neurons, dim = x.shape
-        x_t = self.norm_time(x)
-        x_t = x_t.permute(0, 2, 1, 3).reshape(bsz * num_neurons, time_len, dim)
-        attn_t, _ = self.time_attn(x_t, x_t, x_t, need_weights=False)
-        attn_t = attn_t.reshape(bsz, num_neurons, time_len, dim).permute(0, 2, 1, 3)
-        x = x + attn_t
-
-        x_n = self.norm_neuron(x)
-        x_n = x_n.reshape(bsz * time_len, num_neurons, dim)
-        attn_n, _ = self.neuron_attn(x_n, x_n, x_n, need_weights=False)
-        attn_n = attn_n.reshape(bsz, time_len, num_neurons, dim)
-        x = x + attn_n
-
-        x_ff = self.norm_ff(x)
-        x = x + self.ff(x_ff)
-        return x
-
-
-class AxialTransformerEyepos(torch.nn.Module):
-    def __init__(
-        self,
-        num_neurons,
-        model_dim,
-        num_heads,
-        num_layers,
-        dropout_rate,
-        window_len_input,
-    ):
-        super().__init__()
-        self.input_proj = torch.nn.Linear(1, model_dim)
-        self.time_embed = torch.nn.Embedding(window_len_input, model_dim)
-        self.neuron_embed = torch.nn.Embedding(num_neurons, model_dim)
-        self.layers = torch.nn.ModuleList(
-            [AxialTransformerLayer(model_dim, num_heads, dropout_rate) for _ in range(num_layers)]
-        )
-        self.head = torch.nn.Linear(model_dim, 2)
-
-    def forward(self, x):
-        bsz, time_len, num_neurons = x.shape
-        x = self.input_proj(x.unsqueeze(-1))
-        time_idx = torch.arange(time_len, device=x.device)
-        neuron_idx = torch.arange(num_neurons, device=x.device)
-        time_emb = self.time_embed(time_idx)[None, :, None, :]
-        neuron_emb = self.neuron_embed(neuron_idx)[None, None, :, :]
-        x = x + time_emb + neuron_emb
-        for layer in self.layers:
-            x = layer(x)
-        x = x.mean(dim=2)
-        return self.head(x)
+        for block in self.blocks:
+            x = block(x)
+        x = self.head(x)
+        return x.transpose(1, 2)
 
 
 def masked_mse(pred, target, mask):
@@ -845,23 +681,12 @@ val_loader = torch.utils.data.DataLoader(
     persistent_workers=loader_num_workers > 0,
 )
 
-if use_2d_attention:
-    model = AxialTransformerEyepos(
-        robs_feat_model.shape[2],
-        model_dim=transformer_dim,
-        num_heads=transformer_heads,
-        num_layers=transformer_layers,
-        dropout_rate=transformer_dropout,
-        window_len_input=window_len_input,
-    ).to(device)
-else:
-    model = TransformerEyepos(
-        robs_feat_model.shape[2],
-        model_dim=transformer_dim,
-        num_heads=transformer_heads,
-        num_layers=transformer_layers,
-        dropout_rate=transformer_dropout,
-    ).to(device)
+model = ConvNeXt1DEyepos(
+    robs_feat_model.shape[2],
+    model_dim=transformer_dim,
+    num_layers=transformer_layers,
+    dropout_rate=transformer_dropout,
+).to(device)
 # optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
 # optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
@@ -944,9 +769,6 @@ def run_inference(
     window_len_output,
     device=None,
     batch_size=512,
-    use_overlap=False,
-    overlap_stride=None,
-    center_crop=None,
 ):
     if device is None:
         device = next(model.parameters()).device
@@ -961,58 +783,20 @@ def run_inference(
             if time_len < window_len_input:
                 continue
             max_start = max(0, time_len - window_len_input)
-            if use_overlap:
-                stride = overlap_stride
-                if stride is None:
-                    stride = max(1, window_len_output // 2)
-                crop_len = window_len_output
-                if center_crop is not None:
-                    if isinstance(center_crop, float):
-                        crop_len = int(round(window_len_output * center_crop))
-                    else:
-                        crop_len = int(center_crop)
-                    crop_len = max(1, min(window_len_output, crop_len))
-                crop_offset = (window_len_output - crop_len) // 2
-                starts = np.arange(0, max_start + 1, stride)
-                sum_pred = np.zeros((time_len, 2), dtype=np.float32)
-                count = np.zeros(time_len, dtype=np.float32)
-                for b in range(0, len(starts), batch_size):
-                    starts_batch = starts[b:b + batch_size]
-                    idx = starts_batch[:, None] + np.arange(window_len_input)[None, :]
-                    X_win = X[idx]
-                    X_t = torch.from_numpy(np.nan_to_num(X_win, nan=0.0)).float().to(device)
-                    pred_batch = model(X_t).cpu().numpy()
-                    if crop_len != window_len_output:
-                        pred_batch = pred_batch[:, crop_offset:crop_offset + crop_len]
-                    out_start = starts_batch + output_offset + crop_offset
-                    out_idx = out_start[:, None] + np.arange(crop_len)[None, :]
-                    valid = (out_idx >= 0) & (out_idx < time_len)
-                    if np.any(valid):
-                        idx_flat = out_idx[valid].astype(int)
-                        pred_flat = pred_batch[valid]
-                        np.add.at(sum_pred, idx_flat, pred_flat)
-                        np.add.at(count, idx_flat, 1.0)
-                np.divide(
-                    sum_pred,
-                    count[:, None],
-                    out=pred_all[i, :time_len],
-                    where=count[:, None] > 0,
-                )
-            else:
-                starts = np.clip(np.arange(time_len) - half_input, 0, max_start)
-                idx = starts[:, None] + np.arange(window_len_input)[None, :]
-                X_win = X[idx]
-                center_idx = (np.arange(time_len) - starts) - output_offset
-                for b in range(0, time_len, batch_size):
-                    X_batch = X_win[b:b + batch_size]
-                    X_t = torch.from_numpy(np.nan_to_num(X_batch, nan=0.0)).float()
-                    X_t = X_t.to(device)
-                    pred_batch = model(X_t).cpu().numpy()
-                    centers = center_idx[b:b + batch_size]
-                    valid = (centers >= 0) & (centers < window_len_output)
-                    if np.any(valid):
-                        rows = np.where(valid)[0]
-                        pred_all[i, b:b + batch_size][rows] = pred_batch[rows, centers[valid]]
+            starts = np.clip(np.arange(time_len) - half_input, 0, max_start)
+            idx = starts[:, None] + np.arange(window_len_input)[None, :]
+            X_win = X[idx]
+            center_idx = (np.arange(time_len) - starts) - output_offset
+            for b in range(0, time_len, batch_size):
+                X_batch = X_win[b:b + batch_size]
+                X_t = torch.from_numpy(np.nan_to_num(X_batch, nan=0.0)).float()
+                X_t = X_t.to(device)
+                pred_batch = model(X_t).cpu().numpy()
+                centers = center_idx[b:b + batch_size]
+                valid = (centers >= 0) & (centers < window_len_output)
+                if np.any(valid):
+                    rows = np.where(valid)[0]
+                    pred_all[i, b:b + batch_size][rows] = pred_batch[rows, centers[valid]]
     return pred_all
 
 
@@ -1024,11 +808,8 @@ pred_all = run_inference(
     window_len_input,
     window_len_output,
     device=device,
-    use_overlap=True,
-    overlap_stride=1,
-    center_crop=0.5,
 )
-
+#%%
 
 #%%
 def plot_trial_trace(
@@ -1180,10 +961,7 @@ def plot_trial_trace(
         ridge_err = np.sqrt(((ridge_plot - y) ** 2).sum(axis=-1))
         axes[2].plot(t[valid_xy], ridge_err[valid_xy], color="tab:green", alpha=0.8, linestyle="--", label="ridge err")
     axes[2].set_ylabel("euclid err")
-    #plot mean error as red dotted line
-    # print(f"mean error: {np.mean(pred_err[valid_xy])}")
-    axes[2].axhline(y=np.nanmean(pred_err[valid_xy]), color="red", linestyle="--", label="mean err")
-    axes[2].set_ylim(bottom=0, top=1)
+    axes[2].set_ylim(bottom=0, top=1.5)
     axes[2].set_xlim(time_window_start,time_window_end)
     axes[2].legend(frameon=False)
     axes[2].sharex(axes[0])
@@ -1219,10 +997,11 @@ def plot_trial_trace(
     plt.tight_layout()
     return fig, axes
 
+#%%
 
 
 #%%
-trial_idx = 0
+# trial_idx = 0
 trial_idx += 1
 fig, axes = plot_trial_trace(
     model,
@@ -1264,5 +1043,11 @@ fig, axes = plot_trial_trace(
     show_ridge=False,
     show_pred=True,
 )
+
+#%%
+#get number of parameters in model
+num_params = sum(p.numel() for p in model.parameters())
+print(f"Number of parameters: {num_params}")
+#%%
 
 #%%

@@ -888,6 +888,26 @@ if USE_ROWLEY_DATA:
         robs[itrial, :trial_len] = trial_data
         eyepos[itrial, :trial_len] = trial_eye
         fix_dur[itrial] = trial_len
+
+    r_flat = np.nan_to_num(robs, nan=0.0).reshape(NT, -1)
+    e_flat = np.nan_to_num(eyepos, nan=0.0).reshape(NT, -1)
+    sig = np.concatenate([r_flat, e_flat], axis=1)
+
+    _, keep = np.unique(sig, axis=0, return_index=True)
+    keep = np.sort(keep)
+
+    robs = robs[keep]
+    eyepos = eyepos[keep]
+    fix_dur = fix_dur[keep]
+    NT = len(keep)
+    #search for duplicate trials
+    for itrial in range(NT):
+        for jtrial in range(itrial+1, NT):
+            if np.allclose(robs[itrial], robs[jtrial], equal_nan=True):
+                print(f"Duplicate trial found: {itrial} and {jtrial}")
+                raise ValueError("Duplicate trial found")
+                assert np.allclose(eyepos[itrial], eyepos[jtrial], equal_nan=True)
+
     
     # Filter for trials with sufficient duration
     good_trials = fix_dur > 20
@@ -919,7 +939,7 @@ if USE_ROWLEY_DATA:
 # Clustering parameters (define before running analysis)
 if USE_ROWLEY_DATA:
     # Relaxed constraints for Rowley data (fewer trials, shorter sessions)
-    len_of_each_segment = 40
+    len_of_each_segment = 25
     total_start_time = 0
     total_end_time = 160  # Shorter to fit available data
     max_distance_from_centroid = 0.15  # More lenient

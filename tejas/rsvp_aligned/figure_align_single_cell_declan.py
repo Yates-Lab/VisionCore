@@ -29,95 +29,233 @@ import contextlib
 
 #%%
 #%%
-dataset_configs_path = '/home/tejas/VisionCore/experiments/dataset_configs/multi_basic_240_rsvp.yaml'
-dataset_configs = load_dataset_configs(dataset_configs_path)
+# dataset_configs_path = '/home/tejas/VisionCore/experiments/dataset_configs/multi_basic_240_rsvp.yaml'
+# dataset_configs = load_dataset_configs(dataset_configs_path)
 
-date = "2022-03-04"
-subject = "Allen"
-dataset_idx = next(i for i, cfg in enumerate(dataset_configs) if cfg['session'] == f"{subject}_{date}")
+# date = "2022-03-04"
+# subject = "Allen"
+# dataset_idx = next(i for i, cfg in enumerate(dataset_configs) if cfg['session'] == f"{subject}_{date}")
 
-with open(os.devnull, "w") as devnull, contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
-    train_dset, val_dset, dataset_config = prepare_data(dataset_configs[dataset_idx], strict=False)
+# with open(os.devnull, "w") as devnull, contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
+#     train_dset, val_dset, dataset_config = prepare_data(dataset_configs[dataset_idx], strict=False)
 
 
-#%%
-sess = train_dset.dsets[0].metadata['sess']
-# ppd = train_data.dsets[0].metadata['ppd']
-cids = dataset_config['cids']
-print(f"Running on {sess.name}")
+# #%%
+# sess = train_dset.dsets[0].metadata['sess']
+# # ppd = train_data.dsets[0].metadata['ppd']
+# cids = dataset_config['cids']
+# print(f"Running on {sess.name}")
 
-# get fixrsvp inds and make one dataaset object
-inds = torch.concatenate([
-        train_dset.get_dataset_inds('fixrsvp'),
-        val_dset.get_dataset_inds('fixrsvp')
-    ], dim=0)
+# # get fixrsvp inds and make one dataaset object
+# inds = torch.concatenate([
+#         train_dset.get_dataset_inds('fixrsvp'),
+#         val_dset.get_dataset_inds('fixrsvp')
+#     ], dim=0)
 
-dataset = train_dset.shallow_copy()
-dataset.inds = inds
+# dataset = train_dset.shallow_copy()
+# dataset.inds = inds
 
-# Getting key variables
-dset_idx = inds[:,0].unique().item()
-trial_inds = dataset.dsets[dset_idx].covariates['trial_inds'].numpy()
-trials = np.unique(trial_inds)
+# # Getting key variables
+# dset_idx = inds[:,0].unique().item()
+# trial_inds = dataset.dsets[dset_idx].covariates['trial_inds'].numpy()
+# trials = np.unique(trial_inds)
 
-NC = dataset.dsets[dset_idx]['robs'].shape[1]
-T = np.max(dataset.dsets[dset_idx].covariates['psth_inds'][:].numpy()).item() + 1
-NT = len(trials)
+# NC = dataset.dsets[dset_idx]['robs'].shape[1]
+# T = np.max(dataset.dsets[dset_idx].covariates['psth_inds'][:].numpy()).item() + 1
+# NT = len(trials)
 
-fixation = np.hypot(dataset.dsets[dset_idx]['eyepos'][:,0].numpy(), dataset.dsets[dset_idx]['eyepos'][:,1].numpy()) < 1
+# fixation = np.hypot(dataset.dsets[dset_idx]['eyepos'][:,0].numpy(), dataset.dsets[dset_idx]['eyepos'][:,1].numpy()) < 1
 
-# Loop over trials and align responses
-robs = np.nan*np.zeros((NT, T, NC))
-dfs = np.nan*np.zeros((NT, T, NC))
-eyepos = np.nan*np.zeros((NT, T, 2))
-fix_dur =np.nan*np.zeros((NT,))
+# # Loop over trials and align responses
+# robs = np.nan*np.zeros((NT, T, NC))
+# dfs = np.nan*np.zeros((NT, T, NC))
+# eyepos = np.nan*np.zeros((NT, T, 2))
+# fix_dur =np.nan*np.zeros((NT,))
 
-for itrial in tqdm(range(NT)):
-    # print(f"Trial {itrial}/{NT}")
-    ix = trials[itrial] == trial_inds
-    ix = ix & fixation
-    if np.sum(ix) == 0:
-        continue
+# for itrial in tqdm(range(NT)):
+#     # print(f"Trial {itrial}/{NT}")
+#     ix = trials[itrial] == trial_inds
+#     ix = ix & fixation
+#     if np.sum(ix) == 0:
+#         continue
     
 
-    psth_inds = dataset.dsets[dset_idx].covariates['psth_inds'][ix].numpy()
-    fix_dur[itrial] = len(psth_inds)
-    robs[itrial][psth_inds] = dataset.dsets[dset_idx]['robs'][ix].numpy()
-    dfs[itrial][psth_inds] = dataset.dsets[dset_idx]['dfs'][ix].numpy()
-    eyepos[itrial][psth_inds] = dataset.dsets[dset_idx]['eyepos'][ix].numpy()
+#     psth_inds = dataset.dsets[dset_idx].covariates['psth_inds'][ix].numpy()
+#     fix_dur[itrial] = len(psth_inds)
+#     robs[itrial][psth_inds] = dataset.dsets[dset_idx]['robs'][ix].numpy()
+#     dfs[itrial][psth_inds] = dataset.dsets[dset_idx]['dfs'][ix].numpy()
+#     eyepos[itrial][psth_inds] = dataset.dsets[dset_idx]['eyepos'][ix].numpy()
 
 
+# good_trials = fix_dur > 20
+# robs = robs[good_trials]
+# dfs = dfs[good_trials]
+# eyepos = eyepos[good_trials]
+# fix_dur = fix_dur[good_trials]
+
+
+# ind = np.argsort(fix_dur)[::-1]
+# plt.subplot(1,2,1)
+# plt.imshow(eyepos[ind,:,0])
+# plt.xlim(0, 160)
+# plt.subplot(1,2,2)
+# plt.imshow(np.nanmean(robs,2)[ind])
+# plt.xlim(0, 160)
+
+#%%
+# Load Rowley session
+from DataRowleyV1V2.data.registry import get_session as get_rowley_session
+from pathlib import Path
+USE_ROWLEY_DATA= True
+subject = 'Luke'
+date = '2025-08-04'
+
+print(f"Loading Rowley session: {subject}_{date}")
+sess = get_rowley_session(subject, date)
+print(f"Session loaded: {sess.name}")
+print(f"Session directory: {sess.processed_path}")
+
+# Load fixRSVP dataset
+eye_calibration = 'left_eye_x-0.5_y-0.3'
+dataset_type = 'fixrsvp'
+dset_path = Path(sess.processed_path) / 'datasets' / eye_calibration / f'{dataset_type}.dset'
+
+print(f"Loading dataset from: {dset_path}")
+if not dset_path.exists():
+    raise FileNotFoundError(f"Dataset not found: {dset_path}")
+
+# Load using DictDataset
+from DataYatesV1 import DictDataset
+rowley_dset = DictDataset.load(dset_path)
+
+print(f"Dataset loaded: {len(rowley_dset)} samples")
+print(f"Response shape: {rowley_dset['robs'].shape}")
+
+# Extract data
+trial_inds = rowley_dset['trial_inds'].numpy()
+trials = np.unique(trial_inds)
+NC = rowley_dset['robs'].shape[1]
+NT = len(trials)
+cids = range(NC)
+
+# Determine max trial length
+max_T = 0
+for trial in trials:
+    trial_len = np.sum(trial_inds == trial)
+    max_T = max(max_T, trial_len)
+
+print(f"Number of trials: {NT}")
+print(f"Number of neurons: {NC}")
+print(f"Max trial length: {max_T}")
+
+# Create trial-aligned arrays
+robs = np.nan * np.zeros((NT, max_T, NC))
+eyepos = np.nan * np.zeros((NT, max_T, 2))
+fix_dur = np.zeros(NT)
+
+# Define fixation criterion (eye position < 1 degree from center)
+eyepos_raw = rowley_dset['eyepos'].numpy()
+fixation = np.hypot(eyepos_raw[:, 0], eyepos_raw[:, 1]) < 1
+
+print("Aligning trials...")
+for itrial in tqdm(range(NT)):
+    trial_mask = (trial_inds == trials[itrial]) & fixation
+    if np.sum(trial_mask) == 0:
+        continue
+    
+    trial_data = rowley_dset['robs'][trial_mask].numpy()
+    trial_eye = rowley_dset['eyepos'][trial_mask].numpy()
+    
+    trial_len = trial_data.shape[0]
+    robs[itrial, :trial_len] = trial_data
+    eyepos[itrial, :trial_len] = trial_eye
+    fix_dur[itrial] = trial_len
+
+r_flat = np.nan_to_num(robs, nan=0.0).reshape(NT, -1)
+e_flat = np.nan_to_num(eyepos, nan=0.0).reshape(NT, -1)
+sig = np.concatenate([r_flat, e_flat], axis=1)
+
+_, keep = np.unique(sig, axis=0, return_index=True)
+keep = np.sort(keep)
+
+robs = robs[keep]
+eyepos = eyepos[keep]
+fix_dur = fix_dur[keep]
+NT = len(keep)
+#search for duplicate trials
+for itrial in range(NT):
+    for jtrial in range(itrial+1, NT):
+        if np.allclose(robs[itrial], robs[jtrial], equal_nan=True):
+            print(f"Duplicate trial found: {itrial} and {jtrial}")
+            raise ValueError("Duplicate trial found")
+            assert np.allclose(eyepos[itrial], eyepos[jtrial], equal_nan=True)
+
+# Filter for trials with sufficient duration
 good_trials = fix_dur > 20
 robs = robs[good_trials]
-dfs = dfs[good_trials]
 eyepos = eyepos[good_trials]
 fix_dur = fix_dur[good_trials]
 
+print(f"\nFiltered to {len(fix_dur)} trials with >20 bins")
+print(f"Final robs shape: {robs.shape} (trials × time × neurons)")
+print(f"Final eyepos shape: {eyepos.shape} (trials × time × XY)")
 
+# Sort by fixation duration for visualization
 ind = np.argsort(fix_dur)[::-1]
-plt.subplot(1,2,1)
-plt.imshow(eyepos[ind,:,0])
-plt.xlim(0, 160)
-plt.subplot(1,2,2)
-plt.imshow(np.nanmean(robs,2)[ind])
-plt.xlim(0, 160)
-#%%
-from tejas.metrics.gaborium import plot_unit_sta_ste
-from tejas.metrics.main_unit_panel import get_unit_info_panel_dict
-unit_info_panel_dict = get_unit_info_panel_dict(date, subject, cache = True)
-unit_sta_ste_dict = unit_info_panel_dict['unit_sta_ste_dict']
-contour_metrics = unit_info_panel_dict['rf_contour_metrics']
-gaussian_fit_metrics = unit_info_panel_dict['rf_gaussian_fit_metrics']
-#%%
-from tejas.metrics.gaborium import get_rf_contour_metrics
-rf_contour_metrics = get_rf_contour_metrics(date, subject)
-#%%
+fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+axes[0].imshow(eyepos[ind, :, 0])
+axes[0].set_title('Eye position X (sorted by trial length)')
+axes[0].set_xlabel('Time (bins)')
+axes[0].set_ylabel('Trial')
+axes[1].imshow(np.nanmean(robs, 2)[ind])
+axes[1].set_title('Population mean response')
+axes[1].set_xlabel('Time (bins)')
+plt.tight_layout()
+plt.show()
 
-from tejas.metrics.gratings import get_gratings_for_dataset, plot_ori_tuning
-gratings_info = get_gratings_for_dataset(date, subject, cache = True)
 #%%
-from tejas.metrics.qc import get_qc_units_for_session
-units_qc = get_qc_units_for_session(date, subject, cache = True)
+rbar = np.nanmean(robs, 0)
+v = np.nanvar(rbar, axis=0)
+
+plt.plot(np.sort(v), '.')
+plt.ylim(0, .01)
+thresh = np.percentile(v, 90)
+inds = np.where(v > thresh)[0]
+n2plot = len(inds)
+sx = int(np.ceil(np.sqrt(n2plot)))
+sy = int(np.ceil(n2plot / sx))
+fig, axes = plt.subplots(sx, sy, figsize=(12, 12))
+for i in range(n2plot):
+    ax = axes[i // sx, i % sx]
+    ax.plot(rbar[:,inds[i]])
+    ax.set_title(f'{inds[i]}')
+    ax.set_xlim(0, 80)
+    # axes off
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+plt.tight_layout()
+plt.show()
+
+
+#%%
+#%%
+# from tejas.metrics.gaborium import plot_unit_sta_ste
+# from tejas.metrics.main_unit_panel import get_unit_info_panel_dict
+# unit_info_panel_dict = get_unit_info_panel_dict(date, subject, cache = True)
+# unit_sta_ste_dict = unit_info_panel_dict['unit_sta_ste_dict']
+# contour_metrics = unit_info_panel_dict['rf_contour_metrics']
+# gaussian_fit_metrics = unit_info_panel_dict['rf_gaussian_fit_metrics']
+# #%%
+# from tejas.metrics.gaborium import get_rf_contour_metrics
+# rf_contour_metrics = get_rf_contour_metrics(date, subject)
+# #%%
+
+# from tejas.metrics.gratings import get_gratings_for_dataset, plot_ori_tuning
+# gratings_info = get_gratings_for_dataset(date, subject, cache = True)
+# #%%
+# from tejas.metrics.qc import get_qc_units_for_session
+# units_qc = get_qc_units_for_session(date, subject, cache = True)
 #%%
 def get_iix_distance_from_median_eyepos(eyepos, start_time, end_time):
     centroid_pos0 = np.nanmedian(eyepos[:, start_time:end_time, 0])
@@ -142,14 +280,19 @@ def microsaccade_exists(eyepos, threshold = 0.3):
 def get_iix_projection_on_orthogonal_line(eyepos, start_time, end_time, max_orientation, distance_from_line_threshold, cc, psth, universal_eyepos = False):
     # if psth is not None:
     #     max_psth_idx = np.argmax(psth[start_time:end_time]) - rf_contour_metrics[cc]['ste_peak_lag']
-    
-    peak_lag = rf_contour_metrics[cc]['ste_peak_lag']
+    if not USE_ROWLEY_DATA:
+        peak_lag = rf_contour_metrics[cc]['ste_peak_lag']
+    else:
+        peak_lag = 7
     if universal_eyepos:
-        all_lags = []
-        for i in range(len(rf_contour_metrics)):
-            if i in cids:
-                all_lags.append(rf_contour_metrics[i]['ste_peak_lag'])
-        peak_lag = np.median(all_lags).astype(int)
+        if not USE_ROWLEY_DATA:
+            all_lags = []
+            for i in range(len(rf_contour_metrics)):
+                if i in cids:
+                    all_lags.append(rf_contour_metrics[i]['ste_peak_lag'])
+            peak_lag = np.median(all_lags).astype(int)
+        else:
+            peak_lag = 7
 
     time_window_len = end_time - start_time
     start_time_shifted = max(start_time - peak_lag, 0)
@@ -189,11 +332,13 @@ def get_iix_projection_on_orthogonal_line(eyepos, start_time, end_time, max_orie
             x_proj = (median_eyepos[0] + slope * (median_eyepos[1] - intercept)) / (1 + slope**2)
             valid_indices.append(idx)
             projections.append(x_proj)
+
     
     # Sort by projection x-coordinate (left to right)
     sort_order = np.argsort(projections)
     iix = np.array(valid_indices)[sort_order]
     sorted_projections = np.array(projections)[sort_order]
+
 
    
     if len(iix)==0:
@@ -202,17 +347,24 @@ def get_iix_projection_on_orthogonal_line(eyepos, start_time, end_time, max_orie
     distances_along_line = (sorted_projections - sorted_projections[0]) * np.sqrt(1 + slope**2)
     return iix, distances_along_line
     
-def plot_eyepos(iix, start_time, end_time, max_orientation, cc, universal_eyepos = False, use_bins = True):
+def plot_eyepos(iix, start_time, end_time, max_orientation, cc, universal_eyepos = False, use_bins = True, show_all_eyepos = False):
         
         time_window_len = end_time - start_time
 
-        peak_lag = rf_contour_metrics[cc]['ste_peak_lag']
+        if not USE_ROWLEY_DATA:
+            peak_lag = rf_contour_metrics[cc]['ste_peak_lag']
+        else:
+            peak_lag = 7
         if universal_eyepos:
-            all_lags = []
-            for i in range(len(rf_contour_metrics)):
-                if i in cids:
-                    all_lags.append(rf_contour_metrics[i]['ste_peak_lag'])
-            peak_lag = np.median(all_lags).astype(int)
+
+            if not USE_ROWLEY_DATA:
+                all_lags = []
+                for i in range(len(rf_contour_metrics)):
+                    if i in cids:
+                        all_lags.append(rf_contour_metrics[i]['ste_peak_lag'])
+                peak_lag = np.median(all_lags).astype(int)
+            else:
+                peak_lag = 7
 
         start_time = max(start_time - peak_lag, 0)
         end_time = start_time + time_window_len
@@ -239,6 +391,18 @@ def plot_eyepos(iix, start_time, end_time, max_orientation, cc, universal_eyepos
             'k'
         )
         colors = plt.cm.coolwarm(np.linspace(0, 1, len(iix)))
+        if show_all_eyepos:
+            iix_set = set(iix.tolist() if isinstance(iix, np.ndarray) else list(iix))
+            for idx in range(len(eyepos)):
+                if idx in iix_set:
+                    continue
+                plt.plot(
+                    eyepos[idx, start_time:end_time, 0],
+                    eyepos[idx, start_time:end_time, 1],
+                    color=(0.6, 0.6, 0.6, 0.4),
+                    alpha=1,
+                    linewidth=0.6
+                )
         total_count = 0
         for idx in range(len(iix)):
             assert not microsaccade_exists(eyepos[iix[idx], start_time:end_time, :])
@@ -264,8 +428,12 @@ def plot_eyepos(iix, start_time, end_time, max_orientation, cc, universal_eyepos
 
         plt.xlabel('X (degrees)')
         plt.ylabel('Y (degrees)')
-        max_x =  np.nanmax(np.abs(eyepos[iix, start_time:end_time, 0]))
-        max_y =  np.nanmax(np.abs(eyepos[iix, start_time:end_time, 1]))
+        if show_all_eyepos:
+            max_x = np.nanmax(np.abs(eyepos[:, start_time:end_time, 0]))
+            max_y = np.nanmax(np.abs(eyepos[:, start_time:end_time, 1]))
+        else:
+            max_x =  np.nanmax(np.abs(eyepos[iix, start_time:end_time, 0]))
+            max_y =  np.nanmax(np.abs(eyepos[iix, start_time:end_time, 1]))
         max_for_plot = max(max_x, max_y)
         plt.xlim(-max_for_plot - 0.05, max_for_plot + 0.05)
         plt.ylim(-max_for_plot - 0.05, max_for_plot + 0.05)
@@ -381,17 +549,24 @@ def plot_robs(robs, iix, cc, num_psth = None, distances_along_line = None, alpha
         
         # plt.subplot(1,2,1)
         # ax1 = plt.gca()
-        fig, axes = plt.subplots(2,2, figsize=(15, 10), dpi=500)
-        ax1 = axes[0][0]
+        show_psth = num_psth is not None and num_psth > 0
+        if show_psth:
+            fig, axes = plt.subplots(2, 2, figsize=(15, 10), dpi=500)
+            ax_before = axes[0][0]
+            ax_after = axes[0][1]
+        else:
+            fig, axes = plt.subplots(1, 2, figsize=(15, 6), dpi=500)
+            ax_before = axes[0]
+            ax_after = axes[1]
 
         n_time_bins = robs_original.shape[1]
         time_bins, tick_positions, tick_labels, x_max = _time_axis_params(n_time_bins, bins_x_axis)
-        ax1.set_rasterization_zorder(1)
+        ax_before.set_rasterization_zorder(1)
         if render == "img":
             raster_extent = None
             if not bins_x_axis:
                 raster_extent = (0, x_max, len(iix), 0)
-            ax1.imshow(
+            ax_before.imshow(
                 robs_original[np.sort(iix), :, cids.index(cc)],
                 alpha=alpha_raster,
                 aspect='auto',
@@ -403,7 +578,7 @@ def plot_robs(robs, iix, cc, num_psth = None, distances_along_line = None, alpha
             )
         else:
             plot_raster_as_line(
-                ax1,
+                ax_before,
                 robs_original[np.sort(iix), :, cids.index(cc)],
                 time_bins,
                 height=tick_height,
@@ -411,15 +586,15 @@ def plot_robs(robs, iix, cc, num_psth = None, distances_along_line = None, alpha
                 linewidth=tick_linewidth,
                 alpha=alpha_raster,
             )
-            ax1.set_ylim(len(iix), 0)
-        ax1.set_title(f'{cc} before')
-        ax1.set_xlabel('Time (bins)' if bins_x_axis else 'Time (ms)')
-        ax1.set_ylabel('Trial')
-        ax1.set_xlim(0, x_max)
-        ax1.set_xticks(tick_positions)
-        ax1.set_xticklabels(tick_labels)
+            ax_before.set_ylim(len(iix), 0)
+        ax_before.set_title(f'{cc} before')
+        ax_before.set_xlabel('Time (bins)' if bins_x_axis else 'Time (ms)')
+        ax_before.set_ylabel('Trial')
+        ax_before.set_xlim(0, x_max)
+        ax_before.set_xticks(tick_positions)
+        ax_before.set_xticklabels(tick_labels)
 
-        if num_psth is not None:
+        if show_psth:
             # ax2 = ax1.twinx()
             ax2 = axes[1][0]
             ax2.set_xlabel('Time (bins)' if bins_x_axis else 'Time (ms)')
@@ -450,7 +625,7 @@ def plot_robs(robs, iix, cc, num_psth = None, distances_along_line = None, alpha
             ax2.set_xticklabels(tick_labels)
             
 
-        ax1 = axes[0][1]
+        ax1 = ax_after
         n_time_bins = robs.shape[1]
         time_bins, tick_positions, tick_labels, x_max = _time_axis_params(n_time_bins, bins_x_axis)
         ax1.set_rasterization_zorder(1)
@@ -498,7 +673,7 @@ def plot_robs(robs, iix, cc, num_psth = None, distances_along_line = None, alpha
             ax_dist.set_yticklabels([f'{distances_along_line[i]:.2f}' for i in tick_indices])
             ax_dist.set_ylabel('Distance along line (degrees)')
 
-        if num_psth is not None:
+        if show_psth:
             # ax2 = ax1.twinx()
             ax2 = axes[1][1]
             ax2.set_xlabel('Time (bins)' if bins_x_axis else 'Time (ms)')
@@ -526,19 +701,43 @@ def plot_robs(robs, iix, cc, num_psth = None, distances_along_line = None, alpha
 
         return fig, axes
 
-
 #%%
 
+#plot spike raster for cell 115
+plt.imshow(robs[:, :, 115])
+plt.show()
+#%%
+cells_to_orientations = {
+    62: 0,
+    84: 45,
+    98: 0, 
+    138: 0,
+    184: 0,
+    229: 0, 
+    229: 0,
+    226: 45,
+    248: 0,
+    241: 0,
+    252: 0,
+    255: 0,
+    264: 0,
+    269: 45,
+    280: 0,
+    274: 0,
+    329: 135,
+    314: 0, 
+    300: 45,
+    373: 45,
+    365: 0,
+    362: 45,
+}
 
-cids_and_peak_times = [(14, [150]), (23, [75]), (25, [50]), (29, [75]), (36, [25]), 
-(37, [75]), (42, [75]), (46, [75]), (60, [25]), (61, [25]),
-(82, [75]), (92, [75]), (102, [25]), (110, [75]), (115, [75]),
-(122, [100]), (128, [75]), (147, [25]), (149, [25, 50, 75, 100, 125]),
-(154, [100, 200]), (158, [100, 125]), (159, [100]), (160, [100]),
-(166, [50]), (169, [50, 100]), (170, [100, 175]), (173, [50, 75]), (174, [125])]
 universal_eyepos = False
-trial_stitching = False
-for cc in [154, 122, 115, 92, 29]:
+trial_stitching = True
+# for cc in [154, 122, 115, 92, 29]:
+# for cc in cells_to_orientations.keys():
+for cc in [115]:
+
     # cc = cids.index(cc)
 #nothing from Allen_2022-02-18
 # 61 from Allen_2022-02-24
@@ -553,6 +752,69 @@ for cc in [154, 122, 115, 92, 29]:
 # 70 from Allen_2022-04-15 time range 100,200
 
 # 154 from Allen_2022-04-15 and 158 from Allen_2022-04-06 are best
+
+#okay:
+#for line at 0 degrees, cell 62 time 0
+#for line at 45 degrees, cell 84 time 0
+#for line at 0 degrees, cell 98 time 0
+#for line at 0 degrees, cell 138 time 0
+#for line at 0 degrees, cell 184 time 0
+#for line at 0 degrees, cell 229 time 0
+#for line at 0 degrees, cell 228 time 0
+#for line at 45 degrees, cell 226 time 0
+#for line at 0 degrees, cell 248 time 0
+#for line at 0 degrees, cell 241 time 0
+#for line at 0 degrees, cell 252 time 0
+#for line at 0 degrees, cell 255 time 0
+#for line at 0 degrees, cell 264 time 0
+#for line at 45 degrees, cell 269 time 0
+#for line at 0 degrees, cell 280 time 0
+#for line at 0 degrees, cell 274 time 0
+# for line at 135 degrees, cell 329 time 0
+#for line at 0 degrees, cell 314 time 0
+#for line at 45 degrees, cell 300 time 0
+# for line at 45 degrees, cell 373 time 0
+#for line at 0 degrees, cell 365 time 0
+#for line at 45 degrees, cell 362 time 0
+
+
+
+
+
+
+#maybe:
+#for line at 135 degrees, cell 1
+#for line at 45 degrees, cell 19 time 0
+#for line at 45 degrees, cell 30 time 0
+#for line at 45 degrees, cell 32 time 0
+#for line at 45 degrees, cell 37 time 0
+#for line at 45 degrees, cell 50 time 0
+#for line at 45 degrees, cell 52 time 0
+# for line at 45 degrees, cell 70 time 0
+#for line at 90 degree, cell 78 time 0
+#for line at 45 degrees, cell 85 time 0
+#for line at 45 degrees, cell 106 time 0
+#for line at 90 degrees, cell 104 time 0
+#for line at 45 degrees, cell 118 time 0
+#for line at 45 degrees, cell 128 time 0
+#for line at 90 degrees, cell 140 time 0
+#for line at 0 degrees, cell 145 time 0
+#for line at 0 degrees, cell 192 time 0
+#for line at 0 degrees, cell 218 time 0
+#for line at 0 degrees, cell 242 time 0
+#for line at 0 degrees, cell 234 time 0
+#for line at 0 degrees, cell 250 time 0
+#for line at 0 degrees, cell 299 time 0
+#for line at 0 degrees, cell 289 time 0
+#for line at 0 degrees, cell 307 time 0
+#for line at 45 degrees, cell 306 time 0
+#for line at 0 degrees, cell 381 time 0
+#for line at 0 degrees, cell 380 time 0
+#for line at 0 degrees, cell 369 time 0
+#for line at 0 degrees, cell 368 time 0
+
+
+
 
 
     def display(max_orientation):
@@ -574,8 +836,10 @@ for cc in [154, 122, 115, 92, 29]:
             end_time = start_time + len_of_each_segment
             #eyepos is shape [num_trial, time, 2]
             # iix = get_iix_distance_from_median_eyepos(eyepos, start_time, end_time)
-            distance_from_line_threshold = 0.3
-            psth = np.nanmean(robs[:, :, cids.index(cc)], axis=0)
+            distance_from_line_threshold = 1
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                psth = np.nanmean(robs[:, :, cids.index(cc)], axis=0)
             iix, distances_along_line = get_iix_projection_on_orthogonal_line(eyepos, 
                             start_time, end_time, 
                             max_orientation, distance_from_line_threshold, cc,
@@ -589,7 +853,7 @@ for cc in [154, 122, 115, 92, 29]:
 
             if np.isclose(psth[start_time:end_time].max(), psth[total_start_time:total_end_time].max(), atol=1e-10) and not universal_eyepos:
                 
-                plot_eyepos(iix, start_time, end_time, max_orientation, cc)
+                plot_eyepos(iix, start_time, end_time, max_orientation, cc, show_all_eyepos = True)
                 plt.show()
                 # print(f'start time {start_time} end time {end_time}')
 
@@ -602,106 +866,117 @@ for cc in [154, 122, 115, 92, 29]:
         
         # plot_robs(robs[:, start_time:end_time, :], iix, cc)
         # plot_robs(robs[:, start_time:end_time, :], iix, cc, num_psth = 4)
-        plot_robs(robs_list, iix_list, cc, distances_along_line = distances_to_use, num_psth = 2, render="img")
+        plot_robs(robs_list, iix_list, cc, distances_along_line = distances_to_use, num_psth = None, render="img")
         plt.show()
         # plot_robs(robs_list, iix_list, cc, num_psth = 4)
 
     
-    max_orientation = gratings_info['oris'][np.argmax(gratings_info['ori_tuning'][cc])]
-    print(f'for max orientation {max_orientation}')
-    display(max_orientation)
+    # max_orientation = gratings_info['oris'][np.argmax(gratings_info['ori_tuning'][cc])]
+    # print(f'for max orientation {max_orientation}')
+    # display(max_orientation)
+    # print(f'for line at 90 degrees, cell {cc}')
+    # display(0)
 
-    # print(f'for max orientation 90')
+    # print(f'for line at 135 degrees, cell {cc}')
+    # display(45)
+    
+    # print(f'for line at 0 degrees, cell {cc}')
     # display(90)
 
-    # print(f'for max orientation max_orientation-90')
-    # display(max_orientation-90)
+    # print(f'for line at 45 degrees, cell {cc}')
+    # display(135)
+
+    # display(cells_to_orientations[cc]-90)
+    display(45)
+
+
+
 
 
 
 #%%
-universal_eyepos = True
-trial_stitching = False
-for cc in [115, 92]:
-# for cc in [115]:
+# universal_eyepos = True
+# trial_stitching = False
+# for cc in [115, 92]:
+# # for cc in [115]:
 
-    def display(max_orientation):
-        # plot_ori_tuning(gratings_info, cc)
-        # plt.show()
-        # print(np.var(gratings_info['ori_tuning'][cc]))
-        # max_orientation = gratings_info['oris'][np.argmax(gratings_info['ori_tuning'][cc])]
-        # max_orientation = 90
-        # max_orientation = max_orientation - 90
-        len_of_each_segment = 25
-        iix_list = []
-        robs_list = []
-        total_start_time = 0
-        total_end_time = 100
-        # total_end_time = 100
-        distances_to_use = None
-        for i in range(total_start_time, total_end_time, len_of_each_segment):
-            start_time = i
-            end_time = start_time + len_of_each_segment
-            #eyepos is shape [num_trial, time, 2]
-            # iix = get_iix_distance_from_median_eyepos(eyepos, start_time, end_time)
-            distance_from_line_threshold = 0.3
-            psth = np.nanmean(robs[:, :, cids.index(cc)], axis=0)
-            iix, distances_along_line = get_iix_projection_on_orthogonal_line(eyepos, 
-                            start_time, end_time, 
-                            max_orientation, distance_from_line_threshold, cc,
-                            psth = psth, universal_eyepos = universal_eyepos)
+#     def display(max_orientation):
+#         # plot_ori_tuning(gratings_info, cc)
+#         # plt.show()
+#         # print(np.var(gratings_info['ori_tuning'][cc]))
+#         # max_orientation = gratings_info['oris'][np.argmax(gratings_info['ori_tuning'][cc])]
+#         # max_orientation = 90
+#         # max_orientation = max_orientation - 90
+#         len_of_each_segment = 25
+#         iix_list = []
+#         robs_list = []
+#         total_start_time = 0
+#         total_end_time = 100
+#         # total_end_time = 100
+#         distances_to_use = None
+#         for i in range(total_start_time, total_end_time, len_of_each_segment):
+#             start_time = i
+#             end_time = start_time + len_of_each_segment
+#             #eyepos is shape [num_trial, time, 2]
+#             # iix = get_iix_distance_from_median_eyepos(eyepos, start_time, end_time)
+#             distance_from_line_threshold = 0.3
+#             psth = np.nanmean(robs[:, :, cids.index(cc)], axis=0)
+#             iix, distances_along_line = get_iix_projection_on_orthogonal_line(eyepos, 
+#                             start_time, end_time, 
+#                             max_orientation, distance_from_line_threshold, cc,
+#                             psth = psth, universal_eyepos = universal_eyepos)
 
-            if trial_stitching:
+#             if trial_stitching:
             
-                robs_list.append(robs[:, start_time:end_time, :])
-                iix_list.append(iix)
+#                 robs_list.append(robs[:, start_time:end_time, :])
+#                 iix_list.append(iix)
 
 
-            if np.isclose(psth[start_time:end_time].max(), psth[total_start_time:total_end_time].max(), atol=1e-10):
+#             if np.isclose(psth[start_time:end_time].max(), psth[total_start_time:total_end_time].max(), atol=1e-10):
                 
-                fig, axes = plot_eyepos(iix, start_time, end_time, max_orientation, cc, universal_eyepos = universal_eyepos, use_bins = False)
-                fig.savefig(f'eyepos_single_cell_aligned_{cc}.pdf', dpi=500, bbox_inches='tight')
+#                 fig, axes = plot_eyepos(iix, start_time, end_time, max_orientation, cc, universal_eyepos = universal_eyepos, use_bins = False)
+#                 fig.savefig(f'eyepos_single_cell_aligned_{cc}.pdf', dpi=500, bbox_inches='tight')
                 
-                # plot_eyepos_quiver(iix, start_time, end_time, max_orientation)
-                print(f'start time {start_time} end time {end_time}')
+#                 # plot_eyepos_quiver(iix, start_time, end_time, max_orientation)
+#                 print(f'start time {start_time} end time {end_time}')
 
-                distances_to_use = distances_along_line
+#                 distances_to_use = distances_along_line
 
-                if not trial_stitching:
-                    robs_list = robs[:, total_start_time:total_end_time, :]
-                    iix_list = iix
+#                 if not trial_stitching:
+#                     robs_list = robs[:, total_start_time:total_end_time, :]
+#                     iix_list = iix
 
         
-        # plot_robs(robs[:, start_time:end_time, :], iix, cc)
-        # plot_robs(robs[:, start_time:end_time, :], iix, cc, num_psth = 4)
-        fig, axes = plot_robs(robs_list, iix_list, cc, distances_along_line = distances_to_use, num_psth=2, bins_x_axis = False)
-        fig.savefig(f'raster_single_cell_aligned_{cc}.pdf', dpi=1200, bbox_inches='tight')
-        plt.show()
-        # plot_robs(robs_list, iix_list, cc, num_psth = 4)
+#         # plot_robs(robs[:, start_time:end_time, :], iix, cc)
+#         # plot_robs(robs[:, start_time:end_time, :], iix, cc, num_psth = 4)
+#         fig, axes = plot_robs(robs_list, iix_list, cc, distances_along_line = distances_to_use, num_psth=2, bins_x_axis = False)
+#         fig.savefig(f'raster_single_cell_aligned_{cc}.pdf', dpi=1200, bbox_inches='tight')
+#         plt.show()
+#         # plot_robs(robs_list, iix_list, cc, num_psth = 4)
 
-        fig, ax = plot_unit_sta_ste(subject, date, 
-                    cc, 
-                    unit_sta_ste_dict,
-                    contour_metrics = None, 
-                    gaussian_fit_metrics = None, 
-                    sampling_rate = None, 
-                    ax = None, 
-                    show_ln_energy_fit = False)
-        fig.savefig(f'sta_ste_single_cell_aligned_{cc}.pdf', dpi=1200, bbox_inches='tight')
-        plt.show()
+#         fig, ax = plot_unit_sta_ste(subject, date, 
+#                     cc, 
+#                     unit_sta_ste_dict,
+#                     contour_metrics = None, 
+#                     gaussian_fit_metrics = None, 
+#                     sampling_rate = None, 
+#                     ax = None, 
+#                     show_ln_energy_fit = False)
+#         fig.savefig(f'sta_ste_single_cell_aligned_{cc}.pdf', dpi=1200, bbox_inches='tight')
+#         plt.show()
 
-        return robs_list, iix_list, distances_to_use
+#         return robs_list, iix_list, distances_to_use
 
     
-    max_orientation = gratings_info['oris'][np.argmax(gratings_info['ori_tuning'][cc])]
-    print(f'for max orientation {max_orientation}')
-    robs_list, iix_list, distances_to_use = display(max_orientation)
+#     max_orientation = gratings_info['oris'][np.argmax(gratings_info['ori_tuning'][cc])]
+#     print(f'for max orientation {max_orientation}')
+#     robs_list, iix_list, distances_to_use = display(max_orientation)
 
-    # print(f'for max orientation 90')
-    # display(90)
+#     # print(f'for max orientation 90')
+#     # display(90)
 
-    # print(f'for max orientation max_orientation-90')
-    # display(max_orientation-90)
+#     # print(f'for max orientation max_orientation-90')
+#     # display(max_orientation-90)
 
 
 #%%
