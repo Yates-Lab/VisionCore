@@ -1,7 +1,7 @@
 #%%
 
 import sys
-
+from pathlib import Path
 sys.path.append('./scripts')
 import numpy as np
 
@@ -42,7 +42,6 @@ train_data, val_data, dataset_config = prepare_data(dataset_configs[0], strict=F
 #%%
 #%%#%%
 dataset = train_data.shallow_copy()
-dataset.inds = inds
 
 dset = dataset.dsets[ dataset.inds[0,0].item() ]  # fixrsvp sub-dataset
 robs = dset['robs'].numpy()
@@ -138,9 +137,6 @@ valid_mask = (
     np.isfinite(np.sum(eyepos_mc, axis=2))
 )
 
-eyepos_used = eyepos_mc[:, iix]
-analyzer_luke = DualWindowAnalysis(robs_used, eyepos_used, valid_used, dt=dt)
-eyepos_used = eyepos_mc[:, iix]
 
 # time index window
 iix = np.arange(valid_time_bins)
@@ -158,6 +154,16 @@ print("DualWindowAnalysis initialized for Luke_2025-08-04 fixrsvp")
 # %% Run McFarland sweep on Luke fixrsvp
 windows_ms = [5, 10, 20, 40, 80]
 results_luke, last_mats_luke = analyzer_luke.run_sweep(windows_ms, t_hist_ms=50, n_bins=15)
+
+#%% loop through cells and save out figures
+for cell in range(len(neuron_mask)):
+    fig, axs =analyzer_luke.inspect_neuron_pair(cell,cell,win_ms=10)
+    save_dir = Path('../figures/mcfarland_neuron_inspections')
+    save_dir.mkdir(exist_ok=True)
+    save_path = save_dir / f'neuron_{cell}_fixrsvp_Luke_2025-08-04.png'
+    fig.savefig(save_path)
+    plt.close(fig)
+    print(f"Saved neuron inspection figure to {save_path}")
 
 #%% Save Luke McFarland stats in a figure_fixrsvp-compatible format
 """Package and save Luke_2025-08-04 McFarland stats.
@@ -247,50 +253,56 @@ plt.xlim(0, 60)
 #%%
 
 
-#%%
-cc = 0
-ind = np.argsort(fix_dur)
+# #%%
+# cc = 0
+# ind = np.argsort(fix_dur)
 
-NC = robs.shape[-1]
-sx = int(np.sqrt(NC))
-sy = int(np.ceil(NC / sx))
-fig, axs = plt.subplots(sy, sx, figsize=(3*sx, 2*sy), sharex=True, sharey=False)
-for cc in range(NC):
-    ax = axs.flatten()[cc]
-    ax.imshow(robs[ind][:,:240,cc], aspect='auto', cmap='gray_r', interpolation='none')
-    ax.set_title(f'Cell {cc}')
-    ax.axis('off')
+# NC = robs.shape[-1]
+# sx = int(np.sqrt(NC))
+# sy = int(np.ceil(NC / sx))
+# fig, axs = plt.subplots(sy, sx, figsize=(3*sx, 2*sy), sharex=True, sharey=False)
+# for cc in range(NC):
+#     ax = axs.flatten()[cc]
+#     ax.imshow(robs[ind][:,:240,cc], aspect='auto', cmap='gray_r', interpolation='none')
+#     ax.set_title(f'Cell {cc}')
+#     ax.axis('off')
 
-#%%
-fig, axs = plt.subplots(sy, sx, figsize=(3*sx, 2*sy), sharex=True, sharey=False)
-for cc in range(NC):
-    ax = axs.flatten()[cc]
-    ax.plot(np.nanmean(robs[:,:120,cc],0), 'k')
-    ax.set_title(f'Cell {cc}')
-    ax.axis('off')
-
-
-#%%
-
-itrial += 1
-if itrial >= len(robs):
-    itrial = 0
-fig, axs = plt.subplots(2,1, figsize=(10,5), sharex=True, sharey=False)
-axs[1].plot(eyepos[itrial][:,:])
-xd = axs[1].get_xlim()
-axs[0].imshow(robs[itrial][:,:].T>0, aspect='auto', cmap='gray_r', interpolation='none')
-axs[0].set_xlim(xd)
-axs[1].set_ylim(-1, 1)
+# #%%
+# fig, axs = plt.subplots(sy, sx, figsize=(3*sx, 2*sy), sharex=True, sharey=False)
+# for cc in range(NC):
+#     ax = axs.flatten()[cc]
+#     ax.plot(np.nanmean(robs[:,:120,cc],0), 'k')
+#     ax.set_title(f'Cell {cc}')
+#     ax.axis('off')
 
 
-# # %%
+# #%%
 
-#%% 
-cc += 1
-fig, ax = plt.subplots(1,1, figsize=(10,5), sharex=True, sharey=False)
-ax.imshow(robs[ind][:,:240,cc], aspect='auto', cmap='gray_r', interpolation='none')
 
-# fun = train_data.dsets[0].metadata['sess'].get_missing_pct_interp(train_data.dsets[0].metadata['cids'])
+# # Initialize itrial before use
+# itrial = 0
+# itrial += 1
+# if itrial >= len(robs):
+#     itrial = 0
+# fig, axs = plt.subplots(2,1, figsize=(10,5), sharex=True, sharey=False)
+# axs[1].plot(eyepos[itrial][:,:])
+# xd = axs[1].get_xlim()
+# axs[0].imshow(robs[itrial][:,:].T>0, aspect='auto', cmap='gray_r', interpolation='none')
+# axs[0].set_xlim(xd)
+# axs[1].set_ylim(-1, 1)
+
+
+# # # %%
+
+# #%% 
+
+# # Initialize cc before use
+# cc = 0
+# cc += 1
+# fig, ax = plt.subplots(1,1, figsize=(10,5), sharex=True, sharey=False)
+# ax.imshow(robs[ind][:,:240,cc], aspect='auto', cmap='gray_r', interpolation='none')
+
+# # fun = train_data.dsets[0].metadata['sess'].get_missing_pct_interp(train_data.dsets[0].metadata['cids'])
 # # %%
 # missing_pct = fun(train_data.dsets[0]['t_bins'])
 
