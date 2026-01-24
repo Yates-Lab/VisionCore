@@ -4,6 +4,9 @@
 # 2. look at the image content in fixrsvp and find the highest frequency images and see if decoding is better for those images
 # 3. about if inference is being done correctly right now...
 # 4. NEED TO FIX np.nan_to_num(X_batch, nan=0.0)
+# 5. fix the issue of the trials not matching
+# 6. encode image_ids for transformer
+# 7. setup raytune for hyperparameter tuning
 import os
 from pathlib import Path
 # Device options
@@ -45,7 +48,9 @@ from DataYatesV1.exp.support import get_rsvp_fix_stim
 # stack_images = get_fixrsvp_stack()
 #%%
 subject = 'Allen'
-date = '2022-04-08'
+date = '2022-03-04'
+
+#04-08, 03-02, 04-13, 2-18 all stimuli are not timed right
 
 #03-04, 03-30, 03-02, 04-08, 04-13 (15 epochs), 04-01, 2-18
 #4-06 is okay too
@@ -167,8 +172,44 @@ plt.show()
 plt.plot(np.nanstd(robs, (2,0)))
 robs.shape #(79, 335, 133) [trials, time, cells]
 eyepos.shape #(79, 335, 2) [trials, time, xycoords]
+#%%
+reference_trial_ind = None
+image_ids_condensed = None
+for i in range(len(image_ids)):
+    if (image_ids[time_window_start:time_window_end, i] != -1).all():
+        image_ids_condensed = image_ids[i]
+        # print(i)
+        reference_trial_ind = i
+        break
 
+unmatched_trials = []
+for j, row in enumerate(image_ids):
+    for i in range(len(row)):
+        trial_matches = True
+        if row[i] != -1 and image_ids_condensed[i] != -1:
+            # print(image_ids_condensed[i], row[i], i, j)
+            if image_ids_condensed[i] != row[i]:
+                # print(image_ids_condensed[i], row[i], i, j)
+                trial_matches = False
+                
+            # assert image_ids_condensed[i] == row[i], "Image IDs don't match across trials"
+        if not trial_matches:
+            print(f'trial {j} does not match')
+            unmatched_trials.append(j)
+            break
 
+if len(unmatched_trials) > 0:
+    first_trial_ind = reference_trial_ind
+    second_trial_ind = unmatched_trials[0]
+    plt.plot(image_ids[first_trial_ind])
+    plt.plot(image_ids[second_trial_ind])
+    plt.xlim(0, 100)
+    plt.xlabel('Time (bins)')
+    plt.ylabel('Image ID')
+    plt.title(f'Image IDs for trial {first_trial_ind} and {second_trial_ind}')
+    plt.legend([f'Trial {first_trial_ind}', f'Trial {second_trial_ind}'])
+
+    plt.show()
 # sess = train_dset.dsets[0].metadata['sess']
 # trial_inds = dataset.dsets[dset_idx].covariates['trial_inds'].numpy()
 # trials = np.unique(trial_inds)
@@ -1332,7 +1373,7 @@ fig, axes = plot_trial_trace(
 
 #%%
 # trial_idx = 0
-trial_idx += 1
+trial_idx -= 1
 fig, axes = plot_trial_trace(
     model,
     robs_feat_model,
