@@ -3,7 +3,7 @@
 # 1. try using all cells instead of just the visual responsive ones
 # 2. look at the image content in fixrsvp and find the highest frequency images and see if decoding is better for those images
 # 3. about if inference is being done correctly right now...
-# 
+# 4. NEED TO FIX np.nan_to_num(X_batch, nan=0.0)
 import os
 from pathlib import Path
 # Device options
@@ -44,263 +44,263 @@ from DataYatesV1.exp.support import get_rsvp_fix_stim
 # support_images = get_rsvp_fix_stim()
 # stack_images = get_fixrsvp_stack()
 #%%
-# subject = 'Allen'
-# date = '2022-03-04'
+subject = 'Allen'
+date = '2022-04-08'
 
-# #03-04, 03-30, 03-02, 04-08, 04-13 (15 epochs), 04-01, 2-18
-# #4-06 is okay too
+#03-04, 03-30, 03-02, 04-08, 04-13 (15 epochs), 04-01, 2-18
+#4-06 is okay too
 
 
 
-# dataset_configs_path = '/home/tejas/VisionCore/experiments/dataset_configs/multi_basic_240_rsvp_all_cells.yaml'
-# dataset_configs = load_dataset_configs(dataset_configs_path)
+dataset_configs_path = '/home/tejas/VisionCore/experiments/dataset_configs/multi_basic_240_rsvp_all_cells.yaml'
+dataset_configs = load_dataset_configs(dataset_configs_path)
 
-# # date = "2022-03-04"
-# # subject = "Allen"
-# dataset_idx = next(i for i, cfg in enumerate(dataset_configs) if cfg['session'] == f"{subject}_{date}")
+# date = "2022-03-04"
+# subject = "Allen"
+dataset_idx = next(i for i, cfg in enumerate(dataset_configs) if cfg['session'] == f"{subject}_{date}")
 
-# with open(os.devnull, "w") as devnull, contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
-#     train_dset, val_dset, dataset_config = prepare_data(dataset_configs[dataset_idx], strict=False)
+with open(os.devnull, "w") as devnull, contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
+    train_dset, val_dset, dataset_config = prepare_data(dataset_configs[dataset_idx], strict=False)
 
+
+
+sess = train_dset.dsets[0].metadata['sess']
+# ppd = train_data.dsets[0].metadata['ppd']
+cids = dataset_config['cids']
+print(f"Running on {sess.name}")
+
+# get fixrsvp inds and make one dataaset object
+inds = torch.concatenate([
+        train_dset.get_dataset_inds('fixrsvp'),
+        val_dset.get_dataset_inds('fixrsvp')
+    ], dim=0)
+
+dataset = train_dset.shallow_copy()
+dataset.inds = inds
+
+# Getting key variables
+dset_idx = inds[:,0].unique().item()
+trial_inds = dataset.dsets[dset_idx].covariates['trial_inds'].numpy()
+t_bins = dataset.dsets[dset_idx].covariates['t_bins'].numpy()
+trials = np.unique(trial_inds)
+
+NC = dataset.dsets[dset_idx]['robs'].shape[1]
+T = np.max(dataset.dsets[dset_idx].covariates['psth_inds'][:].numpy()).item() + 1
+NT = len(trials)
+
+fixation = np.hypot(dataset.dsets[dset_idx]['eyepos'][:,0].numpy(), dataset.dsets[dset_idx]['eyepos'][:,1].numpy()) < 1
+
+rsvp_images = get_fixrsvp_stack(frames_per_im=1)
+ptb2ephys, _ = get_clock_functions(sess.exp)
+image_ids = np.full((NT, T), -1, dtype=np.int64)
+# Loop over trials and align responses
+robs = np.nan*np.zeros((NT, T, NC))
+dfs = np.nan*np.zeros((NT, T, NC))
+eyepos = np.nan*np.zeros((NT, T, 2))
+fix_dur =np.nan*np.zeros((NT,))
+
+for itrial in tqdm(range(NT)):
+    # print(f"Trial {itrial}/{NT}")
+    trial_mask = trials[itrial] == trial_inds
+    if np.sum(trial_mask) == 0:
+        continue
+    
+    trial_id = int(trials[itrial])
+    trial = FixRsvpTrial(sess.exp['D'][trial_id], sess.exp['S'])
+    trial_image_ids = trial.image_ids
+    if len(np.unique(trial_image_ids)) < 2:
+        continue
+    start_idx = np.where(trial_image_ids == 2)[0][0]
+    flip_times = ptb2ephys(trial.flip_times[start_idx:])
+
+    psth_inds_all = dataset.dsets[dset_idx].covariates['psth_inds'][trial_mask].numpy()
+    trial_bins_all = t_bins[trial_mask]
+    hist_idx_all = np.searchsorted(flip_times, trial_bins_all, side='right') - 1 + start_idx
+    image_ids[itrial][psth_inds_all] = trial_image_ids[hist_idx_all] - 1
+
+    ix = trial_mask & fixation
+    if np.sum(ix) == 0:
+        continue
+
+    stim_inds = np.where(ix)[0]
+    # stim_inds = stim_inds[:,None] - np.array(dataset_config['keys_lags']['stim'])[None,:]
+    psth_inds = dataset.dsets[dset_idx].covariates['psth_inds'][ix].numpy()
+    fix_dur[itrial] = len(psth_inds)
+    robs[itrial][psth_inds] = dataset.dsets[dset_idx]['robs'][ix].numpy()
+    dfs[itrial][psth_inds] = dataset.dsets[dset_idx]['dfs'][ix].numpy()
+    eyepos[itrial][psth_inds] = dataset.dsets[dset_idx]['eyepos'][ix].numpy()
+
+    
+
+# check for if image_ids is correct.
+# # pick a trial
+# trial_id = int(trials[0])
+# trial = FixRsvpTrial(sess.exp['D'][trial_id], sess.exp['S'])
+# start_idx = np.where(trial.image_ids == 2)[0][0]
+# flip_times = ptb2ephys(trial.flip_times[start_idx:])
+# trial_bins = t_bins[trial_inds == trial_id]
+# hist_idx = np.searchsorted(flip_times, trial_bins, side='right') - 1 + start_idx
+
+# # This should be identical to the assigned row (before -1 shift)
+# np.all(trial.image_ids[hist_idx] - 1 == image_ids[0][dataset.dsets[dset_idx].covariates['psth_inds'][trial_inds == trial_id]])
+
+# time_window_start = 75
+# time_window_end =100
+time_window_start = 0
+time_window_end =200
+good_trials = fix_dur > 20
+robs = robs[good_trials][:,time_window_start:time_window_end,:]
+# dfs = dfs[good_trials]
+eyepos = eyepos[good_trials][:,time_window_start:time_window_end,:]
+fix_dur = fix_dur[good_trials]
+
+
+ind = np.argsort(fix_dur)[::-1]
+plt.subplot(1,2,1)
+plt.imshow(eyepos[ind,:,0])
+# plt.xlim(0, 160)
+plt.subplot(1,2,2)
+plt.imshow(np.nanmean(robs,2)[ind])
+# plt.xlim(0, 160)
+plt.show()
+
+plt.plot(np.nanstd(robs, (2,0)))
+robs.shape #(79, 335, 133) [trials, time, cells]
+eyepos.shape #(79, 335, 2) [trials, time, xycoords]
 
 
 # sess = train_dset.dsets[0].metadata['sess']
-# # ppd = train_data.dsets[0].metadata['ppd']
-# cids = dataset_config['cids']
-# print(f"Running on {sess.name}")
-
-# # get fixrsvp inds and make one dataaset object
-# inds = torch.concatenate([
-#         train_dset.get_dataset_inds('fixrsvp'),
-#         val_dset.get_dataset_inds('fixrsvp')
-#     ], dim=0)
-
-# dataset = train_dset.shallow_copy()
-# dataset.inds = inds
-
-# # Getting key variables
-# dset_idx = inds[:,0].unique().item()
 # trial_inds = dataset.dsets[dset_idx].covariates['trial_inds'].numpy()
-# t_bins = dataset.dsets[dset_idx].covariates['t_bins'].numpy()
 # trials = np.unique(trial_inds)
 
-# NC = dataset.dsets[dset_idx]['robs'].shape[1]
-# T = np.max(dataset.dsets[dset_idx].covariates['psth_inds'][:].numpy()).item() + 1
-# NT = len(trials)
+# trial_id = int(trials[20])  # trial 20 for example
+# trial = FixRsvpTrial(sess.exp['D'][trial_id], sess.exp['S'])
 
-# fixation = np.hypot(dataset.dsets[dset_idx]['eyepos'][:,0].numpy(), dataset.dsets[dset_idx]['eyepos'][:,1].numpy()) < 1
+# image_ids_trial = trial.image_ids
+# flip_times_trial = trial.flip_times
 
-# rsvp_images = get_fixrsvp_stack(frames_per_im=1)
-# ptb2ephys, _ = get_clock_functions(sess.exp)
-# image_ids = np.full((NT, T), -1, dtype=np.int64)
-# # Loop over trials and align responses
-# robs = np.nan*np.zeros((NT, T, NC))
-# dfs = np.nan*np.zeros((NT, T, NC))
-# eyepos = np.nan*np.zeros((NT, T, 2))
-# fix_dur =np.nan*np.zeros((NT,))
+# # indices where image ID changes
+# change_idx = np.where(np.diff(image_ids_trial) != 0)[0] + 1
+# change_times = flip_times_trial[change_idx]
 
-# for itrial in tqdm(range(NT)):
-#     # print(f"Trial {itrial}/{NT}")
-#     trial_mask = trials[itrial] == trial_inds
-#     if np.sum(trial_mask) == 0:
-#         continue
-    
-#     trial_id = int(trials[itrial])
-#     trial = FixRsvpTrial(sess.exp['D'][trial_id], sess.exp['S'])
-#     trial_image_ids = trial.image_ids
-#     if len(np.unique(trial_image_ids)) < 2:
-#         continue
-#     start_idx = np.where(trial_image_ids == 2)[0][0]
-#     flip_times = ptb2ephys(trial.flip_times[start_idx:])
-
-#     psth_inds_all = dataset.dsets[dset_idx].covariates['psth_inds'][trial_mask].numpy()
-#     trial_bins_all = t_bins[trial_mask]
-#     hist_idx_all = np.searchsorted(flip_times, trial_bins_all, side='right') - 1 + start_idx
-#     image_ids[itrial][psth_inds_all] = trial_image_ids[hist_idx_all] - 1
-
-#     ix = trial_mask & fixation
-#     if np.sum(ix) == 0:
-#         continue
-
-#     stim_inds = np.where(ix)[0]
-#     # stim_inds = stim_inds[:,None] - np.array(dataset_config['keys_lags']['stim'])[None,:]
-#     psth_inds = dataset.dsets[dset_idx].covariates['psth_inds'][ix].numpy()
-#     fix_dur[itrial] = len(psth_inds)
-#     robs[itrial][psth_inds] = dataset.dsets[dset_idx]['robs'][ix].numpy()
-#     dfs[itrial][psth_inds] = dataset.dsets[dset_idx]['dfs'][ix].numpy()
-#     eyepos[itrial][psth_inds] = dataset.dsets[dset_idx]['eyepos'][ix].numpy()
-
-    
-
-# # check for if image_ids is correct.
-# # # pick a trial
-# # trial_id = int(trials[0])
-# # trial = FixRsvpTrial(sess.exp['D'][trial_id], sess.exp['S'])
-# # start_idx = np.where(trial.image_ids == 2)[0][0]
-# # flip_times = ptb2ephys(trial.flip_times[start_idx:])
-# # trial_bins = t_bins[trial_inds == trial_id]
-# # hist_idx = np.searchsorted(flip_times, trial_bins, side='right') - 1 + start_idx
-
-# # # This should be identical to the assigned row (before -1 shift)
-# # np.all(trial.image_ids[hist_idx] - 1 == image_ids[0][dataset.dsets[dset_idx].covariates['psth_inds'][trial_inds == trial_id]])
-
-# # time_window_start = 75
-# # time_window_end =100
-# time_window_start = 0
-# time_window_end =200
-# good_trials = fix_dur > 20
-# robs = robs[good_trials][:,time_window_start:time_window_end,:]
-# # dfs = dfs[good_trials]
-# eyepos = eyepos[good_trials][:,time_window_start:time_window_end,:]
-# fix_dur = fix_dur[good_trials]
-
-
-# ind = np.argsort(fix_dur)[::-1]
-# plt.subplot(1,2,1)
-# plt.imshow(eyepos[ind,:,0])
-# # plt.xlim(0, 160)
-# plt.subplot(1,2,2)
-# plt.imshow(np.nanmean(robs,2)[ind])
-# # plt.xlim(0, 160)
-# plt.show()
-
-# plt.plot(np.nanstd(robs, (2,0)))
-# robs.shape #(79, 335, 133) [trials, time, cells]
-# eyepos.shape #(79, 335, 2) [trials, time, xycoords]
-
-
-# # sess = train_dset.dsets[0].metadata['sess']
-# # trial_inds = dataset.dsets[dset_idx].covariates['trial_inds'].numpy()
-# # trials = np.unique(trial_inds)
-
-# # trial_id = int(trials[20])  # trial 20 for example
-# # trial = FixRsvpTrial(sess.exp['D'][trial_id], sess.exp['S'])
-
-# # image_ids_trial = trial.image_ids
-# # flip_times_trial = trial.flip_times
-
-# # # indices where image ID changes
-# # change_idx = np.where(np.diff(image_ids_trial) != 0)[0] + 1
-# # change_times = flip_times_trial[change_idx]
-
-# # dt_change = np.median(np.diff(change_times))
-# # print("Stim change interval (s):", dt_change) #0.050002098083496094
-# # print("Stim change rate (Hz):", 1.0 / dt_change) #19.99916080181572
+# dt_change = np.median(np.diff(change_times))
+# print("Stim change interval (s):", dt_change) #0.050002098083496094
+# print("Stim change rate (Hz):", 1.0 / dt_change) #19.99916080181572
 
 
 
 #%%
 
-# Load Rowley session
-subject = 'Luke'
-date = '2025-08-04'
-from DataRowleyV1V2.data.registry import get_session as get_rowley_session
+# # Load Rowley session
+# subject = 'Luke'
+# date = '2025-08-04'
+# from DataRowleyV1V2.data.registry import get_session as get_rowley_session
 
 
-print(f"Loading Rowley session: {subject}_{date}")
-sess = get_rowley_session(subject, date)
-print(f"Session loaded: {sess.name}")
-print(f"Session directory: {sess.processed_path}")
+# print(f"Loading Rowley session: {subject}_{date}")
+# sess = get_rowley_session(subject, date)
+# print(f"Session loaded: {sess.name}")
+# print(f"Session directory: {sess.processed_path}")
 
-# Load fixRSVP dataset
-eye_calibration = 'left_eye_x-0.5_y-0.3'
-dataset_type = 'fixrsvp'
-dset_path = Path(sess.processed_path) / 'datasets' / eye_calibration / f'{dataset_type}.dset'
+# # Load fixRSVP dataset
+# eye_calibration = 'left_eye_x-0.5_y-0.3'
+# dataset_type = 'fixrsvp'
+# dset_path = Path(sess.processed_path) / 'datasets' / eye_calibration / f'{dataset_type}.dset'
 
-print(f"Loading dataset from: {dset_path}")
-if not dset_path.exists():
-    raise FileNotFoundError(f"Dataset not found: {dset_path}")
+# print(f"Loading dataset from: {dset_path}")
+# if not dset_path.exists():
+#     raise FileNotFoundError(f"Dataset not found: {dset_path}")
 
-# Load using DictDataset
-from DataYatesV1 import DictDataset
-rowley_dset = DictDataset.load(dset_path)
+# # Load using DictDataset
+# from DataYatesV1 import DictDataset
+# rowley_dset = DictDataset.load(dset_path)
 
-print(f"Dataset loaded: {len(rowley_dset)} samples")
-print(f"Response shape: {rowley_dset['robs'].shape}")
+# print(f"Dataset loaded: {len(rowley_dset)} samples")
+# print(f"Response shape: {rowley_dset['robs'].shape}")
 
-# Extract data
-trial_inds = rowley_dset['trial_inds'].numpy()
-trials = np.unique(trial_inds)
-NC = rowley_dset['robs'].shape[1]
-NT = len(trials)
+# # Extract data
+# trial_inds = rowley_dset['trial_inds'].numpy()
+# trials = np.unique(trial_inds)
+# NC = rowley_dset['robs'].shape[1]
+# NT = len(trials)
 
-# Determine max trial length
-max_T = 0
-for trial in trials:
-    trial_len = np.sum(trial_inds == trial)
-    max_T = max(max_T, trial_len)
+# # Determine max trial length
+# max_T = 0
+# for trial in trials:
+#     trial_len = np.sum(trial_inds == trial)
+#     max_T = max(max_T, trial_len)
 
-print(f"Number of trials: {NT}")
-print(f"Number of neurons: {NC}")
-print(f"Max trial length: {max_T}")
+# print(f"Number of trials: {NT}")
+# print(f"Number of neurons: {NC}")
+# print(f"Max trial length: {max_T}")
 
-# Create trial-aligned arrays
-robs = np.nan * np.zeros((NT, max_T, NC))
-eyepos = np.nan * np.zeros((NT, max_T, 2))
-fix_dur = np.zeros(NT)
+# # Create trial-aligned arrays
+# robs = np.nan * np.zeros((NT, max_T, NC))
+# eyepos = np.nan * np.zeros((NT, max_T, 2))
+# fix_dur = np.zeros(NT)
 
-# Define fixation criterion (eye position < 1 degree from center)
-eyepos_raw = rowley_dset['eyepos'].numpy()
-fixation = np.hypot(eyepos_raw[:, 0], eyepos_raw[:, 1]) < 1
+# # Define fixation criterion (eye position < 1 degree from center)
+# eyepos_raw = rowley_dset['eyepos'].numpy()
+# fixation = np.hypot(eyepos_raw[:, 0], eyepos_raw[:, 1]) < 1
 
-print("Aligning trials...")
-for itrial in tqdm(range(NT)):
-    trial_mask = (trial_inds == trials[itrial]) & fixation
-    if np.sum(trial_mask) == 0:
-        continue
+# print("Aligning trials...")
+# for itrial in tqdm(range(NT)):
+#     trial_mask = (trial_inds == trials[itrial]) & fixation
+#     if np.sum(trial_mask) == 0:
+#         continue
     
-    trial_data = rowley_dset['robs'][trial_mask].numpy()
-    trial_eye = rowley_dset['eyepos'][trial_mask].numpy()
+#     trial_data = rowley_dset['robs'][trial_mask].numpy()
+#     trial_eye = rowley_dset['eyepos'][trial_mask].numpy()
     
-    trial_len = trial_data.shape[0]
-    robs[itrial, :trial_len] = trial_data
-    eyepos[itrial, :trial_len] = trial_eye
-    fix_dur[itrial] = trial_len
+#     trial_len = trial_data.shape[0]
+#     robs[itrial, :trial_len] = trial_data
+#     eyepos[itrial, :trial_len] = trial_eye
+#     fix_dur[itrial] = trial_len
 
-r_flat = np.nan_to_num(robs, nan=0.0).reshape(NT, -1)
-e_flat = np.nan_to_num(eyepos, nan=0.0).reshape(NT, -1)
-sig = np.concatenate([r_flat, e_flat], axis=1)
+# r_flat = np.nan_to_num(robs, nan=0.0).reshape(NT, -1)
+# e_flat = np.nan_to_num(eyepos, nan=0.0).reshape(NT, -1)
+# sig = np.concatenate([r_flat, e_flat], axis=1)
 
-_, keep = np.unique(sig, axis=0, return_index=True)
-keep = np.sort(keep)
+# _, keep = np.unique(sig, axis=0, return_index=True)
+# keep = np.sort(keep)
 
-robs = robs[keep]
-eyepos = eyepos[keep]
-fix_dur = fix_dur[keep]
-NT = len(keep)
-#search for duplicate trials
-for itrial in range(NT):
-    for jtrial in range(itrial+1, NT):
-        if np.allclose(robs[itrial], robs[jtrial], equal_nan=True):
-            print(f"Duplicate trial found: {itrial} and {jtrial}")
-            raise ValueError("Duplicate trial found")
-            assert np.allclose(eyepos[itrial], eyepos[jtrial], equal_nan=True)
+# robs = robs[keep]
+# eyepos = eyepos[keep]
+# fix_dur = fix_dur[keep]
+# NT = len(keep)
+# #search for duplicate trials
+# for itrial in range(NT):
+#     for jtrial in range(itrial+1, NT):
+#         if np.allclose(robs[itrial], robs[jtrial], equal_nan=True):
+#             print(f"Duplicate trial found: {itrial} and {jtrial}")
+#             raise ValueError("Duplicate trial found")
+#             assert np.allclose(eyepos[itrial], eyepos[jtrial], equal_nan=True)
 
-time_window_start = 0
-time_window_end =200
+# time_window_start = 0
+# time_window_end =200
 
-# Filter for trials with sufficient duration
-good_trials = fix_dur > 20
-robs = robs[good_trials][:,time_window_start:time_window_end,:]
-eyepos = eyepos[good_trials][:,time_window_start:time_window_end,:]
-fix_dur = fix_dur[good_trials]
+# # Filter for trials with sufficient duration
+# good_trials = fix_dur > 20
+# robs = robs[good_trials][:,time_window_start:time_window_end,:]
+# eyepos = eyepos[good_trials][:,time_window_start:time_window_end,:]
+# fix_dur = fix_dur[good_trials]
 
-print(f"\nFiltered to {len(fix_dur)} trials with >20 bins")
-print(f"Final robs shape: {robs.shape} (trials × time × neurons)")
-print(f"Final eyepos shape: {eyepos.shape} (trials × time × XY)")
+# print(f"\nFiltered to {len(fix_dur)} trials with >20 bins")
+# print(f"Final robs shape: {robs.shape} (trials × time × neurons)")
+# print(f"Final eyepos shape: {eyepos.shape} (trials × time × XY)")
 
-# Sort by fixation duration for visualization
-ind = np.argsort(fix_dur)[::-1]
-fig, axes = plt.subplots(1, 2, figsize=(12, 4))
-axes[0].imshow(eyepos[ind, :, 0])
-axes[0].set_title('Eye position X (sorted by trial length)')
-axes[0].set_xlabel('Time (bins)')
-axes[0].set_ylabel('Trial')
-axes[1].imshow(np.nanmean(robs, 2)[ind])
-axes[1].set_title('Population mean response')
-axes[1].set_xlabel('Time (bins)')
-plt.tight_layout()
-plt.show()
+# # Sort by fixation duration for visualization
+# ind = np.argsort(fix_dur)[::-1]
+# fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+# axes[0].imshow(eyepos[ind, :, 0])
+# axes[0].set_title('Eye position X (sorted by trial length)')
+# axes[0].set_xlabel('Time (bins)')
+# axes[0].set_ylabel('Trial')
+# axes[1].imshow(np.nanmean(robs, 2)[ind])
+# axes[1].set_title('Population mean response')
+# axes[1].set_xlabel('Time (bins)')
+# plt.tight_layout()
+# plt.show()
 #%%
 # Decoder setup
 rng = np.random.default_rng(0)
@@ -327,8 +327,10 @@ cache_data_on_gpu = False
 dataloader_num_workers = 4
 dataloader_pin_memory = True
 sample_poisson = False
-augmentation_turn_off_percentage = 0.2 #0.1
+augmentation_neuron_dropout = 0.1  # Probability of dropping an entire neuron's activity for a window
+augmentation_turn_off_percentage = 0.2 #0.2
 augmentation_turn_on_percentage = 0.02 #0.02 #0.05
+augmentation_mixup_alpha = 0.2  # Mixup interpolation alpha (0.0 to disable)
 transformer_dim = 64 #64 best 16
 transformer_heads = 4 #4 #best 2
 transformer_layers = 2
@@ -339,10 +341,12 @@ require_odd_window = True
 use_trajectory_loss = True
 use_2d_attention = False  # 2d_attention flag (axial time x neuron)
 lambda_pos = 1.0
-lambda_vel = 4 #4
+lambda_vel = 0.4 #4
 lambda_accel = 0 #0.1
 velocity_event_thresh = 0.02 #0.02
 velocity_event_weight = 0
+
+input_nan_fill_value = 0
 
 # augmentation_turn_off_percentage = 0
 # augmentation_turn_on_percentage = 0
@@ -561,19 +565,23 @@ class WindowedEyeposDataset(torch.utils.data.Dataset):
         turn_off_percentage=0.0,
         turn_on_percentage=0.0,
         sample_poisson=False,
+        neuron_dropout=0.0,
+        mixup_alpha=0.0,
     ):
         self.device = device
         self.cache_on_gpu = cache_on_gpu
         self.augment = augment
         self.turn_off_percentage = turn_off_percentage
         self.turn_on_percentage = turn_on_percentage
+        self.neuron_dropout = neuron_dropout
         self.sample_poisson = sample_poisson
+        self.mixup_alpha = mixup_alpha
         X_raw = torch.from_numpy(X)
         Y_raw = torch.from_numpy(Y)
         valid_y = ~torch.isnan(Y_raw).any(axis=-1)
         valid_x = ~torch.isnan(X_raw).any(axis=-1)
         self.valid_mask = valid_y & valid_x
-        self.X = torch.nan_to_num(X_raw, nan=0.0).float()
+        self.X = torch.nan_to_num(X_raw, nan=input_nan_fill_value).float()
         self.Y = torch.nan_to_num(Y_raw, nan=0.0).float()
         if self.cache_on_gpu:
             self.X = self.X.to(self.device, non_blocking=True)
@@ -595,12 +603,17 @@ class WindowedEyeposDataset(torch.utils.data.Dataset):
         return len(self.indices)
 
     def __getitem__(self, idx):
-        trial, start = self.indices[idx]
-        X_win = self.X[trial, start:start + self.window_len_input, :]
-        out_start = start + self.output_offset
-        out_end = out_start + self.window_len_output
-        Y_win = self.Y[trial, out_start:out_end, :]
-        mask = self.valid_mask[trial, out_start:out_end].float()
+        X_win, Y_win, mask, out_start, out_end = self._get_base_item(idx)
+
+        if self.augment and self.mixup_alpha > 0.0:
+            mix_idx = torch.randint(0, len(self.indices), (1,)).item()
+            X_mix, Y_mix, mask_mix, _, _ = self._get_base_item(mix_idx)
+            
+            lam = np.random.beta(self.mixup_alpha, self.mixup_alpha)
+            X_win = lam * X_win + (1 - lam) * X_mix
+            Y_win = lam * Y_win + (1 - lam) * Y_mix
+            mask = mask * mask_mix
+
         if self.augment and (self.turn_off_percentage > 0.0 or self.turn_on_percentage > 0.0):
             X_win = X_win.clone()
             if self.turn_off_percentage > 0.0:
@@ -613,6 +626,20 @@ class WindowedEyeposDataset(torch.utils.data.Dataset):
                 X_win = torch.where(off_mask & (on_draw < self.turn_on_percentage), torch.ones_like(X_win), X_win)
         if self.augment and self.sample_poisson:
             X_win[X_win > 0] = torch.poisson(X_win[X_win > 0])
+        
+        if self.augment and self.neuron_dropout > 0.0:
+            # Get number of neural channels (excluding time encoding if concatenated)
+            # In your case, NC is the number of cells
+            num_neurons = self.X.shape[2] 
+            
+            # Create a mask of shape (1, num_neurons) - 1 to keep, 0 to drop
+            # Using .to(X_win.device) ensures it works if data is cached on GPU
+            neuron_mask = (torch.rand((1, num_neurons), device=X_win.device) > self.neuron_dropout).float()
+            
+            # Apply mask to the neural part of the window (first num_neurons columns)
+            if not (self.turn_off_percentage > 0.0 or self.turn_on_percentage > 0.0 or self.mixup_alpha > 0.0):
+                X_win = X_win.clone()
+            X_win[:, :num_neurons] *= neuron_mask
 
         time_idx = torch.arange(
             out_start,
@@ -621,6 +648,15 @@ class WindowedEyeposDataset(torch.utils.data.Dataset):
             device=self.device if self.cache_on_gpu else None,
         )
         return X_win, Y_win, mask, time_idx
+
+    def _get_base_item(self, idx):
+        trial, start = self.indices[idx]
+        X_win = self.X[trial, start:start + self.window_len_input, :]
+        out_start = start + self.output_offset
+        out_end = out_start + self.window_len_output
+        Y_win = self.Y[trial, out_start:out_end, :]
+        mask = self.valid_mask[trial, out_start:out_end].float()
+        return X_win, Y_win, mask, out_start, out_end
 
 
 class TransformerEyepos(torch.nn.Module):
@@ -810,6 +846,8 @@ train_dataset = WindowedEyeposDataset(
     turn_off_percentage=augmentation_turn_off_percentage,
     turn_on_percentage=augmentation_turn_on_percentage,
     sample_poisson=sample_poisson,
+    neuron_dropout=augmentation_neuron_dropout,
+    mixup_alpha=augmentation_mixup_alpha,
 )
 val_dataset = WindowedEyeposDataset(
     robs_feat_model,
@@ -947,6 +985,7 @@ def run_inference(
     use_overlap=False,
     overlap_stride=None,
     center_crop=None,
+    edge_align=False,
 ):
     if device is None:
         device = next(model.parameters()).device
@@ -976,14 +1015,18 @@ def run_inference(
                 starts = np.arange(0, max_start + 1, stride)
                 sum_pred = np.zeros((time_len, 2), dtype=np.float32)
                 count = np.zeros(time_len, dtype=np.float32)
+                if edge_align:
+                    extra_sum = np.zeros((time_len, 2), dtype=np.float32)
+                    extra_count = np.zeros(time_len, dtype=np.float32)
                 for b in range(0, len(starts), batch_size):
                     starts_batch = starts[b:b + batch_size]
                     idx = starts_batch[:, None] + np.arange(window_len_input)[None, :]
                     X_win = X[idx]
-                    X_t = torch.from_numpy(np.nan_to_num(X_win, nan=0.0)).float().to(device)
-                    pred_batch = model(X_t).cpu().numpy()
+                    X_t = torch.from_numpy(np.nan_to_num(X_win, nan=input_nan_fill_value)).float().to(device)
+                    pred_batch_full = model(X_t).cpu().numpy()
+                    pred_batch = pred_batch_full
                     if crop_len != window_len_output:
-                        pred_batch = pred_batch[:, crop_offset:crop_offset + crop_len]
+                        pred_batch = pred_batch_full[:, crop_offset:crop_offset + crop_len]
                     out_start = starts_batch + output_offset + crop_offset
                     out_idx = out_start[:, None] + np.arange(crop_len)[None, :]
                     valid = (out_idx >= 0) & (out_idx < time_len)
@@ -992,12 +1035,46 @@ def run_inference(
                         pred_flat = pred_batch[valid]
                         np.add.at(sum_pred, idx_flat, pred_flat)
                         np.add.at(count, idx_flat, 1.0)
+
+                    if edge_align:
+                        left_threshold = output_offset + crop_offset
+                        right_threshold = max_start - left_threshold
+                        right_crop_offset = window_len_output - crop_len
+                        right_output_offset = window_len_input - window_len_output
+                        for j, start in enumerate(starts_batch):
+                            if start < left_threshold:
+                                crop_offset_j = 0
+                                output_offset_j = 0
+                            elif start > right_threshold:
+                                crop_offset_j = right_crop_offset
+                                output_offset_j = right_output_offset
+                            else:
+                                continue
+                            if crop_len != window_len_output:
+                                pred_win = pred_batch_full[j, crop_offset_j:crop_offset_j + crop_len]
+                            else:
+                                pred_win = pred_batch_full[j]
+                            out_start = start + output_offset_j + crop_offset_j
+                            out_idx = out_start + np.arange(crop_len)
+                            valid = (out_idx >= 0) & (out_idx < time_len)
+                            if np.any(valid):
+                                idx_flat = out_idx[valid].astype(int)
+                                pred_flat = pred_win[valid]
+                                np.add.at(extra_sum, idx_flat, pred_flat)
+                                np.add.at(extra_count, idx_flat, 1.0)
                 np.divide(
                     sum_pred,
                     count[:, None],
                     out=pred_all[i, :time_len],
                     where=count[:, None] > 0,
                 )
+                if edge_align:
+                    np.divide(
+                        extra_sum,
+                        extra_count[:, None],
+                        out=pred_all[i, :time_len],
+                        where=(count[:, None] == 0) & (extra_count[:, None] > 0),
+                    )
             else:
                 starts = np.clip(np.arange(time_len) - half_input, 0, max_start)
                 idx = starts[:, None] + np.arange(window_len_input)[None, :]
@@ -1005,8 +1082,7 @@ def run_inference(
                 center_idx = (np.arange(time_len) - starts) - output_offset
                 for b in range(0, time_len, batch_size):
                     X_batch = X_win[b:b + batch_size]
-                    X_t = torch.from_numpy(np.nan_to_num(X_batch, nan=0.0)).float()
-                    X_t = X_t.to(device)
+                    X_t = torch.from_numpy(np.nan_to_num(X_batch, nan=input_nan_fill_value)).float().to(device)
                     pred_batch = model(X_t).cpu().numpy()
                     centers = center_idx[b:b + batch_size]
                     valid = (centers >= 0) & (centers < window_len_output)
@@ -1026,7 +1102,8 @@ pred_all = run_inference(
     device=device,
     use_overlap=True,
     overlap_stride=1,
-    center_crop=0.5,
+    center_crop=0.8,
+    edge_align=True,
 )
 
 
@@ -1175,19 +1252,29 @@ def plot_trial_trace(
 
     if show_pred:
         pred_err = np.sqrt(((pred_plot - y) ** 2).sum(axis=-1))
-        axes[2].plot(t[valid_xy], pred_err[valid_xy], color="tab:purple", alpha=0.8, label="pred err")
+        # pred_err_mse = ((pred_plot - y) ** 2).sum(axis=-1) 
+        axes[2].plot(t[valid_xy], pred_err[valid_xy], color="tab:purple", alpha=0.8, 
+        label=f"pred err, {np.nanmean(pred_err[valid_xy]):.4f}")
+        # label=f"pred MSE, {np.nanmean(pred_err_mse[valid_xy]):.4f}")
     if ridge_plot is not None:
         ridge_err = np.sqrt(((ridge_plot - y) ** 2).sum(axis=-1))
         axes[2].plot(t[valid_xy], ridge_err[valid_xy], color="tab:green", alpha=0.8, linestyle="--", label="ridge err")
     axes[2].set_ylabel("euclid err")
     #plot mean error as red dotted line
     # print(f"mean error: {np.mean(pred_err[valid_xy])}")
-    axes[2].axhline(y=np.nanmean(pred_err[valid_xy]), color="red", linestyle="--", label="mean err")
-    axes[2].set_ylim(bottom=0, top=1)
+    # axes[2].axhline(y=np.nanmean(pred_err[valid_xy]), color="red", linestyle="--", label="mean err")
+    # if np.nanmax(pred_err[valid_xy]) < 0.8:
+    #     axes[2].set_ylim(bottom=0, top=0.8)
     axes[2].set_xlim(time_window_start,time_window_end)
+    mean_pred_err = np.sqrt(((eyepos_mean[trial] - y) ** 2).sum(axis=-1))
+    axes[2].plot(t[valid_xy],mean_pred_err[valid_xy], color="tab:red", alpha=0.8, 
+    label=f"mean predictor error, {np.nanmean(mean_pred_err[valid_xy]):.4f}")
     axes[2].legend(frameon=False)
     axes[2].sharex(axes[0])
-        
+
+
+
+    
     #plot cross at eyepos_mean
     # axes[3].plot(eyepos_mean[trial, 0], eyepos_mean[trial, 1], color="red", marker="x", label="mean")
     axes[3].plot(y[valid_xy, 0], y[valid_xy, 1], color="black", label="actual")
