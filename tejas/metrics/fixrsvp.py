@@ -53,7 +53,7 @@ def get_fixrsvp_for_dataset(date, subject, cache = False):
     ]
     dataset_configs = load_dataset_configs(yaml_files, dataset_configs_path)
     from DataYatesV1.utils.data import prepare_data
-    train_dset, val_dset, dataset_config = prepare_data(dataset_configs[0], mat_dir=Path('/mnt/sata/YatesMarmoV1/mat'), proc_dir=Path('/mnt/sata/YatesMarmoV1/processed'))
+    train_dset, val_dset, dataset_config = prepare_data(dataset_configs[0])
 
     fixrsvp_data = train_dset[:]
     psth_inds = train_dset.dsets[0]['psth_inds'][train_dset.inds[:,1]]
