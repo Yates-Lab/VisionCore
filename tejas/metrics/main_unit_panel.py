@@ -136,80 +136,82 @@ def get_unit_info_panel(unit_idx,
         os.makedirs(save_dir, exist_ok=True)
         fig.savefig(save_dir / f'Unit_{unit_idx}_{subject}_{date}.pdf', format='pdf', bbox_inches='tight', dpi=300)
     return fig
-# %matplotlib inline
-date = '2022-04-08'
-subject = 'Allen'
-unit_idx = 16
 
-date = '2022-04-13'
-subject = 'Allen'
-unit_idx = 126
+if __name__ == '__main__':
+    # %matplotlib inline
+    date = '2022-04-08'
+    subject = 'Allen'
+    unit_idx = 16
 
-date = '2022-04-15'
-subject = 'Allen'
-unit_idx = 122
+    date = '2022-04-13'
+    subject = 'Allen'
+    unit_idx = 126
 
-date = '2022-03-04'
-subject = 'Allen'
-unit_idx = 122
+    date = '2022-04-15'
+    subject = 'Allen'
+    unit_idx = 122
 
-gratings_info = get_gratings_for_dataset(date, subject, cache = True)
-plot_ori_tuning(gratings_info, unit_idx)
+    date = '2022-03-04'
+    subject = 'Allen'
+    unit_idx = 122
 
-# date = '2022-04-08'
-# subject = 'Allen'
-# unit_idx = 99
+    gratings_info = get_gratings_for_dataset(date, subject, cache = True)
+    plot_ori_tuning(gratings_info, unit_idx)
 
-# date = '2022-04-06'
-# subject = 'Allen'
-# unit_idx = 95
+    # date = '2022-04-08'
+    # subject = 'Allen'
+    # unit_idx = 99
 
-cache = True
+    # date = '2022-04-06'
+    # subject = 'Allen'
+    # unit_idx = 95
 
-# #throw out 118, 92, 65, 88 for Logan_2020-01-10'
+    cache = True
 
-# # #steep fall off: 49, 126 # 126
+    # #throw out 118, 92, 65, 88 for Logan_2020-01-10'
 
-# #flatter: 57, 59, 60, 64, 72, 83, 96, 115 #96
-unit_info_panel_dict = get_unit_info_panel_dict(date, subject, cache = cache)
-_ = get_unit_info_panel(unit_idx, date, subject, unit_info_panel_dict, cache, 
-mcfarland_bins = 37, 
-show_ln = False, show_energy = True, show_fit = False,
-show_ln_energy_fit = True)
-# save_dir = Path('example_cells'))
+    # # #steep fall off: 49, 126 # 126
 
-# # plot_fixrsvp_psth(fixrsvp_info, unit_idx)
-# # plt.show()
+    # #flatter: 57, 59, 60, 64, 72, 83, 96, 115 #96
+    unit_info_panel_dict = get_unit_info_panel_dict(date, subject, cache = cache)
+    _ = get_unit_info_panel(unit_idx, date, subject, unit_info_panel_dict, cache, 
+    mcfarland_bins = 37, 
+    show_ln = False, show_energy = True, show_fit = False,
+    show_ln_energy_fit = True)
+    # save_dir = Path('example_cells'))
 
-# # plot_fixrsvp_spike_raster(fixrsvp_info, unit_idx)
-# # plt.show()
+    # # plot_fixrsvp_psth(fixrsvp_info, unit_idx)
+    # # plt.show()
 
-# #%%
-# from tejas.metrics.qc import get_qc_units_for_session
-# _, l = get_qc_units_for_session(date, subject)
+    # # plot_fixrsvp_spike_raster(fixrsvp_info, unit_idx)
+    # # plt.show()
 
-#%%
-#%%
-# from DataYatesV1.utils.data import get_gaborium_sta_ste
-# from DataYatesV1.utils.plotting import plot_stas
-# sess = get_session(subject, date)
+    # #%%
+    # from tejas.metrics.qc import get_qc_units_for_session
+    # _, l = get_qc_units_for_session(date, subject)
 
-# stas, stes = get_gaborium_sta_ste(sess, 20)
-# plt.imshow(np.abs(stes[unit_idx, 13]))
-# plt.colorbar()
+    #%%
+    #%%
+    # from DataYatesV1.utils.data import get_gaborium_sta_ste
+    # from DataYatesV1.utils.plotting import plot_stas
+    # sess = get_session(subject, date)
 
-# NC = stes.shape[0]
-# sd = np.std(stes, axis=(2,3))
-# absmax = np.max(np.abs(stes), axis=(2,3))
-# sx = int(np.sqrt(NC))
-# sy = int(np.ceil(np.sqrt(NC)))
-# fig = plt.figure(figsize=(sx*3, sy*3))
-# for cc in range(NC):
-#     plt.subplot(sx, sy, cc+1)
-#     plt.plot(sd[cc])
-#     plt.axis('off')
-#     plt.gca().twinx()
-#     plt.plot(absmax[cc], 'r--')
-#     plt.axis('off')
-#     plt.title(f'Unit {cc}')
-# %%
+    # stas, stes = get_gaborium_sta_ste(sess, 20)
+    # plt.imshow(np.abs(stes[unit_idx, 13]))
+    # plt.colorbar()
+
+    # NC = stes.shape[0]
+    # sd = np.std(stes, axis=(2,3))
+    # absmax = np.max(np.abs(stes), axis=(2,3))
+    # sx = int(np.sqrt(NC))
+    # sy = int(np.ceil(np.sqrt(NC)))
+    # fig = plt.figure(figsize=(sx*3, sy*3))
+    # for cc in range(NC):
+    #     plt.subplot(sx, sy, cc+1)
+    #     plt.plot(sd[cc])
+    #     plt.axis('off')
+    #     plt.gca().twinx()
+    #     plt.plot(absmax[cc], 'r--')
+    #     plt.axis('off')
+    #     plt.title(f'Unit {cc}')
+    # %%
