@@ -3,10 +3,13 @@
 # 1. try using all cells instead of just the visual responsive ones
 # 2. look at the image content in fixrsvp and find the highest frequency images and see if decoding is better for those images
 # 3. about if inference is being done correctly right now...
-# 4. NEED TO FIX np.nan_to_num(X_batch, nan=0.0)
+# 4. NEED TO FIX np.nan_to_num(X_batch, nan=0.0), the fix is probably having attention mask for both time and cells
 # 5. fix the issue of the trials not matching
-# 6. encode image_ids for transformer
-# 7. setup raytune for hyperparameter tuning
+# 6. setup raytune for hyperparameter tuning
+# 7. Try seeing if training on all time bins helps or hurts?
+# 8. for mixing augmention, try doing based on eyepos and not just random
+# 9. shuffle analysis for eyepos for baseline
+# 10. try feeding in image itself to model
 import os
 from pathlib import Path
 # Device options
@@ -170,13 +173,15 @@ plt.imshow(np.nanmean(robs,2)[ind])
 plt.show()
 
 plt.plot(np.nanstd(robs, (2,0)))
+plt.show()
 robs.shape #(79, 335, 133) [trials, time, cells]
 eyepos.shape #(79, 335, 2) [trials, time, xycoords]
-#%%
+
 reference_trial_ind = None
 image_ids_condensed = None
 for i in range(len(image_ids)):
-    if (image_ids[time_window_start:time_window_end, i] != -1).all():
+    if (image_ids[i, time_window_start:time_window_end] != -1).all():
+    # if (image_ids[time_window_start:time_window_end, i] != -1).all():
         image_ids_condensed = image_ids[i]
         # print(i)
         reference_trial_ind = i
@@ -203,13 +208,15 @@ if len(unmatched_trials) > 0:
     second_trial_ind = unmatched_trials[0]
     plt.plot(image_ids[first_trial_ind])
     plt.plot(image_ids[second_trial_ind])
-    plt.xlim(0, 100)
+    plt.xlim(0, 200)
     plt.xlabel('Time (bins)')
     plt.ylabel('Image ID')
     plt.title(f'Image IDs for trial {first_trial_ind} and {second_trial_ind}')
     plt.legend([f'Trial {first_trial_ind}', f'Trial {second_trial_ind}'])
 
     plt.show()
+    raise ValueError("Trials do not match")
+
 # sess = train_dset.dsets[0].metadata['sess']
 # trial_inds = dataset.dsets[dset_idx].covariates['trial_inds'].numpy()
 # trials = np.unique(trial_inds)
@@ -381,6 +388,8 @@ loss_on_center = False
 require_odd_window = True
 use_trajectory_loss = True
 use_2d_attention = False  # 2d_attention flag (axial time x neuron)
+use_image_id_encoding = True
+num_unique_images = int(np.max(image_ids_condensed)) + 1
 lambda_pos = 1.0
 lambda_vel = 0.4 #4
 lambda_accel = 0 #0.1
@@ -589,6 +598,24 @@ else:
     else:
         robs_feat_model = robs_z
 
+if use_image_id_encoding:
+    # ids is (Time,)
+    # Slice to match the time window used for robs/eyepos
+    ids = image_ids_condensed[time_window_start:time_window_end].astype(int)
+    
+    # We only create one-hot for valid IDs (1-20). 
+    # -1 will result in a row of all ZEROS (a "null" encoding).
+    valid_mask = ids >= 0
+    one_hot = np.zeros((len(ids), num_unique_images))
+    # Fill one-hot only for valid indices
+    one_hot[valid_mask, ids[valid_mask]] = 1.0
+    
+    # Tile for all trials: (Trials, Time, Num_Images)
+    image_feat = np.tile(one_hot[None, :, :], (num_trials, 1, 1))
+    
+    # Concatenate to the model features
+    robs_feat_model = np.concatenate([robs_feat_model, image_feat], axis=2)
+
 
 class WindowedEyeposDataset(torch.utils.data.Dataset):
     def __init__(
@@ -608,6 +635,7 @@ class WindowedEyeposDataset(torch.utils.data.Dataset):
         sample_poisson=False,
         neuron_dropout=0.0,
         mixup_alpha=0.0,
+        image_ids_condensed=None,
     ):
         self.device = device
         self.cache_on_gpu = cache_on_gpu
@@ -617,6 +645,7 @@ class WindowedEyeposDataset(torch.utils.data.Dataset):
         self.neuron_dropout = neuron_dropout
         self.sample_poisson = sample_poisson
         self.mixup_alpha = mixup_alpha
+        self.image_ids_condensed = image_ids_condensed
         X_raw = torch.from_numpy(X)
         Y_raw = torch.from_numpy(Y)
         valid_y = ~torch.isnan(Y_raw).any(axis=-1)
@@ -644,6 +673,12 @@ class WindowedEyeposDataset(torch.utils.data.Dataset):
         return len(self.indices)
 
     def __getitem__(self, idx):
+        trial, start = self.indices[idx]
+        if self.image_ids_condensed is not None:
+            window_ids = self.image_ids_condensed[start : start + self.window_len_input]
+            if (window_ids == -1).any():
+                raise ValueError(f"CRITICAL: Model attempted to train on a window containing -1 image IDs at trial {trial}, start {start}!")
+
         X_win, Y_win, mask, out_start, out_end = self._get_base_item(idx)
 
         if self.augment and self.mixup_alpha > 0.0:
@@ -889,6 +924,7 @@ train_dataset = WindowedEyeposDataset(
     sample_poisson=sample_poisson,
     neuron_dropout=augmentation_neuron_dropout,
     mixup_alpha=augmentation_mixup_alpha,
+    image_ids_condensed=image_ids_condensed[time_window_start:time_window_end] if use_image_id_encoding else None,
 )
 val_dataset = WindowedEyeposDataset(
     robs_feat_model,
@@ -1373,7 +1409,7 @@ fig, axes = plot_trial_trace(
 
 #%%
 # trial_idx = 0
-trial_idx -= 1
+trial_idx += 1
 fig, axes = plot_trial_trace(
     model,
     robs_feat_model,
