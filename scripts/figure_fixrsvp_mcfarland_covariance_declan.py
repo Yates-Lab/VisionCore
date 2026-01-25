@@ -528,7 +528,7 @@ plt.title(f"FF Window Size ({results[i]['window_ms']}ms)")
 results[0]
 # %%
 # show the total covariance matrix subtracting the diagonal
-window_idx = 1
+window_idx = 3
 plt.figure(figsize=(12, 4))
 plt.subplot(1,3,1)
 plt.imshow(last_mats[window_idx]['Total'] - np.diag(np.diag(last_mats[window_idx]['Total'])))
