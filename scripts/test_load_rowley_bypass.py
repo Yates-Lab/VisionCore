@@ -470,8 +470,8 @@ operate directly on dset_fix instead of a CombinedEmbeddedDataset.
 # Basic parameters (match original analysis where possible)
 windows_ms = [5, 10, 20, 40, 80]
 total_spikes_threshold = 200
-valid_time_bins = min(240, robs.shape[1])  # clamp to available time
-dt = 1 / 240.0  # Rowley fixrsvp is 240 Hz
+valid_time_bins = min(120, robs.shape[1])  # clamp to available time
+dt = 1 / 120.0  # Rowley fixrsvp is 240 Hz
 
 # Trial selection: require at least 20 valid bins (like original code)
 

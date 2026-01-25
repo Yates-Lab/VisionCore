@@ -65,6 +65,47 @@ if datasets_dir.exists():
         }
         print(f"  {key}")
 
+# Ensure fixrsvp dataset is used for reliability/ccmax analyses
+def ensure_fixrsvp_dataset(dset_current, available):
+    try:
+        # Prefer fixrsvp over others; do not null out current dataset
+        # Find fixrsvp entry
+        fix_key = None
+        for key in sorted(available.keys()):
+            if 'fixrsvp' in key.lower():
+                fix_key = key
+                break
+        if fix_key is None:
+            print("✗ No fixrsvp dataset found in available_datasets")
+            return dset_current
+        info = available[fix_key]
+        print(f"Ensuring fixrsvp dataset for analysis: {fix_key}")
+        return DictDataset.load(info['path'])
+    except Exception as e:
+        print(f"✗ Failed to ensure fixrsvp dataset: {e}")
+        return dset_current
+
+# Identify fixrsvp dataset from metadata
+def is_fixrsvp_dataset(dset_obj):
+    if dset_obj is None:
+        return False
+    meta = getattr(dset_obj, 'metadata', {})
+    name = str(meta.get('name', '')).lower()
+    dtype = str(meta.get('dataset', '')).lower()
+    task = str(meta.get('task', '')).lower()
+    return any('fixrsvp' in x for x in (name, dtype, task))
+
+# If available, restrict samples to fixrsvp via covariate
+def get_fixrsvp_sample_mask(dset_obj):
+    try:
+        if hasattr(dset_obj, 'covariates') and 'trial_type' in dset_obj.covariates:
+            tt = dset_obj['trial_type']
+            tt_np = tt.numpy() if hasattr(tt, 'numpy') else np.array(tt)
+            return np.array([str(x).lower() == 'fixrsvp' for x in tt_np], dtype=bool)
+    except Exception:
+        pass
+    return None
+
 # Load the first available dataset (or backimage if available)
 dset = None
 dataset_to_load = None
@@ -254,13 +295,22 @@ Compute split-half reliability by:
 """
 
 if dset is not None:
-    print("\n" + "="*60)
-    print("Computing per-neuron split-half reliability (fixRSVP)")
-    print("="*60)
+    # Enforce and require fixrsvp for reliability
+    dset = ensure_fixrsvp_dataset(dset, available_datasets)
+    if not is_fixrsvp_dataset(dset):
+        print("✗ Selected dataset is not fixrsvp; skipping split-half reliability (fixRSVP).")
+    else:
+        print("\n" + "="*60)
+        print("Computing per-neuron split-half reliability (fixRSVP only)")
+        print("="*60)
     
-    # Extract data
+    # Extract data (fixrsvp-only samples if covariate present)
     robs = dset['robs'].numpy()  # (samples, neurons)
     trial_inds = dset['trial_inds'].numpy()  # (samples,)
+    mask_fix = get_fixrsvp_sample_mask(dset)
+    if mask_fix is not None:
+        robs = robs[mask_fix]
+        trial_inds = trial_inds[mask_fix]
     num_neurons = robs.shape[1]
     unique_trials = np.unique(trial_inds)
     
@@ -414,13 +464,22 @@ Compute split-half reliability by:
 """
 
 if dset is not None:
-    print("\n" + "="*60)
-    print("Computing per-neuron split-half reliability (session halves)")
-    print("="*60)
+    # Enforce and require fixrsvp for session-halves reliability
+    dset = ensure_fixrsvp_dataset(dset, available_datasets)
+    if not is_fixrsvp_dataset(dset):
+        print("✗ Selected dataset is not fixrsvp; skipping split-half reliability (session halves).")
+    else:
+        print("\n" + "="*60)
+        print("Computing per-neuron split-half reliability (session halves, fixRSVP only)")
+        print("="*60)
     
-    # Extract data
+    # Extract data (fixrsvp-only samples if covariate present)
     robs = dset['robs'].numpy()  # (samples, neurons)
     trial_inds = dset['trial_inds'].numpy()  # (samples,)
+    mask_fix = get_fixrsvp_sample_mask(dset)
+    if mask_fix is not None:
+        robs = robs[mask_fix]
+        trial_inds = trial_inds[mask_fix]
     
     unique_trials = np.unique(trial_inds)
     num_neurons = robs.shape[1]
@@ -672,13 +731,22 @@ Compute ccmax using PSTH-based split-half resampling:
 """
 
 if dset is not None:
-    print("\n" + "="*60)
-    print("Computing ccmax via PSTH-based split-half")
-    print("="*60)
+    # Enforce and require fixrsvp for PSTH-based ccmax
+    dset = ensure_fixrsvp_dataset(dset, available_datasets)
+    if not is_fixrsvp_dataset(dset):
+        print("✗ Selected dataset is not fixrsvp; skipping PSTH-based ccmax.")
+    else:
+        print("\n" + "="*60)
+        print("Computing ccmax via PSTH-based split-half (fixRSVP only)")
+        print("="*60)
     
-    # Extract data
+    # Extract data (fixrsvp-only samples if covariate present)
     robs = dset['robs'].numpy()  # (samples, neurons)
     trial_inds = dset['trial_inds'].numpy()  # (samples,)
+    mask_fix = get_fixrsvp_sample_mask(dset)
+    if mask_fix is not None:
+        robs = robs[mask_fix]
+        trial_inds = trial_inds[mask_fix]
     
     unique_trials = np.unique(trial_inds)
     num_neurons = robs.shape[1]
