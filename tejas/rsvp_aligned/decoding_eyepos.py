@@ -11,6 +11,7 @@
 # 9. shuffle analysis for eyepos for baseline
 # 10. try feeding in image itself to model
 # 11. use dfs
+# 12. see if decoder can predict the patch of image
 import os
 from pathlib import Path
 # Device options
@@ -52,7 +53,7 @@ from DataYatesV1.exp.support import get_rsvp_fix_stim
 # stack_images = get_fixrsvp_stack()
 #%%
 subject = 'Allen'
-date = '2022-04-13'
+date = '2022-03-04'
 
 #04-08, 03-02, 04-13, 2-18 all stimuli are not timed right
 
@@ -1318,7 +1319,7 @@ def plot_trial_trace(
     valid_xy = ~np.isnan(y).any(axis=-1)
     axes[0].plot(t[valid_xy], y[valid_xy, 0], color="black", label="actual")
     if show_pred:
-        axes[0].plot(t, pred_plot[:, 0], color="tab:blue", alpha=0.8, label="pred")
+        axes[0].plot(t, pred_plot[:, 0], color="tab:blue", alpha=1, label="pred")
     if ridge_plot is not None:
         axes[0].plot(
             t,
@@ -1332,8 +1333,8 @@ def plot_trial_trace(
         for trial_i in train_trials:
             y_i = eyepos_actual[trial_i]
             valid_i = ~np.isnan(y_i).any(axis=-1)
-            axes[0].plot(t[valid_i], y_i[valid_i, 0], color="gray", alpha=0.1)
-            axes[1].plot(t[valid_i], y_i[valid_i, 1], color="gray", alpha=0.1)
+            axes[0].plot(t[valid_i], y_i[valid_i, 0], color="gray", alpha=0.15)
+            axes[1].plot(t[valid_i], y_i[valid_i, 1], color="gray", alpha=0.15)
     axes[0].set_ylabel("eye x")
     #set ylim to 0-1
     axes[0].set_ylim(-1, 1)
@@ -1342,7 +1343,7 @@ def plot_trial_trace(
 
     axes[1].plot(t[valid_xy], y[valid_xy, 1], color="black", label="actual")
     if show_pred:
-        axes[1].plot(t, pred_plot[:, 1], color="tab:orange", alpha=0.8, label="pred")
+        axes[1].plot(t, pred_plot[:, 1], color="tab:orange", alpha=1, label="pred")
     
     if ridge_plot is not None:
         axes[1].plot(
