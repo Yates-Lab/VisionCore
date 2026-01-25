@@ -10,6 +10,7 @@
 # 8. for mixing augmention, try doing based on eyepos and not just random
 # 9. shuffle analysis for eyepos for baseline
 # 10. try feeding in image itself to model
+# 11. use dfs
 import os
 from pathlib import Path
 # Device options
@@ -51,7 +52,7 @@ from DataYatesV1.exp.support import get_rsvp_fix_stim
 # stack_images = get_fixrsvp_stack()
 #%%
 subject = 'Allen'
-date = '2022-03-04'
+date = '2022-04-13'
 
 #04-08, 03-02, 04-13, 2-18 all stimuli are not timed right
 
@@ -158,9 +159,10 @@ time_window_start = 0
 time_window_end =200
 good_trials = fix_dur > 20
 robs = robs[good_trials][:,time_window_start:time_window_end,:]
-# dfs = dfs[good_trials]
+dfs = dfs[good_trials][:,time_window_start:time_window_end,:]
 eyepos = eyepos[good_trials][:,time_window_start:time_window_end,:]
 fix_dur = fix_dur[good_trials]
+image_ids = image_ids[good_trials][:, time_window_start:time_window_end]
 
 
 ind = np.argsort(fix_dur)[::-1]
@@ -177,35 +179,36 @@ plt.show()
 robs.shape #(79, 335, 133) [trials, time, cells]
 eyepos.shape #(79, 335, 2) [trials, time, xycoords]
 
+salvageable_mismatch_time_threshold = 20
 reference_trial_ind = None
-image_ids_condensed = None
+image_ids_reference = None
 for i in range(len(image_ids)):
     if (image_ids[i, time_window_start:time_window_end] != -1).all():
-    # if (image_ids[time_window_start:time_window_end, i] != -1).all():
-        image_ids_condensed = image_ids[i]
-        # print(i)
+        image_ids_reference = image_ids[i]
+
         reference_trial_ind = i
         break
 
-unmatched_trials = []
-for j, row in enumerate(image_ids):
-    for i in range(len(row)):
+unmatched_trials_and_start_time_ind_of_mismatch = {}
+
+for trial_ind, row in enumerate(image_ids):
+    start_time_ind_of_mismatch = None
+    for time_ind in range(len(row)):
         trial_matches = True
-        if row[i] != -1 and image_ids_condensed[i] != -1:
-            # print(image_ids_condensed[i], row[i], i, j)
-            if image_ids_condensed[i] != row[i]:
-                # print(image_ids_condensed[i], row[i], i, j)
+        if row[time_ind] != -1 and image_ids_reference[time_ind] != -1:
+            if image_ids_reference[time_ind] != row[time_ind]:
                 trial_matches = False
+                start_time_ind_of_mismatch = time_ind
                 
-            # assert image_ids_condensed[i] == row[i], "Image IDs don't match across trials"
         if not trial_matches:
-            print(f'trial {j} does not match')
-            unmatched_trials.append(j)
+            print(f'trial {trial_ind} does not match')
+            unmatched_trials_and_start_time_ind_of_mismatch[trial_ind] = start_time_ind_of_mismatch
             break
 
-if len(unmatched_trials) > 0:
+trials_to_remove = []
+for trial_ind, start_time_ind_of_mismatch in unmatched_trials_and_start_time_ind_of_mismatch.items():
     first_trial_ind = reference_trial_ind
-    second_trial_ind = unmatched_trials[0]
+    second_trial_ind = trial_ind
     plt.plot(image_ids[first_trial_ind])
     plt.plot(image_ids[second_trial_ind])
     plt.xlim(0, 200)
@@ -215,8 +218,31 @@ if len(unmatched_trials) > 0:
     plt.legend([f'Trial {first_trial_ind}', f'Trial {second_trial_ind}'])
 
     plt.show()
-    raise ValueError("Trials do not match")
+    print(f'start time ind of mismatch for trial {trial_ind} is {start_time_ind_of_mismatch}')
+    
+    if start_time_ind_of_mismatch > salvageable_mismatch_time_threshold:
+        robs[trial_ind, start_time_ind_of_mismatch:, :] = np.nan
+        eyepos[trial_ind, start_time_ind_of_mismatch:, :] = np.nan
+        fix_dur[trial_ind] = start_time_ind_of_mismatch
+        dfs[trial_ind, start_time_ind_of_mismatch:, :] = np.nan
+        image_ids[trial_ind, start_time_ind_of_mismatch:] = -1
+    else:
+        trials_to_remove.append(trial_ind)
 
+robs = robs[~np.isin(np.arange(len(robs)), trials_to_remove)]
+eyepos = eyepos[~np.isin(np.arange(len(eyepos)), trials_to_remove)]
+fix_dur = fix_dur[~np.isin(np.arange(len(fix_dur)), trials_to_remove)]
+dfs = dfs[~np.isin(np.arange(len(dfs)), trials_to_remove)]
+image_ids = image_ids[~np.isin(np.arange(len(image_ids)), trials_to_remove)]
+
+for trial_ind, row in enumerate(image_ids):
+    for time_ind in range(len(row)):
+
+        if row[time_ind] != -1 and image_ids_reference[time_ind] != -1:
+            if image_ids_reference[time_ind] != row[time_ind]:
+                raise ValueError(f'trial {trial_ind} does not match at time {time_ind}')
+
+#%%
 # sess = train_dset.dsets[0].metadata['sess']
 # trial_inds = dataset.dsets[dset_idx].covariates['trial_inds'].numpy()
 # trials = np.unique(trial_inds)
@@ -389,7 +415,7 @@ require_odd_window = True
 use_trajectory_loss = True
 use_2d_attention = False  # 2d_attention flag (axial time x neuron)
 use_image_id_encoding = True
-num_unique_images = int(np.max(image_ids_condensed)) + 1
+num_unique_images = int(np.max(image_ids_reference)) + 1
 lambda_pos = 1.0
 lambda_vel = 0.4 #4
 lambda_accel = 0 #0.1
@@ -601,7 +627,7 @@ else:
 if use_image_id_encoding:
     # ids is (Time,)
     # Slice to match the time window used for robs/eyepos
-    ids = image_ids_condensed[time_window_start:time_window_end].astype(int)
+    ids = image_ids_reference[time_window_start:time_window_end].astype(int)
     
     # We only create one-hot for valid IDs (1-20). 
     # -1 will result in a row of all ZEROS (a "null" encoding).
@@ -924,7 +950,7 @@ train_dataset = WindowedEyeposDataset(
     sample_poisson=sample_poisson,
     neuron_dropout=augmentation_neuron_dropout,
     mixup_alpha=augmentation_mixup_alpha,
-    image_ids_condensed=image_ids_condensed[time_window_start:time_window_end] if use_image_id_encoding else None,
+    image_ids_condensed=image_ids_reference[time_window_start:time_window_end] if use_image_id_encoding else None,
 )
 val_dataset = WindowedEyeposDataset(
     robs_feat_model,
@@ -1203,6 +1229,7 @@ def plot_trial_trace(
     center_per_trial=False,
     show_ridge=False,
     show_pred=False,
+    show_all_train_traces = False,
 ):
     if split not in {"train", "val"}:
         raise ValueError("split must be 'train' or 'val'.")
@@ -1301,6 +1328,12 @@ def plot_trial_trace(
             linestyle="--",
             label="ridge",
         )
+    if show_all_train_traces:
+        for trial_i in train_trials:
+            y_i = eyepos_actual[trial_i]
+            valid_i = ~np.isnan(y_i).any(axis=-1)
+            axes[0].plot(t[valid_i], y_i[valid_i, 0], color="gray", alpha=0.1)
+            axes[1].plot(t[valid_i], y_i[valid_i, 1], color="gray", alpha=0.1)
     axes[0].set_ylabel("eye x")
     #set ylim to 0-1
     axes[0].set_ylim(-1, 1)
@@ -1427,6 +1460,7 @@ fig, axes = plot_trial_trace(
     center_per_trial=center_per_trial,
     show_ridge=False,
     show_pred=True,
+    show_all_train_traces=True,
 )
 
 #%%
