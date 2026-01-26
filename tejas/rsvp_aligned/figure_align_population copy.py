@@ -906,262 +906,262 @@ def plot_population_raster(
 
 
 #%%
+for session in get_complete_sessions():
 
-
-#['2022-03-02', '2022-04-06', '2022-04-13']
-if session.name.split('_')[0] != 'Allen'or session.name.split('_')[1] not in ['2022-03-02']:
-    continue
-subject = session.name.split('_')[0]
-date = session.name.split('_')[1]
-
-# date = "2022-03-04"
-# date = "2022-04-08"
-# date = "2022-04-13" #best
-# date = "2022-04-15" #best
-# date = "2022-04-06" #decent
-# date = "2022-03-02" #best
-# date = "2022-04-01" #not great
-# date = "2022-03-30" #best
-# subject = "Allen"
-
-#jake likes 3-02, 4-06, 4-13
-
-# dataset_configs_path = "/mnt/sata/YatesMarmoV1/conv_model_fits/data_configs/multi_dataset_basic_for_metrics_rsvp"
-# yaml_files = [
-#     f for f in os.listdir(dataset_configs_path) if f.endswith(".yaml") and "base" not in f and date in f and subject in f
-# ]
-# dataset_configs = load_dataset_configs(yaml_files, dataset_configs_path)
-# from DataYatesV1.utils.data import prepare_data
-# train_dset, val_dset, dataset_config = prepare_data(dataset_configs[0])
-
-
-# inds = train_dset.get_dataset_inds('fixrsvp')
-# dataset = train_dset.shallow_copy()
-# dataset.inds = inds
-
-# dset_idx = inds[:,0].unique().item()
-# trial_inds = dataset.dsets[dset_idx].covariates['trial_inds'].numpy()
-# trials = np.unique(trial_inds)
-
-# NC = dataset.dsets[dset_idx]['robs'].shape[1]
-# T = np.max(dataset.dsets[dset_idx].covariates['psth_inds'][:].numpy()).item() + 1
-# NT = len(trials)
-
-# fixation = np.hypot(dataset.dsets[dset_idx]['eyepos'][:,0].numpy(), dataset.dsets[dset_idx]['eyepos'][:,1].numpy()) < 1
-
-# robs = np.nan*np.zeros((NT, T, NC))
-# eyepos = np.nan*np.zeros((NT, T, 2))
-# fix_dur =np.nan*np.zeros((NT,))
-
-# for itrial in tqdm(range(NT)):
-#     ix = trials[itrial] == trial_inds
-#     ix = ix & fixation
-#     if np.sum(ix) == 0:
-#         continue
-    
-#     psth_inds = dataset.dsets[dset_idx].covariates['psth_inds'][ix].numpy()
-#     fix_dur[itrial] = len(psth_inds)
-#     robs[itrial][psth_inds] = dataset.dsets[dset_idx]['robs'][ix].numpy()
-#     eyepos[itrial][psth_inds] = dataset.dsets[dset_idx]['eyepos'][ix].numpy()
-    
-
-# good_trials = fix_dur > 20
-# robs = robs[good_trials]
-# eyepos = eyepos[good_trials]
-# fix_dur = fix_dur[good_trials]
-
-# ind = np.argsort(fix_dur)[::-1]
-# plt.subplot(1,2,1)
-# plt.imshow(eyepos[ind,:,0])
-# # plt.xlim(0, 160)
-# # plt.subplot(1,2,2)
-# # plt.imshow(np.nanmean(robs,2)[ind])
-# # plt.xlim(0, 160)
-
-dataset_configs_path = '/home/tejas/VisionCore/experiments/dataset_configs/multi_basic_240_rsvp.yaml'
-dataset_configs = load_dataset_configs(dataset_configs_path)
-
-# date = "2022-03-04"
-# subject = "Allen"
-dataset_idx = next(i for i, cfg in enumerate(dataset_configs) if cfg['session'] == f"{subject}_{date}")
-
-with open(os.devnull, "w") as devnull, contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
-    train_dset, val_dset, dataset_config = prepare_data(dataset_configs[dataset_idx], strict=False)
-
-
-
-sess = train_dset.dsets[0].metadata['sess']
-# ppd = train_data.dsets[0].metadata['ppd']
-cids = dataset_config['cids']
-print(f"Running on {sess.name}")
-
-# get fixrsvp inds and make one dataaset object
-inds = torch.concatenate([
-        train_dset.get_dataset_inds('fixrsvp'),
-        val_dset.get_dataset_inds('fixrsvp')
-    ], dim=0)
-
-dataset = train_dset.shallow_copy()
-dataset.inds = inds
-
-# Getting key variables
-dset_idx = inds[:,0].unique().item()
-trial_inds = dataset.dsets[dset_idx].covariates['trial_inds'].numpy()
-trials = np.unique(trial_inds)
-
-NC = dataset.dsets[dset_idx]['robs'].shape[1]
-T = np.max(dataset.dsets[dset_idx].covariates['psth_inds'][:].numpy()).item() + 1
-NT = len(trials)
-
-fixation = np.hypot(dataset.dsets[dset_idx]['eyepos'][:,0].numpy(), dataset.dsets[dset_idx]['eyepos'][:,1].numpy()) < 1
-
-# Loop over trials and align responses
-robs = np.nan*np.zeros((NT, T, NC))
-dfs = np.nan*np.zeros((NT, T, NC))
-eyepos = np.nan*np.zeros((NT, T, 2))
-fix_dur =np.nan*np.zeros((NT,))
-
-for itrial in tqdm(range(NT)):
-    # print(f"Trial {itrial}/{NT}")
-    ix = trials[itrial] == trial_inds
-    ix = ix & fixation
-    if np.sum(ix) == 0:
+    #['2022-03-02', '2022-04-06', '2022-04-13']
+    if session.name.split('_')[0] != 'Allen'or session.name.split('_')[1] not in ['2022-03-02']:
         continue
+    subject = session.name.split('_')[0]
+    date = session.name.split('_')[1]
     
-    stim_inds = np.where(ix)[0]
-    # stim_inds = stim_inds[:,None] - np.array(dataset_config['keys_lags']['stim'])[None,:]
+    # date = "2022-03-04"
+    # date = "2022-04-08"
+    # date = "2022-04-13" #best
+    # date = "2022-04-15" #best
+    # date = "2022-04-06" #decent
+    # date = "2022-03-02" #best
+    # date = "2022-04-01" #not great
+    # date = "2022-03-30" #best
+    # subject = "Allen"
+
+    #jake likes 3-02, 4-06, 4-13
+
+    # dataset_configs_path = "/mnt/sata/YatesMarmoV1/conv_model_fits/data_configs/multi_dataset_basic_for_metrics_rsvp"
+    # yaml_files = [
+    #     f for f in os.listdir(dataset_configs_path) if f.endswith(".yaml") and "base" not in f and date in f and subject in f
+    # ]
+    # dataset_configs = load_dataset_configs(yaml_files, dataset_configs_path)
+    # from DataYatesV1.utils.data import prepare_data
+    # train_dset, val_dset, dataset_config = prepare_data(dataset_configs[0])
 
 
-    psth_inds = dataset.dsets[dset_idx].covariates['psth_inds'][ix].numpy()
-    fix_dur[itrial] = len(psth_inds)
-    robs[itrial][psth_inds] = dataset.dsets[dset_idx]['robs'][ix].numpy()
-    dfs[itrial][psth_inds] = dataset.dsets[dset_idx]['dfs'][ix].numpy()
-    eyepos[itrial][psth_inds] = dataset.dsets[dset_idx]['eyepos'][ix].numpy()
+    # inds = train_dset.get_dataset_inds('fixrsvp')
+    # dataset = train_dset.shallow_copy()
+    # dataset.inds = inds
 
+    # dset_idx = inds[:,0].unique().item()
+    # trial_inds = dataset.dsets[dset_idx].covariates['trial_inds'].numpy()
+    # trials = np.unique(trial_inds)
 
-good_trials = fix_dur > 20
-robs = robs[good_trials]
-dfs = dfs[good_trials]
-eyepos = eyepos[good_trials]
-fix_dur = fix_dur[good_trials]
+    # NC = dataset.dsets[dset_idx]['robs'].shape[1]
+    # T = np.max(dataset.dsets[dset_idx].covariates['psth_inds'][:].numpy()).item() + 1
+    # NT = len(trials)
 
+    # fixation = np.hypot(dataset.dsets[dset_idx]['eyepos'][:,0].numpy(), dataset.dsets[dset_idx]['eyepos'][:,1].numpy()) < 1
 
-ind = np.argsort(fix_dur)[::-1]
-plt.subplot(1,2,1)
-plt.imshow(eyepos[ind,:,0])
-plt.xlim(0, 160)
-plt.subplot(1,2,2)
-plt.imshow(np.nanmean(robs,2)[ind])
-plt.xlim(0, 160)
+    # robs = np.nan*np.zeros((NT, T, NC))
+    # eyepos = np.nan*np.zeros((NT, T, 2))
+    # fix_dur =np.nan*np.zeros((NT,))
 
-from tejas.metrics.gaborium import get_rf_contour_metrics
-rf_contour_metrics = get_rf_contour_metrics(date, subject)
+    # for itrial in tqdm(range(NT)):
+    #     ix = trials[itrial] == trial_inds
+    #     ix = ix & fixation
+    #     if np.sum(ix) == 0:
+    #         continue
+        
+    #     psth_inds = dataset.dsets[dset_idx].covariates['psth_inds'][ix].numpy()
+    #     fix_dur[itrial] = len(psth_inds)
+    #     robs[itrial][psth_inds] = dataset.dsets[dset_idx]['robs'][ix].numpy()
+    #     eyepos[itrial][psth_inds] = dataset.dsets[dset_idx]['eyepos'][ix].numpy()
+        
 
-# len_of_each_segment = 20
-# total_start_time = 0
-# total_end_time = 150
-# max_distance_from_centroid = 0.3
-# num_clusters = 2
-# min_cluster_size = 5
-# cluster_size = 5
-# sort_by_cluster_psth = False
-# distance_between_centroids = (-np.inf, np.inf)
+    # good_trials = fix_dur > 20
+    # robs = robs[good_trials]
+    # eyepos = eyepos[good_trials]
+    # fix_dur = fix_dur[good_trials]
 
-#The idea is: can we get really different population response patterns with really tiny differences in eye position for 4-13 in section 4
-# len_of_each_segment = 20
-# total_start_time = 0
-# total_end_time = 150
-# max_distance_from_centroid = 0.1
-# num_clusters = 2
-# min_cluster_size = 4
-# cluster_size = 4
-# sort_by_cluster_psth = False
-# distance_between_centroids = (0.09, 0.2)
+    # ind = np.argsort(fix_dur)[::-1]
+    # plt.subplot(1,2,1)
+    # plt.imshow(eyepos[ind,:,0])
+    # # plt.xlim(0, 160)
+    # # plt.subplot(1,2,2)
+    # # plt.imshow(np.nanmean(robs,2)[ind])
+    # # plt.xlim(0, 160)
 
-# len_of_each_segment = 20
-# total_start_time = 0
-# total_end_time = 150
-# max_distance_from_centroid = 0.1
-# num_clusters = 2
-# min_cluster_size = 4
-# cluster_size = 4
-# sort_by_cluster_psth = True
-# distance_between_centroids = (0.09, 0.2)
+    dataset_configs_path = '/home/tejas/VisionCore/experiments/dataset_configs/multi_basic_240_rsvp.yaml'
+    dataset_configs = load_dataset_configs(dataset_configs_path)
 
+    # date = "2022-03-04"
+    # subject = "Allen"
+    dataset_idx = next(i for i, cfg in enumerate(dataset_configs) if cfg['session'] == f"{subject}_{date}")
 
-
-# len_of_each_segment = 25
-# len_of_each_segment = 40
-len_of_each_segment = 32
-# total_start_time = 0
-total_start_time = 46
-# total_end_time = 175
-total_end_time = 78
-max_distance_from_centroid = 0.10
-num_clusters = 2
-min_cluster_size = 5 #4
-cluster_size = 5 #4
-sort_by_cluster_psth = True
-# distance_between_centroids = (0.3, 0.4)
-distance_between_centroids = (0.02, 0.3)
-min_distance_between_inter_cluster_points = 0#0.02
-return_top_k_combos = 10
-
-
-robs_list = []
-iix_list = [[] for _ in range(return_top_k_combos)]
-clusters_list = [[] for _ in range(return_top_k_combos)]
-start_time_list = []
-end_time_list = []
-
-for i in range(total_start_time, total_end_time, len_of_each_segment):
-    start_time = i
-    end_time = start_time + len_of_each_segment
-    #eyepos is shape [num_trial, time, 2]
-
-    iix, clusters = get_eyepos_clusters(eyepos, start_time, end_time,
-    robs, sort_by_cluster_psth = sort_by_cluster_psth,
-    max_distance_from_centroid = max_distance_from_centroid, num_clusters = num_clusters, 
-    min_cluster_size = min_cluster_size, cluster_size = cluster_size,
-    distance_between_centroids = distance_between_centroids,
-    min_distance_between_inter_cluster_points = min_distance_between_inter_cluster_points,
-    return_top_k_combos = return_top_k_combos, dedupe = True)
-
-
-    plot_eyepos_clusters(eyepos, iix[0], start_time, end_time, clusters=clusters[0])
-    # plot_population_raster(robs[:, start_time:end_time, :], iix, clusters, show_psth = True, show_difference_psth = True)
-
-    # print(i, clusters)
-
-    for j in range(return_top_k_combos):
-        if j < len(iix):
-            iix_list[j].append(iix[j])
-            clusters_list[j].append(clusters[j])
-        else:
-            first_iix = iix[0]
-            iix_list[j].append(first_iix)
-            clusters_list[j].append(np.full(len(first_iix), -1))
-                
-
-    # iix_list.append(iix)
-    # clusters_list.append(clusters)
-
-    robs_list.append(robs[:, start_time:end_time, :])
-    start_time_list.append(start_time)
-    end_time_list.append(end_time)
+    with open(os.devnull, "w") as devnull, contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
+        train_dset, val_dset, dataset_config = prepare_data(dataset_configs[dataset_idx], strict=False)
 
 
 
-show = True
-for j in range(return_top_k_combos)[:2]:
-    fig1, ax1 = plot_eyepos_clusters(eyepos, iix_list[j], start_time_list, end_time_list, clusters=clusters_list[j], show=show)
-#     fig1.savefig(f"population_figures/eyepos_{subject}_{date}_{j}.png", dpi=300, bbox_inches="tight")
-#     plt.close(fig1)
-    fig2, ax2, spike_x, spike_y = plot_population_raster(robs_list, iix_list[j], clusters_list[j], start_time_list, end_time_list, 
-    show_psth = True, show_difference_psth = False, show=show, render = "scatter", fig_width = 1, fig_height =20, fig_dpi = 400, gap= 50,
-    bins_x_axis=True)
-#     fig2.savefig(f"population_figures/population_raster_{subject}_{date}_{j}.png", dpi=300, bbox_inches="tight")
-#     plt.close(fig2)
+    sess = train_dset.dsets[0].metadata['sess']
+    # ppd = train_data.dsets[0].metadata['ppd']
+    cids = dataset_config['cids']
+    print(f"Running on {sess.name}")
+
+    # get fixrsvp inds and make one dataaset object
+    inds = torch.concatenate([
+            train_dset.get_dataset_inds('fixrsvp'),
+            val_dset.get_dataset_inds('fixrsvp')
+        ], dim=0)
+
+    dataset = train_dset.shallow_copy()
+    dataset.inds = inds
+
+    # Getting key variables
+    dset_idx = inds[:,0].unique().item()
+    trial_inds = dataset.dsets[dset_idx].covariates['trial_inds'].numpy()
+    trials = np.unique(trial_inds)
+
+    NC = dataset.dsets[dset_idx]['robs'].shape[1]
+    T = np.max(dataset.dsets[dset_idx].covariates['psth_inds'][:].numpy()).item() + 1
+    NT = len(trials)
+
+    fixation = np.hypot(dataset.dsets[dset_idx]['eyepos'][:,0].numpy(), dataset.dsets[dset_idx]['eyepos'][:,1].numpy()) < 1
+
+    # Loop over trials and align responses
+    robs = np.nan*np.zeros((NT, T, NC))
+    dfs = np.nan*np.zeros((NT, T, NC))
+    eyepos = np.nan*np.zeros((NT, T, 2))
+    fix_dur =np.nan*np.zeros((NT,))
+
+    for itrial in tqdm(range(NT)):
+        # print(f"Trial {itrial}/{NT}")
+        ix = trials[itrial] == trial_inds
+        ix = ix & fixation
+        if np.sum(ix) == 0:
+            continue
+        
+        stim_inds = np.where(ix)[0]
+        # stim_inds = stim_inds[:,None] - np.array(dataset_config['keys_lags']['stim'])[None,:]
+
+
+        psth_inds = dataset.dsets[dset_idx].covariates['psth_inds'][ix].numpy()
+        fix_dur[itrial] = len(psth_inds)
+        robs[itrial][psth_inds] = dataset.dsets[dset_idx]['robs'][ix].numpy()
+        dfs[itrial][psth_inds] = dataset.dsets[dset_idx]['dfs'][ix].numpy()
+        eyepos[itrial][psth_inds] = dataset.dsets[dset_idx]['eyepos'][ix].numpy()
+
+
+    good_trials = fix_dur > 20
+    robs = robs[good_trials]
+    dfs = dfs[good_trials]
+    eyepos = eyepos[good_trials]
+    fix_dur = fix_dur[good_trials]
+
+
+    ind = np.argsort(fix_dur)[::-1]
+    plt.subplot(1,2,1)
+    plt.imshow(eyepos[ind,:,0])
+    plt.xlim(0, 160)
+    plt.subplot(1,2,2)
+    plt.imshow(np.nanmean(robs,2)[ind])
+    plt.xlim(0, 160)
+
+    from tejas.metrics.gaborium import get_rf_contour_metrics
+    rf_contour_metrics = get_rf_contour_metrics(date, subject)
+
+    # len_of_each_segment = 20
+    # total_start_time = 0
+    # total_end_time = 150
+    # max_distance_from_centroid = 0.3
+    # num_clusters = 2
+    # min_cluster_size = 5
+    # cluster_size = 5
+    # sort_by_cluster_psth = False
+    # distance_between_centroids = (-np.inf, np.inf)
+
+    #The idea is: can we get really different population response patterns with really tiny differences in eye position for 4-13 in section 4
+    # len_of_each_segment = 20
+    # total_start_time = 0
+    # total_end_time = 150
+    # max_distance_from_centroid = 0.1
+    # num_clusters = 2
+    # min_cluster_size = 4
+    # cluster_size = 4
+    # sort_by_cluster_psth = False
+    # distance_between_centroids = (0.09, 0.2)
+
+    # len_of_each_segment = 20
+    # total_start_time = 0
+    # total_end_time = 150
+    # max_distance_from_centroid = 0.1
+    # num_clusters = 2
+    # min_cluster_size = 4
+    # cluster_size = 4
+    # sort_by_cluster_psth = True
+    # distance_between_centroids = (0.09, 0.2)
+
+
+
+    # len_of_each_segment = 25
+    # len_of_each_segment = 40
+    len_of_each_segment = 32
+    # total_start_time = 0
+    total_start_time = 46
+    # total_end_time = 175
+    total_end_time = 78
+    max_distance_from_centroid = 0.10
+    num_clusters = 2
+    min_cluster_size = 5 #4
+    cluster_size = 5 #4
+    sort_by_cluster_psth = True
+    # distance_between_centroids = (0.3, 0.4)
+    distance_between_centroids = (0.02, 0.3)
+    min_distance_between_inter_cluster_points = 0#0.02
+    return_top_k_combos = 10
+
+
+    robs_list = []
+    iix_list = [[] for _ in range(return_top_k_combos)]
+    clusters_list = [[] for _ in range(return_top_k_combos)]
+    start_time_list = []
+    end_time_list = []
+
+    for i in range(total_start_time, total_end_time, len_of_each_segment):
+        start_time = i
+        end_time = start_time + len_of_each_segment
+        #eyepos is shape [num_trial, time, 2]
+
+        iix, clusters = get_eyepos_clusters(eyepos, start_time, end_time,
+        robs, sort_by_cluster_psth = sort_by_cluster_psth,
+        max_distance_from_centroid = max_distance_from_centroid, num_clusters = num_clusters, 
+        min_cluster_size = min_cluster_size, cluster_size = cluster_size,
+        distance_between_centroids = distance_between_centroids,
+        min_distance_between_inter_cluster_points = min_distance_between_inter_cluster_points,
+        return_top_k_combos = return_top_k_combos, dedupe = True)
+
+
+        plot_eyepos_clusters(eyepos, iix[0], start_time, end_time, clusters=clusters[0])
+        # plot_population_raster(robs[:, start_time:end_time, :], iix, clusters, show_psth = True, show_difference_psth = True)
+
+        # print(i, clusters)
+
+        for j in range(return_top_k_combos):
+            if j < len(iix):
+                iix_list[j].append(iix[j])
+                clusters_list[j].append(clusters[j])
+            else:
+                first_iix = iix[0]
+                iix_list[j].append(first_iix)
+                clusters_list[j].append(np.full(len(first_iix), -1))
+                    
+
+        # iix_list.append(iix)
+        # clusters_list.append(clusters)
+
+        robs_list.append(robs[:, start_time:end_time, :])
+        start_time_list.append(start_time)
+        end_time_list.append(end_time)
+
+
+    
+    show = True
+    for j in range(return_top_k_combos)[:2]:
+        fig1, ax1 = plot_eyepos_clusters(eyepos, iix_list[j], start_time_list, end_time_list, clusters=clusters_list[j], show=show)
+    #     fig1.savefig(f"population_figures/eyepos_{subject}_{date}_{j}.png", dpi=300, bbox_inches="tight")
+    #     plt.close(fig1)
+        fig2, ax2, spike_x, spike_y = plot_population_raster(robs_list, iix_list[j], clusters_list[j], start_time_list, end_time_list, 
+        show_psth = True, show_difference_psth = False, show=show, render = "scatter", fig_width = 1, fig_height =20, fig_dpi = 400, gap= 50,
+        bins_x_axis=True)
+    #     fig2.savefig(f"population_figures/population_raster_{subject}_{date}_{j}.png", dpi=300, bbox_inches="tight")
+    #     plt.close(fig2)
 
 start_time_list = np.array(start_time_list)
 end_time_list = np.array(end_time_list)
