@@ -1449,7 +1449,7 @@ def plot_spikes_as_lines(ax, spike_x, spike_y, spike_vals=None, height=1.0, colo
             continue
         if vmax > vmin:
             norm = (val - vmin) / (vmax - vmin)
-            alpha_val = np.clip(0.7 + 0.9 * norm, 0.0, 1.0) * alpha
+            alpha_val = np.clip(0.5 + 0.9 * norm, 0.0, 1.0) * alpha
             # print(alpha_val)
         else:
             alpha_val = alpha
@@ -1476,7 +1476,7 @@ def plot_population_raster_NEW(
     show=True,
     render="scatter",
     fig_width=3,
-    fig_height=20,
+    fig_height=10,
     fig_dpi=800,
     bins_x_axis=True,
     # Line render parameters

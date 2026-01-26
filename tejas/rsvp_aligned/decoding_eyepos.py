@@ -392,8 +392,8 @@ window_len_input = 50 #70
 window_len_output = 50 #70
 window_stride = 1
 min_valid_fraction = 0.8
-num_epochs = 75
-batch_size = 64
+num_epochs = 75 # 75
+batch_size = 64 #64
 learning_rate = 1e-3
 lag_bins = 0
 center_per_trial = True
@@ -406,6 +406,8 @@ augmentation_neuron_dropout = 0.1  # Probability of dropping an entire neuron's 
 augmentation_turn_off_percentage = 0.2 #0.2
 augmentation_turn_on_percentage = 0.02 #0.02 #0.05
 augmentation_mixup_alpha = 0.2  # Mixup interpolation alpha (0.0 to disable)
+augmentation_mixup_same_time = False  # If True, only mixup windows with same start index
+augment_encodings = True  # If True, augmentations affect ALL features (neural + time + image_id encodings)
 transformer_dim = 64 #64 best 16
 transformer_heads = 4 #4 #best 2
 transformer_layers = 2
@@ -643,6 +645,14 @@ if use_image_id_encoding:
     # Concatenate to the model features
     robs_feat_model = np.concatenate([robs_feat_model, image_feat], axis=2)
 
+# Set num_neural_features based on augment_encodings flag
+# If augment_encodings=True: augmentations affect ALL features (replicates original "bug" behavior)
+# If augment_encodings=False: augmentations only affect neural features (correct behavior)
+if augment_encodings:
+    num_neural_features = robs_feat_model.shape[2]  # All features including encodings
+else:
+    num_neural_features = robs_z.shape[2]  # Only neural features
+
 
 class WindowedEyeposDataset(torch.utils.data.Dataset):
     def __init__(
@@ -662,7 +672,9 @@ class WindowedEyeposDataset(torch.utils.data.Dataset):
         sample_poisson=False,
         neuron_dropout=0.0,
         mixup_alpha=0.0,
+        mixup_same_time=False,
         image_ids_condensed=None,
+        num_neural_features=None,
     ):
         self.device = device
         self.cache_on_gpu = cache_on_gpu
@@ -672,7 +684,11 @@ class WindowedEyeposDataset(torch.utils.data.Dataset):
         self.neuron_dropout = neuron_dropout
         self.sample_poisson = sample_poisson
         self.mixup_alpha = mixup_alpha
+        self.mixup_same_time = mixup_same_time
         self.image_ids_condensed = image_ids_condensed
+        # Number of neural features (excluding time encoding and image_id encoding)
+        # If not provided, assume all features are neural (backward compatibility)
+        self.num_neural_features = num_neural_features if num_neural_features is not None else X.shape[2]
         X_raw = torch.from_numpy(X)
         Y_raw = torch.from_numpy(Y)
         valid_y = ~torch.isnan(Y_raw).any(axis=-1)
@@ -695,6 +711,14 @@ class WindowedEyeposDataset(torch.utils.data.Dataset):
                 window_mask = self.valid_mask[trial, out_start:out_end]
                 if window_mask.float().mean() >= min_valid_fraction:
                     self.indices.append((trial, start))
+        
+        # Build index for same-time mixup
+        if self.mixup_same_time and self.mixup_alpha > 0.0:
+            self.start_to_indices = {}
+            for idx, (_, start) in enumerate(self.indices):
+                if start not in self.start_to_indices:
+                    self.start_to_indices[start] = []
+                self.start_to_indices[start].append(idx)
 
     def __len__(self):
         return len(self.indices)
@@ -708,41 +732,55 @@ class WindowedEyeposDataset(torch.utils.data.Dataset):
 
         X_win, Y_win, mask, out_start, out_end = self._get_base_item(idx)
 
-        if self.augment and self.mixup_alpha > 0.0:
-            mix_idx = torch.randint(0, len(self.indices), (1,)).item()
-            X_mix, Y_mix, mask_mix, _, _ = self._get_base_item(mix_idx)
-            
-            lam = np.random.beta(self.mixup_alpha, self.mixup_alpha)
-            X_win = lam * X_win + (1 - lam) * X_mix
-            Y_win = lam * Y_win + (1 - lam) * Y_mix
-            mask = mask * mask_mix
+        # All augmentations only affect neural features (first num_neural_features columns)
+        # Time encoding and image_id encoding columns are left unchanged
+        nf = self.num_neural_features
 
+        if self.augment and self.mixup_alpha > 0.0:
+            if self.mixup_same_time:
+                candidates = [i for i in self.start_to_indices[start] if i != idx]
+                if candidates:
+                    mix_idx = candidates[torch.randint(0, len(candidates), (1,)).item()]
+                else:
+                    mix_idx = idx  # No other same-start window, skip mixup
+            else:
+                mix_idx = torch.randint(0, len(self.indices), (1,)).item()
+            
+            if mix_idx != idx:
+                X_mix, Y_mix, mask_mix, _, _ = self._get_base_item(mix_idx)
+                lam = np.random.beta(self.mixup_alpha, self.mixup_alpha)
+                X_win = X_win.clone()
+                X_win[:, :nf] = lam * X_win[:, :nf] + (1 - lam) * X_mix[:, :nf]
+                Y_win = lam * Y_win + (1 - lam) * Y_mix
+                mask = mask * mask_mix
         if self.augment and (self.turn_off_percentage > 0.0 or self.turn_on_percentage > 0.0):
-            X_win = X_win.clone()
+            if self.mixup_alpha <= 0.0:
+                X_win = X_win.clone()
+            X_neural = X_win[:, :nf]
             if self.turn_off_percentage > 0.0:
-                on_mask = X_win > 0
-                off_draw = torch.rand_like(X_win, dtype=torch.float32)
-                X_win = torch.where(on_mask & (off_draw < self.turn_off_percentage), torch.zeros_like(X_win), X_win)
+                on_mask = X_neural > 0
+                off_draw = torch.rand_like(X_neural, dtype=torch.float32)
+                X_neural = torch.where(on_mask & (off_draw < self.turn_off_percentage), torch.zeros_like(X_neural), X_neural)
             if self.turn_on_percentage > 0.0:
-                off_mask = X_win == 0
-                on_draw = torch.rand_like(X_win, dtype=torch.float32)
-                X_win = torch.where(off_mask & (on_draw < self.turn_on_percentage), torch.ones_like(X_win), X_win)
+                off_mask = X_neural == 0
+                on_draw = torch.rand_like(X_neural, dtype=torch.float32)
+                X_neural = torch.where(off_mask & (on_draw < self.turn_on_percentage), torch.ones_like(X_neural), X_neural)
+            X_win[:, :nf] = X_neural
+
         if self.augment and self.sample_poisson:
-            X_win[X_win > 0] = torch.poisson(X_win[X_win > 0])
+            if self.mixup_alpha <= 0.0 and self.turn_off_percentage <= 0.0 and self.turn_on_percentage <= 0.0:
+                X_win = X_win.clone()
+            X_neural = X_win[:, :nf]
+            X_neural[X_neural > 0] = torch.poisson(X_neural[X_neural > 0])
+            X_win[:, :nf] = X_neural
         
         if self.augment and self.neuron_dropout > 0.0:
-            # Get number of neural channels (excluding time encoding if concatenated)
-            # In your case, NC is the number of cells
-            num_neurons = self.X.shape[2] 
+            # Create dropout mask only for neural features
+            neuron_mask = (torch.rand((1, nf), device=X_win.device) > self.neuron_dropout).float()
             
-            # Create a mask of shape (1, num_neurons) - 1 to keep, 0 to drop
-            # Using .to(X_win.device) ensures it works if data is cached on GPU
-            neuron_mask = (torch.rand((1, num_neurons), device=X_win.device) > self.neuron_dropout).float()
-            
-            # Apply mask to the neural part of the window (first num_neurons columns)
-            if not (self.turn_off_percentage > 0.0 or self.turn_on_percentage > 0.0 or self.mixup_alpha > 0.0):
+            if not (self.turn_off_percentage > 0.0 or self.turn_on_percentage > 0.0 or self.mixup_alpha > 0.0 or self.sample_poisson):
                 X_win = X_win.clone()
-            X_win[:, :num_neurons] *= neuron_mask
+            X_win[:, :nf] *= neuron_mask
 
         time_idx = torch.arange(
             out_start,
@@ -951,7 +989,9 @@ train_dataset = WindowedEyeposDataset(
     sample_poisson=sample_poisson,
     neuron_dropout=augmentation_neuron_dropout,
     mixup_alpha=augmentation_mixup_alpha,
+    mixup_same_time=augmentation_mixup_same_time,
     image_ids_condensed=image_ids_reference[time_window_start:time_window_end] if use_image_id_encoding else None,
+    num_neural_features=num_neural_features,
 )
 val_dataset = WindowedEyeposDataset(
     robs_feat_model,
@@ -966,6 +1006,7 @@ val_dataset = WindowedEyeposDataset(
     augment=False,
     turn_off_percentage=0.0,
     turn_on_percentage=0.0,
+    num_neural_features=num_neural_features,
 )
 
 loader_num_workers = 0 if cache_data_on_gpu else dataloader_num_workers
@@ -1077,7 +1118,7 @@ for epoch in range(num_epochs):
         f"train loss: {np.mean(train_losses):.4f} | "
         f"val loss: {np.mean(val_losses):.4f}"
     )
-
+#%%
 def run_inference(
     model,
     robs_feat_input,
@@ -1420,8 +1461,8 @@ def plot_trial_trace(
 
 
 #%%
-trial_idx = 0
-trial_idx += 1
+# trial_idx = 0
+trial_idx -= 1
 fig, axes = plot_trial_trace(
     model,
     robs_feat_model,
@@ -1443,7 +1484,7 @@ fig, axes = plot_trial_trace(
 
 #%%
 # trial_idx = 0
-trial_idx += 1
+trial_idx -= 1
 fig, axes = plot_trial_trace(
     model,
     robs_feat_model,
