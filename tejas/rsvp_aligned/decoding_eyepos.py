@@ -12,6 +12,7 @@
 # 10. try feeding in image itself to model
 # 11. use dfs
 # 12. see if decoder can predict the patch of image
+# 13. see which parts of image are most decodeable
 import os
 from pathlib import Path
 # Device options
@@ -53,7 +54,7 @@ from DataYatesV1.exp.support import get_rsvp_fix_stim
 # stack_images = get_fixrsvp_stack()
 #%%
 subject = 'Allen'
-date = '2022-03-04'
+date = '2022-03-02'
 
 #04-08, 03-02, 04-13, 2-18 all stimuli are not timed right
 
@@ -100,7 +101,15 @@ NT = len(trials)
 
 fixation = np.hypot(dataset.dsets[dset_idx]['eyepos'][:,0].numpy(), dataset.dsets[dset_idx]['eyepos'][:,1].numpy()) < 1
 
-rsvp_images = get_fixrsvp_stack(frames_per_im=1)
+rsvp_images = torch.from_numpy(get_fixrsvp_stack(frames_per_im=1))
+ppd = 37.50476617
+#get the central 2.5 degrees of the image
+window_size_pixels = 3 * ppd
+start_x = int(rsvp_images.shape[1] // 2 - window_size_pixels // 2)
+end_x = int(rsvp_images.shape[1] // 2 + window_size_pixels // 2)
+start_y = int(rsvp_images.shape[2] // 2 - window_size_pixels // 2)
+end_y = int(rsvp_images.shape[2] // 2 + window_size_pixels // 2)
+rsvp_images_cropped = rsvp_images[:, start_x:end_x, start_y:end_y]
 ptb2ephys, _ = get_clock_functions(sess.exp)
 image_ids = np.full((NT, T), -1, dtype=np.int64)
 # Loop over trials and align responses
@@ -426,6 +435,7 @@ velocity_event_thresh = 0.02 #0.02
 velocity_event_weight = 0
 
 input_nan_fill_value = 0
+shuffle_train_eye_traj = False  # If True, shuffle eye trajectories among train trials only
 
 # augmentation_turn_off_percentage = 0
 # augmentation_turn_on_percentage = 0
@@ -489,6 +499,10 @@ if use_trajectory_loss and loss_on_center:
     raise ValueError("loss_on_center must be False when use_trajectory_loss=True.")
 if loss_on_center and require_odd_window and window_len_output % 2 == 0:
     raise ValueError("window_len must be odd when loss_on_center=True.")
+
+if shuffle_train_eye_traj:
+    perm = rng.permutation(len(train_trials))
+    eyepos_aligned[train_trials] = eyepos_aligned[train_trials][perm]
 
 if center_per_trial:
     global_mean = np.nanmean(eyepos_aligned[train_trials], axis=(0, 1))
@@ -1118,7 +1132,7 @@ for epoch in range(num_epochs):
         f"train loss: {np.mean(train_losses):.4f} | "
         f"val loss: {np.mean(val_losses):.4f}"
     )
-#%%
+
 def run_inference(
     model,
     robs_feat_input,
@@ -1483,8 +1497,9 @@ fig, axes = plot_trial_trace(
 )
 
 #%%
-# trial_idx = 0
-trial_idx -= 1
+trial_idx = -1
+#%%
+trial_idx += 1
 fig, axes = plot_trial_trace(
     model,
     robs_feat_model,

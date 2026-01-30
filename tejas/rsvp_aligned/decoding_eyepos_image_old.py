@@ -12,6 +12,7 @@
 # 10. try feeding in image itself to model
 # 11. use dfs
 # 12. see if decoder can predict the patch of image
+# 13. see which parts of image are most decodeable
 import os
 from pathlib import Path
 # Device options
@@ -35,6 +36,12 @@ from DataYatesV1 import  get_complete_sessions
 import matplotlib.patheffects as pe 
 from DataYatesV1.exp.fix_rsvp import FixRsvpTrial
 from DataYatesV1.utils.general import get_clock_functions
+import torch
+import torch.nn as nn
+import numpy as np
+import plenoptic as po
+from plenoptic.simulate import SteerablePyramidFreq
+from tqdm import tqdm
 
 mpl.rcParams['pdf.fonttype'] = 42
 mpl.rcParams['ps.fonttype'] = 42
@@ -45,6 +52,86 @@ import contextlib
 import schedulefree
 
 #%%
+def get_spatial_pyramid_features(image_stack, grid_size=6, device='cuda'):
+    """
+    Extracts Steerable Pyramid features (Real+Imag) and pools them into a 
+    fixed spatial grid (grid_size x grid_size).
+    
+    Args:
+        image_stack: (N_images, H, W) or (N, 1, H, W)
+        grid_size: Spatial resolution for attention (e.g. 6 -> 36 patches)
+    Returns:
+        Tensor of shape (N_images, Grid*Grid, Feature_Dim)
+    """
+    # 1. Format Input
+    if isinstance(image_stack, np.ndarray):
+        images = torch.from_numpy(image_stack).float()
+    else:
+        images = image_stack.float()
+        
+    if images.ndim == 3:
+        images = images.unsqueeze(1) # Ensure (N, 1, H, W)
+    
+    images = images.to(device)
+    
+    # 2. Initialize Pyramid
+    # downsample=True is efficient, we will resize outputs later anyway
+    pyr = SteerablePyramidFreq(
+        image_shape=images.shape[-2:],
+        height='auto',
+        order=3,        # 4 orientations
+        is_complex=True,
+        downsample=True 
+    ).to(device)
+
+    batch_size = 20 # Smaller batch size to save GPU memory
+    all_grid_features = []
+    
+    print(f"Extracting Spatial Pyramid Features (Grid {grid_size}x{grid_size})...")
+    
+    with torch.no_grad():
+        for i in tqdm(range(0, len(images), batch_size)):
+            batch = images[i : i + batch_size]
+            coeffs = pyr(batch)
+            
+            # We will stack channels here
+            batch_channels = []
+            
+            # Sort keys for deterministic order
+            sorted_keys = sorted(coeffs.keys(), key=lambda x: str(x))
+            
+            for key in sorted_keys:
+                c = coeffs[key]
+                
+                # Handle Complex (Real/Imag) vs Real
+                if torch.is_complex(c):
+                    # Separate components -> (B, 2, H_scale, W_scale)
+                    components = torch.cat([c.real, c.imag], dim=1) 
+                else:
+                    components = c 
+                
+                # FORCE all scales to the same spatial grid size
+                # This aligns high-freq (fine) and low-freq (coarse) maps
+                pooled = nn.functional.adaptive_avg_pool2d(components, (grid_size, grid_size))
+                
+                # Flatten spatial grid? No, we flatten spatial grid later.
+                # Right now we want: (B, Channels, Grid, Grid)
+                batch_channels.append(pooled)
+            
+            # Concatenate all feature channels: (B, Total_Channels, Grid, Grid)
+            features_spatial = torch.cat(batch_channels, dim=1)
+            
+            # Reshape to: (B, Grid*Grid, Total_Channels)
+            # This makes "Patches" the sequence for Attention
+            B, C, H, W = features_spatial.shape
+            features_flat_grid = features_spatial.view(B, C, H*W).permute(0, 2, 1)
+            
+            all_grid_features.append(features_flat_grid.cpu())
+
+    # Stack: (N_Images, 36, Feature_Dim)
+    full_tensor = torch.cat(all_grid_features, dim=0)
+    print(f"Final Feature Shape: {full_tensor.shape}")
+    return full_tensor
 
 from scripts.mcfarland_sim import get_fixrsvp_stack
 from DataYatesV1.exp.support import get_rsvp_fix_stim
@@ -53,7 +140,7 @@ from DataYatesV1.exp.support import get_rsvp_fix_stim
 # stack_images = get_fixrsvp_stack()
 #%%
 subject = 'Allen'
-date = '2022-03-02'
+date = '2022-03-04'
 
 #04-08, 03-02, 04-13, 2-18 all stimuli are not timed right
 
@@ -100,7 +187,15 @@ NT = len(trials)
 
 fixation = np.hypot(dataset.dsets[dset_idx]['eyepos'][:,0].numpy(), dataset.dsets[dset_idx]['eyepos'][:,1].numpy()) < 1
 
-rsvp_images = get_fixrsvp_stack(frames_per_im=1)
+rsvp_images = torch.from_numpy(get_fixrsvp_stack(frames_per_im=1))
+ppd = 37.50476617
+#get the central 2.5 degrees of the image
+window_size_pixels = 3 * ppd
+start_x = int(rsvp_images.shape[1] // 2 - window_size_pixels // 2)
+end_x = int(rsvp_images.shape[1] // 2 + window_size_pixels // 2)
+start_y = int(rsvp_images.shape[2] // 2 - window_size_pixels // 2)
+end_y = int(rsvp_images.shape[2] // 2 + window_size_pixels // 2)
+rsvp_images_cropped = rsvp_images[:, start_x:end_x, start_y:end_y]
 ptb2ephys, _ = get_clock_functions(sess.exp)
 image_ids = np.full((NT, T), -1, dtype=np.int64)
 # Loop over trials and align responses
@@ -166,18 +261,17 @@ fix_dur = fix_dur[good_trials]
 image_ids = image_ids[good_trials][:, time_window_start:time_window_end]
 
 
-# Commented out plotting for testing
-# ind = np.argsort(fix_dur)[::-1]
-# plt.subplot(1,2,1)
-# plt.imshow(eyepos[ind,:,0])
-# # plt.xlim(0, 160)
-# plt.subplot(1,2,2)
-# plt.imshow(np.nanmean(robs,2)[ind])
-# # plt.xlim(0, 160)
-# plt.show()
+ind = np.argsort(fix_dur)[::-1]
+plt.subplot(1,2,1)
+plt.imshow(eyepos[ind,:,0])
+# plt.xlim(0, 160)
+plt.subplot(1,2,2)
+plt.imshow(np.nanmean(robs,2)[ind])
+# plt.xlim(0, 160)
+plt.show()
 
-# plt.plot(np.nanstd(robs, (2,0)))
-# plt.show()
+plt.plot(np.nanstd(robs, (2,0)))
+plt.show()
 robs.shape #(79, 335, 133) [trials, time, cells]
 eyepos.shape #(79, 335, 2) [trials, time, xycoords]
 
@@ -211,15 +305,15 @@ trials_to_remove = []
 for trial_ind, start_time_ind_of_mismatch in unmatched_trials_and_start_time_ind_of_mismatch.items():
     first_trial_ind = reference_trial_ind
     second_trial_ind = trial_ind
-    # Commented out plotting for testing
-    # plt.plot(image_ids[first_trial_ind])
-    # plt.plot(image_ids[second_trial_ind])
-    # plt.xlim(0, 200)
-    # plt.xlabel('Time (bins)')
-    # plt.ylabel('Image ID')
-    # plt.title(f'Image IDs for trial {first_trial_ind} and {second_trial_ind}')
-    # plt.legend([f'Trial {first_trial_ind}', f'Trial {second_trial_ind}'])
-    # plt.show()
+    plt.plot(image_ids[first_trial_ind])
+    plt.plot(image_ids[second_trial_ind])
+    plt.xlim(0, 200)
+    plt.xlabel('Time (bins)')
+    plt.ylabel('Image ID')
+    plt.title(f'Image IDs for trial {first_trial_ind} and {second_trial_ind}')
+    plt.legend([f'Trial {first_trial_ind}', f'Trial {second_trial_ind}'])
+
+    plt.show()
     print(f'start time ind of mismatch for trial {trial_ind} is {start_time_ind_of_mismatch}')
     
     if start_time_ind_of_mismatch > salvageable_mismatch_time_threshold:
@@ -408,17 +502,24 @@ augmentation_turn_off_percentage = 0.2 #0.2
 augmentation_turn_on_percentage = 0.02 #0.02 #0.05
 augmentation_mixup_alpha = 0.2  # Mixup interpolation alpha (0.0 to disable)
 augmentation_mixup_same_time = False  # If True, only mixup windows with same start index
-augment_encodings = True  # If True, augmentations affect ALL features (neural + time + image_id encodings)
-# MLP model hyperparameters (best from tuning: val_loss=0.0331)
-mlp_hidden_dim = 256  # Best: 256
-mlp_num_layers = 4  # Best: 4
-mlp_dropout_rate = 0.0  # Best: 0.0
-weight_decay = 1e-4  # Best: 1e-4 (0.0001)
+augment_encodings = False  # If True, augmentations affect ALL features (neural + time + image_id encodings)
+transformer_dim = 64 #64 best 16
+transformer_heads = 4 #4 #best 2
+transformer_layers = 2
+transformer_dropout = 0.1 #0.1 #best 0.3
+weight_decay = 1e-4 #best 1e-2
 loss_on_center = False
 require_odd_window = True
 use_trajectory_loss = True
-use_image_id_encoding = True
+use_2d_attention = False  # 2d_attention flag (axial time x neuron)
+use_image_id_encoding = False
+include_images = True  # If True, use cross-attention with image features
 num_unique_images = int(np.max(image_ids_reference)) + 1
+
+# Validation: cannot use 2d attention with image cross-attention
+if include_images and use_2d_attention:
+    raise ValueError("Cannot use use_2d_attention=True when include_images=True")
+
 lambda_pos = 1.0
 lambda_vel = 0.4 #4
 lambda_accel = 0 #0.1
@@ -429,6 +530,11 @@ input_nan_fill_value = 0
 
 # augmentation_turn_off_percentage = 0
 # augmentation_turn_on_percentage = 0
+# transformer_dim = 16 #64 best 16
+# transformer_heads = 2 #4 #best 2
+# transformer_layers = 2
+# transformer_dropout = 0.3 #0.1 #best 0.3
+# weight_decay = 1e-2 #best 1e-2
 # loss_on_center = False
 # require_odd_window = True
 # use_trajectory_loss = True
@@ -444,6 +550,24 @@ rng.shuffle(trial_indices)
 num_train = int(train_frac * num_trials)
 train_trials = trial_indices[:num_train]
 val_trials = trial_indices[num_train:]
+
+rsvp_image_features = get_spatial_pyramid_features(rsvp_images_cropped)
+
+# Prepare feature tensor with background for cross-attention model
+if include_images:
+    # rsvp_image_features shape: (num_images, grid_len, feat_dim)
+    num_imgs, grid_len, feat_dim = rsvp_image_features.shape
+    
+    # Add background/Gray Screen Vector
+    # If your dataset uses -1 for "no image", we map it to the last index
+    background_vec = torch.zeros((1, grid_len, feat_dim))  # Zero energy for gray screen
+    final_feature_table = torch.cat([rsvp_image_features, background_vec], dim=0)
+    
+    # The index for background is now 'num_imgs' (if you had 0-64 images, background is 65)
+    BG_INDEX = num_imgs
+else:
+    final_feature_table = None
+    BG_INDEX = None
 
 
 def build_time_encoding(num_timepoints, dim):
@@ -611,15 +735,20 @@ if standardize_inputs:
 else:
     robs_z = robs_aligned
 
-
-if time_encoding is not None:
-    robs_feat_model = np.concatenate(
-        [robs_z, time_enc_scale * time_encoding], axis=2
-    )
-else:
+if use_2d_attention:
+    # Use raw neuron features; time encoding handled via embeddings in the model.
     robs_feat_model = robs_z
+else:
+    if time_encoding is not None:
+        robs_feat_model = np.concatenate(
+            [robs_z, time_enc_scale * time_encoding], axis=2
+        )
+    else:
+        robs_feat_model = robs_z
 
-if use_image_id_encoding:
+# Only add image ID one-hot encoding if use_image_id_encoding=True AND include_images=False
+# When include_images=True, image information comes via cross-attention, not one-hot encoding
+if use_image_id_encoding and not include_images:
     # ids is (Time,)
     # Slice to match the time window used for robs/eyepos
     ids = image_ids_reference[time_window_start:time_window_end].astype(int)
@@ -667,6 +796,9 @@ class WindowedEyeposDataset(torch.utils.data.Dataset):
         mixup_same_time=False,
         image_ids_condensed=None,
         num_neural_features=None,
+        image_ids_full=None,
+        bg_index=None,
+        include_images=False,
     ):
         self.device = device
         self.cache_on_gpu = cache_on_gpu
@@ -678,6 +810,9 @@ class WindowedEyeposDataset(torch.utils.data.Dataset):
         self.mixup_alpha = mixup_alpha
         self.mixup_same_time = mixup_same_time
         self.image_ids_condensed = image_ids_condensed
+        self.image_ids_full = image_ids_full
+        self.bg_index = bg_index
+        self.include_images = include_images
         # Number of neural features (excluding time encoding and image_id encoding)
         # If not provided, assume all features are neural (backward compatibility)
         self.num_neural_features = num_neural_features if num_neural_features is not None else X.shape[2]
@@ -723,6 +858,25 @@ class WindowedEyeposDataset(torch.utils.data.Dataset):
                 raise ValueError(f"CRITICAL: Model attempted to train on a window containing -1 image IDs at trial {trial}, start {start}!")
 
         X_win, Y_win, mask, out_start, out_end = self._get_base_item(idx)
+        
+        # Get image IDs sequence if include_images is True
+        x_img_ids = None
+        if self.include_images:
+            if self.image_ids_full is None:
+                raise ValueError("include_images=True but image_ids_full is None")
+            if self.bg_index is None:
+                raise ValueError("include_images=True but bg_index is None")
+            
+            # Get image IDs sequence for this window
+            img_seq = self.image_ids_full[trial, start:start + self.window_len_input]
+            
+            # Map -1 (or whatever 'no image' is) to BG_INDEX
+            # We do this here or in the model input, doing it here is cleaner
+            img_seq_clean = img_seq.copy()
+            img_seq_clean[img_seq_clean < 0] = self.bg_index
+            
+            # Convert to LongTensor
+            x_img_ids = torch.tensor(img_seq_clean, dtype=torch.long)
 
         # All augmentations only affect neural features (first num_neural_features columns)
         # Time encoding and image_id encoding columns are left unchanged
@@ -780,7 +934,12 @@ class WindowedEyeposDataset(torch.utils.data.Dataset):
             dtype=torch.int64,
             device=self.device if self.cache_on_gpu else None,
         )
-        return X_win, Y_win, mask, time_idx
+        
+        # Return spikes and IDs separately when include_images is True
+        if self.include_images:
+            return X_win, Y_win, mask, time_idx, x_img_ids
+        else:
+            return X_win, Y_win, mask, time_idx
 
     def _get_base_item(self, idx):
         trial, start = self.indices[idx]
@@ -792,35 +951,177 @@ class WindowedEyeposDataset(torch.utils.data.Dataset):
         return X_win, Y_win, mask, out_start, out_end
 
 
-class MLPEyepos(torch.nn.Module):
-    def __init__(self, input_dim, window_len_input, hidden_dim=64, num_layers=2, dropout_rate=0.1):
+class TransformerEyepos(torch.nn.Module):
+    def __init__(self, input_dim, model_dim, num_heads, num_layers, dropout_rate):
         super().__init__()
-        # Flatten window: (batch, time, features) -> (batch, time * features)
-        flattened_dim = window_len_input * input_dim
-        layers = []
-        layers.append(torch.nn.Linear(flattened_dim, hidden_dim))
-        layers.append(torch.nn.ReLU())
-        layers.append(torch.nn.Dropout(dropout_rate))
-        
-        for _ in range(num_layers - 1):
-            layers.append(torch.nn.Linear(hidden_dim, hidden_dim))
-            layers.append(torch.nn.ReLU())
-            layers.append(torch.nn.Dropout(dropout_rate))
-        
-        # Output: (batch, hidden_dim) -> (batch, window_len_output, 2)
-        # We'll reshape in forward
-        self.layers = torch.nn.Sequential(*layers)
-        self.head = torch.nn.Linear(hidden_dim, window_len_input * 2)
-        self.window_len_input = window_len_input
+        self.input_proj = torch.nn.Linear(input_dim, model_dim)
+        encoder_layer = torch.nn.TransformerEncoderLayer(
+            d_model=model_dim,
+            nhead=num_heads,
+            dim_feedforward=model_dim * 4,
+            dropout=dropout_rate,
+            batch_first=True,
+        )
+        self.encoder = torch.nn.TransformerEncoder(
+            encoder_layer, num_layers=num_layers
+        )
+        self.head = torch.nn.Linear(model_dim, 2)
 
     def forward(self, x):
-        # x: (batch, time, features)
-        bsz = x.shape[0]
-        x = x.reshape(bsz, -1)  # Flatten: (batch, time * features)
-        x = self.layers(x)  # (batch, hidden_dim)
-        x = self.head(x)  # (batch, window_len_input * 2)
-        x = x.reshape(bsz, self.window_len_input, 2)  # (batch, time, 2)
+        x = self.input_proj(x)
+        x = self.encoder(x)
+        return self.head(x)
+
+
+class TransformerEyeposCrossAttn(nn.Module):
+    def __init__(self, num_neurons, feature_tensor, model_dim=128, num_heads=4, num_layers=3):
+        """
+        feature_tensor: Pre-computed tensor (Num_Images+1, Grid_Len, Feat_Dim)
+        """
+        super().__init__()
+        
+        # 1. Image Memory (Embedding)
+        # We use a trick: Embedding usually returns 1D vectors. 
+        # We will flatten the grid (Grid*Feat) into the embedding dim, then reshape in forward.
+        self.num_imgs, self.grid_len, self.feat_dim = feature_tensor.shape
+        
+        # Initialize embedding with your pre-computed features
+        # Flatten last two dims for storage: (N, Grid_Len * Feat_Dim)
+        flat_tensor = feature_tensor.reshape(self.num_imgs, -1)
+        self.image_embed = nn.Embedding.from_pretrained(flat_tensor, freeze=True)
+        
+        # 2. Projections
+        self.neuron_proj = nn.Linear(num_neurons, model_dim)
+        self.img_proj = nn.Linear(self.feat_dim, model_dim) # Project pyramid feats to model dim
+        
+        # 3. Cross Attention (The Core Logic)
+        # Query = Neurons, Key = Image Patches, Value = Image Patches
+        self.cross_attn = nn.MultiheadAttention(embed_dim=model_dim, num_heads=num_heads, batch_first=True)
+        
+        # 4. Temporal Transformer (Process time dynamics)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=model_dim, nhead=num_heads, batch_first=True)
+        self.temporal_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        
+        # 5. Output Head
+        self.head = nn.Linear(model_dim, 2) # X, Y
+
+    def forward(self, x_neurons, x_img_ids):
+        """
+        x_neurons: (Batch, Time, Neurons)
+        x_img_ids: (Batch, Time) -> Integers
+        """
+        B, T, _ = x_neurons.shape
+        
+        # --- A. Prepare Queries (Neurons) ---
+        q_neurons = self.neuron_proj(x_neurons) # (B, T, Model_Dim)
+        
+        # --- B. Prepare Keys/Values (Images) ---
+        # 1. Lookup Features
+        # View as flat list of indices first: (B*T)
+        flat_ids = x_img_ids.view(-1)
+        
+        # Retrieve: (B*T, Grid_Len * Feat_Dim)
+        img_raw = self.image_embed(flat_ids)
+        
+        # Reshape back to grid: (B*T, Grid_Len, Feat_Dim)
+        kv_grid = img_raw.view(B*T, self.grid_len, self.feat_dim)
+        
+        # Project to Model Dimension: (B*T, Grid_Len, Model_Dim)
+        kv_proj = self.img_proj(kv_grid)
+        
+        # --- C. Cross Attention ---
+        # We treat every timepoint as an independent "search" first.
+        # Query Shape must be: (B*T, 1, Model_Dim)
+        q_flat = q_neurons.view(B*T, 1, -1)
+        
+        # Attend: "For these spikes, which of the 36 patches are relevant?"
+        # attn_out: (B*T, 1, Model_Dim)
+        # weights:  (B*T, 1, Grid_Len) -> Keep this if you want to visualize!
+        attn_out, attn_weights = self.cross_attn(query=q_flat, key=kv_proj, value=kv_proj)
+        
+        # Reshape context back to (Batch, Time, Model_Dim)
+        context = attn_out.view(B, T, -1)
+        
+        # --- D. Temporal Processing ---
+        # Combine Neural info + Visual Context (Residual connection)
+        combined = q_neurons + context 
+        
+        # Now run standard temporal transformer
+        out = self.temporal_encoder(combined)
+        
+        return self.head(out)
+
+
+class AxialTransformerLayer(torch.nn.Module):
+    def __init__(self, model_dim, num_heads, dropout_rate):
+        super().__init__()
+        self.time_attn = torch.nn.MultiheadAttention(
+            model_dim, num_heads, dropout=dropout_rate, batch_first=True
+        )
+        self.neuron_attn = torch.nn.MultiheadAttention(
+            model_dim, num_heads, dropout=dropout_rate, batch_first=True
+        )
+        self.norm_time = torch.nn.LayerNorm(model_dim)
+        self.norm_neuron = torch.nn.LayerNorm(model_dim)
+        self.norm_ff = torch.nn.LayerNorm(model_dim)
+        self.ff = torch.nn.Sequential(
+            torch.nn.Linear(model_dim, model_dim * 4),
+            torch.nn.GELU(),
+            torch.nn.Dropout(dropout_rate),
+            torch.nn.Linear(model_dim * 4, model_dim),
+            torch.nn.Dropout(dropout_rate),
+        )
+
+    def forward(self, x):
+        bsz, time_len, num_neurons, dim = x.shape
+        x_t = self.norm_time(x)
+        x_t = x_t.permute(0, 2, 1, 3).reshape(bsz * num_neurons, time_len, dim)
+        attn_t, _ = self.time_attn(x_t, x_t, x_t, need_weights=False)
+        attn_t = attn_t.reshape(bsz, num_neurons, time_len, dim).permute(0, 2, 1, 3)
+        x = x + attn_t
+
+        x_n = self.norm_neuron(x)
+        x_n = x_n.reshape(bsz * time_len, num_neurons, dim)
+        attn_n, _ = self.neuron_attn(x_n, x_n, x_n, need_weights=False)
+        attn_n = attn_n.reshape(bsz, time_len, num_neurons, dim)
+        x = x + attn_n
+
+        x_ff = self.norm_ff(x)
+        x = x + self.ff(x_ff)
         return x
+
+
+class AxialTransformerEyepos(torch.nn.Module):
+    def __init__(
+        self,
+        num_neurons,
+        model_dim,
+        num_heads,
+        num_layers,
+        dropout_rate,
+        window_len_input,
+    ):
+        super().__init__()
+        self.input_proj = torch.nn.Linear(1, model_dim)
+        self.time_embed = torch.nn.Embedding(window_len_input, model_dim)
+        self.neuron_embed = torch.nn.Embedding(num_neurons, model_dim)
+        self.layers = torch.nn.ModuleList(
+            [AxialTransformerLayer(model_dim, num_heads, dropout_rate) for _ in range(num_layers)]
+        )
+        self.head = torch.nn.Linear(model_dim, 2)
+
+    def forward(self, x):
+        bsz, time_len, num_neurons = x.shape
+        x = self.input_proj(x.unsqueeze(-1))
+        time_idx = torch.arange(time_len, device=x.device)
+        neuron_idx = torch.arange(num_neurons, device=x.device)
+        time_emb = self.time_embed(time_idx)[None, :, None, :]
+        neuron_emb = self.neuron_embed(neuron_idx)[None, None, :, :]
+        x = x + time_emb + neuron_emb
+        for layer in self.layers:
+            x = layer(x)
+        x = x.mean(dim=2)
+        return self.head(x)
 
 
 def masked_mse(pred, target, mask):
@@ -921,6 +1222,9 @@ train_dataset = WindowedEyeposDataset(
     mixup_same_time=augmentation_mixup_same_time,
     image_ids_condensed=image_ids_reference[time_window_start:time_window_end] if use_image_id_encoding else None,
     num_neural_features=num_neural_features,
+    image_ids_full=image_ids if include_images else None,
+    bg_index=BG_INDEX if include_images else None,
+    include_images=include_images,
 )
 val_dataset = WindowedEyeposDataset(
     robs_feat_model,
@@ -936,6 +1240,9 @@ val_dataset = WindowedEyeposDataset(
     turn_off_percentage=0.0,
     turn_on_percentage=0.0,
     num_neural_features=num_neural_features,
+    image_ids_full=image_ids if include_images else None,
+    bg_index=BG_INDEX if include_images else None,
+    include_images=include_images,
 )
 
 loader_num_workers = 0 if cache_data_on_gpu else dataloader_num_workers
@@ -957,35 +1264,65 @@ val_loader = torch.utils.data.DataLoader(
     persistent_workers=loader_num_workers > 0,
 )
 
-model = MLPEyepos(
-    input_dim=robs_feat_model.shape[2],
-    window_len_input=window_len_input,
-    hidden_dim=mlp_hidden_dim,
-    num_layers=mlp_num_layers,
-    dropout_rate=mlp_dropout_rate,
-).to(device)
+if include_images:
+    # Use cross-attention model with image features
+    # Input dimension: neural features + time encoding (no image ID one-hot when include_images=True)
+    # robs_feat_model already has the correct shape when use_image_id_encoding=False
+    model = TransformerEyeposCrossAttn(
+        num_neurons=robs_feat_model.shape[2],
+        feature_tensor=final_feature_table,
+        model_dim=transformer_dim,
+        num_heads=transformer_heads,
+        num_layers=transformer_layers,
+    ).to(device)
+elif use_2d_attention:
+    model = AxialTransformerEyepos(
+        robs_feat_model.shape[2],
+        model_dim=transformer_dim,
+        num_heads=transformer_heads,
+        num_layers=transformer_layers,
+        dropout_rate=transformer_dropout,
+        window_len_input=window_len_input,
+    ).to(device)
+else:
+    model = TransformerEyepos(
+        robs_feat_model.shape[2],
+        model_dim=transformer_dim,
+        num_heads=transformer_heads,
+        num_layers=transformer_layers,
+        dropout_rate=transformer_dropout,
+    ).to(device)
 # optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-# optimizer = schedulefree.AdamWScheduleFree(model.parameters(), lr=learning_rate)
-# Use AdamW with weight_decay to match tuning script (best hyperparameters used weight_decay=1e-4)
-# optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-optimizer = schedulefree.RAdamScheduleFree(model.parameters())
 
+# optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+# optimizer = schedulefree.AdamWScheduleFree(model.parameters(), lr=learning_rate)
+optimizer = schedulefree.RAdamScheduleFree(model.parameters())
 pred_all = None
-best_val_loss = float('inf')
 
 for epoch in range(num_epochs):
     model.train()
-    if hasattr(optimizer, 'train'):
-        optimizer.train()
+    optimizer.train() if optimizer.__class__.__module__.startswith("schedulefree") else None
     train_losses = []
     center_idx = window_len_output // 2
-    for X_batch, y_batch, mask_batch, time_idx in train_loader:
-        X_batch = X_batch.to(device)
+    for batch_data in train_loader:
+        if include_images:
+            X_batch, y_batch, mask_batch, time_idx, x_img_ids = batch_data
+            X_batch = X_batch.to(device)
+            x_img_ids = x_img_ids.to(device)
+        else:
+            X_batch, y_batch, mask_batch, time_idx = batch_data
+            X_batch = X_batch.to(device)
         y_batch = y_batch.to(device)
         mask_batch = mask_batch.to(device)
         time_idx = time_idx.to(device)
         optimizer.zero_grad()
-        pred = model(X_batch)
+        
+        # Forward pass with BOTH inputs when include_images is True
+        if include_images:
+            pred = model(X_batch, x_img_ids)
+        else:
+            pred = model(X_batch)
+        
         pred = slice_pred_to_output(pred, window_len_input, window_len_output)
         if use_trajectory_loss:
             loss = trajectory_loss(
@@ -1007,17 +1344,28 @@ for epoch in range(num_epochs):
         train_losses.append(loss.item())
 
     model.eval()
-    if hasattr(optimizer, 'eval'):
-        optimizer.eval()
+    optimizer.eval() if optimizer.__class__.__module__.startswith("schedulefree") else None
     val_losses = []
     center_idx = window_len_output // 2
     with torch.no_grad():
-        for X_batch, y_batch, mask_batch, time_idx in val_loader:
-            X_batch = X_batch.to(device)
+        for batch_data in val_loader:
+            if include_images:
+                X_batch, y_batch, mask_batch, time_idx, x_img_ids = batch_data
+                X_batch = X_batch.to(device)
+                x_img_ids = x_img_ids.to(device)
+            else:
+                X_batch, y_batch, mask_batch, time_idx = batch_data
+                X_batch = X_batch.to(device)
             y_batch = y_batch.to(device)
             mask_batch = mask_batch.to(device)
             time_idx = time_idx.to(device)
-            pred = model(X_batch)
+            
+            # Forward pass with BOTH inputs when include_images is True
+            if include_images:
+                pred = model(X_batch, x_img_ids)
+            else:
+                pred = model(X_batch)
+            
             pred = slice_pred_to_output(pred, window_len_input, window_len_output)
             if use_trajectory_loss:
                 loss = trajectory_loss(
@@ -1036,17 +1384,11 @@ for epoch in range(num_epochs):
                 loss = masked_mse(pred, y_batch, mask_batch)
             val_losses.append(loss.item())
 
-    mean_val_loss = np.mean(val_losses)
-    if mean_val_loss < best_val_loss:
-        best_val_loss = mean_val_loss
-
     print(
         f"Epoch {epoch + 1:02d} | "
         f"train loss: {np.mean(train_losses):.4f} | "
-        f"val loss: {mean_val_loss:.4f}"
+        f"val loss: {np.mean(val_losses):.4f}"
     )
-
-print(f"\nBest validation loss: {best_val_loss:.4f}")
 
 def run_inference(
     model,
@@ -1165,7 +1507,7 @@ def run_inference(
                         pred_all[i, b:b + batch_size][rows] = pred_batch[rows, centers[valid]]
     return pred_all
 
-# Commented out for testing - only need val_loss
+
 trials_all = np.concatenate([train_trials, val_trials])
 pred_all = run_inference(
     model,
@@ -1182,7 +1524,6 @@ pred_all = run_inference(
 
 
 #%%
-# Commented out plotting code for testing
 def plot_trial_trace(
     model,
     robs_feat_input,
@@ -1390,10 +1731,9 @@ def plot_trial_trace(
 
 
 
-# Commented out plotting for testing
 #%%
-trial_idx = 0
-trial_idx += 1
+# trial_idx = 0
+trial_idx -= 1
 fig, axes = plot_trial_trace(
     model,
     robs_feat_model,

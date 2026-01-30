@@ -12,6 +12,7 @@
 # 10. try feeding in image itself to model
 # 11. use dfs
 # 12. see if decoder can predict the patch of image
+# 13. see which parts of image are most decodeable
 import os
 from pathlib import Path
 # Device options
@@ -26,6 +27,7 @@ else:
 from models.config_loader import load_dataset_configs
 from models.data import prepare_data
 import torch
+import torch.nn as nn
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -35,6 +37,8 @@ from DataYatesV1 import  get_complete_sessions
 import matplotlib.patheffects as pe 
 from DataYatesV1.exp.fix_rsvp import FixRsvpTrial
 from DataYatesV1.utils.general import get_clock_functions
+import plenoptic as po
+from plenoptic.simulate import SteerablePyramidFreq
 
 mpl.rcParams['pdf.fonttype'] = 42
 mpl.rcParams['ps.fonttype'] = 42
@@ -45,6 +49,86 @@ import contextlib
 import schedulefree
 
 #%%
+def get_spatial_pyramid_features(image_stack, grid_size=6, device='cuda'):
+    """
+    Extracts Steerable Pyramid features (Real+Imag) and pools them into a 
+    fixed spatial grid (grid_size x grid_size).
+    
+    Args:
+        image_stack: (N_images, H, W) or (N, 1, H, W)
+        grid_size: Spatial resolution for attention (e.g. 6 -> 36 patches)
+    Returns:
+        Tensor of shape (N_images, Grid*Grid, Feature_Dim)
+    """
+    # 1. Format Input
+    if isinstance(image_stack, np.ndarray):
+        images = torch.from_numpy(image_stack).float()
+    else:
+        images = image_stack.float()
+        
+    if images.ndim == 3:
+        images = images.unsqueeze(1) # Ensure (N, 1, H, W)
+    
+    images = images.to(device)
+    
+    # 2. Initialize Pyramid
+    # downsample=True is efficient, we will resize outputs later anyway
+    pyr = SteerablePyramidFreq(
+        image_shape=images.shape[-2:],
+        height='auto',
+        order=3,        # 4 orientations
+        is_complex=True,
+        downsample=True 
+    ).to(device)
+
+    batch_size = 20 # Smaller batch size to save GPU memory
+    all_grid_features = []
+    
+    print(f"Extracting Spatial Pyramid Features (Grid {grid_size}x{grid_size})...")
+    
+    with torch.no_grad():
+        for i in tqdm(range(0, len(images), batch_size)):
+            batch = images[i : i + batch_size]
+            coeffs = pyr(batch)
+            
+            # We will stack channels here
+            batch_channels = []
+            
+            # Sort keys for deterministic order
+            sorted_keys = sorted(coeffs.keys(), key=lambda x: str(x))
+            
+            for key in sorted_keys:
+                c = coeffs[key]
+                
+                # Handle Complex (Real/Imag) vs Real
+                if torch.is_complex(c):
+                    # Separate components -> (B, 2, H_scale, W_scale)
+                    components = torch.cat([c.real, c.imag], dim=1) 
+                else:
+                    components = c 
+                
+                # FORCE all scales to the same spatial grid size
+                # This aligns high-freq (fine) and low-freq (coarse) maps
+                pooled = nn.functional.adaptive_avg_pool2d(components, (grid_size, grid_size))
+                
+                # Flatten spatial grid? No, we flatten spatial grid later.
+                # Right now we want: (B, Channels, Grid, Grid)
+                batch_channels.append(pooled)
+            
+            # Concatenate all feature channels: (B, Total_Channels, Grid, Grid)
+            features_spatial = torch.cat(batch_channels, dim=1)
+            
+            # Reshape to: (B, Grid*Grid, Total_Channels)
+            # This makes "Patches" the sequence for Attention
+            B, C, H, W = features_spatial.shape
+            features_flat_grid = features_spatial.view(B, C, H*W).permute(0, 2, 1)
+            
+            all_grid_features.append(features_flat_grid.cpu())
+
+    # Stack: (N_Images, 36, Feature_Dim)
+    full_tensor = torch.cat(all_grid_features, dim=0)
+    print(f"Final Feature Shape: {full_tensor.shape}")
+    return full_tensor
 
 from scripts.mcfarland_sim import get_fixrsvp_stack
 from DataYatesV1.exp.support import get_rsvp_fix_stim
@@ -53,7 +137,7 @@ from DataYatesV1.exp.support import get_rsvp_fix_stim
 # stack_images = get_fixrsvp_stack()
 #%%
 subject = 'Allen'
-date = '2022-03-02'
+date = '2022-03-04'
 
 #04-08, 03-02, 04-13, 2-18 all stimuli are not timed right
 
@@ -100,7 +184,15 @@ NT = len(trials)
 
 fixation = np.hypot(dataset.dsets[dset_idx]['eyepos'][:,0].numpy(), dataset.dsets[dset_idx]['eyepos'][:,1].numpy()) < 1
 
-rsvp_images = get_fixrsvp_stack(frames_per_im=1)
+rsvp_images = torch.from_numpy(get_fixrsvp_stack(frames_per_im=1))
+ppd = 37.50476617
+#get the central 2.5 degrees of the image
+window_size_pixels = 2 * ppd
+start_x = int(rsvp_images.shape[1] // 2 - window_size_pixels // 2)
+end_x = int(rsvp_images.shape[1] // 2 + window_size_pixels // 2)
+start_y = int(rsvp_images.shape[2] // 2 - window_size_pixels // 2)
+end_y = int(rsvp_images.shape[2] // 2 + window_size_pixels // 2)
+rsvp_images_cropped = rsvp_images[:, start_x:end_x, start_y:end_y]
 ptb2ephys, _ = get_clock_functions(sess.exp)
 image_ids = np.full((NT, T), -1, dtype=np.int64)
 # Loop over trials and align responses
@@ -166,18 +258,17 @@ fix_dur = fix_dur[good_trials]
 image_ids = image_ids[good_trials][:, time_window_start:time_window_end]
 
 
-# Commented out plotting for testing
-# ind = np.argsort(fix_dur)[::-1]
-# plt.subplot(1,2,1)
-# plt.imshow(eyepos[ind,:,0])
-# # plt.xlim(0, 160)
-# plt.subplot(1,2,2)
-# plt.imshow(np.nanmean(robs,2)[ind])
-# # plt.xlim(0, 160)
-# plt.show()
+ind = np.argsort(fix_dur)[::-1]
+plt.subplot(1,2,1)
+plt.imshow(eyepos[ind,:,0])
+# plt.xlim(0, 160)
+plt.subplot(1,2,2)
+plt.imshow(np.nanmean(robs,2)[ind])
+# plt.xlim(0, 160)
+plt.show()
 
-# plt.plot(np.nanstd(robs, (2,0)))
-# plt.show()
+plt.plot(np.nanstd(robs, (2,0)))
+plt.show()
 robs.shape #(79, 335, 133) [trials, time, cells]
 eyepos.shape #(79, 335, 2) [trials, time, xycoords]
 
@@ -211,15 +302,15 @@ trials_to_remove = []
 for trial_ind, start_time_ind_of_mismatch in unmatched_trials_and_start_time_ind_of_mismatch.items():
     first_trial_ind = reference_trial_ind
     second_trial_ind = trial_ind
-    # Commented out plotting for testing
-    # plt.plot(image_ids[first_trial_ind])
-    # plt.plot(image_ids[second_trial_ind])
-    # plt.xlim(0, 200)
-    # plt.xlabel('Time (bins)')
-    # plt.ylabel('Image ID')
-    # plt.title(f'Image IDs for trial {first_trial_ind} and {second_trial_ind}')
-    # plt.legend([f'Trial {first_trial_ind}', f'Trial {second_trial_ind}'])
-    # plt.show()
+    plt.plot(image_ids[first_trial_ind])
+    plt.plot(image_ids[second_trial_ind])
+    plt.xlim(0, 200)
+    plt.xlabel('Time (bins)')
+    plt.ylabel('Image ID')
+    plt.title(f'Image IDs for trial {first_trial_ind} and {second_trial_ind}')
+    plt.legend([f'Trial {first_trial_ind}', f'Trial {second_trial_ind}'])
+
+    plt.show()
     print(f'start time ind of mismatch for trial {trial_ind} is {start_time_ind_of_mismatch}')
     
     if start_time_ind_of_mismatch > salvageable_mismatch_time_threshold:
@@ -393,7 +484,7 @@ window_len_input = 50 #70
 window_len_output = 50 #70
 window_stride = 1
 min_valid_fraction = 0.8
-num_epochs = 75 # 75
+num_epochs = 100 # 75
 batch_size = 64 #64
 learning_rate = 1e-3
 lag_bins = 0
@@ -409,15 +500,18 @@ augmentation_turn_on_percentage = 0.02 #0.02 #0.05
 augmentation_mixup_alpha = 0.2  # Mixup interpolation alpha (0.0 to disable)
 augmentation_mixup_same_time = False  # If True, only mixup windows with same start index
 augment_encodings = True  # If True, augmentations affect ALL features (neural + time + image_id encodings)
-# MLP model hyperparameters (best from tuning: val_loss=0.0331)
-mlp_hidden_dim = 256  # Best: 256
-mlp_num_layers = 4  # Best: 4
-mlp_dropout_rate = 0.0  # Best: 0.0
-weight_decay = 1e-4  # Best: 1e-4 (0.0001)
+transformer_dim = 64 #64 best 16
+transformer_heads = 4 #4 #best 2
+transformer_layers = 2
+transformer_dropout = 0.1 #0.1 #best 0.3
+weight_decay = 1e-4 #best 1e-2
 loss_on_center = False
 require_odd_window = True
 use_trajectory_loss = True
+use_2d_attention = False  # 2d_attention flag (axial time x neuron)
 use_image_id_encoding = True
+use_images = True  # If True, use global image features instead of one-hot encoding
+image_feat_scale = 0.1  # Scale factor for image features (try 0.1, 0.5, 1.0)
 num_unique_images = int(np.max(image_ids_reference)) + 1
 lambda_pos = 1.0
 lambda_vel = 0.4 #4
@@ -429,6 +523,11 @@ input_nan_fill_value = 0
 
 # augmentation_turn_off_percentage = 0
 # augmentation_turn_on_percentage = 0
+# transformer_dim = 16 #64 best 16
+# transformer_heads = 2 #4 #best 2
+# transformer_layers = 2
+# transformer_dropout = 0.3 #0.1 #best 0.3
+# weight_decay = 1e-2 #best 1e-2
 # loss_on_center = False
 # require_odd_window = True
 # use_trajectory_loss = True
@@ -611,15 +710,44 @@ if standardize_inputs:
 else:
     robs_z = robs_aligned
 
-
-if time_encoding is not None:
-    robs_feat_model = np.concatenate(
-        [robs_z, time_enc_scale * time_encoding], axis=2
-    )
-else:
+if use_2d_attention:
+    # Use raw neuron features; time encoding handled via embeddings in the model.
     robs_feat_model = robs_z
+else:
+    if time_encoding is not None:
+        robs_feat_model = np.concatenate(
+            [robs_z, time_enc_scale * time_encoding], axis=2
+        )
+    else:
+        robs_feat_model = robs_z
 
-if use_image_id_encoding:
+if use_images:
+    # Compute spatial pyramid features with cross-attention (keep spatial structure)
+    print("Computing spatial pyramid features for cross-attention...")
+    image_grid_size = 20  # 20x20 = 400 patches
+    image_patch_bank = get_spatial_pyramid_features(rsvp_images_cropped, grid_size=image_grid_size, device='cuda')
+    image_patch_bank = image_patch_bank.numpy()  # (20, num_patches, patch_dim)
+    num_patches = image_patch_bank.shape[1]
+    patch_dim = image_patch_bank.shape[2]
+    print(f"Image patch bank shape: {image_patch_bank.shape} (images, patches, features)")
+    
+    # Normalize patch features (global normalization across all)
+    img_mean = image_patch_bank.mean()
+    img_std = image_patch_bank.std()
+    image_patch_bank = (image_patch_bank - img_mean) / (img_std + 1e-8)
+    image_patch_bank = image_feat_scale * image_patch_bank
+    print(f"Patch features normalized: mean~{image_patch_bank.mean():.3f}, std~{image_patch_bank.std():.3f}")
+    
+    # Create time-indexed patch sequence: (time, num_patches, patch_dim)
+    ids = image_ids_reference[time_window_start:time_window_end].astype(int)
+    valid_mask = ids >= 0
+    image_patch_sequence = np.zeros((len(ids), num_patches, patch_dim), dtype=np.float32)
+    image_patch_sequence[valid_mask] = image_patch_bank[ids[valid_mask]]
+    print(f"Image patch sequence shape: {image_patch_sequence.shape} (time, patches, features)")
+    
+    # Don't concatenate to features - will use cross-attention instead
+
+elif use_image_id_encoding:
     # ids is (Time,)
     # Slice to match the time window used for robs/eyepos
     ids = image_ids_reference[time_window_start:time_window_end].astype(int)
@@ -667,6 +795,7 @@ class WindowedEyeposDataset(torch.utils.data.Dataset):
         mixup_same_time=False,
         image_ids_condensed=None,
         num_neural_features=None,
+        image_patch_sequence=None,  # (time, num_patches, patch_dim) for cross-attention
     ):
         self.device = device
         self.cache_on_gpu = cache_on_gpu
@@ -688,6 +817,15 @@ class WindowedEyeposDataset(torch.utils.data.Dataset):
         self.valid_mask = valid_y & valid_x
         self.X = torch.nan_to_num(X_raw, nan=input_nan_fill_value).float()
         self.Y = torch.nan_to_num(Y_raw, nan=0.0).float()
+        
+        # Store image patches if provided
+        if image_patch_sequence is not None:
+            self.image_patches = torch.from_numpy(image_patch_sequence).float()
+            if self.cache_on_gpu:
+                self.image_patches = self.image_patches.to(self.device, non_blocking=True)
+        else:
+            self.image_patches = None
+        
         if self.cache_on_gpu:
             self.X = self.X.to(self.device, non_blocking=True)
             self.Y = self.Y.to(self.device, non_blocking=True)
@@ -780,7 +918,14 @@ class WindowedEyeposDataset(torch.utils.data.Dataset):
             dtype=torch.int64,
             device=self.device if self.cache_on_gpu else None,
         )
-        return X_win, Y_win, mask, time_idx
+        
+        # Return image patches if available
+        if self.image_patches is not None:
+            trial, start = self.indices[idx]
+            patches_win = self.image_patches[start:start + self.window_len_input]
+            return X_win, Y_win, mask, time_idx, patches_win
+        else:
+            return X_win, Y_win, mask, time_idx, None
 
     def _get_base_item(self, idx):
         trial, start = self.indices[idx]
@@ -792,35 +937,157 @@ class WindowedEyeposDataset(torch.utils.data.Dataset):
         return X_win, Y_win, mask, out_start, out_end
 
 
-class MLPEyepos(torch.nn.Module):
-    def __init__(self, input_dim, window_len_input, hidden_dim=64, num_layers=2, dropout_rate=0.1):
+class TransformerEyepos(torch.nn.Module):
+    def __init__(self, input_dim, model_dim, num_heads, num_layers, dropout_rate):
         super().__init__()
-        # Flatten window: (batch, time, features) -> (batch, time * features)
-        flattened_dim = window_len_input * input_dim
-        layers = []
-        layers.append(torch.nn.Linear(flattened_dim, hidden_dim))
-        layers.append(torch.nn.ReLU())
-        layers.append(torch.nn.Dropout(dropout_rate))
+        self.input_proj = torch.nn.Linear(input_dim, model_dim)
+        encoder_layer = torch.nn.TransformerEncoderLayer(
+            d_model=model_dim,
+            nhead=num_heads,
+            dim_feedforward=model_dim * 4,
+            dropout=dropout_rate,
+            batch_first=True,
+        )
+        self.encoder = torch.nn.TransformerEncoder(
+            encoder_layer, num_layers=num_layers
+        )
+        self.head = torch.nn.Linear(model_dim, 2)
+
+    def forward(self, x, image_patches=None):
+        # image_patches ignored for backward compatibility
+        x = self.input_proj(x)
+        x = self.encoder(x)
+        return self.head(x)
+
+
+class TransformerEyeposWithCrossAttn(torch.nn.Module):
+    """Transformer with cross-attention to image patches."""
+    def __init__(self, input_dim, model_dim, num_heads, num_layers, dropout_rate, patch_dim):
+        super().__init__()
+        self.input_proj = torch.nn.Linear(input_dim, model_dim)
         
-        for _ in range(num_layers - 1):
-            layers.append(torch.nn.Linear(hidden_dim, hidden_dim))
-            layers.append(torch.nn.ReLU())
-            layers.append(torch.nn.Dropout(dropout_rate))
+        # Project image patches to model_dim
+        self.patch_proj = torch.nn.Linear(patch_dim, model_dim)
         
-        # Output: (batch, hidden_dim) -> (batch, window_len_output, 2)
-        # We'll reshape in forward
-        self.layers = torch.nn.Sequential(*layers)
-        self.head = torch.nn.Linear(hidden_dim, window_len_input * 2)
-        self.window_len_input = window_len_input
+        # Cross-attention: spikes attend to image patches
+        self.cross_attn = torch.nn.MultiheadAttention(
+            model_dim, num_heads, dropout=dropout_rate, batch_first=True
+        )
+        self.cross_norm = torch.nn.LayerNorm(model_dim)
+        
+        # Main transformer encoder
+        encoder_layer = torch.nn.TransformerEncoderLayer(
+            d_model=model_dim,
+            nhead=num_heads,
+            dim_feedforward=model_dim * 4,
+            dropout=dropout_rate,
+            batch_first=True,
+        )
+        self.encoder = torch.nn.TransformerEncoder(
+            encoder_layer, num_layers=num_layers
+        )
+        self.head = torch.nn.Linear(model_dim, 2)
+
+    def forward(self, x, image_patches):
+        """
+        x: (batch, time, input_dim) - spike features + time encoding
+        image_patches: (batch, time, num_patches, patch_dim) - patches per timestep
+        """
+        batch_size, time_len, num_patches, patch_dim_in = image_patches.shape
+        
+        # Project spikes to model_dim
+        x = self.input_proj(x)  # (batch, time, model_dim)
+        
+        # Project patches to model_dim
+        patches = self.patch_proj(image_patches)  # (batch, time, num_patches, model_dim)
+        
+        # Cross-attention: each timestep's spike repr attends to its image's patches
+        # Reshape for efficient batched attention: (batch * time, 1, model_dim) queries (batch * time, num_patches, model_dim)
+        x_flat = x.reshape(batch_size * time_len, 1, -1)  # (B*T, 1, model_dim)
+        patches_flat = patches.reshape(batch_size * time_len, num_patches, -1)  # (B*T, num_patches, model_dim)
+        
+        attn_out, _ = self.cross_attn(x_flat, patches_flat, patches_flat)
+        attn_out = attn_out.reshape(batch_size, time_len, -1)  # (batch, time, model_dim)
+        
+        # Residual + norm
+        x = self.cross_norm(x + attn_out)
+        
+        # Self-attention across time
+        x = self.encoder(x)
+        
+        return self.head(x)
+
+
+class AxialTransformerLayer(torch.nn.Module):
+    def __init__(self, model_dim, num_heads, dropout_rate):
+        super().__init__()
+        self.time_attn = torch.nn.MultiheadAttention(
+            model_dim, num_heads, dropout=dropout_rate, batch_first=True
+        )
+        self.neuron_attn = torch.nn.MultiheadAttention(
+            model_dim, num_heads, dropout=dropout_rate, batch_first=True
+        )
+        self.norm_time = torch.nn.LayerNorm(model_dim)
+        self.norm_neuron = torch.nn.LayerNorm(model_dim)
+        self.norm_ff = torch.nn.LayerNorm(model_dim)
+        self.ff = torch.nn.Sequential(
+            torch.nn.Linear(model_dim, model_dim * 4),
+            torch.nn.GELU(),
+            torch.nn.Dropout(dropout_rate),
+            torch.nn.Linear(model_dim * 4, model_dim),
+            torch.nn.Dropout(dropout_rate),
+        )
 
     def forward(self, x):
-        # x: (batch, time, features)
-        bsz = x.shape[0]
-        x = x.reshape(bsz, -1)  # Flatten: (batch, time * features)
-        x = self.layers(x)  # (batch, hidden_dim)
-        x = self.head(x)  # (batch, window_len_input * 2)
-        x = x.reshape(bsz, self.window_len_input, 2)  # (batch, time, 2)
+        bsz, time_len, num_neurons, dim = x.shape
+        x_t = self.norm_time(x)
+        x_t = x_t.permute(0, 2, 1, 3).reshape(bsz * num_neurons, time_len, dim)
+        attn_t, _ = self.time_attn(x_t, x_t, x_t, need_weights=False)
+        attn_t = attn_t.reshape(bsz, num_neurons, time_len, dim).permute(0, 2, 1, 3)
+        x = x + attn_t
+
+        x_n = self.norm_neuron(x)
+        x_n = x_n.reshape(bsz * time_len, num_neurons, dim)
+        attn_n, _ = self.neuron_attn(x_n, x_n, x_n, need_weights=False)
+        attn_n = attn_n.reshape(bsz, time_len, num_neurons, dim)
+        x = x + attn_n
+
+        x_ff = self.norm_ff(x)
+        x = x + self.ff(x_ff)
         return x
+
+
+class AxialTransformerEyepos(torch.nn.Module):
+    def __init__(
+        self,
+        num_neurons,
+        model_dim,
+        num_heads,
+        num_layers,
+        dropout_rate,
+        window_len_input,
+    ):
+        super().__init__()
+        self.input_proj = torch.nn.Linear(1, model_dim)
+        self.time_embed = torch.nn.Embedding(window_len_input, model_dim)
+        self.neuron_embed = torch.nn.Embedding(num_neurons, model_dim)
+        self.layers = torch.nn.ModuleList(
+            [AxialTransformerLayer(model_dim, num_heads, dropout_rate) for _ in range(num_layers)]
+        )
+        self.head = torch.nn.Linear(model_dim, 2)
+
+    def forward(self, x):
+        bsz, time_len, num_neurons = x.shape
+        x = self.input_proj(x.unsqueeze(-1))
+        time_idx = torch.arange(time_len, device=x.device)
+        neuron_idx = torch.arange(num_neurons, device=x.device)
+        time_emb = self.time_embed(time_idx)[None, :, None, :]
+        neuron_emb = self.neuron_embed(neuron_idx)[None, None, :, :]
+        x = x + time_emb + neuron_emb
+        for layer in self.layers:
+            x = layer(x)
+        x = x.mean(dim=2)
+        return self.head(x)
 
 
 def masked_mse(pred, target, mask):
@@ -919,8 +1186,9 @@ train_dataset = WindowedEyeposDataset(
     neuron_dropout=augmentation_neuron_dropout,
     mixup_alpha=augmentation_mixup_alpha,
     mixup_same_time=augmentation_mixup_same_time,
-    image_ids_condensed=image_ids_reference[time_window_start:time_window_end] if use_image_id_encoding else None,
+    image_ids_condensed=image_ids_reference[time_window_start:time_window_end] if use_image_id_encoding and not use_images else None,
     num_neural_features=num_neural_features,
+    image_patch_sequence=image_patch_sequence if use_images else None,
 )
 val_dataset = WindowedEyeposDataset(
     robs_feat_model,
@@ -936,10 +1204,25 @@ val_dataset = WindowedEyeposDataset(
     turn_off_percentage=0.0,
     turn_on_percentage=0.0,
     num_neural_features=num_neural_features,
+    image_patch_sequence=image_patch_sequence if use_images else None,
 )
 
 loader_num_workers = 0 if cache_data_on_gpu else dataloader_num_workers
 loader_pin_memory = False if cache_data_on_gpu else dataloader_pin_memory
+
+def custom_collate_fn(batch):
+    """Custom collate that handles optional image patches (5th element may be None)."""
+    X = torch.stack([item[0] for item in batch])
+    Y = torch.stack([item[1] for item in batch])
+    mask = torch.stack([item[2] for item in batch])
+    time_idx = torch.stack([item[3] for item in batch])
+    # Handle patches - stack if not None, otherwise return None
+    if batch[0][4] is not None:
+        patches = torch.stack([item[4] for item in batch])
+    else:
+        patches = None
+    return X, Y, mask, time_idx, patches
+
 train_loader = torch.utils.data.DataLoader(
     train_dataset,
     batch_size=batch_size,
@@ -947,6 +1230,7 @@ train_loader = torch.utils.data.DataLoader(
     num_workers=loader_num_workers,
     pin_memory=loader_pin_memory,
     persistent_workers=loader_num_workers > 0,
+    collate_fn=custom_collate_fn,
 )
 val_loader = torch.utils.data.DataLoader(
     val_dataset,
@@ -955,37 +1239,57 @@ val_loader = torch.utils.data.DataLoader(
     num_workers=loader_num_workers,
     pin_memory=loader_pin_memory,
     persistent_workers=loader_num_workers > 0,
+    collate_fn=custom_collate_fn,
 )
 
-model = MLPEyepos(
-    input_dim=robs_feat_model.shape[2],
-    window_len_input=window_len_input,
-    hidden_dim=mlp_hidden_dim,
-    num_layers=mlp_num_layers,
-    dropout_rate=mlp_dropout_rate,
-).to(device)
+if use_2d_attention:
+    model = AxialTransformerEyepos(
+        robs_feat_model.shape[2],
+        model_dim=transformer_dim,
+        num_heads=transformer_heads,
+        num_layers=transformer_layers,
+        dropout_rate=transformer_dropout,
+        window_len_input=window_len_input,
+    ).to(device)
+elif use_images:
+    model = TransformerEyeposWithCrossAttn(
+        robs_feat_model.shape[2],
+        model_dim=transformer_dim,
+        num_heads=transformer_heads,
+        num_layers=transformer_layers,
+        dropout_rate=transformer_dropout,
+        patch_dim=patch_dim,
+    ).to(device)
+    print(f"Using TransformerEyeposWithCrossAttn with {num_patches} patches of dim {patch_dim}")
+else:
+    model = TransformerEyepos(
+        robs_feat_model.shape[2],
+        model_dim=transformer_dim,
+        num_heads=transformer_heads,
+        num_layers=transformer_layers,
+        dropout_rate=transformer_dropout,
+    ).to(device)
 # optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-# optimizer = schedulefree.AdamWScheduleFree(model.parameters(), lr=learning_rate)
-# Use AdamW with weight_decay to match tuning script (best hyperparameters used weight_decay=1e-4)
-# optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-optimizer = schedulefree.RAdamScheduleFree(model.parameters())
 
+# optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+# optimizer = schedulefree.AdamWScheduleFree(model.parameters(), lr=learning_rate)
+optimizer = schedulefree.RAdamScheduleFree(model.parameters())
 pred_all = None
-best_val_loss = float('inf')
 
 for epoch in range(num_epochs):
     model.train()
-    if hasattr(optimizer, 'train'):
-        optimizer.train()
+    optimizer.train() if optimizer.__class__.__module__.startswith("schedulefree") else None
     train_losses = []
     center_idx = window_len_output // 2
-    for X_batch, y_batch, mask_batch, time_idx in train_loader:
+    for X_batch, y_batch, mask_batch, time_idx, patches_batch in train_loader:
         X_batch = X_batch.to(device)
         y_batch = y_batch.to(device)
         mask_batch = mask_batch.to(device)
         time_idx = time_idx.to(device)
+        if patches_batch is not None:
+            patches_batch = patches_batch.to(device)
         optimizer.zero_grad()
-        pred = model(X_batch)
+        pred = model(X_batch, patches_batch)
         pred = slice_pred_to_output(pred, window_len_input, window_len_output)
         if use_trajectory_loss:
             loss = trajectory_loss(
@@ -1007,17 +1311,18 @@ for epoch in range(num_epochs):
         train_losses.append(loss.item())
 
     model.eval()
-    if hasattr(optimizer, 'eval'):
-        optimizer.eval()
+    optimizer.eval() if optimizer.__class__.__module__.startswith("schedulefree") else None
     val_losses = []
     center_idx = window_len_output // 2
     with torch.no_grad():
-        for X_batch, y_batch, mask_batch, time_idx in val_loader:
+        for X_batch, y_batch, mask_batch, time_idx, patches_batch in val_loader:
             X_batch = X_batch.to(device)
             y_batch = y_batch.to(device)
             mask_batch = mask_batch.to(device)
             time_idx = time_idx.to(device)
-            pred = model(X_batch)
+            if patches_batch is not None:
+                patches_batch = patches_batch.to(device)
+            pred = model(X_batch, patches_batch)
             pred = slice_pred_to_output(pred, window_len_input, window_len_output)
             if use_trajectory_loss:
                 loss = trajectory_loss(
@@ -1036,18 +1341,12 @@ for epoch in range(num_epochs):
                 loss = masked_mse(pred, y_batch, mask_batch)
             val_losses.append(loss.item())
 
-    mean_val_loss = np.mean(val_losses)
-    if mean_val_loss < best_val_loss:
-        best_val_loss = mean_val_loss
-
     print(
         f"Epoch {epoch + 1:02d} | "
         f"train loss: {np.mean(train_losses):.4f} | "
-        f"val loss: {mean_val_loss:.4f}"
+        f"val loss: {np.mean(val_losses):.4f}"
     )
-
-print(f"\nBest validation loss: {best_val_loss:.4f}")
-
+#%%
 def run_inference(
     model,
     robs_feat_input,
@@ -1060,6 +1359,7 @@ def run_inference(
     overlap_stride=None,
     center_crop=None,
     edge_align=False,
+    image_patch_sequence=None,  # (time, num_patches, patch_dim) for cross-attention
 ):
     if device is None:
         device = next(model.parameters()).device
@@ -1097,7 +1397,12 @@ def run_inference(
                     idx = starts_batch[:, None] + np.arange(window_len_input)[None, :]
                     X_win = X[idx]
                     X_t = torch.from_numpy(np.nan_to_num(X_win, nan=input_nan_fill_value)).float().to(device)
-                    pred_batch_full = model(X_t).cpu().numpy()
+                    # Get patches for this batch if available
+                    patches_t = None
+                    if image_patch_sequence is not None:
+                        patches_win = image_patch_sequence[idx]  # (batch, window_len, num_patches, patch_dim)
+                        patches_t = torch.from_numpy(patches_win).float().to(device)
+                    pred_batch_full = model(X_t, patches_t).cpu().numpy()
                     pred_batch = pred_batch_full
                     if crop_len != window_len_output:
                         pred_batch = pred_batch_full[:, crop_offset:crop_offset + crop_len]
@@ -1157,7 +1462,13 @@ def run_inference(
                 for b in range(0, time_len, batch_size):
                     X_batch = X_win[b:b + batch_size]
                     X_t = torch.from_numpy(np.nan_to_num(X_batch, nan=input_nan_fill_value)).float().to(device)
-                    pred_batch = model(X_t).cpu().numpy()
+                    # Get patches for this batch if available
+                    patches_t = None
+                    if image_patch_sequence is not None:
+                        batch_idx = idx[b:b + batch_size]
+                        patches_win = image_patch_sequence[batch_idx]
+                        patches_t = torch.from_numpy(patches_win).float().to(device)
+                    pred_batch = model(X_t, patches_t).cpu().numpy()
                     centers = center_idx[b:b + batch_size]
                     valid = (centers >= 0) & (centers < window_len_output)
                     if np.any(valid):
@@ -1165,7 +1476,7 @@ def run_inference(
                         pred_all[i, b:b + batch_size][rows] = pred_batch[rows, centers[valid]]
     return pred_all
 
-# Commented out for testing - only need val_loss
+
 trials_all = np.concatenate([train_trials, val_trials])
 pred_all = run_inference(
     model,
@@ -1178,11 +1489,11 @@ pred_all = run_inference(
     overlap_stride=1,
     center_crop=0.8,
     edge_align=True,
+    image_patch_sequence=image_patch_sequence if use_images else None,
 )
 
 
 #%%
-# Commented out plotting code for testing
 def plot_trial_trace(
     model,
     robs_feat_input,
@@ -1390,10 +1701,9 @@ def plot_trial_trace(
 
 
 
-# Commented out plotting for testing
 #%%
-trial_idx = 0
-trial_idx += 1
+# trial_idx = 0
+trial_idx -= 1
 fig, axes = plot_trial_trace(
     model,
     robs_feat_model,
