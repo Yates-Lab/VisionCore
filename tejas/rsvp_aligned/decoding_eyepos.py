@@ -54,7 +54,7 @@ from DataYatesV1.exp.support import get_rsvp_fix_stim
 # stack_images = get_fixrsvp_stack()
 #%%
 subject = 'Allen'
-date = '2022-03-02'
+date = '2022-03-04'
 
 #04-08, 03-02, 04-13, 2-18 all stimuli are not timed right
 
