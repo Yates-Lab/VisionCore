@@ -43,17 +43,10 @@ mpl.rcParams['image.interpolation'] = 'none'
 mpl.rcParams['image.resample'] = False
 import contextlib
 import schedulefree
+from tejas.rsvp_util import get_fixrsvp_data
 
 #%%
 
-from scripts.mcfarland_sim import get_fixrsvp_stack
-from DataYatesV1.exp.support import get_rsvp_fix_stim
-
-# support_images = get_rsvp_fix_stim()
-# stack_images = get_fixrsvp_stack()
-#%%
-subject = 'Allen'
-date = '2022-03-02'
 
 #04-08, 03-02, 04-13, 2-18 all stimuli are not timed right
 
@@ -62,188 +55,46 @@ date = '2022-03-02'
 
 
 
+subject = 'Allen'
+date = '2022-03-30'
 dataset_configs_path = '/home/tejas/VisionCore/experiments/dataset_configs/multi_basic_240_rsvp_all_cells.yaml'
-dataset_configs = load_dataset_configs(dataset_configs_path)
 
-# date = "2022-03-04"
-# subject = "Allen"
-dataset_idx = next(i for i, cfg in enumerate(dataset_configs) if cfg['session'] == f"{subject}_{date}")
+data = get_fixrsvp_data(subject, date, dataset_configs_path, 
+use_cached_data=True, 
+salvageable_mismatch_time_threshold=25, verbose=True)
 
-with open(os.devnull, "w") as devnull, contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
-    train_dset, val_dset, dataset_config = prepare_data(dataset_configs[dataset_idx], strict=False)
-
-
-
-sess = train_dset.dsets[0].metadata['sess']
-# ppd = train_data.dsets[0].metadata['ppd']
-cids = dataset_config['cids']
-print(f"Running on {sess.name}")
-
-# get fixrsvp inds and make one dataaset object
-inds = torch.concatenate([
-        train_dset.get_dataset_inds('fixrsvp'),
-        val_dset.get_dataset_inds('fixrsvp')
-    ], dim=0)
-
-dataset = train_dset.shallow_copy()
-dataset.inds = inds
-
-# Getting key variables
-dset_idx = inds[:,0].unique().item()
-trial_inds = dataset.dsets[dset_idx].covariates['trial_inds'].numpy()
-t_bins = dataset.dsets[dset_idx].covariates['t_bins'].numpy()
-trials = np.unique(trial_inds)
-
-NC = dataset.dsets[dset_idx]['robs'].shape[1]
-T = np.max(dataset.dsets[dset_idx].covariates['psth_inds'][:].numpy()).item() + 1
-NT = len(trials)
-
-fixation = np.hypot(dataset.dsets[dset_idx]['eyepos'][:,0].numpy(), dataset.dsets[dset_idx]['eyepos'][:,1].numpy()) < 1
-
-rsvp_images = get_fixrsvp_stack(frames_per_im=1)
-ptb2ephys, _ = get_clock_functions(sess.exp)
-image_ids = np.full((NT, T), -1, dtype=np.int64)
-# Loop over trials and align responses
-robs = np.nan*np.zeros((NT, T, NC))
-dfs = np.nan*np.zeros((NT, T, NC))
-eyepos = np.nan*np.zeros((NT, T, 2))
-fix_dur =np.nan*np.zeros((NT,))
-
-for itrial in tqdm(range(NT)):
-    # print(f"Trial {itrial}/{NT}")
-    trial_mask = trials[itrial] == trial_inds
-    if np.sum(trial_mask) == 0:
-        continue
+robs = data['robs']
+dfs = data['dfs']
+eyepos = data['eyepos']
+fix_dur = data['fix_dur']
+image_ids = data['image_ids']
+cids = data['cids']
     
-    trial_id = int(trials[itrial])
-    trial = FixRsvpTrial(sess.exp['D'][trial_id], sess.exp['S'])
-    trial_image_ids = trial.image_ids
-    if len(np.unique(trial_image_ids)) < 2:
-        continue
-    start_idx = np.where(trial_image_ids == 2)[0][0]
-    flip_times = ptb2ephys(trial.flip_times[start_idx:])
-
-    psth_inds_all = dataset.dsets[dset_idx].covariates['psth_inds'][trial_mask].numpy()
-    trial_bins_all = t_bins[trial_mask]
-    hist_idx_all = np.searchsorted(flip_times, trial_bins_all, side='right') - 1 + start_idx
-    image_ids[itrial][psth_inds_all] = trial_image_ids[hist_idx_all] - 1
-
-    ix = trial_mask & fixation
-    if np.sum(ix) == 0:
-        continue
-
-    stim_inds = np.where(ix)[0]
-    # stim_inds = stim_inds[:,None] - np.array(dataset_config['keys_lags']['stim'])[None,:]
-    psth_inds = dataset.dsets[dset_idx].covariates['psth_inds'][ix].numpy()
-    fix_dur[itrial] = len(psth_inds)
-    robs[itrial][psth_inds] = dataset.dsets[dset_idx]['robs'][ix].numpy()
-    dfs[itrial][psth_inds] = dataset.dsets[dset_idx]['dfs'][ix].numpy()
-    eyepos[itrial][psth_inds] = dataset.dsets[dset_idx]['eyepos'][ix].numpy()
-
-    
-
-# check for if image_ids is correct.
-# # pick a trial
-# trial_id = int(trials[0])
-# trial = FixRsvpTrial(sess.exp['D'][trial_id], sess.exp['S'])
-# start_idx = np.where(trial.image_ids == 2)[0][0]
-# flip_times = ptb2ephys(trial.flip_times[start_idx:])
-# trial_bins = t_bins[trial_inds == trial_id]
-# hist_idx = np.searchsorted(flip_times, trial_bins, side='right') - 1 + start_idx
-
-# # This should be identical to the assigned row (before -1 shift)
-# np.all(trial.image_ids[hist_idx] - 1 == image_ids[0][dataset.dsets[dset_idx].covariates['psth_inds'][trial_inds == trial_id]])
-
-# time_window_start = 75
-# time_window_end =100
 time_window_start = 0
 time_window_end =200
 good_trials = fix_dur > 20
+assert good_trials.all() == True, f"Some trials have fix_dur <= 20"
 robs = robs[good_trials][:,time_window_start:time_window_end,:]
 dfs = dfs[good_trials][:,time_window_start:time_window_end,:]
 eyepos = eyepos[good_trials][:,time_window_start:time_window_end,:]
 fix_dur = fix_dur[good_trials]
 image_ids = image_ids[good_trials][:, time_window_start:time_window_end]
+#trial with image_ids.max() is image_ids_reference
+image_ids_reference = image_ids[np.where(image_ids ==image_ids.max())[0][0]]
 
+ind = np.argsort(fix_dur)[::-1]
+plt.subplot(1,2,1)
+plt.imshow(eyepos[ind,:,0])
+# plt.xlim(0, 160)
+plt.subplot(1,2,2)
+plt.imshow(np.nanmean(robs,2)[ind])
+# plt.xlim(0, 160)
+plt.show()
 
-# Commented out plotting for testing
-# ind = np.argsort(fix_dur)[::-1]
-# plt.subplot(1,2,1)
-# plt.imshow(eyepos[ind,:,0])
-# # plt.xlim(0, 160)
-# plt.subplot(1,2,2)
-# plt.imshow(np.nanmean(robs,2)[ind])
-# # plt.xlim(0, 160)
-# plt.show()
-
-# plt.plot(np.nanstd(robs, (2,0)))
-# plt.show()
+plt.plot(np.nanstd(robs, (2,0)))
+plt.show()
 robs.shape #(79, 335, 133) [trials, time, cells]
 eyepos.shape #(79, 335, 2) [trials, time, xycoords]
-
-salvageable_mismatch_time_threshold = 20
-reference_trial_ind = None
-image_ids_reference = None
-for i in range(len(image_ids)):
-    if (image_ids[i, time_window_start:time_window_end] != -1).all():
-        image_ids_reference = image_ids[i]
-
-        reference_trial_ind = i
-        break
-
-unmatched_trials_and_start_time_ind_of_mismatch = {}
-
-for trial_ind, row in enumerate(image_ids):
-    start_time_ind_of_mismatch = None
-    for time_ind in range(len(row)):
-        trial_matches = True
-        if row[time_ind] != -1 and image_ids_reference[time_ind] != -1:
-            if image_ids_reference[time_ind] != row[time_ind]:
-                trial_matches = False
-                start_time_ind_of_mismatch = time_ind
-                
-        if not trial_matches:
-            print(f'trial {trial_ind} does not match')
-            unmatched_trials_and_start_time_ind_of_mismatch[trial_ind] = start_time_ind_of_mismatch
-            break
-
-trials_to_remove = []
-for trial_ind, start_time_ind_of_mismatch in unmatched_trials_and_start_time_ind_of_mismatch.items():
-    first_trial_ind = reference_trial_ind
-    second_trial_ind = trial_ind
-    # Commented out plotting for testing
-    # plt.plot(image_ids[first_trial_ind])
-    # plt.plot(image_ids[second_trial_ind])
-    # plt.xlim(0, 200)
-    # plt.xlabel('Time (bins)')
-    # plt.ylabel('Image ID')
-    # plt.title(f'Image IDs for trial {first_trial_ind} and {second_trial_ind}')
-    # plt.legend([f'Trial {first_trial_ind}', f'Trial {second_trial_ind}'])
-    # plt.show()
-    print(f'start time ind of mismatch for trial {trial_ind} is {start_time_ind_of_mismatch}')
-    
-    if start_time_ind_of_mismatch > salvageable_mismatch_time_threshold:
-        robs[trial_ind, start_time_ind_of_mismatch:, :] = np.nan
-        eyepos[trial_ind, start_time_ind_of_mismatch:, :] = np.nan
-        fix_dur[trial_ind] = start_time_ind_of_mismatch
-        dfs[trial_ind, start_time_ind_of_mismatch:, :] = np.nan
-        image_ids[trial_ind, start_time_ind_of_mismatch:] = -1
-    else:
-        trials_to_remove.append(trial_ind)
-
-robs = robs[~np.isin(np.arange(len(robs)), trials_to_remove)]
-eyepos = eyepos[~np.isin(np.arange(len(eyepos)), trials_to_remove)]
-fix_dur = fix_dur[~np.isin(np.arange(len(fix_dur)), trials_to_remove)]
-dfs = dfs[~np.isin(np.arange(len(dfs)), trials_to_remove)]
-image_ids = image_ids[~np.isin(np.arange(len(image_ids)), trials_to_remove)]
-
-for trial_ind, row in enumerate(image_ids):
-    for time_ind in range(len(row)):
-
-        if row[time_ind] != -1 and image_ids_reference[time_ind] != -1:
-            if image_ids_reference[time_ind] != row[time_ind]:
-                raise ValueError(f'trial {trial_ind} does not match at time {time_ind}')
-
 #%%
 # sess = train_dset.dsets[0].metadata['sess']
 # trial_inds = dataset.dsets[dset_idx].covariates['trial_inds'].numpy()
@@ -400,7 +251,7 @@ lag_bins = 0
 center_per_trial = True
 standardize_inputs = False
 cache_data_on_gpu = False
-dataloader_num_workers = 4
+dataloader_num_workers = 16
 dataloader_pin_memory = True
 sample_poisson = False
 augmentation_neuron_dropout = 0.1  # Probability of dropping an entire neuron's activity for a window
@@ -947,6 +798,7 @@ train_loader = torch.utils.data.DataLoader(
     num_workers=loader_num_workers,
     pin_memory=loader_pin_memory,
     persistent_workers=loader_num_workers > 0,
+    prefetch_factor=4,
 )
 val_loader = torch.utils.data.DataLoader(
     val_dataset,

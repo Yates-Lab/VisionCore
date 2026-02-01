@@ -763,7 +763,7 @@ def get_fixrsvp_data(subject, date, dataset_configs_path,
 
     processed_data_path = DATA_DIR / 'processed' / dataset.dsets[dset_idx].metadata['sess'].name / 'datasets'
     assert processed_data_path.exists(), f"Processed data path {processed_data_path} does not exist"
-    cached_file = processed_data_path / f'fixrsvp_data_collated.pkl'
+    cached_file = processed_data_path / f'fixrsvp_data_collated_{Path(dataset_configs_path).stem}.pkl'
     if use_cached_data and os.path.exists(cached_file):
         with open(cached_file, 'rb') as f:
             data_dict = pickle.load(f)
@@ -828,13 +828,25 @@ def get_fixrsvp_data(subject, date, dataset_configs_path,
     )
     assert all_match, f"Found {len(mismatches)} mismatches"   
 
-    return dict_to_save
+    return {
+        'robs': robs,
+        'dfs': dfs,
+        'eyepos': eyepos,
+        'fix_dur': fix_dur,
+        'image_ids': image_ids,
+        'cids': dataset_config['cids'],
+        'rsvp_images': rsvp_images,
+        'spike_times_trials': spike_times_trials,
+        'trial_time_windows': trial_time_windows,
+        'trial_t_bins': trial_t_bins,
+    }
 #%%
-subject = 'Allen'
-date = '2022-03-30'
-dataset_configs_path = '/home/tejas/VisionCore/experiments/dataset_configs/multi_basic_240_rsvp_all_cells.yaml'
+# subject = 'Allen'
+# date = '2022-03-30'
+# dataset_configs_path = '/home/tejas/VisionCore/experiments/dataset_configs/multi_basic_240_rsvp_all_cells.yaml'
 
-data = get_fixrsvp_data(subject, date, dataset_configs_path, 
-use_cached_data=False, 
-salvageable_mismatch_time_threshold=25, verbose=False)
-#%%
+# data = get_fixrsvp_data(subject, date, dataset_configs_path, 
+# use_cached_data=True, 
+# salvageable_mismatch_time_threshold=25, verbose=False)
+# #%%
+# data['fix_dur']
