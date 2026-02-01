@@ -20,8 +20,8 @@ from matplotlib.backends.backend_pdf import PdfPages
 #enable_autoreload()
 device = get_free_device()
 
-from mcfarland_sim import run_mcfarland_on_dataset, extract_metrics, DualWindowAnalysis
-from utils import get_model_and_dataset_configs
+#from mcfarland_sim import run_mcfarland_on_dataset, extract_metrics, DualWindowAnalysis
+#from utils import get_model_and_dataset_configs
 
 #%%
 

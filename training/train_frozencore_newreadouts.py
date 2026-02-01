@@ -179,6 +179,14 @@ def main():
     model.hparams.warmup_epochs = args.warmup_epochs
 
     # -------------------------------------------------------------------------
+    # Prepare data before initializing wandb (so failed data prep doesn't
+    # create orphaned wandb runs)
+    # -------------------------------------------------------------------------
+    print("Preparing datasets...")
+    dm.setup("fit")
+    print(f"✓ Data preparation complete: {len(dm.train_dsets)} datasets loaded")
+
+    # -------------------------------------------------------------------------
     # Callbacks
     # -------------------------------------------------------------------------
     ckpt_dir = Path(args.checkpoint_dir) / args.experiment_name
