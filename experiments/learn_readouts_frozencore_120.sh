@@ -61,7 +61,7 @@ PRETRAINED_CHECKPOINT_DIR="/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/mul
 MODEL_TYPE="resnet_none_convgru"  # Type of model to load from checkpoint dir
 
 # New dataset configuration  
-DATASET_CONFIGS_PATH="/home/jake/repos/VisionCore/experiments/dataset_configs/multi_basic_120_long_rowley.yaml"
+DATASET_CONFIGS_PATH="/home/ryanress/VisionCore/experiments/dataset_configs/multi_basic_120_long_rowley.yaml"
 
 # Output configuration
 PROJECT_NAME="frozencore_readouts_120"

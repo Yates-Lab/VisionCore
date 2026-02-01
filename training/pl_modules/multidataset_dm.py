@@ -2,10 +2,7 @@
 PyTorch Lightning DataModule for multi-dataset training.
 """
 
-import os
 import time
-import contextlib
-from pathlib import Path
 from typing import Dict, Optional
 
 import torch
@@ -158,6 +155,10 @@ class MultiDatasetDM(pl.LightningDataModule):
         stage : str, optional
             Current stage ('fit', 'validate', 'test', or 'predict')
         """
+        # Skip if already set up (e.g., called manually before trainer.fit)
+        if hasattr(self, 'train_dsets') and self.train_dsets:
+            return
+
         from models.config_loader import load_dataset_configs
         from DataYatesV1.utils.data.loading import remove_pixel_norm
         from models.data import prepare_data
@@ -191,11 +192,7 @@ class MultiDatasetDM(pl.LightningDataModule):
                 # Remove pixelnorm from config
                 cfg, norm_removed = remove_pixel_norm(cfg)
 
-                # Suppress output from prepare_data
-                with open(os.devnull, "w") as _null, \
-                     contextlib.redirect_stdout(_null), \
-                     contextlib.redirect_stderr(_null):
-                    tr, va, _ = prepare_data(cfg, strict=False)
+                tr, va, _ = prepare_data(cfg, strict=True)
 
                 # Wrap with Float32View for on-the-fly normalization
                 self.train_dsets[name] = Float32View(tr, norm_removed, float16=False)
@@ -205,11 +202,7 @@ class MultiDatasetDM(pl.LightningDataModule):
                 # Path 2: bfloat16 or float32 storage (new behavior)
                 # Keep all transforms including pixelnorm
 
-                # Suppress output from prepare_data
-                with open(os.devnull, "w") as _null, \
-                     contextlib.redirect_stdout(_null), \
-                     contextlib.redirect_stderr(_null):
-                    tr, va, _ = prepare_data(cfg, strict=False)
+                tr, va, _ = prepare_data(cfg, strict=True)
 
                 # Cast to requested dtype
                 dtype_map = {
@@ -423,6 +416,13 @@ class MultiDatasetDM(pl.LightningDataModule):
         return self._mk_loader(self.train_dsets, shuffle=True)
 
     def val_dataloader(self):
-        """Create validation dataloader."""
-        return self._mk_loader(self.val_dsets, shuffle=False)
+        """Create validation dataloader.
+
+        Note: Validation data is shuffled to ensure all datasets are represented
+        proportionally when using limit_val_batches. This is important when training
+        on multiple datasets with different sizes - without shuffling, datasets that
+        appear later in the concatenated dataset may never be validated if
+        limit_val_batches is set to a small fraction.
+        """
+        return self._mk_loader(self.val_dsets, shuffle=True)
 
