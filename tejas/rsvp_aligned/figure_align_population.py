@@ -2066,6 +2066,12 @@ def population_plot_movie(
     x_scale = 1000 / 240 if not bins_x_axis else 1
     total_time = end_time_val - start_time_val
     
+    # Time values for x-axis (absolute bin positions, used for raster and eye traces)
+    if bins_x_axis:
+        t_vals = np.arange(start_time_val, end_time_val)
+    else:
+        t_vals = (np.arange(start_time_val, end_time_val) / 240) * 1000
+    
     # Cluster 0 trials first
     trial_number = 1
     psth_data = {0: [], 1: []}
@@ -2091,14 +2097,14 @@ def population_plot_movie(
                             mask = (cell_spikes >= t_start) & (cell_spikes < t_end)
                             filtered = cell_spikes[mask]
                             if filtered.size > 0:
-                                # Convert to bin coordinates relative to start
-                                bin_coords = (filtered - t_start) / dt
+                                # Convert to bin coordinates relative to start, then add offset for absolute position
+                                bin_coords = (filtered - t_start) / dt + start_time_val
                                 spike_x_raster.extend(bin_coords * x_scale)
                                 spike_y_raster.extend([current_row + cell_idx] * len(bin_coords))
             else:
-                # Use robs for spike positions
+                # Use robs for spike positions (add start_time_val offset for absolute position)
                 times, cells = np.where(spikes > 0)
-                spike_x_raster.extend(times * x_scale)
+                spike_x_raster.extend((times + start_time_val) * x_scale)
                 spike_y_raster.extend(current_row + cells)
             
             trial_info_raster.append((current_row + num_cells / 2, trial_number, 0))
@@ -2130,14 +2136,14 @@ def population_plot_movie(
                             mask = (cell_spikes >= t_start) & (cell_spikes < t_end)
                             filtered = cell_spikes[mask]
                             if filtered.size > 0:
-                                # Convert to bin coordinates relative to start
-                                bin_coords = (filtered - t_start) / dt
+                                # Convert to bin coordinates relative to start, then add offset for absolute position
+                                bin_coords = (filtered - t_start) / dt + start_time_val
                                 spike_x_raster.extend(bin_coords * x_scale)
                                 spike_y_raster.extend([current_row + cell_idx] * len(bin_coords))
             else:
-                # Use robs for spike positions
+                # Use robs for spike positions (add start_time_val offset for absolute position)
                 times, cells = np.where(spikes > 0)
-                spike_x_raster.extend(times * x_scale)
+                spike_x_raster.extend((times + start_time_val) * x_scale)
                 spike_y_raster.extend(current_row + cells)
             
             trial_info_raster.append((current_row + num_cells / 2, trial_number, 1))
@@ -2167,12 +2173,12 @@ def population_plot_movie(
         psth0_scaled = offset0 + psth_height - (psth0 / max_psth) * psth_height
         psth1_scaled = offset1 + psth_height - (psth1 / max_psth) * psth_height
         
-        x_vals = np.linspace(0, total_time * x_scale, len(psth0))
+        x_vals = np.linspace(t_vals[0], t_vals[-1], len(psth0))
         ax_raster.fill_between(x_vals, offset0 + psth_height, psth0_scaled, color='blue', alpha=0.5)
         ax_raster.fill_between(x_vals, offset1 + psth_height, psth1_scaled, color='red', alpha=0.5)
     
-    # Set raster axis limits and labels
-    ax_raster.set_xlim(0, total_time * x_scale)
+    # Set raster axis limits and labels (use same absolute coordinates as eye traces)
+    ax_raster.set_xlim(t_vals[0], t_vals[-1])
     ax_raster.set_ylim(total_rows, 0)
     ax_raster.set_xlabel('Time (bins)' if bins_x_axis else 'Time (ms)')
     ax_raster.set_ylabel('Trial number')
@@ -2191,12 +2197,6 @@ def population_plot_movie(
     # =========================================================================
     # Draw static eye trace plots on ax_eye_x and ax_eye_y
     # =========================================================================
-    
-    # Time values for x-axis
-    if bins_x_axis:
-        t_vals = np.arange(start_time_val, end_time_val)
-    else:
-        t_vals = (np.arange(start_time_val, end_time_val) / 240) * 1000
     
     # Plot ALL traces in gray first (background) if enabled
     if plot_all_traces:
@@ -2249,9 +2249,9 @@ def population_plot_movie(
     # Initialize movable elements for animation
     # =========================================================================
     
-    # Vertical lines for time marker
+    # Vertical lines for time marker (all use same absolute coordinates)
     vline_x_pos = t_vals[0]  # Initial position
-    vline_raster = ax_raster.axvline(x=0, color='red', linestyle='--', linewidth=1.5, zorder=10)
+    vline_raster = ax_raster.axvline(x=vline_x_pos, color='red', linestyle='--', linewidth=1.5, zorder=10)
     vline_eye_x = ax_eye_x.axvline(x=vline_x_pos, color='red', linestyle='--', linewidth=1.5, zorder=10)
     vline_eye_y = ax_eye_y.axvline(x=vline_x_pos, color='red', linestyle='--', linewidth=1.5, zorder=10)
     
@@ -2306,16 +2306,14 @@ def population_plot_movie(
         
         # Convert current bin to x-axis position
         if bins_x_axis:
-            x_pos_eyetrace = current_bin
-            x_pos_raster = frame  # Raster uses relative position
+            x_pos = current_bin  # Absolute bin position
         else:
-            x_pos_eyetrace = (current_bin / 240) * 1000
-            x_pos_raster = frame * x_scale
+            x_pos = (current_bin / 240) * 1000  # Absolute time in ms
         
-        # Update vertical lines
-        vline_raster.set_xdata([x_pos_raster, x_pos_raster])
-        vline_eye_x.set_xdata([x_pos_eyetrace, x_pos_eyetrace])
-        vline_eye_y.set_xdata([x_pos_eyetrace, x_pos_eyetrace])
+        # Update vertical lines (all use same absolute coordinates)
+        vline_raster.set_xdata([x_pos, x_pos])
+        vline_eye_x.set_xdata([x_pos, x_pos])
+        vline_eye_y.set_xdata([x_pos, x_pos])
         
         # Update image based on image_ids
         img_id = int(image_ids[reference_trial, current_bin])
