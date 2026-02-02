@@ -937,6 +937,8 @@ cids = data['cids']
 spike_times_trials = data['spike_times_trials']
 trial_t_bins = data['trial_t_bins']
 trial_time_windows = data['trial_time_windows']
+rsvp_images = data['rsvp_images']
+dataset = data['dataset']
     
 # good_trials = fix_dur > 20
 # assert good_trials.sum() == len(robs)
@@ -1047,7 +1049,9 @@ def plot_eyepos_clusters_NEW(
     plot_time_traces=False,
     bins_x_axis=False,
     use_peak_lag=True,
-    plot_all_traces = False
+    plot_all_traces = False,
+    vertical_line=None,  # Time bin index for vertical marker line
+    vertical_linewidth=1.5,  # Line width for vertical marker
 ):
    
     all_lags = []
@@ -1154,6 +1158,21 @@ def plot_eyepos_clusters_NEW(
                 ax.set_title(f'{start_time} to {end_time} bins')
             else:
                 ax.set_title(f'{round(start_time * 1/240 * 1000):.0f} to {round(end_time * 1/240 * 1000):.0f} ms')
+        
+        # Draw vertical marker line if specified (single-plot case)
+        if vertical_line is not None:
+            assert start_time <= vertical_line <= end_time, \
+                f"vertical_line ({vertical_line}) must be between start_time ({start_time}) and end_time ({end_time})"
+            if bins_x_axis:
+                vline_x = vertical_line  # Absolute bin value
+            else:
+                vline_x = vertical_line * (1000 / 240)  # Convert absolute bin to absolute ms
+            if plot_time_traces:
+                for ax_single in axes:
+                    ax_single.axvline(x=vline_x, color='red', linestyle='--', linewidth=vertical_linewidth, zorder=10)
+            else:
+                ax.axvline(x=vline_x, color='red', linestyle='--', linewidth=vertical_linewidth, zorder=10)
+        
         if show:
             plt.show()
         return (fig, axes) if plot_time_traces else (fig, ax)
@@ -1273,6 +1292,27 @@ def plot_eyepos_clusters_NEW(
         if plot_idx == 0 and not plot_time_traces:
             ax.set_ylabel('Y (degrees)')
     
+    # Draw vertical marker line if specified
+    if vertical_line is not None:
+        # Validate that vertical_line is within bounds
+        st_vals = np.atleast_1d(start_time)
+        et_vals = np.atleast_1d(end_time)
+        min_start = st_vals.min()
+        max_end = et_vals.max()
+        assert min_start <= vertical_line <= max_end, \
+            f"vertical_line ({vertical_line}) must be between start_time ({min_start}) and end_time ({max_end})"
+        
+        # Convert to x-axis units (bins or ms)
+        # Note: eyepos plots use ABSOLUTE time values on x-axis, not relative
+        if bins_x_axis:
+            vline_x = vertical_line  # Absolute bin value
+        else:
+            vline_x = vertical_line * (1000 / 240)  # Convert absolute bin to absolute ms
+        
+        # Draw on all axes
+        for ax in axes.ravel():
+            ax.axvline(x=vline_x, color='red', linestyle='--', linewidth=vertical_linewidth, zorder=10)
+    
     plt.subplots_adjust(wspace=0)
     if show:
         plt.show()
@@ -1343,10 +1383,19 @@ def _get_trial_spikes(trial_idx, robs, use_spike_times, spike_times_trials, tria
         vals: array of spike values (for alpha) or None if using spike_times
     """
     if use_spike_times and spike_times_trials is not None:
-        # Get time bounds from trial_t_bins
+        # Get time bounds from trial_t_bins (handle sparse NaN-padded arrays)
         t_bins = trial_t_bins[trial_idx]
-        t_start = t_bins[0] - dt/2   # left edge of first bin
-        t_end = t_bins[-1] + dt/2    # right edge of last bin
+        valid_mask = ~np.isnan(t_bins)
+        if not np.any(valid_mask):
+            # No valid time bins for this trial
+            return np.array([]), np.array([]), None
+        
+        valid_t_bins = t_bins[valid_mask]
+        valid_indices = np.where(valid_mask)[0]
+        first_valid_idx = valid_indices[0]  # Index offset for bin coordinates
+        
+        t_start = valid_t_bins[0] - dt/2   # left edge of first valid bin
+        t_end = valid_t_bins[-1] + dt/2    # right edge of last valid bin
         
         times_list = []
         cells_list = []
@@ -1359,7 +1408,8 @@ def _get_trial_spikes(trial_idx, robs, use_spike_times, spike_times_trials, tria
             filtered = cell_spikes[mask]
             if filtered.size > 0:
                 # Convert to fractional bin coordinates
-                bin_coords = (filtered - t_start) / dt
+                # Offset by first_valid_idx so coordinates align with slice position, not first valid bin
+                bin_coords = (filtered - t_start) / dt + first_valid_idx
                 times_list.append(bin_coords)
                 cells_list.append(np.full(filtered.size, cell_idx))
         
@@ -1373,11 +1423,11 @@ def _get_trial_spikes(trial_idx, robs, use_spike_times, spike_times_trials, tria
         vals = None  # No alpha variation for spike times
         
         # Verification: compare with robs
-        # Only count robs bins that correspond to valid time window (len(t_bins))
-        # This handles trials shorter than the slice window
-        n_valid_bins = len(t_bins)
-        robs_slice = robs[trial_idx, :n_valid_bins, :]
-        robs_sum = int(np.nansum(robs_slice))
+        # Only count robs bins that correspond to valid (non-NaN) time bins
+        # When window is expanded beyond fixation, only compare the valid region
+        n_valid_bins = len(valid_t_bins)
+        # Sum robs only at valid bin positions
+        robs_sum = int(np.nansum(robs[trial_idx, valid_indices, :]))
         
         if robs_sum != len(times):
             # Debug: check the time ranges
@@ -1389,8 +1439,9 @@ def _get_trial_spikes(trial_idx, robs, use_spike_times, spike_times_trials, tria
             all_spikes = np.array(all_spikes)
             
             print(f"MISMATCH trial {trial_idx}:")
-            print(f"  t_bins range: [{t_bins[0]:.6f}, {t_bins[-1]:.6f}]")
+            print(f"  valid t_bins range: [{valid_t_bins[0]:.6f}, {valid_t_bins[-1]:.6f}]")
             print(f"  filter window: [{t_start:.6f}, {t_end:.6f})")
+            print(f"  valid_indices: {first_valid_idx} to {valid_indices[-1]} ({n_valid_bins} bins)")
             print(f"  spike_times_trials has {len(all_spikes)} total spikes for this trial")
             if len(all_spikes) > 0:
                 print(f"  spike times range: [{all_spikes.min():.6f}, {all_spikes.max():.6f}]")
@@ -1495,6 +1546,8 @@ def plot_population_raster_NEW(
     trial_t_bins=None,
     dt=1/240,
     psth_bin_size=0.001,  # PSTH bin size in seconds (default 1ms) when using spike times
+    vertical_line=None,  # Time bin index for vertical marker line
+    vertical_linewidth=1.5,  # Line width for vertical marker
 ):
     # robs shape: [trials, time, cells]
     
@@ -1832,6 +1885,25 @@ def plot_population_raster_NEW(
         ax.set_xticks(tick_positions)
         ax.set_xticklabels([f"{start_time_val + val:g}" for val in tick_positions])
     
+    # Draw vertical marker line if specified
+    if vertical_line is not None:
+        # Validate that vertical_line is within bounds
+        st_vals = np.atleast_1d(start_time)
+        et_vals = np.atleast_1d(end_time)
+        min_start = st_vals.min()
+        max_end = et_vals.max()
+        assert min_start <= vertical_line <= max_end, \
+            f"vertical_line ({vertical_line}) must be between start_time ({min_start}) and end_time ({max_end})"
+        
+        # Convert to x-axis units (bins or ms)
+        if bins_x_axis:
+            vline_x = vertical_line - min_start  # Relative to start
+        else:
+            vline_x = (vertical_line - min_start) * (1000 / 240)  # Convert to ms
+        
+        # Draw vertical line spanning full height
+        ax.axvline(x=vline_x, color='red', linestyle='--', linewidth=vertical_linewidth, zorder=10)
+    
     ax.set_xlabel('Time (bins)' if bins_x_axis else 'Time (ms)')
     ax.set_ylabel('Trial number')
     plt.title(f'session {subject}_{date}')
@@ -1839,20 +1911,490 @@ def plot_population_raster_NEW(
         plt.show()
 
     return fig, ax, spike_x, spike_y, robs_clustered
+
+
+def population_plot_movie(
+    robs, eyepos, iix, clusters, start_time, end_time,
+    image_ids, rsvp_images, ppd,
+    # Optional parameters
+    trail_length=3,  # Number of bins of eye trajectory history
+    fps=10,
+    save_path=None,
+    show=True,
+    # Eye position parameters
+    show_unclustered_points=False,  # Whether to show unclustered trials (cluster < 0)
+    plot_all_traces=True,  # Whether to plot all trials as gray background traces
+    image_extent=1.0,  # Extent of image/eyepos display in degrees (radius from center)
+    # Pass-through parameters for existing functions
+    gap=20,
+    render="line",
+    dt=1/240,
+    use_spike_times=False,
+    spike_times_trials=None,
+    trial_t_bins=None,
+    show_psth=True,
+    bins_x_axis=True,
+    fig_width=16,
+    fig_height=20,
+    fig_dpi=150,
+    **kwargs
+):
+    """
+    Create an animated movie showing synchronized eye position trajectories,
+    RSVP images, eye traces, and raster plots with a moving time marker.
+    
+    Parameters
+    ----------
+    robs : np.ndarray
+        Spike data, shape [trials, time, cells]
+    eyepos : np.ndarray
+        Eye position data, shape [trials, time, 2] (X, Y in degrees)
+    iix : np.ndarray
+        Trial indices to include
+    clusters : np.ndarray
+        Cluster assignments for each trial in iix
+    start_time : int
+        Start time bin
+    end_time : int
+        End time bin
+    image_ids : np.ndarray
+        Image IDs per bin, shape [trials, time]. Values index into rsvp_images.
+    rsvp_images : np.ndarray
+        RSVP images, shape [num_images, H, W]
+    ppd : float
+        Pixels per degree for cropping images
+    trail_length : int
+        Number of bins of eye trajectory history to show
+    fps : int
+        Frames per second for animation
+    save_path : str, optional
+        Path to save the animation (e.g., 'movie.mp4')
+    show : bool
+        Whether to display the animation
+    show_unclustered_points : bool
+        Whether to show unclustered trials (cluster < 0). Default False.
+    plot_all_traces : bool
+        Whether to plot all trials as gray background traces. Default True.
+    image_extent : float
+        Extent of image/eyepos display in degrees (radius from center). Default 1.0.
+        Controls both the image cropping and the axis limits for the left panel.
+    gap : int
+        Gap between trials in raster plot
+    render : str
+        Render mode for raster ('line', 'scatter', 'img')
+    dt : float
+        Time bin size in seconds
+    use_spike_times : bool
+        Whether to use spike times for raster
+    spike_times_trials : list, optional
+        Spike times per trial
+    trial_t_bins : list, optional
+        Time bins per trial
+    show_psth : bool
+        Whether to show PSTH in raster plot
+    bins_x_axis : bool
+        Whether to use bins (True) or ms (False) for x-axis
+    
+    Returns
+    -------
+    anim : matplotlib.animation.FuncAnimation
+        The animation object
+    """
+    from matplotlib.animation import FuncAnimation
+    from matplotlib.gridspec import GridSpec
+    
+    # =========================================================================
+    # Setup Phase: Create figure and static elements
+    # =========================================================================
+    
+    # Create figure with GridSpec layout
+    fig = plt.figure(figsize=(fig_width, fig_height), dpi=fig_dpi)
+    gs = GridSpec(3, 2, figure=fig, width_ratios=[1, 1.5], height_ratios=[1, 1, 2],
+                  hspace=0.3, wspace=0.3)
+    
+    # Left: image + eye trajectories (spans all rows)
+    ax_image = fig.add_subplot(gs[:, 0])
+    # Right top: eye X trace
+    ax_eye_x = fig.add_subplot(gs[0, 1])
+    # Right middle: eye Y trace  
+    ax_eye_y = fig.add_subplot(gs[1, 1], sharex=ax_eye_x)
+    # Right bottom: raster plot
+    ax_raster = fig.add_subplot(gs[2, 1])
+    
+    # =========================================================================
+    # Prepare data
+    # =========================================================================
+    
+    # Handle single values for start_time/end_time
+    start_time_val = int(np.atleast_1d(start_time).ravel()[0])
+    end_time_val = int(np.atleast_1d(end_time).ravel()[-1])
+    n_frames = end_time_val - start_time_val
+    
+    # Get cluster colors (same as plot_eyepos_clusters_NEW)
+    if clusters is None:
+        num_trials = len(iix)
+        colors = plt.cm.coolwarm(np.linspace(0, 1, num_trials))
+    else:
+        clusters_arr = np.asarray(clusters)
+        num_clusters = len(set(clusters_arr[clusters_arr >= 0]))
+        cluster_colors = plt.cm.coolwarm(np.linspace(0, 1, max(num_clusters, 1)))
+        colors = [cluster_colors[c] if c >= 0 else (0.5, 0.5, 0.5, 0.3) for c in clusters_arr]
+    
+    # =========================================================================
+    # Draw static raster plot on ax_raster
+    # =========================================================================
+    
+    # Slice robs for the time window
+    robs_sliced = robs[:, start_time_val:end_time_val, :]
+    num_cells = robs_sliced.shape[2]
+    
+    # Collect spikes for plotting
+    spike_x_raster = []
+    spike_y_raster = []
+    current_row = 0
+    trial_info_raster = []
+    
+    # Compute row positions
+    max_cluster0_trials = np.sum(np.asarray(clusters) == 0) if clusters is not None else 0
+    max_cluster1_trials = np.sum(np.asarray(clusters) == 1) if clusters is not None else 0
+    
+    psth_height = num_cells * 0.8
+    psth_space = 2 * (psth_height + gap) if show_psth else 0
+    psth_row_start = max_cluster0_trials * (num_cells + gap)
+    
+    # X scale for converting bins to ms
+    x_scale = 1000 / 240 if not bins_x_axis else 1
+    total_time = end_time_val - start_time_val
+    
+    # Cluster 0 trials first
+    trial_number = 1
+    psth_data = {0: [], 1: []}
+    
+    for i, trial_idx in enumerate(iix):
+        cluster_id = clusters[i] if clusters is not None else 0
+        if cluster_id == 0:
+            spikes = robs_sliced[trial_idx, :, :]  # [time, cells]
+            psth_data[0].append(np.nansum(spikes, axis=1))
+            
+            if use_spike_times and spike_times_trials is not None and trial_t_bins is not None:
+                # Use spike times for more precise plotting
+                t_bins = trial_t_bins[trial_idx]
+                valid_mask = ~np.isnan(t_bins)
+                if np.any(valid_mask):
+                    valid_t_bins = t_bins[valid_mask]
+                    t_start = valid_t_bins[0] - dt/2
+                    t_end = valid_t_bins[-1] + dt/2
+                    
+                    for cell_idx in range(num_cells):
+                        cell_spikes = np.atleast_1d(np.asarray(spike_times_trials[trial_idx][cell_idx]))
+                        if cell_spikes.size > 0:
+                            mask = (cell_spikes >= t_start) & (cell_spikes < t_end)
+                            filtered = cell_spikes[mask]
+                            if filtered.size > 0:
+                                # Convert to bin coordinates relative to start
+                                bin_coords = (filtered - t_start) / dt
+                                spike_x_raster.extend(bin_coords * x_scale)
+                                spike_y_raster.extend([current_row + cell_idx] * len(bin_coords))
+            else:
+                # Use robs for spike positions
+                times, cells = np.where(spikes > 0)
+                spike_x_raster.extend(times * x_scale)
+                spike_y_raster.extend(current_row + cells)
+            
+            trial_info_raster.append((current_row + num_cells / 2, trial_number, 0))
+            current_row += num_cells + gap
+            trial_number += 1
+    
+    # Set cluster 1 start position
+    current_row = psth_row_start + psth_space
+    
+    # Cluster 1 trials
+    for i, trial_idx in enumerate(iix):
+        cluster_id = clusters[i] if clusters is not None else 1
+        if cluster_id == 1:
+            spikes = robs_sliced[trial_idx, :, :]
+            psth_data[1].append(np.nansum(spikes, axis=1))
+            
+            if use_spike_times and spike_times_trials is not None and trial_t_bins is not None:
+                # Use spike times for more precise plotting
+                t_bins = trial_t_bins[trial_idx]
+                valid_mask = ~np.isnan(t_bins)
+                if np.any(valid_mask):
+                    valid_t_bins = t_bins[valid_mask]
+                    t_start = valid_t_bins[0] - dt/2
+                    t_end = valid_t_bins[-1] + dt/2
+                    
+                    for cell_idx in range(num_cells):
+                        cell_spikes = np.atleast_1d(np.asarray(spike_times_trials[trial_idx][cell_idx]))
+                        if cell_spikes.size > 0:
+                            mask = (cell_spikes >= t_start) & (cell_spikes < t_end)
+                            filtered = cell_spikes[mask]
+                            if filtered.size > 0:
+                                # Convert to bin coordinates relative to start
+                                bin_coords = (filtered - t_start) / dt
+                                spike_x_raster.extend(bin_coords * x_scale)
+                                spike_y_raster.extend([current_row + cell_idx] * len(bin_coords))
+            else:
+                # Use robs for spike positions
+                times, cells = np.where(spikes > 0)
+                spike_x_raster.extend(times * x_scale)
+                spike_y_raster.extend(current_row + cells)
+            
+            trial_info_raster.append((current_row + num_cells / 2, trial_number, 1))
+            current_row += num_cells + gap
+            trial_number += 1
+    
+    total_rows = psth_row_start + psth_space + max_cluster1_trials * (num_cells + gap) - gap
+    
+    # Plot spikes on raster
+    if render == "line":
+        spike_x_arr = np.asarray(spike_x_raster)
+        plot_spikes_as_lines(ax_raster, spike_x_arr, spike_y_raster, height=0.1, 
+                            color='k', linewidth=2.8, alpha=1.0)
+    else:
+        spike_x_plot = np.asarray(spike_x_raster)
+        ax_raster.scatter(spike_x_plot, spike_y_raster, s=0.6, c='black', marker='|', linewidths=2)
+    
+    # Plot PSTHs if enabled
+    if show_psth and psth_row_start is not None:
+        psth0 = np.nanmean(psth_data[0], axis=0) if psth_data[0] else np.zeros(total_time)
+        psth1 = np.nanmean(psth_data[1], axis=0) if psth_data[1] else np.zeros(total_time)
+        max_psth = max(np.nanmax(psth0), np.nanmax(psth1)) + 1e-10
+        
+        offset0 = psth_row_start
+        offset1 = psth_row_start + (psth_height + gap)
+        
+        psth0_scaled = offset0 + psth_height - (psth0 / max_psth) * psth_height
+        psth1_scaled = offset1 + psth_height - (psth1 / max_psth) * psth_height
+        
+        x_vals = np.linspace(0, total_time * x_scale, len(psth0))
+        ax_raster.fill_between(x_vals, offset0 + psth_height, psth0_scaled, color='blue', alpha=0.5)
+        ax_raster.fill_between(x_vals, offset1 + psth_height, psth1_scaled, color='red', alpha=0.5)
+    
+    # Set raster axis limits and labels
+    ax_raster.set_xlim(0, total_time * x_scale)
+    ax_raster.set_ylim(total_rows, 0)
+    ax_raster.set_xlabel('Time (bins)' if bins_x_axis else 'Time (ms)')
+    ax_raster.set_ylabel('Trial number')
+    
+    # Y-axis ticks
+    tick_positions = [info[0] for info in trial_info_raster]
+    tick_labels = [str(info[1]) for info in trial_info_raster]
+    ax_raster.set_yticks(tick_positions)
+    ax_raster.set_yticklabels(tick_labels)
+    
+    # Color tick labels by cluster
+    cluster_colors_map = {0: 'blue', 1: 'red'}
+    for tick_label, info in zip(ax_raster.get_yticklabels(), trial_info_raster):
+        tick_label.set_color(cluster_colors_map[info[2]])
+    
+    # =========================================================================
+    # Draw static eye trace plots on ax_eye_x and ax_eye_y
+    # =========================================================================
+    
+    # Time values for x-axis
+    if bins_x_axis:
+        t_vals = np.arange(start_time_val, end_time_val)
+    else:
+        t_vals = (np.arange(start_time_val, end_time_val) / 240) * 1000
+    
+    # Plot ALL traces in gray first (background) if enabled
+    if plot_all_traces:
+        for trial_i in range(eyepos.shape[0]):
+            if trial_i in iix:
+                continue  # Skip trials that will be plotted in color
+            eye_x_bg = eyepos[trial_i, start_time_val:end_time_val, 0]
+            eye_y_bg = eyepos[trial_i, start_time_val:end_time_val, 1]
+            valid_mask = ~(np.isnan(eye_x_bg) | np.isnan(eye_y_bg))
+            if valid_mask.sum() > 0:
+                ax_eye_x.plot(t_vals[valid_mask], eye_x_bg[valid_mask], color="gray", alpha=0.2, linewidth=0.5)
+                ax_eye_y.plot(t_vals[valid_mask], eye_y_bg[valid_mask], color="gray", alpha=0.2, linewidth=0.5)
+    
+    # Plot eye traces for each trial (clustered only if show_unclustered_points=False)
+    for i, trial_idx in enumerate(iix):
+        # Skip unclustered points if show_unclustered_points=False
+        if clusters is not None and not show_unclustered_points and clusters_arr[i] < 0:
+            continue
+        color = colors[i]
+        eye_x = eyepos[trial_idx, start_time_val:end_time_val, 0]
+        eye_y = eyepos[trial_idx, start_time_val:end_time_val, 1]
+        ax_eye_x.plot(t_vals, eye_x, color=color, alpha=0.7, linewidth=0.7)
+        ax_eye_y.plot(t_vals, eye_y, color=color, alpha=0.7, linewidth=0.7)
+    
+    # Set eye trace axis labels and limits
+    ax_eye_x.set_ylabel('X (degrees)')
+    ax_eye_y.set_ylabel('Y (degrees)')
+    ax_eye_y.set_xlabel('Time (bins)' if bins_x_axis else 'Time (ms)')
+    ax_eye_x.set_ylim(-1, 1)
+    ax_eye_y.set_ylim(-1, 1)
+    ax_eye_x.set_xlim(t_vals[0], t_vals[-1])
+    plt.setp(ax_eye_x.get_xticklabels(), visible=False)
+    
+    # =========================================================================
+    # Crop images to central 1 degree radius (2 degree diameter)
+    # =========================================================================
+    
+    window_size_pixels = int(2 * image_extent * ppd)  # image_extent radius = 2*image_extent diameter
+    img_h, img_w = rsvp_images.shape[1], rsvp_images.shape[2]
+    cx, cy = img_h // 2, img_w // 2
+    half = window_size_pixels // 2
+    
+    # Crop all images
+    rsvp_images_cropped = rsvp_images[:, cx-half:cx+half, cy-half:cy+half]
+    
+    # Create a blank/gray image for when no image is shown (image_id = -1)
+    blank_image = np.full((window_size_pixels, window_size_pixels), 127, dtype=np.float32)
+    
+    # =========================================================================
+    # Initialize movable elements for animation
+    # =========================================================================
+    
+    # Vertical lines for time marker
+    vline_x_pos = t_vals[0]  # Initial position
+    vline_raster = ax_raster.axvline(x=0, color='red', linestyle='--', linewidth=1.5, zorder=10)
+    vline_eye_x = ax_eye_x.axvline(x=vline_x_pos, color='red', linestyle='--', linewidth=1.5, zorder=10)
+    vline_eye_y = ax_eye_y.axvline(x=vline_x_pos, color='red', linestyle='--', linewidth=1.5, zorder=10)
+    
+    # Image display on ax_image
+    # Use first valid image or blank as initial
+    initial_img_id = int(image_ids[iix[0], start_time_val]) if image_ids[iix[0], start_time_val] >= 0 else -1
+    img_extent = [-image_extent, image_extent, -image_extent, image_extent]
+    if initial_img_id >= 0:
+        im_display = ax_image.imshow(rsvp_images_cropped[initial_img_id], cmap='gray', 
+                                      extent=img_extent, aspect='equal')
+    else:
+        im_display = ax_image.imshow(blank_image, cmap='gray', 
+                                      extent=img_extent, aspect='equal')
+    
+    ax_image.set_xlabel('X (degrees)')
+    ax_image.set_ylabel('Y (degrees)')
+    ax_image.set_title('Eye Position on Image')
+    
+    # Eye trajectory trails on image (one line per trial + current position marker)
+    # Only create trails for clustered trials if show_unclustered_points=False
+    eye_trails = []
+    eye_markers = []
+    active_trial_indices = []  # Track which trials have active trails
+    for i, trial_idx in enumerate(iix):
+        # Skip unclustered points if show_unclustered_points=False
+        if clusters is not None and not show_unclustered_points and clusters_arr[i] < 0:
+            continue
+        active_trial_indices.append((i, trial_idx))
+        color = colors[i]
+        # Trail line
+        trail_line, = ax_image.plot([], [], color=color, linewidth=1.0, alpha=0.8)
+        eye_trails.append(trail_line)
+        # Current position marker
+        marker, = ax_image.plot([], [], 'o', color=color, markersize=6, 
+                                markeredgecolor='white', markeredgewidth=0.5)
+        eye_markers.append(marker)
+    
+    # Set image axis limits to match image_extent
+    ax_image.set_xlim(-image_extent, image_extent)
+    ax_image.set_ylim(-image_extent, image_extent)
+    
+    # =========================================================================
+    # Animation update function
+    # =========================================================================
+    
+    # Reference trial for image_ids (use first trial)
+    reference_trial = iix[0]
+    
+    def update(frame):
+        """Update function for animation - called for each frame."""
+        current_bin = start_time_val + frame
+        
+        # Convert current bin to x-axis position
+        if bins_x_axis:
+            x_pos_eyetrace = current_bin
+            x_pos_raster = frame  # Raster uses relative position
+        else:
+            x_pos_eyetrace = (current_bin / 240) * 1000
+            x_pos_raster = frame * x_scale
+        
+        # Update vertical lines
+        vline_raster.set_xdata([x_pos_raster, x_pos_raster])
+        vline_eye_x.set_xdata([x_pos_eyetrace, x_pos_eyetrace])
+        vline_eye_y.set_xdata([x_pos_eyetrace, x_pos_eyetrace])
+        
+        # Update image based on image_ids
+        img_id = int(image_ids[reference_trial, current_bin])
+        if img_id >= 0 and img_id < len(rsvp_images_cropped):
+            im_display.set_array(rsvp_images_cropped[img_id])
+        else:
+            im_display.set_array(blank_image)
+        
+        # Update eye trajectories (trailing history)
+        trail_start = max(start_time_val, current_bin - trail_length)
+        
+        artists_to_return = [vline_raster, vline_eye_x, vline_eye_y, im_display]
+        
+        # Only update trails for active (clustered) trials
+        for trail_idx, (i, trial_idx) in enumerate(active_trial_indices):
+            # Get trail data
+            trail_x = eyepos[trial_idx, trail_start:current_bin+1, 0]
+            trail_y = eyepos[trial_idx, trail_start:current_bin+1, 1]
+            
+            # Filter out NaN values for valid trail
+            valid_mask = ~(np.isnan(trail_x) | np.isnan(trail_y))
+            trail_x_valid = trail_x[valid_mask]
+            trail_y_valid = trail_y[valid_mask]
+            
+            # Update trail line
+            eye_trails[trail_idx].set_data(trail_x_valid, trail_y_valid)
+            
+            # Update current position marker (last valid point)
+            if len(trail_x_valid) > 0:
+                eye_markers[trail_idx].set_data([trail_x_valid[-1]], [trail_y_valid[-1]])
+            else:
+                eye_markers[trail_idx].set_data([], [])
+            
+            artists_to_return.extend([eye_trails[trail_idx], eye_markers[trail_idx]])
+        
+        return artists_to_return
+    
+    # =========================================================================
+    # Create and run animation
+    # =========================================================================
+    
+    anim = FuncAnimation(fig, update, frames=n_frames, interval=1000/fps, blit=True)
+    
+    plt.tight_layout()
+    
+    if save_path:
+        print(f"Saving animation to {save_path}...")
+        # Create progress bar for saving
+        pbar = tqdm(total=n_frames, desc="Rendering frames", unit="frame")
+        
+        def progress_callback(current_frame, total_frames):
+            pbar.update(1)
+        
+        anim.save(save_path, writer='ffmpeg', fps=fps, dpi=fig_dpi, 
+                  progress_callback=progress_callback)
+        pbar.close()
+        print("Done saving.")
+    
+    if show:
+        plt.show()
+    
+    return anim, fig
+
+
 for j in range(return_top_k_combos)[1:2]:
     splice_start = 0
     splice_end = 1
     splice = slice(splice_start, splice_end)
     new_start_time_list = start_time_list[splice] - 30 #+6
     new_end_time_list = end_time_list[splice] + 30 #-2
-    use_bins_x_axis = False
+    use_bins_x_axis = True
     new_robs_list = []
+    vertical_line_pos = 40
     for i in range(splice_start, splice_end):
         new_robs_list.append(robs[:, new_start_time_list[i - splice_start]:new_end_time_list[i - splice_start], :])
     # fig1, ax1 = plot_eyepos_clusters(eyepos, iix_list[j][splice], start_time_list[splice], end_time_list[splice], clusters=clusters_list[j][splice], show=show, show_unclustered_points=False, plot_time_traces=True, bins_x_axis=False, use_peak_lag=False)
     fig1, ax1 = plot_eyepos_clusters_NEW(eyepos, iix_list[j][splice], new_start_time_list, new_end_time_list, clusters=clusters_list[j][splice], 
-    show=show, show_unclustered_points=True, 
-    plot_time_traces=False, bins_x_axis=use_bins_x_axis, use_peak_lag=False, plot_all_traces=True)
+    show=show, show_unclustered_points=False, 
+    plot_time_traces=True, bins_x_axis=use_bins_x_axis, use_peak_lag=False, plot_all_traces=True, vertical_line=vertical_line_pos, vertical_linewidth=3)
     # fig1.savefig(f"population_eyepos.pdf", dpi=1200, bbox_inches="tight")
     plt.show()
     plt.close(fig1)
@@ -1860,10 +2402,6 @@ for j in range(return_top_k_combos)[1:2]:
     # fig1, ax1 = plot_eyepos_clusters_NEW(eyepos, iix_list[j][splice], new_start_time_list, new_end_time_list, clusters=clusters_list[j][splice], show=show, show_unclustered_points=False, plot_time_traces=False, bins_x_axis=use_bins_x_axis, use_peak_lag=False)
     # plt.show()
     # plt.close(fig1)
-
-    #only keep 3 from each cluster
-    # clusters_list[j][splice][clusters_list[j][splice] == 0] = 0
-    # np.where
 
     cluster_list_new = [clusters_list[j][splice][0].copy()]
     counter0 = 0
@@ -1878,35 +2416,64 @@ for j in range(return_top_k_combos)[1:2]:
             if counter1 > 5:
                 cluster_list_new[0][i] = -1
     
-    # Create time-sliced trial_t_bins to match robs_list
+    # # Create time-sliced trial_t_bins to match robs_list
+    # trial_t_bins_sliced = []
+    # for i in range(splice_start, splice_end):
+    #     start = start_time_list[i]
+    #     end = end_time_list[i]
+    #     # Slice trial_t_bins for each trial to match the time window
+    #     sliced_t_bins = [trial_t_bins[trial_idx][start:end] for trial_idx in range(len(trial_t_bins))]
+    #     trial_t_bins_sliced.append(sliced_t_bins)
+    
+    # # fig2, ax2, spike_x, spike_y, robs_clustered = plot_population_raster_NEW(robs_list[splice], iix_list[j][splice], cluster_list_new, start_time_list[splice], end_time_list[splice], 
+    # # show_psth = True, show_difference_psth = False, show=show, render = "line",
+    # # bins_x_axis=False)
+    # fig2, ax2, spike_x, spike_y, robs_clustered = plot_population_raster_NEW(
+    #     robs_list[splice], 
+    #     iix_list[j][splice], 
+    #     cluster_list_new, 
+    #     start_time_list[splice], 
+    #     end_time_list[splice], 
+    #     show_psth=True, 
+    #     show_difference_psth=False, 
+    #     show=show, 
+    #     render="line",
+    #     bins_x_axis=False,
+    #     # Spike times parameters
+    #     use_spike_times=True,
+    #     spike_times_trials=spike_times_trials,  # Full spike times (same trial indexing as robs)
+    #     trial_t_bins=trial_t_bins_sliced,       # Time-sliced to match robs_list
+    #     dt=1/240,
+    # )
+
     trial_t_bins_sliced = []
     for i in range(splice_start, splice_end):
-        start = start_time_list[i]
-        end = end_time_list[i]
+        start = new_start_time_list[i]
+        end = new_end_time_list[i]
         # Slice trial_t_bins for each trial to match the time window
         sliced_t_bins = [trial_t_bins[trial_idx][start:end] for trial_idx in range(len(trial_t_bins))]
         trial_t_bins_sliced.append(sliced_t_bins)
-    
-    # fig2, ax2, spike_x, spike_y, robs_clustered = plot_population_raster_NEW(robs_list[splice], iix_list[j][splice], cluster_list_new, start_time_list[splice], end_time_list[splice], 
-    # show_psth = True, show_difference_psth = False, show=show, render = "line",
-    # bins_x_axis=False)
-    # Call with spike times:
+
     fig2, ax2, spike_x, spike_y, robs_clustered = plot_population_raster_NEW(
-        robs_list[splice], 
+        new_robs_list[splice], 
         iix_list[j][splice], 
         cluster_list_new, 
-        start_time_list[splice], 
-        end_time_list[splice], 
+        new_start_time_list, 
+        new_end_time_list, 
         show_psth=True, 
         show_difference_psth=False, 
         show=show, 
         render="line",
-        bins_x_axis=False,
+        bins_x_axis=use_bins_x_axis,
         # Spike times parameters
         use_spike_times=True,
         spike_times_trials=spike_times_trials,  # Full spike times (same trial indexing as robs)
         trial_t_bins=trial_t_bins_sliced,       # Time-sliced to match robs_list
         dt=1/240,
+        fig_width=10,
+        fig_height=10,
+        vertical_line=vertical_line_pos,
+        vertical_linewidth=3,
     )
     # fig2, ax2, spike_x, spike_y = plot_population_raster(new_robs_list[splice], iix_list[j][splice], clusters_list[j][splice], new_start_time_list, new_end_time_list, 
     # show_psth = True, show_difference_psth = False, show=show, render = "img", fig_width = 5, fig_height = 40, fig_dpi = 400, gap= 50,
@@ -1914,6 +2481,38 @@ for j in range(return_top_k_combos)[1:2]:
     fig2.savefig(f"population_raster2.pdf", dpi=400, bbox_inches="tight")
     plt.show()
     plt.close(fig2)
+    
+    # Example: Create animated movie
+    # Get ppd from dataset metadata: ppd = dataset.dsets[0].metadata['ppd']
+    ppd = dataset.dsets[0].metadata['ppd']  # pixels per degree (adjust based on your dataset)
+    anim, fig_movie = population_plot_movie(
+        robs=robs,
+        eyepos=eyepos,
+        iix=iix_list[j][splice][0],
+        clusters=cluster_list_new[0],
+        start_time=new_start_time_list[0],
+        end_time=new_end_time_list[0],
+        image_ids=image_ids,
+        rsvp_images=rsvp_images,
+        ppd=ppd,
+        trail_length=5,  # Number of bins of eye trajectory history
+        fps=10,
+        save_path='population_movie.mp4',
+        show=False,
+        # Eye position parameters
+        show_unclustered_points=False,  # Only show clustered trials
+        plot_all_traces=True,  # Show all trials as gray background
+        image_extent=0.8,  # Extent in degrees (radius from center)
+        # Spike times parameters (same as plot_population_raster_NEW)
+        use_spike_times=True,
+        spike_times_trials=spike_times_trials,
+        trial_t_bins=trial_t_bins_sliced[0],  # Use sliced t_bins for the time window
+        dt=1/240,
+        show_psth=True,
+        bins_x_axis=use_bins_x_axis,
+        render="line",
+    )
+    plt.close(fig_movie)
 #%%
 def plot_spikes_as_lines(ax, spike_x, spike_y, spike_vals=None, height=1.0, color="k", linewidth=0.5, alpha=1.0):
     """

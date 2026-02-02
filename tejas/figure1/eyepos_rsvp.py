@@ -21,85 +21,48 @@ mpl.rcParams['pdf.compression'] = 0
 mpl.rcParams['image.interpolation'] = 'none'
 mpl.rcParams['image.resample'] = False
 import contextlib
+from tejas.rsvp_util import get_fixrsvp_data
 #%%
-subject = "Allen"
-date = "2022-03-02"
-dataset_configs_path = '/home/tejas/VisionCore/experiments/dataset_configs/multi_basic_240_rsvp.yaml'
-dataset_configs = load_dataset_configs(dataset_configs_path)
-
-# date = "2022-03-04"
 # subject = "Allen"
-dataset_idx = next(i for i, cfg in enumerate(dataset_configs) if cfg['session'] == f"{subject}_{date}")
+# date = "2022-03-02"
+# dataset_configs_path = '/home/tejas/VisionCore/experiments/dataset_configs/multi_basic_240_rsvp.yaml'
 
-with open(os.devnull, "w") as devnull, contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
-    train_dset, val_dset, dataset_config = prepare_data(dataset_configs[dataset_idx], strict=False)
+# data = get_fixrsvp_data(subject, date, dataset_configs_path, 
+# use_cached_data=True, 
+# salvageable_mismatch_time_threshold=25, verbose=False)
 
-
-
-sess = train_dset.dsets[0].metadata['sess']
-# ppd = train_data.dsets[0].metadata['ppd']
-cids = dataset_config['cids']
-print(f"Running on {sess.name}")
-
-# get fixrsvp inds and make one dataaset object
-inds = torch.concatenate([
-        train_dset.get_dataset_inds('fixrsvp'),
-        val_dset.get_dataset_inds('fixrsvp')
-    ], dim=0)
-
-dataset = train_dset.shallow_copy()
-dataset.inds = inds
-
-# Getting key variables
-dset_idx = inds[:,0].unique().item()
-trial_inds = dataset.dsets[dset_idx].covariates['trial_inds'].numpy()
-trials = np.unique(trial_inds)
-
-NC = dataset.dsets[dset_idx]['robs'].shape[1]
-T = np.max(dataset.dsets[dset_idx].covariates['psth_inds'][:].numpy()).item() + 1
-NT = len(trials)
-
-fixation = np.hypot(dataset.dsets[dset_idx]['eyepos'][:,0].numpy(), dataset.dsets[dset_idx]['eyepos'][:,1].numpy()) < 1
-
-# Loop over trials and align responses
-robs = np.nan*np.zeros((NT, T, NC))
-dfs = np.nan*np.zeros((NT, T, NC))
-eyepos = np.nan*np.zeros((NT, T, 2))
-fix_dur =np.nan*np.zeros((NT,))
-
-for itrial in tqdm(range(NT)):
-    # print(f"Trial {itrial}/{NT}")
-    ix = trials[itrial] == trial_inds
-    ix = ix & fixation
-    if np.sum(ix) == 0:
-        continue
+# robs = data['robs']
+# dfs = data['dfs']
+# eyepos = data['eyepos']
+# fix_dur = data['fix_dur']
+# image_ids = data['image_ids']
+# cids = data['cids']
     
-    stim_inds = np.where(ix)[0]
-    # stim_inds = stim_inds[:,None] - np.array(dataset_config['keys_lags']['stim'])[None,:]
 
+# ind = np.argsort(fix_dur)[::-1]
+# plt.subplot(1,2,1)
+# plt.imshow(eyepos[ind,:,0])
+# plt.xlim(0, 160)
+# plt.subplot(1,2,2)
+# plt.imshow(np.nanmean(robs,2)[ind])
+# plt.xlim(0, 160)
+all_eyepos = []
+dataset_configs_path = '/home/tejas/VisionCore/experiments/dataset_configs/multi_basic_240_rsvp.yaml'
+for session in get_complete_sessions():
+    print(session.name)
+    subject = session.name.split('_')[0]
+    date = session.name.split('_')[1]
+    try:
+        data = get_fixrsvp_data(subject, date, dataset_configs_path, 
+        use_cached_data=True, 
+        salvageable_mismatch_time_threshold=25, verbose=False)
+        all_eyepos.append(data['eyepos'])
+    except ValueError as e:
+        print(f"{e}")
+        continue
 
-    psth_inds = dataset.dsets[dset_idx].covariates['psth_inds'][ix].numpy()
-    fix_dur[itrial] = len(psth_inds)
-    robs[itrial][psth_inds] = dataset.dsets[dset_idx]['robs'][ix].numpy()
-    dfs[itrial][psth_inds] = dataset.dsets[dset_idx]['dfs'][ix].numpy()
-    eyepos[itrial][psth_inds] = dataset.dsets[dset_idx]['eyepos'][ix].numpy()
-
-
-good_trials = fix_dur > 20
-robs = robs[good_trials]
-dfs = dfs[good_trials]
-eyepos = eyepos[good_trials]
-fix_dur = fix_dur[good_trials]
-
-
-ind = np.argsort(fix_dur)[::-1]
-plt.subplot(1,2,1)
-plt.imshow(eyepos[ind,:,0])
-plt.xlim(0, 160)
-plt.subplot(1,2,2)
-plt.imshow(np.nanmean(robs,2)[ind])
-plt.xlim(0, 160)
-#%%
+all_eyepos = [eyepos.reshape(-1, 2) for eyepos in all_eyepos ]
+eyepos = np.concatenate(all_eyepos, axis=0)
 
 #%% Eye position density plot (contours + crosshair + fixation circle)
 # Flatten eye positions across trials/time, dropping NaNs

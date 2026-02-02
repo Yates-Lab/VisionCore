@@ -24,7 +24,7 @@ if HOSTNAME == "solo":
 elif HOSTNAME == "yoru":
     DATA_DIR = Path("/mnt/sata/YatesMarmoV1/")
 #%%
-def get_dataset_from_config(subject, date, dataset_configs_path):
+def get_dataset_from_config(subject, date, dataset_configs_path, dataset_type='fixrsvp'):
     """
     Build a single dataset containing only fixrsvp trials from train and val splits.
 
@@ -47,14 +47,18 @@ def get_dataset_from_config(subject, date, dataset_configs_path):
     # Load config and locate this session
     # =========================================================================
     dataset_configs = load_dataset_configs(dataset_configs_path)
-    dataset_idx = next(i for i, cfg in enumerate(dataset_configs) if cfg['session'] == f"{subject}_{date}")
-
+    try:
+        dataset_idx = next(i for i, cfg in enumerate(dataset_configs) if cfg['session'] == f"{subject}_{date}")
+    except Exception as e:
+        raise ValueError(f"config not found for {subject}_{date}")
     # =========================================================================
     # Prepare train/val datasets (suppress prepare_data stdout/stderr)
     # =========================================================================
     with open(os.devnull, "w") as devnull, contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
-        train_dset, val_dset, dataset_config = prepare_data(dataset_configs[dataset_idx], strict=False)
-
+        try:
+            train_dset, val_dset, dataset_config = prepare_data(dataset_configs[dataset_idx], strict=False)
+        except Exception as e:
+            raise ValueError(f"{dataset_type} dataset not found for {subject}_{date}")
     sess = train_dset.dsets[0].metadata['sess']
     cids = dataset_config['cids']
 
@@ -63,8 +67,8 @@ def get_dataset_from_config(subject, date, dataset_configs_path):
     # =========================================================================
     # Concatenate fixrsvp indices from train and val so we have one unified index set.
     inds = torch.concatenate([
-        train_dset.get_dataset_inds('fixrsvp'),
-        val_dset.get_dataset_inds('fixrsvp')
+        train_dset.get_dataset_inds(dataset_type),
+        val_dset.get_dataset_inds(dataset_type)
     ], dim=0)
 
     dataset = train_dset.shallow_copy()
@@ -313,18 +317,9 @@ def _filter_spike_times_by_valid_psth_inds(spike_times_trial, trial_t_bins_trial
     
     return filtered_spike_times, filtered_t_bins
 
+def get_image_ids_reference(image_ids, start_ind_trial = 0, verbose=False):
 
-def align_image_ids(robs, dfs, eyepos, fix_dur, image_ids, salvageable_mismatch_time_threshold=25, verbose=True,
-                    spike_times_trials=None, trial_time_windows=None, trial_t_bins=None, dt=1/240):
-    """
-    Align image IDs across trials by truncating, shifting, or removing trials.
-    
-    If spike_times_trials, trial_time_windows, trial_t_bins are provided,
-    they will also be modified to stay in sync with robs.
-    """
-    reference_trial_ind = None
-    image_ids_reference = None
-    for i in range(len(image_ids)):
+    for i in range(start_ind_trial, len(image_ids)):
         if (image_ids[i, :200] != -1).all():
             image_ids_reference = image_ids[i]
             reference_trial_ind = i
@@ -347,8 +342,22 @@ def align_image_ids(robs, dfs, eyepos, fix_dur, image_ids, salvageable_mismatch_
                     print(f'trial {trial_ind} does not match')
                 unmatched_trials_and_start_time_ind_of_mismatch[trial_ind] = start_time_ind_of_mismatch
                 break
+    if len(unmatched_trials_and_start_time_ind_of_mismatch) >= 5:
+        return get_image_ids_reference(image_ids, start_ind_trial + 1, verbose)
+    return reference_trial_ind, image_ids_reference, unmatched_trials_and_start_time_ind_of_mismatch
+def align_image_ids(robs, dfs, eyepos, fix_dur, image_ids, salvageable_mismatch_time_threshold=25, verbose=True,
+                    spike_times_trials=None, trial_time_windows=None, trial_t_bins=None, dt=1/240):
+    """
+    Align image IDs across trials by truncating, shifting, or removing trials.
     
-    assert len(unmatched_trials_and_start_time_ind_of_mismatch) < 5, f"More than 5 trials have mismatched image ids"
+    If spike_times_trials, trial_time_windows, trial_t_bins are provided,
+    they will also be modified to stay in sync with robs.
+    """
+    # reference_trial_ind = None
+    # image_ids_reference = None
+    
+    reference_trial_ind, image_ids_reference, unmatched_trials_and_start_time_ind_of_mismatch = get_image_ids_reference(image_ids, verbose)
+    assert len(unmatched_trials_and_start_time_ind_of_mismatch) < 5, f"{len(unmatched_trials_and_start_time_ind_of_mismatch)} trials have mismatched image ids, out of {len(image_ids)} trials"
     trials_to_remove = []
 
     def find_shift_to_match(image_ids_reference, image_ids_trial):
@@ -844,6 +853,7 @@ def get_fixrsvp_data(subject, date, dataset_configs_path,
         'spike_times_trials': spike_times_trials,
         'trial_time_windows': trial_time_windows,
         'trial_t_bins': trial_t_bins,
+        'dataset': dataset,
     }
 #%%
 # subject = 'Allen'
