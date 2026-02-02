@@ -234,72 +234,76 @@ def collate_fixrsvp_data(dataset, dset_idx, fixation_degree_radius):
 
 def _get_psth_inds_for_trial(trial_t_bins_trial, trial_time_windows_trial, dt=1/240):
     """
-    Compute the psth_ind for each fixation bin center in a trial.
+    Get the psth_inds (bin indices) for fixation bins in a trial.
     
-    Returns array of psth_inds corresponding to each entry in trial_t_bins_trial.
+    With sparse indexing, trial_t_bins_trial[i] = time center for bin i (NaN if not fixation).
+    So the psth_inds are simply the indices where values are not NaN.
+    
+    Returns array of psth_inds that have valid (non-NaN) time centers.
     """
-    t_start, t_end = trial_time_windows_trial
-    if np.isnan(t_start) or np.isnan(t_end) or len(trial_t_bins_trial) == 0:
-        return np.array([])
+    if len(trial_t_bins_trial) == 0:
+        return np.array([], dtype=int)
     
-    # Reconstruct bin edges and centers
-    trial_bin_edges = np.arange(t_start, t_end + dt/2, dt)
-    all_bin_centers = trial_bin_edges[:-1] + dt/2
-    
-    # Find psth_ind for each fixation center
-    psth_inds = []
-    for fc in trial_t_bins_trial:
-        diffs = np.abs(all_bin_centers - fc)
-        idx = np.argmin(diffs)
-        if diffs[idx] < dt/10:
-            psth_inds.append(idx)
-        else:
-            psth_inds.append(-1)  # Could not match
-    return np.array(psth_inds)
+    # With sparse indexing, position i IS psth_ind i
+    # Return indices where we have valid (non-NaN) time centers
+    valid_mask = ~np.isnan(trial_t_bins_trial)
+    return np.where(valid_mask)[0]
 
 
 def _filter_spike_times_by_valid_psth_inds(spike_times_trial, trial_t_bins_trial, psth_inds, valid_psth_mask, dt=1/240):
     """
-    Filter spike times and trial_t_bins to keep only entries where valid_psth_mask is True.
+    Filter spike times and invalidate trial_t_bins entries based on valid_psth_mask.
+    
+    With sparse indexing:
+    - trial_t_bins_trial[i] = time center for bin i (NaN if not fixation)
+    - psth_inds = array of indices where trial_t_bins has valid values
+    - valid_psth_mask = boolean mask over psth_inds indicating which to keep
     
     Parameters
     ----------
     spike_times_trial : list of np.ndarray
         spike_times_trial[cell_idx] = spike times for that cell
     trial_t_bins_trial : np.ndarray
-        Fixation bin centers for this trial
+        Sparse array: trial_t_bins_trial[i] = time center for bin i (NaN if not fixation)
     psth_inds : np.ndarray
-        The psth_ind for each entry in trial_t_bins_trial
+        Array of psth_inds that have valid (non-NaN) time centers
     valid_psth_mask : np.ndarray of bool
-        Which entries to keep
+        Boolean mask over psth_inds - True = keep, False = invalidate
     dt : float
         Time bin size
     
     Returns
     -------
     filtered_spike_times : list of np.ndarray
-    filtered_t_bins : np.ndarray
+    filtered_t_bins : np.ndarray (same shape as input, with invalid entries set to NaN)
     """
-    if len(trial_t_bins_trial) == 0:
+    if len(trial_t_bins_trial) == 0 or len(psth_inds) == 0:
         return spike_times_trial, trial_t_bins_trial
     
-    # Filter bin centers
-    filtered_t_bins = trial_t_bins_trial[valid_psth_mask]
+    # Get the psth_inds to keep and invalidate
+    valid_psth_inds = psth_inds[valid_psth_mask]
+    invalid_psth_inds = psth_inds[~valid_psth_mask]
     
-    # Filter spike times
+    # Create a copy of trial_t_bins and set invalid entries to NaN
+    filtered_t_bins = trial_t_bins_trial.copy()
+    if len(invalid_psth_inds) > 0:
+        filtered_t_bins[invalid_psth_inds] = np.nan
+    
+    # Filter spike times - keep spikes that fall in valid bins
     NC = len(spike_times_trial)
     filtered_spike_times = []
     
     for cell_idx in range(NC):
         cell_spikes = spike_times_trial[cell_idx]
-        if len(cell_spikes) == 0 or np.sum(valid_psth_mask) == 0:
+        if len(cell_spikes) == 0 or len(valid_psth_inds) == 0:
             filtered_spike_times.append(np.array([]))
             continue
         
         # Keep spikes that fall in valid bins
         keep_spikes_mask = np.zeros(len(cell_spikes), dtype=bool)
-        for i, (is_valid, center) in enumerate(zip(valid_psth_mask, trial_t_bins_trial)):
-            if is_valid:
+        for psth_idx in valid_psth_inds:
+            center = trial_t_bins_trial[psth_idx]  # Use original (not filtered) to get time
+            if not np.isnan(center):
                 bin_start = center - dt/2
                 bin_end = center + dt/2
                 in_bin = (cell_spikes >= bin_start) & (cell_spikes < bin_end)
@@ -372,14 +376,17 @@ def align_image_ids(robs, dfs, eyepos, fix_dur, image_ids, salvageable_mismatch_
             image_ids[trial_ind, start_time_ind_of_mismatch:] = -1
             
             # Handle spike times: keep only spikes in bins with psth_ind < start_time_ind_of_mismatch
-            if spike_times_trials is not None and len(trial_t_bins[trial_ind]) > 0:
+            if spike_times_trials is not None and np.any(~np.isnan(trial_t_bins[trial_ind])):
                 psth_inds = _get_psth_inds_for_trial(trial_t_bins[trial_ind], trial_time_windows[trial_ind], dt)
                 valid_mask = psth_inds < start_time_ind_of_mismatch
                 spike_times_trials[trial_ind], trial_t_bins[trial_ind] = _filter_spike_times_by_valid_psth_inds(
                     spike_times_trials[trial_ind], trial_t_bins[trial_ind], psth_inds, valid_mask, dt
                 )
-                # Update fix_dur to reflect actual number of remaining fixation bins
-                fix_dur[trial_ind] = len(trial_t_bins[trial_ind])
+                # Also set trial_t_bins entries >= start_time_ind_of_mismatch to NaN (to match robs)
+                trial_t_bins[trial_ind][start_time_ind_of_mismatch:] = np.nan
+                
+                # Update fix_dur to count non-NaN bins (sparse indexing)
+                fix_dur[trial_ind] = np.sum(~np.isnan(trial_t_bins[trial_ind]))
             else:
                 # Count non-NaN bins in robs as fallback
                 fix_dur[trial_ind] = np.sum(~np.isnan(robs[trial_ind, :, 0]))
@@ -398,14 +405,24 @@ def align_image_ids(robs, dfs, eyepos, fix_dur, image_ids, salvageable_mismatch_
             image_ids[trial_ind, -shift:] = -1
             
             # Handle spike times: remove spikes in bins with ORIGINAL psth_ind < shift
-            if spike_times_trials is not None and len(trial_t_bins[trial_ind]) > 0:
+            if spike_times_trials is not None and np.any(~np.isnan(trial_t_bins[trial_ind])):
                 psth_inds = _get_psth_inds_for_trial(trial_t_bins[trial_ind], trial_time_windows[trial_ind], dt)
                 valid_mask = psth_inds >= shift  # Keep bins with original psth_ind >= shift
                 spike_times_trials[trial_ind], trial_t_bins[trial_ind] = _filter_spike_times_by_valid_psth_inds(
                     spike_times_trials[trial_ind], trial_t_bins[trial_ind], psth_inds, valid_mask, dt
                 )
-                # Update fix_dur to reflect actual number of remaining fixation bins
-                fix_dur[trial_ind] = len(trial_t_bins[trial_ind])
+                # CRITICAL: Also shift trial_t_bins to match robs shift
+                # After this, position i in both robs and trial_t_bins corresponds to original psth_ind i+shift
+                trial_t_bins[trial_ind][:-shift] = trial_t_bins[trial_ind][shift:].copy()
+                trial_t_bins[trial_ind][-shift:] = np.nan
+                
+                # Update trial_time_windows to reflect the new start time
+                old_t_start, old_t_end = trial_time_windows[trial_ind]
+                new_t_start = old_t_start + shift * dt
+                trial_time_windows[trial_ind] = (new_t_start, old_t_end)
+                
+                # Update fix_dur to count non-NaN bins (sparse indexing)
+                fix_dur[trial_ind] = np.sum(~np.isnan(trial_t_bins[trial_ind]))
             else:
                 # Count non-NaN bins in robs as fallback
                 fix_dur[trial_ind] = np.sum(~np.isnan(robs[trial_ind, :, 0]))
@@ -516,36 +533,19 @@ def compare_spike_times_to_robs(spike_times_trials, trial_time_windows, trial_t_
         if np.isnan(t_start) or np.isnan(t_end):
             continue
         
-        fixation_centers = trial_t_bins[itrial]
-        if len(fixation_centers) == 0:
+        trial_t_bins_full = trial_t_bins[itrial]
+        # With sparse indexing, trial_t_bins[i] = time center for bin i (NaN if not fixation)
+        # The indices where values are not NaN are the fixation bin indices (psth_inds)
+        fixation_bin_indices = np.where(~np.isnan(trial_t_bins_full))[0]
+        if len(fixation_bin_indices) == 0:
             continue
         
-        # Reconstruct bin edges from trial time window
-        # Use t_end + dt/2 to ensure the last edge is included (handles floating point)
+        fixation_centers = trial_t_bins_full[fixation_bin_indices]
+        
+        # Reconstruct bin edges from trial time window for spike binning
         trial_bin_edges = np.arange(t_start, t_end + dt/2, dt)
         n_bins = len(trial_bin_edges) - 1
-        
         if n_bins <= 0:
-            continue
-        
-        # Compute all bin centers to find fixation bin indices
-        all_bin_centers = trial_bin_edges[:-1] + dt/2
-        
-        # Find which bin indices correspond to fixation centers
-        # Use tolerance for floating point comparison
-        fixation_bin_indices = []
-        for fc in fixation_centers:
-            diffs = np.abs(all_bin_centers - fc)
-            idx = np.argmin(diffs)
-            if diffs[idx] < dt/10:  # tolerance
-                fixation_bin_indices.append(idx)
-            else:
-                # Couldn't match this fixation center - this shouldn't happen
-                if verbose:
-                    print(f"Warning: trial {itrial} couldn't match fixation center {fc}")
-        fixation_bin_indices = np.array(fixation_bin_indices)
-        
-        if len(fixation_bin_indices) == 0:
             continue
         
         for cell_idx in range(NC):
@@ -673,10 +673,15 @@ def extract_spike_times_per_trial(dataset, dset_idx, cids, fixation_degree_radiu
     NT = len(trials)
     NC = len(cids)
     
+    # Get max psth_ind to match robs structure (sparse indexing)
+    T = np.max(psth_inds).item() + 1
+    
     # Initialize output structures
     spike_times_trials = [[np.array([]) for _ in range(NC)] for _ in range(NT)]
     trial_time_windows = [(np.nan, np.nan) for _ in range(NT)]
-    trial_t_bins = [np.array([]) for _ in range(NT)]
+    # Use sparse indexing for trial_t_bins to match robs structure:
+    # trial_t_bins[trial][i] = time center for bin i (NaN if not fixation)
+    trial_t_bins = [np.full(T, np.nan) for _ in range(NT)]
     
     # Loop over trials
     for itrial in tqdm(range(NT), desc="Extracting spike times"):
@@ -712,8 +717,9 @@ def extract_spike_times_per_trial(dataset, dset_idx, cids, fixation_degree_radiu
         if len(trial_t_bins_centers) == 0:
             continue
         
-        # Store trial t_bins (fixation centers)
-        trial_t_bins[itrial] = trial_t_bins_centers
+        # Store trial t_bins using sparse indexing (same structure as robs)
+        # trial_t_bins[itrial][psth_ind] = time center for that bin (NaN for non-fixation)
+        trial_t_bins[itrial][trial_psth_inds] = trial_t_bins_centers
         
         # Use original bin edges for time window (avoids floating-point reconstruction errors)
         t_start = trial_bin_edges[0]
@@ -779,7 +785,6 @@ def get_fixrsvp_data(subject, date, dataset_configs_path,
         trial_t_bins = data_dict['trial_t_bins']
         rsvp_images = data_dict['rsvp_images']
     else:
-
         robs, dfs, eyepos, fix_dur, image_ids = collate_fixrsvp_data(dataset, dset_idx, fixation_degree_radius)
         validate_image_ids(image_ids, dataset, dset_idx)
 

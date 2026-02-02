@@ -29,126 +29,6 @@ import contextlib
 
 
 #%%
-
-
-
-def extract_spike_times_per_trial(dataset, dset_idx, sess, cids, trial_inds, trials, fixation, dt=1/240):
-    """
-    Extract spike times for each trial, aligned with the trial structure used in robs.
-    
-    This function mirrors the logic from bin_spikes but returns actual spike times
-    instead of binned counts. Spike times are organized to match the robs structure.
-    
-    Parameters
-    ----------
-    dataset : DictDataset
-        The dataset containing trial information
-    dset_idx : int
-        Index of the dataset to use
-    sess : Session object
-        Session object containing ks_results
-    cids : np.ndarray
-        Cluster IDs in the order they appear in robs columns
-    trial_inds : np.ndarray
-        Trial indices for each data point
-    trials : np.ndarray
-        Unique trial indices
-    fixation : np.ndarray
-        Boolean array indicating fixation periods
-    dt : float
-        Time bin size in seconds (default 1/240)
-    
-    Returns
-    -------
-    spike_times_trials : list of lists
-        spike_times_trials[itrial][cell_idx] = np.array of spike times in seconds
-        Shape matches robs: (NT, NC) where each element is a variable-length array
-    trial_time_windows : list of tuples
-        trial_time_windows[itrial] = (t_start, t_end) in seconds
-    trial_t_bins : list of np.ndarray
-        trial_t_bins[itrial] = time bin centers for that trial
-    """
-    # Get raw spike data
-    spike_times = sess.ks_results.spike_times
-    spike_clusters = sess.ks_results.spike_clusters
-    
-    # Get t_bins from dataset
-    t_bins = dataset.dsets[dset_idx].covariates['t_bins'].numpy()
-    psth_inds = dataset.dsets[dset_idx].covariates['psth_inds'].numpy()
-    
-    # Create cluster ID to column index mapping (same as bin_spikes)
-    cids = np.asarray(cids)
-    n_cids = len(cids)
-    cids2inds = np.zeros(np.max(cids) + 1, dtype=int)
-    cids2inds[cids] = np.arange(n_cids)
-    
-    # Ensure spike times are sorted (same as bin_spikes)
-    if not np.all(np.diff(spike_times) >= 0):
-        sort_inds = np.argsort(spike_times)
-        spike_times = spike_times[sort_inds]
-        spike_clusters = spike_clusters[sort_inds]
-    
-    # Filter spikes to only include clusters in cids
-    cids_mask = np.isin(spike_clusters, cids)
-    spike_times_filtered = spike_times[cids_mask]
-    spike_clusters_filtered = spike_clusters[cids_mask]
-    
-    # Map cluster IDs to column indices
-    spike_inds = cids2inds[spike_clusters_filtered]
-    
-    NT = len(trials)
-    NC = len(cids)
-    
-    # Initialize output structures
-    spike_times_trials = [[np.array([]) for _ in range(NC)] for _ in range(NT)]
-    trial_time_windows = [(np.nan, np.nan) for _ in range(NT)]
-    trial_t_bins = [np.array([]) for _ in range(NT)]
-    
-    # Loop over trials
-    for itrial in tqdm(range(NT), desc="Extracting spike times"):
-        # Find data points for this trial with fixation
-        ix = trials[itrial] == trial_inds
-        ix = ix & fixation
-        if np.sum(ix) == 0:
-            continue
-        
-        # Get time bins for this trial
-        trial_t_bins_centers = t_bins[ix]
-        trial_psth_inds = psth_inds[ix]
-        
-        if len(trial_t_bins_centers) == 0:
-            continue
-        
-        # Store trial t_bins
-        trial_t_bins[itrial] = trial_t_bins_centers
-        
-        # Compute time window edges (same logic as dataset_generation.py)
-        # t_bins are centers, so edges are: center - dt/2 to center + dt/2
-        t_start = trial_t_bins_centers[0] - dt/2
-        t_end = trial_t_bins_centers[-1] + dt/2
-        trial_time_windows[itrial] = (t_start, t_end)
-        
-        # Extract spikes in this time window (same logic as bin_spikes)
-        i0 = np.searchsorted(spike_times_filtered, t_start)
-        i1 = np.searchsorted(spike_times_filtered, t_end)
-        
-        if i0 >= i1:
-            # No spikes in this window
-            continue
-        
-        # Get spikes in this time window
-        trial_spike_times = spike_times_filtered[i0:i1]
-        trial_spike_inds = spike_inds[i0:i1]
-        
-        # Organize spikes by cell index
-        for cell_idx in range(NC):
-            cell_mask = trial_spike_inds == cell_idx
-            cell_spike_times = trial_spike_times[cell_mask]
-            spike_times_trials[itrial][cell_idx] = cell_spike_times
-    
-    return spike_times_trials, trial_time_windows, trial_t_bins
-
-
 def microsaccade_exists(eyepos, threshold = 0.3):
     '''
     helper function for get_iix_projection_on_orthogonal_line.
@@ -1026,7 +906,7 @@ def plot_population_raster(
 
 
 #%%
-
+from tejas.rsvp_util import get_fixrsvp_data
 subject = 'Allen'
 date = '2022-03-02'
 
@@ -1043,81 +923,28 @@ date = '2022-03-02'
 #jake likes 3-02, 4-06, 4-13
 
 dataset_configs_path = '/home/tejas/VisionCore/experiments/dataset_configs/multi_basic_240_rsvp.yaml'
-dataset_configs = load_dataset_configs(dataset_configs_path)
 
-# date = "2022-03-04"
-# subject = "Allen"
-dataset_idx = next(i for i, cfg in enumerate(dataset_configs) if cfg['session'] == f"{subject}_{date}")
+data = get_fixrsvp_data(subject, date, dataset_configs_path, 
+use_cached_data=False, 
+salvageable_mismatch_time_threshold=25, verbose=True)
 
-with open(os.devnull, "w") as devnull, contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
-    train_dset, val_dset, dataset_config = prepare_data(dataset_configs[dataset_idx], strict=False)
-
-
-
-sess = train_dset.dsets[0].metadata['sess']
-# ppd = train_data.dsets[0].metadata['ppd']
-cids = dataset_config['cids']
-print(f"Running on {sess.name}")
-
-# get fixrsvp inds and make one dataaset object
-inds = torch.concatenate([
-        train_dset.get_dataset_inds('fixrsvp'),
-        val_dset.get_dataset_inds('fixrsvp')
-    ], dim=0)
-
-dataset = train_dset.shallow_copy()
-dataset.inds = inds
-
-# Getting key variables
-dset_idx = inds[:,0].unique().item()
-trial_inds = dataset.dsets[dset_idx].covariates['trial_inds'].numpy()
-trials = np.unique(trial_inds)
-
-NC = dataset.dsets[dset_idx]['robs'].shape[1]
-T = np.max(dataset.dsets[dset_idx].covariates['psth_inds'][:].numpy()).item() + 1
-NT = len(trials)
-
-fixation = np.hypot(dataset.dsets[dset_idx]['eyepos'][:,0].numpy(), dataset.dsets[dset_idx]['eyepos'][:,1].numpy()) < 1
-
-# Loop over trials and align responses
-robs = np.nan*np.zeros((NT, T, NC))
-dfs = np.nan*np.zeros((NT, T, NC))
-eyepos = np.nan*np.zeros((NT, T, 2))
-fix_dur =np.nan*np.zeros((NT,))
-
-for itrial in tqdm(range(NT)):
-    # print(f"Trial {itrial}/{NT}")
-    ix = trials[itrial] == trial_inds
-    ix = ix & fixation
-    if np.sum(ix) == 0:
-        continue
+robs = data['robs']
+dfs = data['dfs']
+eyepos = data['eyepos']
+fix_dur = data['fix_dur']
+image_ids = data['image_ids']
+cids = data['cids']
+spike_times_trials = data['spike_times_trials']
+trial_t_bins = data['trial_t_bins']
+trial_time_windows = data['trial_time_windows']
     
-    stim_inds = np.where(ix)[0]
-    # stim_inds = stim_inds[:,None] - np.array(dataset_config['keys_lags']['stim'])[None,:]
+# good_trials = fix_dur > 20
+# assert good_trials.sum() == len(robs)
+# robs = robs[good_trials]
+# dfs = dfs[good_trials]
+# eyepos = eyepos[good_trials]
+# fix_dur = fix_dur[good_trials]
 
-
-    psth_inds = dataset.dsets[dset_idx].covariates['psth_inds'][ix].numpy()
-    fix_dur[itrial] = len(psth_inds)
-    robs[itrial][psth_inds] = dataset.dsets[dset_idx]['robs'][ix].numpy()
-    dfs[itrial][psth_inds] = dataset.dsets[dset_idx]['dfs'][ix].numpy()
-    eyepos[itrial][psth_inds] = dataset.dsets[dset_idx]['eyepos'][ix].numpy()
-
-# Extract spike times for all trials (before good_trials filter)
-print("Extracting spike times...")
-spike_times_trials, trial_time_windows, trial_t_bins = extract_spike_times_per_trial(
-    dataset, dset_idx, sess, cids, trial_inds, trials, fixation, dt=1/240
-)
-good_trials = fix_dur > 20
-robs = robs[good_trials]
-dfs = dfs[good_trials]
-eyepos = eyepos[good_trials]
-fix_dur = fix_dur[good_trials]
-
-# Filter spike times to match good_trials
-spike_times_trials = [spike_times_trials[i] for i in range(NT) if good_trials[i]]
-trial_time_windows = [trial_time_windows[i] for i in range(NT) if good_trials[i]]
-trial_t_bins = [trial_t_bins[i] for i in range(NT) if good_trials[i]]
-    
 
 
 ind = np.argsort(fix_dur)[::-1]
@@ -1546,9 +1373,30 @@ def _get_trial_spikes(trial_idx, robs, use_spike_times, spike_times_trials, tria
         vals = None  # No alpha variation for spike times
         
         # Verification: compare with robs
-        robs_sum = int(robs[trial_idx, :].sum())
+        # Only count robs bins that correspond to valid time window (len(t_bins))
+        # This handles trials shorter than the slice window
+        n_valid_bins = len(t_bins)
+        robs_slice = robs[trial_idx, :n_valid_bins, :]
+        robs_sum = int(np.nansum(robs_slice))
+        
         if robs_sum != len(times):
-            print(f"Warning: spike count mismatch for trial {trial_idx}: robs={robs_sum}, spike_times={len(times)}")
+            # Debug: check the time ranges
+            all_spikes = []
+            for cell_idx in range(num_cells):
+                cell_spikes = np.atleast_1d(np.asarray(spike_times_trials[trial_idx][cell_idx]))
+                if cell_spikes.size > 0:
+                    all_spikes.extend(cell_spikes)
+            all_spikes = np.array(all_spikes)
+            
+            print(f"MISMATCH trial {trial_idx}:")
+            print(f"  t_bins range: [{t_bins[0]:.6f}, {t_bins[-1]:.6f}]")
+            print(f"  filter window: [{t_start:.6f}, {t_end:.6f})")
+            print(f"  spike_times_trials has {len(all_spikes)} total spikes for this trial")
+            if len(all_spikes) > 0:
+                print(f"  spike times range: [{all_spikes.min():.6f}, {all_spikes.max():.6f}]")
+                in_window = ((all_spikes >= t_start) & (all_spikes < t_end)).sum()
+                print(f"  spikes in filter window: {in_window}")
+            print(f"  robs_sum={robs_sum}, spike_times_in_window={len(times)}")
         
         return times, cells, vals
     else:
@@ -1557,6 +1405,66 @@ def _get_trial_spikes(trial_idx, robs, use_spike_times, spike_times_trials, tria
         times, cells = np.where(spikes > 0)
         vals = spikes[times, cells]
         return times, cells, vals
+
+
+def _compute_psth_from_spike_times(spike_times_trial, t_bins, psth_bin_size, dt):
+    """
+    Compute PSTH from spike times by binning at specified resolution.
+    
+    Parameters
+    ----------
+    spike_times_trial : list of np.ndarray
+        spike_times_trial[cell_idx] = array of spike times for that cell
+    t_bins : np.ndarray
+        Time bin centers for this trial (sparse indexing - may contain NaN)
+    psth_bin_size : float
+        Bin size for PSTH in seconds (e.g., 0.001 for 1ms)
+    dt : float
+        Original data bin size (for determining time window)
+    
+    Returns
+    -------
+    psth : np.ndarray
+        Spike counts per PSTH bin (summed across all cells)
+    psth_time_edges : np.ndarray
+        Bin edges for the PSTH
+    """
+    # Get valid (non-NaN) time bins
+    valid_mask = ~np.isnan(t_bins)
+    if not np.any(valid_mask):
+        return np.array([]), np.array([])
+    
+    valid_t_bins = t_bins[valid_mask]
+    
+    # Determine time window from t_bins
+    t_start = valid_t_bins[0] - dt/2
+    t_end = valid_t_bins[-1] + dt/2
+    
+    # Create PSTH bin edges at specified resolution
+    psth_edges = np.arange(t_start, t_end + psth_bin_size/2, psth_bin_size)
+    n_psth_bins = len(psth_edges) - 1
+    
+    if n_psth_bins <= 0:
+        return np.array([]), np.array([])
+    
+    # Bin all spikes from all cells
+    all_spike_times = []
+    for cell_spikes in spike_times_trial:
+        cell_spikes = np.atleast_1d(np.asarray(cell_spikes))
+        if cell_spikes.size > 0:
+            # Filter to time window
+            mask = (cell_spikes >= t_start) & (cell_spikes < t_end)
+            all_spike_times.extend(cell_spikes[mask])
+    
+    if len(all_spike_times) == 0:
+        return np.zeros(n_psth_bins), psth_edges
+    
+    all_spike_times = np.array(all_spike_times)
+    
+    # Bin the spikes
+    psth, _ = np.histogram(all_spike_times, bins=psth_edges)
+    
+    return psth, psth_edges
 
 
 def plot_population_raster_NEW(
@@ -1586,6 +1494,7 @@ def plot_population_raster_NEW(
     spike_times_trials=None,
     trial_t_bins=None,
     dt=1/240,
+    psth_bin_size=0.001,  # PSTH bin size in seconds (default 1ms) when using spike times
 ):
     # robs shape: [trials, time, cells]
     
@@ -1631,7 +1540,7 @@ def plot_population_raster_NEW(
     total_time = int(np.sum([r.shape[1] for r in robs_list]))
 
     prev_total_time = 0
-    psth_height = num_cells * 0.8 # Adjust multiplier to change PSTH height
+    psth_height = num_cells * 1 # Adjust multiplier to change PSTH height
     psth_segments = {0: [], 1: []}  # Collect mean PSTH per segment
     
     # Pre-compute row positions based on max cluster trials across all segments
@@ -1662,6 +1571,7 @@ def plot_population_raster_NEW(
         
         # Collect segment PSTHs
         seg_psth = {0: [], 1: []}
+        seg_psth_n_bins = None  # Track PSTH bin count for this segment
         
         # Cluster 0 trials first (top)
 
@@ -1669,7 +1579,19 @@ def plot_population_raster_NEW(
             if clusters[i] == 0:
                 spikes = robs[trial_idx, :]  # [time, cells]
                 cluster0_trials.append(spikes)  # collect for output
-                seg_psth[0].append(np.nansum(spikes, axis=1))  # sum over cells
+                
+                # Compute PSTH - from spike times if use_spike_times, else from robs
+                if use_spike_times and st_trials is not None:
+                    trial_psth, _ = _compute_psth_from_spike_times(
+                        st_trials[trial_idx], t_bins[trial_idx], psth_bin_size, dt
+                    )
+                    if len(trial_psth) > 0:
+                        seg_psth[0].append(trial_psth)
+                        if seg_psth_n_bins is None:
+                            seg_psth_n_bins = len(trial_psth)
+                else:
+                    seg_psth[0].append(np.nansum(spikes, axis=1))  # sum over cells
+                
                 # Get spike positions (uses helper for spike_times or robs)
                 print('on trial', trial_number)
                 times, cells, vals = _get_trial_spikes(
@@ -1695,7 +1617,19 @@ def plot_population_raster_NEW(
             if clusters[i] == 1:
                 spikes = robs[trial_idx, :]  # [time, cells]
                 cluster1_trials.append(spikes)  # collect for output
-                seg_psth[1].append(np.nansum(spikes, axis=1))  # sum over cells
+                
+                # Compute PSTH - from spike times if use_spike_times, else from robs
+                if use_spike_times and st_trials is not None:
+                    trial_psth, _ = _compute_psth_from_spike_times(
+                        st_trials[trial_idx], t_bins[trial_idx], psth_bin_size, dt
+                    )
+                    if len(trial_psth) > 0:
+                        seg_psth[1].append(trial_psth)
+                        if seg_psth_n_bins is None:
+                            seg_psth_n_bins = len(trial_psth)
+                else:
+                    seg_psth[1].append(np.nansum(spikes, axis=1))  # sum over cells
+                
                 # Get spike positions (uses helper for spike_times or robs)
                 print('on trial', trial_number)
                 times, cells, vals = _get_trial_spikes(
@@ -1714,11 +1648,25 @@ def plot_population_raster_NEW(
                 trial_number += 1
         
         # Average this segment's trials and store
+        # Determine expected PSTH size for this segment
+        if use_spike_times and seg_psth_n_bins is not None:
+            expected_psth_size = seg_psth_n_bins
+        else:
+            expected_psth_size = robs.shape[1]
+            
         for c in [0, 1]:
             if seg_psth[c]:
-                psth_segments[c].append(np.nanmean(seg_psth[c], axis=0))
+                # Pad/truncate to consistent size if needed
+                padded = []
+                for p in seg_psth[c]:
+                    if len(p) < expected_psth_size:
+                        p = np.pad(p, (0, expected_psth_size - len(p)), constant_values=0)
+                    elif len(p) > expected_psth_size:
+                        p = p[:expected_psth_size]
+                    padded.append(p)
+                psth_segments[c].append(np.nanmean(padded, axis=0))
             else:
-                psth_segments[c].append(np.zeros(robs.shape[1]))
+                psth_segments[c].append(np.zeros(expected_psth_size))
         
         prev_total_time += robs.shape[1]
     
@@ -1799,10 +1747,12 @@ def plot_population_raster_NEW(
         psth0_scaled = offset0 + psth_height - (psth0 / max_psth) * psth_height
         psth1_scaled = offset1 + psth_height - (psth1 / max_psth) * psth_height
         
+        # Create x values for PSTH that span the full raster range
+        # When using spike times, PSTH may have different number of bins than robs
         if bins_x_axis:
-            x_vals = np.arange(len(psth0))
+            x_vals = np.linspace(0, total_time, len(psth0))
         else:
-            x_vals = np.arange(len(psth0)) * x_scale
+            x_vals = np.linspace(0, total_time * x_scale, len(psth0))
         ax.fill_between(x_vals, offset0 + psth_height, psth0_scaled, color='blue', alpha=0.5)
 
         if show_difference_psth:
@@ -1900,12 +1850,12 @@ for j in range(return_top_k_combos)[1:2]:
     for i in range(splice_start, splice_end):
         new_robs_list.append(robs[:, new_start_time_list[i - splice_start]:new_end_time_list[i - splice_start], :])
     # fig1, ax1 = plot_eyepos_clusters(eyepos, iix_list[j][splice], start_time_list[splice], end_time_list[splice], clusters=clusters_list[j][splice], show=show, show_unclustered_points=False, plot_time_traces=True, bins_x_axis=False, use_peak_lag=False)
-    # fig1, ax1 = plot_eyepos_clusters_NEW(eyepos, iix_list[j][splice], new_start_time_list, new_end_time_list, clusters=clusters_list[j][splice], 
-    # show=show, show_unclustered_points=False, 
-    # plot_time_traces=True, bins_x_axis=use_bins_x_axis, use_peak_lag=False, plot_all_traces=True)
-    # # fig1.savefig(f"population_eyepos.pdf", dpi=1200, bbox_inches="tight")
-    # plt.show()
-    # plt.close(fig1)
+    fig1, ax1 = plot_eyepos_clusters_NEW(eyepos, iix_list[j][splice], new_start_time_list, new_end_time_list, clusters=clusters_list[j][splice], 
+    show=show, show_unclustered_points=True, 
+    plot_time_traces=False, bins_x_axis=use_bins_x_axis, use_peak_lag=False, plot_all_traces=True)
+    # fig1.savefig(f"population_eyepos.pdf", dpi=1200, bbox_inches="tight")
+    plt.show()
+    plt.close(fig1)
 
     # fig1, ax1 = plot_eyepos_clusters_NEW(eyepos, iix_list[j][splice], new_start_time_list, new_end_time_list, clusters=clusters_list[j][splice], show=show, show_unclustered_points=False, plot_time_traces=False, bins_x_axis=use_bins_x_axis, use_peak_lag=False)
     # plt.show()
@@ -2091,4 +2041,6 @@ plt.tight_layout()
 plt.show()
 # %%
 
-print(robs_slice.sum(), len(spike_x_times))
+print(np.nansum(robs_slice), len(spike_x_times))
+
+# %%
