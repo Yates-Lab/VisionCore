@@ -1,4 +1,336 @@
 #%%
+import numpy as np
+import torch
+import matplotlib.pyplot as plt
+import numpy as np
+
+def fill_small_nan_gaps_prev_rowwise(X, k):
+    """
+    Row-wise: fill NaN runs of length <= k with the value immediately preceding the run.
+    Leading NaNs stay NaN. Rows are independent. Gaps are along columns.
+
+    Parameters
+    ----------
+    X : array-like, shape (R, C)
+    k : int >= 0
+
+    Returns
+    -------
+    Y : np.ndarray, shape (R, C)
+    """
+    X = np.asarray(X, dtype=float)
+    Y = X.copy()
+    if k <= 0:
+        return Y
+
+    R, C = Y.shape
+    nan = np.isnan(Y)
+
+    # Identify starts of NaN runs per row: nan & not nan immediately to the left
+    left_nan = np.concatenate([np.zeros((R, 1), dtype=bool), nan[:, :-1]], axis=1)
+    run_start = nan & ~left_nan
+
+    # Label runs within each row: 1,2,3,... (0 for non-NaNs)
+    run_id = np.cumsum(run_start, axis=1)
+    run_id = run_id * nan  # 0 where not NaN
+
+    max_runs = int(run_id.max())
+    if max_runs == 0:
+        return Y
+
+    # Count run lengths: counts[r, rid] = number of NaNs in that run
+    counts = np.zeros((R, max_runs + 1), dtype=np.int32)
+    rr, cc = np.nonzero(nan)
+    rid = run_id[rr, cc].astype(np.int32)
+    np.add.at(counts, (rr, rid), 1)
+
+    # For each run, store whether it has a valid previous value, and that fill value
+    prev_ok = np.zeros((R, max_runs + 1), dtype=bool)
+    fill_val = np.full((R, max_runs + 1), np.nan, dtype=float)
+
+    rs_r, rs_c = np.nonzero(run_start)
+    rs_id = run_id[rs_r, rs_c].astype(np.int32)
+
+    has_prev = rs_c > 0
+    prev_is_finite = np.zeros_like(has_prev, dtype=bool)
+    prev_is_finite[has_prev] = np.isfinite(Y[rs_r[has_prev], rs_c[has_prev] - 1])
+
+    ok = has_prev & prev_is_finite
+    prev_ok[rs_r[ok], rs_id[ok]] = True
+    fill_val[rs_r[ok], rs_id[ok]] = Y[rs_r[ok], rs_c[ok] - 1]
+
+    # Decide which NaN entries to fill: run length <= k and run has valid previous value
+    run_len = counts[rr, rid]
+    do_fill = (run_len <= k) & prev_ok[rr, rid]
+
+    Y[rr[do_fill], cc[do_fill]] = fill_val[rr[do_fill], rid[do_fill]]
+    return Y
+
+
+def plot_raster(ii, jj, height=1, ax=None, **kwargs):
+
+    ii = np.stack([ii, ii, np.nan*np.ones_like(ii)], 1).flatten()
+    jj = np.stack([jj, jj+height, np.nan*np.ones_like(jj)], 1).flatten()
+
+    if ax is None:
+        ax = plt.gca()
+    ax.plot(ii, jj, 'k', **kwargs)
+
+
+from scipy.sparse import coo_matrix
+def bin_spikes(spike_times, spike_clusters, t_bins, n_units=None):
+    time_bins = np.digitize(spike_times, t_bins) - 1
+    spike_indices = spike_clusters  # Don't subtract 1 - use cluster IDs directly as indices
+
+    if n_units is None:
+        n_units = int(np.max(spike_clusters)) + 1  # +1 because 0-indexed
+
+    # Filter out spikes outside valid bin range and invalid cluster indices
+    n_time_bins = len(t_bins) - 1
+    valid = (time_bins >= 0) & (time_bins < n_time_bins) & (spike_indices >= 0) & (spike_indices < n_units)
+    time_bins = time_bins[valid]
+    spike_indices = spike_indices[valid]
+    n_spikes = len(time_bins)
+
+    counts = coo_matrix(
+            (np.ones(n_spikes, dtype=int), (time_bins.astype(int), spike_indices.astype(int))),
+            shape=(n_time_bins, n_units),
+        )
+    return counts
+#%%
+# import dictdataset
+
+fpath = '/mnt/ssd/RowleyMarmoV1V2/processed/Luke_2025-08-04/datasets/right_eye/fixrsvp.dset'
+
+from models.data import DictDataset
+dset = DictDataset.load(fpath)
+
+use_rowley = True
+if use_rowley:
+    from DataRowleyV1V2.data.registry import get_session
+    sess = get_session('Luke', '2025-08-04')
+    spikes = sess.load_spikes()  
+    st = spikes[0]      
+    clu = spikes[1]
+    exp = sess.load_exp()
+    ptb2ephys = sess.load_ptb2ephys()[0]
+else:
+    from DataYatesV1 import get_session
+    sess = get_session('Allen', '2022-02-18')
+    st = sess.get_spike_times()
+    clu = sess.get_spike_clusters()
+    exp = sess.exp
+    ptb2ephys = sess.ptb2ephys
+
+#%%
+num_trials = len(exp['D'])
+trial_protocols = [exp['D'][i]['PR']['name'] for i in range(num_trials)]
+
+fixrsvp_trials = [i for i in range(num_trials) if trial_protocols[i] == 'FixRsvpStim']
+
+#%%
+
+NT = len(fixrsvp_trials)
+nclu = np.max(clu)
+
+dt = 1/240
+time_bins = np.arange(-1, 2, dt)
+
+binned_spikes = np.nan*np.zeros((NT, len(time_bins)-1, nclu))
+state = np.nan*np.zeros((NT, len(time_bins)-1))
+eyepos = np.nan*np.zeros((NT, len(time_bins)-1, 3))
+image_id = np.nan*np.zeros((NT, len(time_bins)-1))
+breakfix = np.nan*np.zeros(NT)
+ctrfix = np.nan*np.zeros((NT, 2))
+
+
+for i in range(NT):
+    itrial = fixrsvp_trials[i]
+    NH = exp['D'][itrial]['PR']['NoiseHistory']
+    if NH is None or NH.shape[0] < 10:
+        continue
+
+    eye_data = exp['D'][itrial]['eyeData']
+
+    c = exp['D'][itrial]['c']
+    dx = exp['D'][itrial]['dx']
+    dy = exp['D'][itrial]['dy']
+
+    eye_data[:,2] = (eye_data[:,2] - c[1])*dy
+    eye_data[:,1] = (eye_data[:,1] - c[0])*dx
+
+    t2 = np.where(NH[:,3]==2)[0][0]
+    eye_time = ptb2ephys(eye_data[:,0])
+    frame_times = ptb2ephys(NH[:,0])
+
+    eye_time = eye_time - frame_times[0]
+    # digitize to time_bins
+    eye_digi = np.digitize(eye_time, time_bins) - 1
+    eye_iix = (eye_digi >= 0) & (eye_digi < len(time_bins)-1)
+    nh_digi = np.digitize(frame_times-frame_times[0], time_bins) - 1
+    nh_good = (nh_digi >= 0) & (nh_digi < len(time_bins)-1)
+    
+    image_id[i, nh_digi[nh_good]] = NH[nh_good,3]
+    eyepos[i, eye_digi[eye_iix], :] = eye_data[eye_iix, 1:4]
+    state[i, eye_digi[eye_iix]] = eye_data[eye_iix, 4]
+    
+    ctr_ = np.nanmean(eyepos[i][(time_bins[:-1]>0) & (time_bins[:-1]<.1)], 0)
+    ctrfix[i] = ctr_[:2]
+    st_ix = (st > frame_times[0]+time_bins[0]) & (st < frame_times[0]+time_bins[-1])
+
+    trial_st = st[st_ix] - frame_times[0]
+    trial_clu = clu[st_ix]
+    st_binned = bin_spikes(trial_st, trial_clu, time_bins, n_units=nclu)
+    binned_spikes[i] = st_binned.toarray()
+
+    try:    
+        breakfix[i] = np.where(state[i]==3)[0][0]
+    except:
+        breakfix[i] = np.nan
+
+ctr = np.nanmean(ctrfix, 0)
+eyepos[:,:,0] = fill_small_nan_gaps_prev_rowwise(eyepos[:,:,0], 2) - ctr[0]
+eyepos[:,:,1] = fill_small_nan_gaps_prev_rowwise(eyepos[:,:,1], 2) - ctr[1]
+
+dfs = np.isfinite(image_id)[:,:,None].repeat(binned_spikes.shape[-1], axis=2)
+image_id = fill_small_nan_gaps_prev_rowwise(image_id, 2)
+
+# get fixation duration
+Y = image_id.copy()
+R, C = Y.shape
+nan = np.isnan(Y)
+
+# Identify starts of NaN runs per row: nan & not nan immediately to the left
+left_nan = np.concatenate([np.zeros((R, 1), dtype=bool), nan[:, :-1]], axis=1)
+run_start = nan & ~left_nan
+
+# Label runs within each row: 1,2,3,... (0 for non-NaNs)
+run_id = np.cumsum(run_start, axis=1)
+run_id = run_id * nan  # 0 where not NaN
+
+fix_dur = np.zeros(R)
+for i in range(R):
+    try:
+        fix_dur[i] = np.where(run_id[i]==2)[0][0]
+    except:
+        fix_dur[i] = np.nan
+
+good_trials = (fix_dur-np.where(time_bins[:-1]>0)[0][0]) > 20
+
+# remove bad trials
+binned_spikes = binned_spikes[good_trials]
+eyepos = eyepos[good_trials][:,:,[0,1]]
+image_id = image_id[good_trials]
+fix_dur = fix_dur[good_trials]
+dfs = dfs[good_trials]
+good_trials = (fix_dur-np.where(time_bins[:-1]>0)[0][0]) > 20
+ind = np.argsort(fix_dur[good_trials])
+
+plt.imshow(eyepos[good_trials][ind][:,:,0],
+           vmin=-.5, vmax=.5,
+           aspect='auto',
+           cmap='coolwarm', interpolation='none',
+           origin='lower',
+           extent=[time_bins[0], time_bins[-1], 0, eyepos.shape[0]])
+
+plt.xlim(-.1, 1.0)
+
+
+plt.imshow(image_id[good_trials][ind],
+    aspect='auto',
+    interpolation='none', origin='lower', vmin=0, vmax=20,
+    extent=[time_bins[0], time_bins[-1], 0, eyepos.shape[0]])
+plt.xlim(-.1, 1.0)
+    
+#%%
+v1cids = [800, 801, 802, 805, 806, 807, 810, 815, 816, 818, 820, 823, 825, 828, 835, 841, 844, 846, 850, 852, 853, 854, 859, 863, 867, 875, 880, 883, 884, 887, 888, 894, 902, 904, 908, 911, 917, 923, 924, 925, 931, 933, 936, 938, 939, 940, 942, 943, 950]
+v2cids = [363, 364, 365, 367, 368, 373, 374, 390, 398, 432, 445, 447, 458, 469, 472, 473, 477, 508, 536]
+# v1cids = np.arange(0, binned_spikes.shape[-1])
+# cids = np.array(v1cids)
+cids = np.array(v2cids)
+# cids = np.arange(355, 400)
+# good_trials = np.isnan(binned_spikes[:,:,cids[0]]).sum(1)==0
+good_trials = (np.isnan(binned_spikes[:,:,cids[0]]).sum(1)==0) & (np.sum(np.diff(np.nansum(binned_spikes, 1), 0),1)>0)
+ind = np.argsort(fix_dur[good_trials])
+
+
+#%%
+# trial_num += 1
+# plt.plot(eyepos[trial_num, :, 0],)
+# plt.plot(eyepos[trial_num, :, 1],)
+# plt.show()
+#%%
+    # plt.figure()
+    # # plt.plot(st[0][st_ix], st[1][st_ix], 'k.')
+    # plot_raster(st[st_ix], clu[st_ix])
+    # plt.axvline(frame_times[t2], color='r', linestyle='--')
+    # plt.title(f'Trial {itrial}')
+    # plt.show()
+
+#%%
+from scipy.signal import savgol_filter
+
+# for cc in cids:
+#     # plt.plot(time_bins[:-1], savgol_filter(np.nanmean(binned_spikes, 0)[:,cc], 10, 1))
+#     plt.plot(time_bins[:-1], np.nanmean(binned_spikes, 0)[:,cc])
+#     plt.axvline(0, color='r', linestyle='--')
+#     plt.title(f'Neuron {cc}')
+#     plt.show()
+
+#%%
+
+# for cc in cids:
+#     good_trials = (np.isnan(binned_spikes[:,:,cc]).sum(1)==0) & (np.sum(np.diff(np.nansum(binned_spikes, 1), 0),1)>0)
+
+#     ind = np.argsort(fix_dur[good_trials])
+#     jj, ii = np.where(binned_spikes[:,:,cc][good_trials][ind])
+#     plot_raster(time_bins[ii], jj, height=1)
+#     plt.axvline(0, color='r', linestyle='--')
+
+#     plt.title(f'Neuron {cc}')
+#     plt.show()
+# plt.xlim(1000,1500)
+#%%
+from tejas.rsvp_util import remove_duplicate_trials, align_image_ids
+
+
+robs, dfs, eyepos, dur, image_ids = remove_duplicate_trials(binned_spikes, dfs, eyepos, fix_dur, image_id)
+
+# for itrial in range(40):(robs, dfs, eyepos, dur, image_ids, 
+#     ii, jj = np.where(binned_spikes[good_trials][:,:,:][itrial])
+#     plot_raster(ii, jj, height=1)
+#     plt.title(f"Trial {itrial}")
+#     plt.show()
+
+
+#%%
+# NT = robs.shape[0]
+
+# for itrial in range(NT):
+
+#     ii, jj = np.where(robs[itrial])
+#     plot_raster(time_bins[:-1][ii], jj, height=1)
+#     plt.axis('off')
+#     plt.gca().twinx()
+#     plt.plot(time_bins[:-1], eyepos[itrial][:,0], '-r')
+#     plt.plot(time_bins[:-1], eyepos[itrial][:,1], '-g')
+#     plt.ylim(-50, 50)
+#     plt.gca().twinx()
+#     plt.plot(time_bins[:-1], image_id[good_trials][itrial], '-b')
+#     plt.title(f"Trial {itrial}")
+
+#     # plt.plot(time_bins[:-1], eyepos[good_trials][itrial][:,2], '.m')
+#     plt.xlim(-.250, 0.50)
+#     plt.show()
+
+#%%
+start_bin = np.where(image_ids[0]==2)[0][0]
+robs = robs[:, start_bin:]
+image_ids = image_ids[:, start_bin:]
+eyepos = eyepos[:, start_bin:]
+# fix_dur = fix_dur - start_bin
+
+#%%
 import os
 from pathlib import Path
 from tkinter.constants import TRUE
@@ -70,16 +402,21 @@ def get_eyepos_clusters(eyepos, start_time, end_time, robs, sort_by_cluster_psth
     
     for idx in range(len(eyepos)):
         if np.isnan(eyepos[idx, start_time:end_time, :]).all():
+            # print(f'All NaNs for trial {idx}')
             continue
         if np.isnan(robs_start_end[idx]).sum() > len(robs_start_end[idx])//2:
+            # print(f'Too many NaNs for trial {idx}')
             continue
+            
         if microsaccade_exists(eyepos[idx, start_time:end_time, :], threshold = 0.1):
+            # print(f'Microsaccade exists for trial {idx}')
             continue
         valid_indices.append(idx)
     iix = np.array(valid_indices)
     
     if len(iix) < num_clusters * min_cluster_size:
         # Always return lists for consistency
+        print(f'Not enough points')
         return [iix], [np.full(len(iix), -1)]  # Not enough points
 
     # Precompute per-trial summaries for fast PSTH scoring (exact NaN-aware mean over trials*cells)
@@ -903,42 +1240,43 @@ def plot_population_raster(
         plt.show()
 
     return fig, ax, spike_x, spike_y
+#%%
 
 
 #%%
-from tejas.rsvp_util import get_fixrsvp_data
-subject = 'Allen'
-date = '2022-03-02'
+# from tejas.rsvp_util import get_fixrsvp_data
+subject = 'Luke'
+date = '2025-08-04'
 
-# date = "2022-03-04"
-# date = "2022-04-08"
-# date = "2022-04-13" #best
-# date = "2022-04-15" #best
-# date = "2022-04-06" #decent
-# date = "2022-03-02" #best
-# date = "2022-04-01" #not great
-# date = "2022-03-30" #best
-# subject = "Allen"
+# # date = "2022-03-04"
+# # date = "2022-04-08"
+# # date = "2022-04-13" #best
+# # date = "2022-04-15" #best
+# # date = "2022-04-06" #decent
+# # date = "2022-03-02" #best
+# # date = "2022-04-01" #not great
+# # date = "2022-03-30" #best
+# # subject = "Allen"
 
-#jake likes 3-02, 4-06, 4-13
+# #jake likes 3-02, 4-06, 4-13
 
-dataset_configs_path = '/home/tejas/VisionCore/experiments/dataset_configs/multi_basic_240_rsvp.yaml'
+# dataset_configs_path = '/home/tejas/VisionCore/experiments/dataset_configs/multi_basic_240_rsvp.yaml'
 
-data = get_fixrsvp_data(subject, date, dataset_configs_path, 
-use_cached_data=False, 
-salvageable_mismatch_time_threshold=25, verbose=True)
+# data = get_fixrsvp_data(subject, date, dataset_configs_path, 
+# use_cached_data=False, 
+# salvageable_mismatch_time_threshold=25, verbose=True)
 
-robs = data['robs']
-dfs = data['dfs']
-eyepos = data['eyepos']
-fix_dur = data['fix_dur']
-image_ids = data['image_ids']
-cids = data['cids']
-spike_times_trials = data['spike_times_trials']
-trial_t_bins = data['trial_t_bins']
-trial_time_windows = data['trial_time_windows']
-rsvp_images = data['rsvp_images']
-dataset = data['dataset']
+# robs = data['robs']
+# dfs = data['dfs']
+# eyepos = data['eyepos']
+# fix_dur = data['fix_dur']
+# image_ids = data['image_ids']
+# cids = data['cids']
+# spike_times_trials = data['spike_times_trials']
+# trial_t_bins = data['trial_t_bins']
+# trial_time_windows = data['trial_time_windows']
+# rsvp_images = data['rsvp_images']
+# dataset = data['dataset']
     
 # good_trials = fix_dur > 20
 # assert good_trials.sum() == len(robs)
@@ -949,32 +1287,35 @@ dataset = data['dataset']
 
 
 
-ind = np.argsort(fix_dur)[::-1]
-plt.subplot(1,2,1)
-plt.imshow(eyepos[ind,:,0])
-plt.xlim(0, 160)
-plt.subplot(1,2,2)
-plt.imshow(np.nanmean(robs,2)[ind])
-plt.xlim(0, 160)
+# ind = np.argsort(fix_dur)[::-1]
+# plt.subplot(1,2,1)
+# plt.imshow(eyepos[ind,:,0])
+# plt.xlim(0, 160)
+# plt.subplot(1,2,2)
+# plt.imshow(np.nanmean(robs,2)[ind])
+# plt.xlim(0, 160)
 
-from tejas.metrics.gaborium import get_rf_contour_metrics
-rf_contour_metrics = get_rf_contour_metrics(date, subject)
-
-
-# len_of_each_segment = 25
+# from tejas.metrics.gaborium import get_rf_contour_metrics
+# rf_contour_metrics = get_rf_contour_metrics(date, subject)
+# robs_v2 = robs[:, :, 363:536]
+robs_v2 = robs[:, :, v2cids]
+rf_contour_metrics = []
+for i in range(robs_v2.shape[-1]):
+    rf_contour_metrics.append({'ste_peak_lag': 7})
+len_of_each_segment = 25
 # len_of_each_segment = 40
-len_of_each_segment = 32
-# total_start_time = 0
-total_start_time = 46
-# total_end_time = 175
+# len_of_each_segment = 32
+total_start_time = 15
+# total_start_time = 46
+# total_end_time = total_start_time + len_of_each_segment
 total_end_time = 78
-max_distance_from_centroid = 0.10
+max_distance_from_centroid = 0.15
 num_clusters = 2
-min_cluster_size = 5 #4
-cluster_size = 5 #4
+min_cluster_size = 4 #4
+cluster_size = 4 #4
 sort_by_cluster_psth = True
 # distance_between_centroids = (0.3, 0.4)
-distance_between_centroids = (0.02, 0.3)
+distance_between_centroids = (0.02, 0.6)
 min_distance_between_inter_cluster_points = 0#0.02
 return_top_k_combos = 10
 
@@ -991,7 +1332,7 @@ for i in range(total_start_time, total_end_time, len_of_each_segment):
     #eyepos is shape [num_trial, time, 2]
 
     iix, clusters = get_eyepos_clusters(eyepos, start_time, end_time,
-    robs, sort_by_cluster_psth = sort_by_cluster_psth,
+    robs_v2, sort_by_cluster_psth = sort_by_cluster_psth,
     max_distance_from_centroid = max_distance_from_centroid, num_clusters = num_clusters, 
     min_cluster_size = min_cluster_size, cluster_size = cluster_size,
     distance_between_centroids = distance_between_centroids,
@@ -1017,7 +1358,7 @@ for i in range(total_start_time, total_end_time, len_of_each_segment):
     # iix_list.append(iix)
     # clusters_list.append(clusters)
 
-    robs_list.append(robs[:, start_time:end_time, :])
+    robs_list.append(robs[:, :, 363:536][:, start_time:end_time, :])
     start_time_list.append(start_time)
     end_time_list.append(end_time)
 
@@ -2215,9 +2556,6 @@ def population_plot_movie(
         # Skip unclustered points if show_unclustered_points=False
         if clusters is not None and not show_unclustered_points and clusters_arr[i] < 0:
             continue
-        # #don't show microsaccade exists
-        # if microsaccade_exists(eyepos[trial_idx, start_time_val:end_time_val, :]):
-        #     continue
         color = colors[i]
         eye_x = eyepos[trial_idx, start_time_val:end_time_val, 0]
         eye_y = eyepos[trial_idx, start_time_val:end_time_val, 1]
@@ -2282,9 +2620,6 @@ def population_plot_movie(
         # Skip unclustered points if show_unclustered_points=False
         if clusters is not None and not show_unclustered_points and clusters_arr[i] < 0:
             continue
-        #don't show microsaccade exists
-        # if microsaccade_exists(eyepos[trial_idx, start_time_val:end_time_val, :]):
-        #     continue
         active_trial_indices.append((i, trial_idx))
         color = colors[i]
         # Trail line
@@ -2388,8 +2723,8 @@ for j in range(return_top_k_combos)[1:2]:
     splice_start = 0
     splice_end = 1
     splice = slice(splice_start, splice_end)
-    new_start_time_list = start_time_list[splice] - 30 #+6
-    new_end_time_list = end_time_list[splice] + 30 #-2
+    new_start_time_list = start_time_list[splice] - 20 #+6
+    new_end_time_list = end_time_list[splice] + 20 #-2
     use_bins_x_axis = False
     new_robs_list = []
     vertical_line_pos = 40
@@ -2420,36 +2755,36 @@ for j in range(return_top_k_combos)[1:2]:
             if counter1 > 5:
                 cluster_list_new[0][i] = -1
     
-    # Create time-sliced trial_t_bins to match robs_list
-    trial_t_bins_sliced = []
-    for i in range(splice_start, splice_end):
-        start = start_time_list[i]
-        end = end_time_list[i]
-        # Slice trial_t_bins for each trial to match the time window
-        sliced_t_bins = [trial_t_bins[trial_idx][start:end] for trial_idx in range(len(trial_t_bins))]
-        trial_t_bins_sliced.append(sliced_t_bins)
+    # # Create time-sliced trial_t_bins to match robs_list
+    # trial_t_bins_sliced = []
+    # for i in range(splice_start, splice_end):
+    #     start = start_time_list[i]
+    #     end = end_time_list[i]
+    #     # Slice trial_t_bins for each trial to match the time window
+    #     sliced_t_bins = [trial_t_bins[trial_idx][start:end] for trial_idx in range(len(trial_t_bins))]
+    #     trial_t_bins_sliced.append(sliced_t_bins)
     
     # fig2, ax2, spike_x, spike_y, robs_clustered = plot_population_raster_NEW(robs_list[splice], iix_list[j][splice], cluster_list_new, start_time_list[splice], end_time_list[splice], 
     # show_psth = True, show_difference_psth = False, show=show, render = "line",
     # bins_x_axis=False)
-    fig2, ax2, spike_x, spike_y, robs_clustered = plot_population_raster_NEW(
-        robs_list[splice], 
-        iix_list[j][splice], 
-        cluster_list_new, 
-        start_time_list[splice], 
-        end_time_list[splice], 
-        show_psth=True, 
-        show_difference_psth=False, 
-        show=show, 
-        render="line",
-        bins_x_axis=False,
-        # Spike times parameters
-        use_spike_times=True,
-        spike_times_trials=spike_times_trials,  # Full spike times (same trial indexing as robs)
-        trial_t_bins=trial_t_bins_sliced,       # Time-sliced to match robs_list
-        dt=1/240,
-        fig_height=14,
-    )
+    # fig2, ax2, spike_x, spike_y, robs_clustered = plot_population_raster_NEW(
+    #     robs_list[splice], 
+    #     iix_list[j][splice], 
+    #     cluster_list_new, 
+    #     start_time_list[splice], 
+    #     end_time_list[splice], 
+    #     show_psth=True, 
+    #     show_difference_psth=False, 
+    #     show=show, 
+    #     render="line",
+    #     bins_x_axis=True,
+    #     # Spike times parameters
+    #     use_spike_times=False,
+    #     spike_times_trials=None,  # Full spike times (same trial indexing as robs)
+    #     trial_t_bins=None,       # Time-sliced to match robs_list
+    #     dt=1/240,
+    #     fig_height=14,
+    # )
 
     # trial_t_bins_sliced = []
     # for i in range(splice_start, splice_end):
@@ -2459,72 +2794,72 @@ for j in range(return_top_k_combos)[1:2]:
     #     sliced_t_bins = [trial_t_bins[trial_idx][start:end] for trial_idx in range(len(trial_t_bins))]
     #     trial_t_bins_sliced.append(sliced_t_bins)
 
-    # fig2, ax2, spike_x, spike_y, robs_clustered = plot_population_raster_NEW(
-    #     new_robs_list[splice], 
-    #     iix_list[j][splice], 
-    #     cluster_list_new, 
-    #     new_start_time_list, 
-    #     new_end_time_list, 
-    #     show_psth=True, 
-    #     show_difference_psth=False, 
-    #     show=show, 
-    #     render="line",
-    #     bins_x_axis=use_bins_x_axis,
-    #     # Spike times parameters
-    #     use_spike_times=True,
-    #     spike_times_trials=spike_times_trials,  # Full spike times (same trial indexing as robs)
-    #     trial_t_bins=trial_t_bins_sliced,       # Time-sliced to match robs_list
-    #     dt=1/240,
-    #     fig_width=10,
-    #     fig_height=10,
-    #     vertical_line=vertical_line_pos,
-    #     vertical_linewidth=3,
-    # )
+    fig2, ax2, spike_x, spike_y, robs_clustered = plot_population_raster_NEW(
+        new_robs_list[splice], 
+        iix_list[j][splice], 
+        cluster_list_new, 
+        new_start_time_list, 
+        new_end_time_list, 
+        show_psth=True, 
+        show_difference_psth=False, 
+        show=show, 
+        render="line",
+        bins_x_axis=use_bins_x_axis,
+        # Spike times parameters
+        use_spike_times=False,
+        spike_times_trials=None,  # Full spike times (same trial indexing as robs)
+        trial_t_bins=None,       # Time-sliced to match robs_list
+        dt=1/240,
+        fig_width=10,
+        fig_height=10,
+        vertical_line=vertical_line_pos,
+        vertical_linewidth=3,
+    )
     # fig2, ax2, spike_x, spike_y = plot_population_raster(new_robs_list[splice], iix_list[j][splice], clusters_list[j][splice], new_start_time_list, new_end_time_list, 
     # show_psth = True, show_difference_psth = False, show=show, render = "img", fig_width = 5, fig_height = 40, fig_dpi = 400, gap= 50,
     # bins_x_axis=use_bins_x_axis, smooth_psth_sigma=0)
-    fig2.savefig(f"population_raster2.pdf", dpi=400, bbox_inches="tight")
+    # fig2.savefig(f"population_raster_e.pdf", dpi=400, bbox_inches="tight")
     plt.show()
     plt.close(fig2)
 
-    trial_t_bins_sliced = []
-    for i in range(splice_start, splice_end):
-        start = new_start_time_list[i]
-        end = new_end_time_list[i]
-        # Slice trial_t_bins for each trial to match the time window
-        sliced_t_bins = [trial_t_bins[trial_idx][start:end] for trial_idx in range(len(trial_t_bins))]
-        trial_t_bins_sliced.append(sliced_t_bins)
+    # trial_t_bins_sliced = []
+    # for i in range(splice_start, splice_end):
+    #     start = new_start_time_list[i]
+    #     end = new_end_time_list[i]
+    #     # Slice trial_t_bins for each trial to match the time window
+    #     sliced_t_bins = [trial_t_bins[trial_idx][start:end] for trial_idx in range(len(trial_t_bins))]
+    #     trial_t_bins_sliced.append(sliced_t_bins)
 
     
-    # Example: Create animated movie
-    # Get ppd from dataset metadata: ppd = dataset.dsets[0].metadata['ppd']
-    ppd = dataset.dsets[0].metadata['ppd']  # pixels per degree (adjust based on your dataset)
-    anim, fig_movie = population_plot_movie(
-        robs=robs,
-        eyepos=eyepos,
-        iix=iix_list[j][splice][0],
-        clusters=cluster_list_new[0],
-        start_time=new_start_time_list[0],
-        end_time=new_end_time_list[0],
-        image_ids=image_ids,
-        rsvp_images=rsvp_images,
-        ppd=ppd,
-        trail_length=5,  # Number of bins of eye trajectory history
-        fps=10,
-        save_path='population_movie.mp4',
-        show=False,
-        # Eye position parameters
-        show_unclustered_points=True,  # Only show clustered trials
-        plot_all_traces=True,  # Show all trials as gray background
-        image_extent=0.8,  # Extent in degrees (radius from center)
-        # Spike times parameters (same as plot_population_raster_NEW)
-        use_spike_times=True,
-        spike_times_trials=spike_times_trials,
-        trial_t_bins=trial_t_bins_sliced[0],  # Use sliced t_bins for the time window
-        dt=1/240,
-        show_psth=True,
-        bins_x_axis=use_bins_x_axis,
-        render="line",
-    )
-    plt.close(fig_movie)
+    # # Example: Create animated movie
+    # # Get ppd from dataset metadata: ppd = dataset.dsets[0].metadata['ppd']
+    # ppd = dataset.dsets[0].metadata['ppd']  # pixels per degree (adjust based on your dataset)
+    # anim, fig_movie = population_plot_movie(
+    #     robs=robs,
+    #     eyepos=eyepos,
+    #     iix=iix_list[j][splice][0],
+    #     clusters=cluster_list_new[0],
+    #     start_time=new_start_time_list[0],
+    #     end_time=new_end_time_list[0],
+    #     image_ids=image_ids,
+    #     rsvp_images=rsvp_images,
+    #     ppd=ppd,
+    #     trail_length=5,  # Number of bins of eye trajectory history
+    #     fps=10,
+    #     save_path='population_movie.mp4',
+    #     show=False,
+    #     # Eye position parameters
+    #     show_unclustered_points=True,  # Only show clustered trials
+    #     plot_all_traces=True,  # Show all trials as gray background
+    #     image_extent=0.8,  # Extent in degrees (radius from center)
+    #     # Spike times parameters (same as plot_population_raster_NEW)
+    #     use_spike_times=True,
+    #     spike_times_trials=spike_times_trials,
+    #     trial_t_bins=trial_t_bins_sliced[0],  # Use sliced t_bins for the time window
+    #     dt=1/240,
+    #     show_psth=True,
+    #     bins_x_axis=use_bins_x_axis,
+    #     render="line",
+    # )
+    # plt.close(fig_movie)
 #%%

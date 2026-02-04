@@ -303,7 +303,7 @@ def plot_eyepos_colormap(eyepos, iix, start_time, end_time):
     plt.imshow(eyepos[iix,start_time:end_time,1])
     plt.colorbar()
     plt.show()
-def plot_robs(robs, iix, cc, num_psth = None, distances_along_line = None, alpha_raster =1, bins_x_axis = True, render="line", linear_distance=False, empty_row_style=None):
+def plot_robs(robs, iix, cc, num_psth = None, distances_along_line = None, alpha_raster =1, bins_x_axis = True, render="line"):
         def _time_axis_params(n_time_bins, bins_x_axis):
             max_ms = (n_time_bins - 1) / 240 * 1000
             if bins_x_axis:
@@ -327,27 +327,37 @@ def plot_robs(robs, iix, cc, num_psth = None, distances_along_line = None, alpha
         tick_height = 0.2
         tick_linewidth =4
 
-        def plot_raster_as_line(ax, raster_data, time_bins, height=1.0, color="k", linewidth=0.5, alpha=1.0, y_positions=None):
+        def plot_raster_as_line(ax, raster_data, time_bins, height=1.0, color="k", linewidth=0.5, alpha=1.0):
             mask = np.isfinite(raster_data) & (raster_data > 0)
             row_idx, col_idx = np.where(mask)
             if row_idx.size == 0:
                 return None
             values = raster_data[row_idx, col_idx]
             unique_vals = np.unique(values)
-            vmin, vmax = unique_vals[0], unique_vals[-1]
+            vmin = unique_vals[0]
+            vmax = unique_vals[-1]
             handles = []
             for val in unique_vals:
                 sel = values == val
                 if not np.any(sel):
                     continue
-                alpha_val = min(1.0, (0.2 + 0.8 * (val - vmin) / (vmax - vmin)) * alpha) if vmax > vmin else alpha
+                if vmax > vmin:
+                    norm = (val - vmin) / (vmax - vmin)
+                    alpha_val = (0.2 + 0.8 * norm) * alpha
+                else:
+                    alpha_val = alpha
                 x_vals = time_bins[col_idx[sel]]
-                y_vals = y_positions[row_idx[sel]] if y_positions is not None else row_idx[sel]
                 x = np.vstack([x_vals, x_vals, np.full(sel.sum(), np.nan)])
-                y = np.vstack([y_vals, y_vals + height, np.full(sel.sum(), np.nan)])
+                y = np.vstack([row_idx[sel], row_idx[sel] + height, np.full(sel.sum(), np.nan)])
                 handles.append(
-                    ax.plot(x.ravel(order="F"), y.ravel(order="F"), color=color,
-                            linewidth=linewidth, alpha=alpha_val, rasterized=True)[0]
+                    ax.plot(
+                        x.ravel(order="F"),
+                        y.ravel(order="F"),
+                        color=color,
+                        linewidth=linewidth,
+                        alpha=alpha_val,
+                        rasterized=True,
+                    )[0]
                 )
             return handles[-1] if handles else None
         # Handle lists - stitch together along time axis with padding
@@ -462,16 +472,6 @@ def plot_robs(robs, iix, cc, num_psth = None, distances_along_line = None, alpha
         n_time_bins = robs.shape[1]
         time_bins, tick_positions, tick_labels, x_max = _time_axis_params(n_time_bins, bins_x_axis)
         ax1.set_rasterization_zorder(1)
-        
-        # Linear distance mode: map trials to their actual distance positions
-        use_linear = linear_distance and distances_along_line is not None
-        if use_linear:
-            n_rows = len(distances_along_line)
-            dist_min, dist_max = distances_along_line.min(), distances_along_line.max()
-            # Map distances to row indices in linear space
-            y_positions = (distances_along_line - dist_min) / (dist_max - dist_min) * (n_rows - 1)
-            raster_data = robs[iix, :, cids.index(cc)]
-        
         if render == "img":
             raster_extent = None
             if not bins_x_axis:
@@ -480,71 +480,41 @@ def plot_robs(robs, iix, cc, num_psth = None, distances_along_line = None, alpha
                 robs[iix, :, cids.index(cc)],
                 alpha=alpha_raster,
                 aspect='auto',
+                # cmap="gray_r",
                 extent=raster_extent,
                 interpolation='none',
                 rasterized=True,
                 zorder=0,
             )
         else:
-            if use_linear:
-                # Plot using refactored function with custom y_positions
-                plot_raster_as_line(ax1, raster_data, time_bins, height=tick_height, color="k",
-                                   linewidth=tick_linewidth, alpha=alpha_raster, y_positions=y_positions)
-                ax1.set_ylim(n_rows, 0)
-                
-                # Visualize empty regions if requested
-                if empty_row_style is not None:
-                    sorted_y = np.sort(y_positions)
-                    gap_threshold = 1.5  # gaps larger than this are considered empty
-                    for j in range(len(sorted_y) - 1):
-                        gap = sorted_y[j + 1] - sorted_y[j]
-                        if gap > gap_threshold:
-                            y_start, y_end = sorted_y[j] + 0.5, sorted_y[j + 1] - 0.5
-                            if empty_row_style == "shade":
-                                ax1.axhspan(y_start, y_end, color='lightblue', alpha=0.3, zorder=-1)
-                            elif empty_row_style == "hatch":
-                                ax1.axhspan(y_start, y_end, facecolor='none', edgecolor='gray', 
-                                           hatch='///', alpha=0.5, zorder=-1)
-                            elif empty_row_style == "lines":
-                                ax1.axhspan(y_start, y_end, facecolor='none', edgecolor='lightblue',
-                                           linewidth=0.5, zorder=-1)
-                                ax1.axhline(y=(y_start + y_end) / 2, color='lightblue', 
-                                           linestyle='--', linewidth=1, alpha=0.7)
-            else:
-                plot_raster_as_line(
-                    ax1,
-                    robs[iix, :, cids.index(cc)],
-                    time_bins,
-                    height=tick_height,
-                    color="k",
-                    linewidth=tick_linewidth,
-                    alpha=alpha_raster,
-                )
-                ax1.set_ylim(len(iix), 0)
+            plot_raster_as_line(
+                ax1,
+                robs[iix, :, cids.index(cc)],
+                time_bins,
+                height=tick_height,
+                color="k",
+                linewidth=tick_linewidth,
+                alpha=alpha_raster,
+            )
+            ax1.set_ylim(len(iix), 0)
         ax1.set_title(f'{cc} after')
         ax1.set_xlabel('Time (bins)' if bins_x_axis else 'Time (ms)')
-        ax1.set_ylabel('Trial (ordered)' if not use_linear else 'Distance along line (degrees)')
+        ax1.set_ylabel('Trial (ordered)')
         ax1.set_xlim(0, x_max)
         ax1.set_xticks(tick_positions)
         ax1.set_xticklabels(tick_labels)
 
         # Add secondary y-axis with distance labels (from peak psth segment)
-        if distances_along_line is not None and not use_linear:
+        if distances_along_line is not None:
             ax_dist = ax1.twinx()
             ax_dist.set_ylim(ax1.get_ylim())
+            # Select ~5 equally spaced indices based on distances array length
             n_ticks = 5
             n_distances = len(distances_along_line)
             tick_indices = np.linspace(0, n_distances - 1, n_ticks, dtype=int)
             ax_dist.set_yticks(tick_indices)
             ax_dist.set_yticklabels([f'{distances_along_line[i]:.2f}' for i in tick_indices])
             ax_dist.set_ylabel('Distance along line (degrees)')
-        elif use_linear:
-            # Set y-axis ticks to show actual distance values
-            n_ticks = 5
-            tick_positions_y = np.linspace(0, len(iix) - 1, n_ticks)
-            tick_labels_y = np.linspace(dist_min, dist_max, n_ticks)
-            ax1.set_yticks(tick_positions_y)
-            ax1.set_yticklabels([f'{v:.2f}' for v in tick_labels_y])
 
         if num_psth is not None:
             # ax2 = ax1.twinx()
@@ -722,7 +692,7 @@ for cc in [115, 92]:
         
         # plot_robs(robs[:, start_time:end_time, :], iix, cc)
         # plot_robs(robs[:, start_time:end_time, :], iix, cc, num_psth = 4)
-        fig, axes = plot_robs(robs_list, iix_list, cc, distances_along_line = distances_to_use, num_psth=2, bins_x_axis = False, linear_distance = True,empty_row_style="hatch")
+        fig, axes = plot_robs(robs_list, iix_list, cc, distances_along_line = distances_to_use, num_psth=2, bins_x_axis = False)
         fig.savefig(f'raster_single_cell_aligned_{cc}.pdf', dpi=1200, bbox_inches='tight')
         plt.show()
         # plot_robs(robs_list, iix_list, cc, num_psth = 4)
