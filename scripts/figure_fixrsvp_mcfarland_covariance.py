@@ -3,7 +3,7 @@
 
 # this is to suppress errors in the attempts at compilation that happen for one of the loaded models because it crashed
 import sys
-sys.path.append('..')
+sys.path.append('./scripts')
 import numpy as np
 
 from DataYatesV1 import enable_autoreload, get_free_device, get_session, get_complete_sessions
