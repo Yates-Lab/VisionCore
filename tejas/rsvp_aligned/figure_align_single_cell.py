@@ -100,12 +100,17 @@ eyepos = data['eyepos']
 fix_dur = data['fix_dur']
 image_ids = data['image_ids']
 cids = data['cids']
+spike_times_trials = data['spike_times_trials']
+trial_t_bins = data['trial_t_bins']
+trial_time_windows = data['trial_time_windows']
+rsvp_images = data['rsvp_images']
+dataset = data['dataset']
 
-good_trials = fix_dur > 20
-robs = robs[good_trials]
-dfs = dfs[good_trials]
-eyepos = eyepos[good_trials]
-fix_dur = fix_dur[good_trials]
+# good_trials = fix_dur > 20
+# robs = robs[good_trials]
+# dfs = dfs[good_trials]
+# eyepos = eyepos[good_trials]
+# fix_dur = fix_dur[good_trials]
 
 
 ind = np.argsort(fix_dur)[::-1]
@@ -303,9 +308,9 @@ def plot_eyepos_colormap(eyepos, iix, start_time, end_time):
     plt.imshow(eyepos[iix,start_time:end_time,1])
     plt.colorbar()
     plt.show()
-def plot_robs(robs, iix, cc, num_psth = None, distances_along_line = None, alpha_raster =1, bins_x_axis = True, render="line", linear_distance=False, empty_row_style=None):
-        def _time_axis_params(n_time_bins, bins_x_axis):
-            max_ms = (n_time_bins - 1) / 240 * 1000
+def plot_robs(robs, iix, cc, num_psth = None, distances_along_line = None, alpha_raster =1, bins_x_axis = True, render="line", linear_distance=False, empty_row_style=None, empty_row_margin=0.1, use_spike_times=False, spike_times=None, trial_t_bins=None, dt=1/240, t_start=None, t_end=None, tick_height = 0.2, tick_linewidth = 4, debug=False):
+        def _time_axis_params(n_time_bins, bins_x_axis, dt=1/240):
+            max_ms = (n_time_bins - 1) * dt * 1000
             if bins_x_axis:
                 time_bins = np.arange(n_time_bins)
                 tick_step = 20 if n_time_bins <= 100 else 50
@@ -313,7 +318,7 @@ def plot_robs(robs, iix, cc, num_psth = None, distances_along_line = None, alpha
                 tick_labels = [f'{tick:.0f}' for tick in tick_positions]
                 x_max = n_time_bins - 1
             else:
-                time_bins = (np.arange(n_time_bins) / 240) * 1000
+                time_bins = np.arange(n_time_bins) * dt * 1000
                 if max_ms <= 120:
                     tick_step = 25
                 elif max_ms <= 250:
@@ -324,8 +329,58 @@ def plot_robs(robs, iix, cc, num_psth = None, distances_along_line = None, alpha
                 tick_labels = [f'{tick:.0f}' for tick in tick_positions]
                 x_max = max_ms
             return time_bins, tick_positions, tick_labels, x_max
-        tick_height = 0.2
-        tick_linewidth =4
+        
+
+        def plot_raster_spike_times(ax, spike_times_list, trial_indices, height=1.0, color="k", linewidth=0.5, 
+                                    y_positions=None, bins_x_axis=True, dt=1/240, trial_t_bins=None, debug=False):
+            """Plot raster from spike times (no alpha - all spikes are binary).
+            Uses trial_t_bins to get per-trial time windows (spike times are in absolute time)."""
+            x_list, y_list = [], []
+            total_spikes_before_filter = 0
+            total_spikes_after_filter = 0
+            for i, trial_idx in enumerate(trial_indices):
+                spikes = np.atleast_1d(np.asarray(spike_times_list[trial_idx]))
+                total_spikes_before_filter += spikes.size
+                if spikes.size == 0:
+                    continue
+                
+                # Get per-trial time window from trial_t_bins
+                if trial_t_bins is not None:
+                    t_bins = trial_t_bins[trial_idx]
+                    valid_mask = ~np.isnan(t_bins)
+                    if not np.any(valid_mask):
+                        continue
+                    valid_t_bins = t_bins[valid_mask]
+                    t_start = valid_t_bins[0] - dt/2
+                    t_end = valid_t_bins[-1] + dt/2
+                    
+                    # Filter to time window
+                    mask = (spikes >= t_start) & (spikes < t_end)
+                    spikes = spikes[mask] - t_start  # make relative to window start
+                # else: use spikes as-is (assumes already relative times)
+                
+                total_spikes_after_filter += spikes.size
+                if spikes.size == 0:
+                    continue
+                x_vals = spikes / dt if bins_x_axis else spikes * 1000  # bins or ms
+                y_base = y_positions[i] if y_positions is not None else i
+                for x in x_vals:
+                    x_list.extend([x, x, np.nan])
+                    y_list.extend([y_base, y_base + height, np.nan])
+            if debug:
+                print(f"[DEBUG spike_times] trials: {len(trial_indices)}, spikes before filter: {total_spikes_before_filter}, after filter: {total_spikes_after_filter}")
+                if len(trial_indices) > 0 and trial_t_bins is not None:
+                    sample_trial = trial_indices[0]
+                    sample = np.atleast_1d(np.asarray(spike_times_list[sample_trial]))
+                    t_bins = trial_t_bins[sample_trial]
+                    valid_t_bins = t_bins[~np.isnan(t_bins)]
+                    print(f"[DEBUG spike_times] sample trial {sample_trial}: {sample.size} spikes")
+                    if sample.size > 0:
+                        print(f"[DEBUG spike_times]   spike range: [{sample.min():.6f}, {sample.max():.6f}]")
+                    if len(valid_t_bins) > 0:
+                        print(f"[DEBUG spike_times]   t_bins range: [{valid_t_bins[0]:.6f}, {valid_t_bins[-1]:.6f}]")
+            if x_list:
+                ax.plot(x_list, y_list, color=color, linewidth=linewidth, rasterized=True)
 
         def plot_raster_as_line(ax, raster_data, time_bins, height=1.0, color="k", linewidth=0.5, alpha=1.0, y_positions=None):
             mask = np.isfinite(raster_data) & (raster_data > 0)
@@ -389,8 +444,12 @@ def plot_robs(robs, iix, cc, num_psth = None, distances_along_line = None, alpha
         
         # plt.subplot(1,2,1)
         # ax1 = plt.gca()
-        fig, axes = plt.subplots(2,2, figsize=(15, 10), dpi=500)
-        ax1 = axes[0][0]
+        if num_psth is not None:
+            fig, axes = plt.subplots(2, 2, figsize=(15, 10), dpi=500)
+            ax1 = axes[0][0]
+        else:
+            fig, axes = plt.subplots(1, 2, figsize=(15, 5), dpi=500)
+            ax1 = axes[0]
 
         n_time_bins = robs_original.shape[1]
         time_bins, tick_positions, tick_labels, x_max = _time_axis_params(n_time_bins, bins_x_axis)
@@ -410,15 +469,12 @@ def plot_robs(robs, iix, cc, num_psth = None, distances_along_line = None, alpha
                 zorder=0,
             )
         else:
-            plot_raster_as_line(
-                ax1,
-                robs_original[np.sort(iix), :, cids.index(cc)],
-                time_bins,
-                height=tick_height,
-                color="k",
-                linewidth=tick_linewidth,
-                alpha=alpha_raster,
-            )
+            if use_spike_times and spike_times is not None:
+                plot_raster_spike_times(ax1, spike_times, np.sort(iix), height=tick_height, color="k",
+                                       linewidth=tick_linewidth, bins_x_axis=bins_x_axis, dt=dt, trial_t_bins=trial_t_bins, debug=debug)
+            else:
+                plot_raster_as_line(ax1, robs_original[np.sort(iix), :, cids.index(cc)], time_bins,
+                                   height=tick_height, color="k", linewidth=tick_linewidth, alpha=alpha_raster)
             ax1.set_ylim(len(iix), 0)
         ax1.set_title(f'{cc} before')
         ax1.set_xlabel('Time (bins)' if bins_x_axis else 'Time (ms)')
@@ -458,7 +514,7 @@ def plot_robs(robs, iix, cc, num_psth = None, distances_along_line = None, alpha
             ax2.set_xticklabels(tick_labels)
             
 
-        ax1 = axes[0][1]
+        ax1 = axes[0][1] if num_psth is not None else axes[1]
         n_time_bins = robs.shape[1]
         time_bins, tick_positions, tick_labels, x_max = _time_axis_params(n_time_bins, bins_x_axis)
         ax1.set_rasterization_zorder(1)
@@ -487,9 +543,13 @@ def plot_robs(robs, iix, cc, num_psth = None, distances_along_line = None, alpha
             )
         else:
             if use_linear:
-                # Plot using refactored function with custom y_positions
-                plot_raster_as_line(ax1, raster_data, time_bins, height=tick_height, color="k",
-                                   linewidth=tick_linewidth, alpha=alpha_raster, y_positions=y_positions)
+                # Plot using appropriate method with custom y_positions
+                if use_spike_times and spike_times is not None:
+                    plot_raster_spike_times(ax1, spike_times, iix, height=tick_height, color="k",
+                                           linewidth=tick_linewidth, y_positions=y_positions, bins_x_axis=bins_x_axis, dt=dt, trial_t_bins=trial_t_bins, debug=debug)
+                else:
+                    plot_raster_as_line(ax1, raster_data, time_bins, height=tick_height, color="k",
+                                       linewidth=tick_linewidth, alpha=alpha_raster, y_positions=y_positions)
                 ax1.set_ylim(n_rows, 0)
                 
                 # Visualize empty regions if requested
@@ -499,7 +559,9 @@ def plot_robs(robs, iix, cc, num_psth = None, distances_along_line = None, alpha
                     for j in range(len(sorted_y) - 1):
                         gap = sorted_y[j + 1] - sorted_y[j]
                         if gap > gap_threshold:
-                            y_start, y_end = sorted_y[j] + 0.5, sorted_y[j + 1] - 0.5
+                            # Start after current row's spikes end, end before next row starts
+                            y_start = sorted_y[j] + tick_height + empty_row_margin
+                            y_end = sorted_y[j + 1] - empty_row_margin
                             if empty_row_style == "shade":
                                 ax1.axhspan(y_start, y_end, color='lightblue', alpha=0.3, zorder=-1)
                             elif empty_row_style == "hatch":
@@ -511,15 +573,12 @@ def plot_robs(robs, iix, cc, num_psth = None, distances_along_line = None, alpha
                                 ax1.axhline(y=(y_start + y_end) / 2, color='lightblue', 
                                            linestyle='--', linewidth=1, alpha=0.7)
             else:
-                plot_raster_as_line(
-                    ax1,
-                    robs[iix, :, cids.index(cc)],
-                    time_bins,
-                    height=tick_height,
-                    color="k",
-                    linewidth=tick_linewidth,
-                    alpha=alpha_raster,
-                )
+                if use_spike_times and spike_times is not None:
+                    plot_raster_spike_times(ax1, spike_times, iix, height=tick_height, color="k",
+                                           linewidth=tick_linewidth, bins_x_axis=bins_x_axis, dt=dt, trial_t_bins=trial_t_bins, debug=debug)
+                else:
+                    plot_raster_as_line(ax1, robs[iix, :, cids.index(cc)], time_bins, height=tick_height,
+                                       color="k", linewidth=tick_linewidth, alpha=alpha_raster)
                 ax1.set_ylim(len(iix), 0)
         ax1.set_title(f'{cc} after')
         ax1.set_xlabel('Time (bins)' if bins_x_axis else 'Time (ms)')
@@ -722,7 +781,25 @@ for cc in [115, 92]:
         
         # plot_robs(robs[:, start_time:end_time, :], iix, cc)
         # plot_robs(robs[:, start_time:end_time, :], iix, cc, num_psth = 4)
-        fig, axes = plot_robs(robs_list, iix_list, cc, distances_along_line = distances_to_use, num_psth=2, bins_x_axis = False, linear_distance = True,empty_row_style="hatch")
+        spike_times_cc = [spike_times_trials[t][cids.index(cc)] for t in range(len(spike_times_trials))]
+        t_start = 0.0
+        t_end = total_end_time / 240
+
+        fig, axes = plot_robs(robs_list, iix_list[2:], cc, distances_along_line = distances_to_use[2:], 
+                        num_psth=None, bins_x_axis = False, linear_distance = True,
+                        # empty_row_style="hatch",
+                        empty_row_style=None,
+                        use_spike_times=True,
+                        spike_times=spike_times_cc,
+                        dt=1/240,
+                        # tick_height = 1.5,
+                        # tick_linewidth = 1,
+                        tick_height = 0.6,
+                        tick_linewidth = 1,
+                        trial_t_bins=trial_t_bins,  # ADD THIS
+                        debug=False,
+                        empty_row_margin=0.0
+                       )
         fig.savefig(f'raster_single_cell_aligned_{cc}.pdf', dpi=1200, bbox_inches='tight')
         plt.show()
         # plot_robs(robs_list, iix_list, cc, num_psth = 4)

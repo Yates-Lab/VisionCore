@@ -163,6 +163,182 @@ def get_position_colors(positions, xlim, ylim, corner_colors=None):
     return colors
 
 
+def orientation_to_color(orientation, cmap_name='hsv', unique_orientations=None):
+    """
+    Map an orientation (in degrees) to a color using a colormap.
+    
+    Parameters
+    ----------
+    orientation : float
+        Orientation in degrees (0-180, where 0° and 180° are the same)
+    cmap_name : str
+        Name of matplotlib colormap to use. 
+        - Cyclic options: 'hsv', 'twilight'
+        - Categorical (better for discrete): 'tab10', 'Set1', 'Set2', 'Paired'
+    unique_orientations : array-like, optional
+        If provided, maps orientation to discrete color index based on position
+        in this sorted list. Better for categorical colormaps.
+        
+    Returns
+    -------
+    tuple
+        RGBA color tuple (0-1)
+    """
+    cmap = plt.get_cmap(cmap_name)
+    
+    if unique_orientations is not None:
+        # Discrete mapping: find index of this orientation in sorted unique list
+        sorted_unique = np.sort(unique_orientations)
+        idx = np.searchsorted(sorted_unique, orientation)
+        # Map to colormap - spread evenly across colormap range
+        n_unique = len(sorted_unique)
+        normalized = idx / max(n_unique - 1, 1)
+    else:
+        # Continuous mapping for cyclic colormaps
+        normalized = (orientation % 180) / 180
+    
+    return cmap(normalized)
+
+
+def get_orientation_colors(orientations, cmap_name='hsv', unique_orientations=None, 
+                           highlight_orientations=None):
+    """
+    Get colors for an array of orientations.
+    
+    Parameters
+    ----------
+    orientations : np.ndarray
+        Array of orientations in degrees
+    cmap_name : str
+        Name of colormap. For discrete orientations, 'tab10', 'Set1', 'Paired' work well.
+    unique_orientations : array-like, optional
+        If provided, uses discrete color mapping (better for categorical colormaps).
+    highlight_orientations : list, optional
+        If provided, only these orientations get colors; all others are black.
+        
+    Returns
+    -------
+    list
+        List of RGBA color tuples
+    """
+    if unique_orientations is None:
+        unique_orientations = np.unique(orientations)
+    
+    colors = []
+    for o in orientations:
+        if highlight_orientations is not None:
+            # Check if this orientation should be highlighted
+            # Use np.isclose for floating point comparison
+            is_highlighted = any(np.isclose(o, h, atol=0.1) for h in highlight_orientations)
+            if is_highlighted:
+                # Use only highlighted orientations for color mapping
+                color = orientation_to_color(o, cmap_name, unique_orientations=highlight_orientations)
+            else:
+                color = (0.2, 0.2, 0.2, 0.3)  # Dark gray, semi-transparent for non-highlighted
+        else:
+            color = orientation_to_color(o, cmap_name, unique_orientations)
+        colors.append(color)
+    
+    return colors
+
+
+def add_orientation_legend(ax, unique_orientations, cmap_name='hsv', loc='upper left', 
+                           line_length=0.03, fontsize=9):
+    """
+    Add a legend showing orientation-to-color mapping with angled line segments.
+    
+    Parameters
+    ----------
+    ax : matplotlib axis
+    unique_orientations : array-like
+        Sorted unique orientations in degrees
+    cmap_name : str
+        Colormap name
+    loc : str
+        Legend location
+    line_length : float
+        Length of orientation lines in axis coordinates
+    fontsize : int
+        Font size for labels
+    """
+    from matplotlib.lines import Line2D
+    from matplotlib.patches import Rectangle
+    
+    sorted_oris = sorted(unique_orientations)
+    legend_elements = []
+    for ori in sorted_oris:
+        color = orientation_to_color(ori, cmap_name, unique_orientations=sorted_oris)
+        # Create a line element - the line angle is just for visual, 
+        # we'll use a colored patch and text
+        legend_elements.append(
+            Line2D([0], [0], color=color, linewidth=3, label=f'{ori:.1f}°')
+        )
+    
+    # Create a custom legend with oriented lines
+    legend = ax.legend(handles=legend_elements, loc=loc, fontsize=fontsize, 
+                       title='Preferred Orientation', title_fontsize=fontsize+1,
+                       framealpha=0.9)
+    
+    return legend
+
+
+def draw_orientation_legend_with_lines(ax, unique_orientations, cmap_name='hsv',
+                                        position=(0.02, 0.98), spacing=0.045,
+                                        line_length=0.025, fontsize=9):
+    """
+    Draw a custom legend with actual oriented line segments.
+    
+    Parameters
+    ----------
+    ax : matplotlib axis
+    unique_orientations : array-like
+        Sorted unique orientations in degrees
+    cmap_name : str
+        Colormap name
+    position : tuple
+        (x, y) position in axes coordinates for top-left of legend
+    spacing : float
+        Vertical spacing between entries in axes coordinates
+    line_length : float
+        Half-length of the orientation line in axes coordinates
+    fontsize : int
+        Font size for labels
+    """
+    x_start, y_start = position
+    sorted_oris = sorted(unique_orientations)
+    
+    # Draw background box
+    box_height = len(sorted_oris) * spacing + 0.03
+    box_width = 0.12
+    rect = plt.Rectangle((x_start - 0.01, y_start - box_height), box_width, box_height + 0.01,
+                          transform=ax.transAxes, facecolor='white', edgecolor='gray',
+                          alpha=0.9, zorder=100)
+    ax.add_patch(rect)
+    
+    # Title
+    ax.text(x_start + box_width/2 - 0.01, y_start - 0.01, 'Orientation', 
+            transform=ax.transAxes, fontsize=fontsize, fontweight='bold',
+            ha='center', va='top', zorder=101)
+    
+    for i, ori in enumerate(sorted_oris):
+        y_pos = y_start - 0.035 - i * spacing
+        color = orientation_to_color(ori, cmap_name, unique_orientations=sorted_oris)
+        
+        # Draw oriented line
+        angle_rad = np.radians(ori)
+        dx = line_length * np.cos(angle_rad)
+        dy = line_length * np.sin(angle_rad)
+        
+        line_x = x_start + 0.02
+        ax.plot([line_x - dx, line_x + dx], [y_pos - dy, y_pos + dy],
+                color=color, linewidth=3, transform=ax.transAxes, zorder=101,
+                solid_capstyle='round')
+        
+        # Draw label
+        ax.text(line_x + line_length + 0.015, y_pos, f'{ori:.1f}°',
+                transform=ax.transAxes, fontsize=fontsize-1, va='center', zorder=101)
+
+
 def boxes_overlap(pos1, pos2, raster_size, spacing=0):
     """Check if two raster boxes overlap (including spacing)."""
     rw, rh = raster_size
@@ -479,6 +655,7 @@ def setup_tiled_rasters(spike_times_trials, trial_t_bins, eyepos, start_time, en
                         raster_width=0.2, raster_height=0.15,
                         raster_spacing=0.02,
                         xlim=None, ylim=None, space_bounds=None,
+                        lim_dynamic=False,
                         layout_method='two_phase',
                         search_radius=2.0, search_step=0.01,
                         force_iterations=500,
@@ -488,6 +665,9 @@ def setup_tiled_rasters(spike_times_trials, trial_t_bins, eyepos, start_time, en
                         position_line_color='red',
                         position_line_alpha=0.5,
                         position_line_width=0.8,
+                        preferred_orientations=None,
+                        orientation_cmap='hsv',
+                        highlight_orientations=None,
                         figsize=(14, 12),
                         title=None):
     """
@@ -589,6 +769,15 @@ def setup_tiled_rasters(spike_times_trials, trial_t_bins, eyepos, start_time, en
     else:
         raise ValueError(f"Unknown layout_method: {layout_method}")
     
+    # Dynamically adjust limits to fit all rasters if requested
+    if lim_dynamic:
+        margin = 0.05  # Small margin around the rasters
+        xlim = (final_positions[:, 0].min() - raster_width/2 - margin,
+                final_positions[:, 0].max() + raster_width/2 + margin)
+        ylim = (final_positions[:, 1].min() - raster_height/2 - margin,
+                final_positions[:, 1].max() + raster_height/2 + margin)
+        print(f"Dynamic limits: xlim={xlim}, ylim={ylim}")
+    
     # Create figure
     fig, ax = plt.subplots(figsize=figsize)
     ax.set_xlim(xlim[0], xlim[1])
@@ -614,6 +803,30 @@ def setup_tiled_rasters(spike_times_trials, trial_t_bins, eyepos, start_time, en
     else:
         position_colors = None
     
+    # Process preferred orientations if provided
+    orientation_sort_order = None
+    orientation_colors = None
+    unique_orientations = None
+    if preferred_orientations is not None:
+        preferred_orientations = np.asarray(preferred_orientations)
+        if len(preferred_orientations) != n_cells:
+            raise ValueError(f"preferred_orientations length ({len(preferred_orientations)}) "
+                           f"must match n_cells ({n_cells})")
+        
+        # Compute sort order by orientation (ascending)
+        orientation_sort_order = np.argsort(preferred_orientations)
+        
+        # Get unique orientations for legend and discrete color mapping
+        unique_orientations = np.unique(preferred_orientations)
+        
+        # Get colors for each cell based on orientation (discrete mapping)
+        orientation_colors = get_orientation_colors(
+            preferred_orientations, orientation_cmap, unique_orientations, 
+            highlight_orientations=highlight_orientations
+        )
+        
+        print(f"Orientation sorting enabled: {len(unique_orientations)} unique orientations")
+    
     # Add legend
     if show_true_positions or show_position_lines:
         if color_by_position:
@@ -633,6 +846,13 @@ def setup_tiled_rasters(spike_times_trials, trial_t_bins, eyepos, start_time, en
                        alpha=position_line_alpha, label='Position offset')
             ax.legend(loc='upper right', fontsize=10)
     
+    # Add orientation legend if orientations provided
+    if unique_orientations is not None:
+        # If highlighting specific orientations, only show those in legend
+        legend_orientations = highlight_orientations if highlight_orientations is not None else unique_orientations
+        draw_orientation_legend_with_lines(ax, legend_orientations, cmap_name=orientation_cmap,
+                                           position=(0.02, 0.98), fontsize=8)
+    
     return {
         'fig': fig, 'ax': ax,
         'valid_trials': valid_trials,
@@ -648,6 +868,10 @@ def setup_tiled_rasters(spike_times_trials, trial_t_bins, eyepos, start_time, en
         'position_line_color': position_line_color,
         'position_line_alpha': position_line_alpha,
         'position_line_width': position_line_width,
+        'orientation_sort_order': orientation_sort_order,
+        'orientation_colors': orientation_colors,
+        'orientation_cmap': orientation_cmap,
+        'preferred_orientations': preferred_orientations,
     }
 
 
@@ -696,6 +920,8 @@ def render_tiled_frame(ax, setup_data, spike_times_trials, trial_t_bins,
     position_line_color = setup_data['position_line_color']
     position_line_alpha = setup_data['position_line_alpha']
     position_line_width = setup_data['position_line_width']
+    orientation_sort_order = setup_data.get('orientation_sort_order')
+    orientation_colors = setup_data.get('orientation_colors')
     
     time_window = window_end - window_start
     
@@ -781,14 +1007,37 @@ def render_tiled_frame(ax, setup_data, spike_times_trials, trial_t_bins,
             times = np.concatenate(times_list)
             cells = np.concatenate(cells_list).astype(int)
             
-            spike_x = pos_x - raster_width/2 + (times / time_window) * raster_width
-            spike_y = pos_y - raster_height/2 + (cells / n_cells) * raster_height
+            # If orientation sorting is enabled, map cell indices to sorted positions
+            if orientation_sort_order is not None:
+                # Create reverse mapping: original cell idx -> sorted position
+                sorted_positions = np.zeros(n_cells, dtype=int)
+                sorted_positions[orientation_sort_order] = np.arange(n_cells)
+                display_cells = sorted_positions[cells]
+            else:
+                display_cells = cells
             
+            spike_x = pos_x - raster_width/2 + (times / time_window) * raster_width
+            spike_y = pos_y - raster_height/2 + (display_cells / n_cells) * raster_height
             spike_height = raster_height / n_cells * 0.8
-            line_artist = plot_spikes_as_lines(ax, spike_x, spike_y, height=spike_height,
-                                               color='black', linewidth=spike_linewidth, alpha=spike_alpha)
-            if line_artist is not None:
-                artists.append(line_artist)
+            
+            # Color spikes by orientation if available
+            if orientation_colors is not None:
+                # Group spikes by color for efficient rendering
+                unique_cells = np.unique(cells)
+                for cell_idx in unique_cells:
+                    cell_mask = cells == cell_idx
+                    cell_color = orientation_colors[cell_idx]
+                    line_artist = plot_spikes_as_lines(
+                        ax, spike_x[cell_mask], spike_y[cell_mask], 
+                        height=spike_height, color=cell_color, 
+                        linewidth=spike_linewidth, alpha=spike_alpha)
+                    if line_artist is not None:
+                        artists.append(line_artist)
+            else:
+                line_artist = plot_spikes_as_lines(ax, spike_x, spike_y, height=spike_height,
+                                                   color='black', linewidth=spike_linewidth, alpha=spike_alpha)
+                if line_artist is not None:
+                    artists.append(line_artist)
         
         if show_position_lines:
             line_color = raster_color if color_by_position else position_line_color
@@ -1002,6 +1251,7 @@ def tiled_rasters_movie(spike_times_trials, trial_t_bins, eyepos,
                         raster_width=0.2, raster_height=0.15,
                         raster_spacing=0.02,
                         xlim=None, ylim=None, space_bounds=None,
+                        lim_dynamic=False,
                         layout_method='two_phase',
                         search_radius=2.0, search_step=0.01,
                         force_iterations=500,
@@ -1011,6 +1261,9 @@ def tiled_rasters_movie(spike_times_trials, trial_t_bins, eyepos,
                         position_line_color='red',
                         position_line_alpha=0.5,
                         position_line_width=0.8,
+                        preferred_orientations=None,
+                        orientation_cmap='hsv',
+                        highlight_orientations=None,
                         figsize=(14, 12),
                         spike_linewidth=0.3,
                         spike_alpha=0.8,
@@ -1064,6 +1317,7 @@ def tiled_rasters_movie(spike_times_trials, trial_t_bins, eyepos,
         raster_height=raster_height,
         raster_spacing=raster_spacing,
         xlim=xlim, ylim=ylim, space_bounds=space_bounds,
+        lim_dynamic=lim_dynamic,
         layout_method=layout_method,
         search_radius=search_radius, search_step=search_step,
         force_iterations=force_iterations,
@@ -1073,6 +1327,9 @@ def tiled_rasters_movie(spike_times_trials, trial_t_bins, eyepos,
         position_line_color=position_line_color,
         position_line_alpha=position_line_alpha,
         position_line_width=position_line_width,
+        preferred_orientations=preferred_orientations,
+        orientation_cmap=orientation_cmap,
+        highlight_orientations=highlight_orientations,
         figsize=figsize,
         title=title,
     )
@@ -1146,6 +1403,7 @@ def plot_tiled_rasters(spike_times_trials, trial_t_bins, eyepos, start_time, end
                        xlim=None,
                        ylim=None,
                        space_bounds=None,
+                       lim_dynamic=False,
                        layout_method='two_phase',
                        search_radius=2.0,
                        search_step=0.01,
@@ -1156,6 +1414,9 @@ def plot_tiled_rasters(spike_times_trials, trial_t_bins, eyepos, start_time, end
                        position_line_color='red',
                        position_line_alpha=0.5,
                        position_line_width=0.8,
+                       preferred_orientations=None,
+                       orientation_cmap='hsv',
+                       highlight_orientations=None,
                        figsize=(14, 12),
                        spike_linewidth=0.3,
                        spike_alpha=0.8,
@@ -1201,6 +1462,10 @@ def plot_tiled_rasters(spike_times_trials, trial_t_bins, eyepos, start_time, end
     space_bounds : tuple, optional
         (x_min, x_max, y_min, y_max) bounds for raster placement. If None, 
         derived from xlim/ylim with some margin for displaced rasters.
+    lim_dynamic : bool
+        If True, ignores xlim/ylim and dynamically adjusts axis limits to fit
+        all rasters (including their full width/height) with a small margin.
+        Useful when rasters extend beyond the original xlim/ylim bounds.
     layout_method : str
         Algorithm for placing rasters. Options:
         - 'greedy': Place rasters one at a time at nearest non-overlapping position.
@@ -1227,6 +1492,18 @@ def plot_tiled_rasters(spike_times_trials, trial_t_bins, eyepos, start_time, end
         Alpha/transparency of the position line (0-1)
     position_line_width : float
         Line width of the position line
+    preferred_orientations : np.ndarray, optional
+        Array of preferred orientations (in degrees) for each cell. 
+        If provided, cells are ordered by orientation within each raster (bottom=low, top=high),
+        and spikes are colored by the cell's orientation using a cyclic colormap.
+        Length must equal n_cells.
+    orientation_cmap : str
+        Matplotlib colormap for orientation colors. Default 'hsv' (cyclic).
+        Other good options: 'tab10', 'Set1' (categorical, better for discrete orientations).
+    highlight_orientations : list, optional
+        If provided, only spikes from cells with these orientations are colored;
+        all other orientations are shown in dark gray. Useful for tracking specific
+        orientations across space. Example: [11.25, 101.25]
     figsize : tuple
         Figure size
     spike_linewidth : float
@@ -1261,6 +1538,7 @@ def plot_tiled_rasters(spike_times_trials, trial_t_bins, eyepos, start_time, end
         xlim=xlim,
         ylim=ylim,
         space_bounds=space_bounds,
+        lim_dynamic=lim_dynamic,
         layout_method=layout_method,
         search_radius=search_radius,
         search_step=search_step,
@@ -1271,10 +1549,13 @@ def plot_tiled_rasters(spike_times_trials, trial_t_bins, eyepos, start_time, end
         position_line_color=position_line_color,
         position_line_alpha=position_line_alpha,
         position_line_width=position_line_width,
+        preferred_orientations=preferred_orientations,
+        orientation_cmap=orientation_cmap,
+        highlight_orientations=highlight_orientations,
         figsize=figsize,
         title=title,
     )
-    
+
     if setup_data is None:
         return None, None, [], np.array([])
     
@@ -1317,6 +1598,9 @@ data = get_fixrsvp_data(subject, date, dataset_configs_path,
 use_cached_data=True, 
 salvageable_mismatch_time_threshold=25, verbose=True)
 
+from tejas.metrics.gratings import get_gratings_for_dataset, plot_ori_tuning
+gratings_info = get_gratings_for_dataset(date, subject, cache = True)
+
 robs = data['robs']
 dfs = data['dfs']
 eyepos = data['eyepos']
@@ -1328,7 +1612,11 @@ trial_t_bins = data['trial_t_bins']
 trial_time_windows = data['trial_time_windows']
 rsvp_images = data['rsvp_images']
 dataset = data['dataset']
+
+preferred_orientations = gratings_info['oris'][np.argmax(gratings_info['ori_tuning'][cids], axis=-1)]
+
 #%%
+
 # Get number of cells from spike_times_trials structure
 n_cells = len(spike_times_trials[0])  # Number of cells per trial
 total_start_time = 40
@@ -1344,11 +1632,14 @@ fig, ax, valid_trials, final_positions = plot_tiled_rasters(
     microsaccade_threshold=0.15,
     raster_width=0.15,
     raster_height=0.15,
+    # raster_width=0.2,
+    # raster_height=0.2,
     raster_spacing=0.02,  # Minimum gap between adjacent rasters
     xlim=(-0.9, 0.9),  # Only include trials with median fixation in this x range
     ylim=(-0.4, 1.2),  # Only include trials with median fixation in this y range
-    # xlim=(-0.9, 0.9),
-    # ylim=(-0.8, 0.8),
+    # xlim=(-1.2, 1.2),
+    # ylim=(-1.2, 1.2),
+    lim_dynamic=False,
     # space_bounds is computed automatically from xlim/ylim with margin
     layout_method='two_phase',  # 'greedy' or 'two_phase'
     force_iterations=500,  # For two_phase method
@@ -1365,9 +1656,13 @@ fig, ax, valid_trials, final_positions = plot_tiled_rasters(
     spike_alpha=1,
     title=f'Tiled Spike Rasters - {subject} {date}',
     check_consistency=True,
+    # preferred_orientations=preferred_orientations,  # your array
+    # orientation_cmap='tab10',  # or 'twilight',
+    # highlight_orientations=[123.75],
 )
 
 plt.show()
+
 
 #%%
 # Save the figure
