@@ -27,7 +27,7 @@ device = get_free_device()
 
 from models.config_loader import load_dataset_configs
 
-dataset_configs_path = "/home/declan/VisionCore/experiments/dataset_configs/single_basic_120_long_rowley.yaml"
+dataset_configs_path = "/home/declan/VisionCore/experiments/dataset_configs/multi_basic_120_long_rowley.yaml"
     
 dataset_configs = load_dataset_configs(dataset_configs_path)
 
@@ -41,6 +41,16 @@ from models.data import prepare_data
 train_data, val_data, dataset_config = prepare_data(dataset_configs[0], strict=False)
 
 #%%
+train_data2, val_data2, dataset_config2 = prepare_data(dataset_configs[1], strict=False)
+
+#%%
+gab_dset = [d for d in train_data.dsets if getattr(d, 'metadata', {}).get('name', '') == 'gaborium']
+#%%
+# Check datasets for dfs 
+print(dataset_configs[0]['session'])
+print(dataset_configs[1]['session'])
+
+
 #%%#%%
 dataset = train_data.shallow_copy()
 
