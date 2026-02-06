@@ -645,6 +645,10 @@ def mcfarland2016(robs, eyepos, n_bins=10, plot=False):
 
 #%%
 
+
+
+
+cids_to_plot = [33]
 for iunit, cid in enumerate(cids_to_plot):
     id = np.where(np.isin(cids, cid))[0]
     x = robs[:,:,id][:,:,0]
@@ -654,4 +658,181 @@ for iunit, cid in enumerate(cids_to_plot):
     
 
 
+# %%
+
+out['em_corrected_var']/out['total_var']
+# %%
+x.shape
+# %%
+win_size = 10
+
+m = np.nanmean(np.nansum(robs[:,:10], 1), 0)
+v = np.nanvar(np.nansum(robs[:,:10], 1), 0)
+
+plt.plot(m, v, 'o')
+# plot line of unity
+plt.plot([0, 5], [0, 5], 'k--')
+plt.xlabel('Mean rate (spikes/sec)')
+plt.ylabel('Variance (spikes^2/sec)')
+# plt.xlim(0, 20)
+# plt.ylim(0, 20)
+
+
+
+# %%
+from numpy.lib.stride_tricks import sliding_window_view
+
+def get_lagged_trajectories(eyepos, history_bins=12, future_bins=0):
+    """
+    Unfold eye position into trajectories [Trials, Time, Lags, 2].
+    
+    Parameters:
+    -----------
+    eyepos : np.ndarray [Trials, Time, 2]
+    history_bins : int
+        Number of bins BEFORE the current time t to include.
+    future_bins : int
+        Number of bins AFTER the current time t to include (usually 0 for causality,
+        but useful if defining a window centered on t).
+        
+    Returns:
+    --------
+    eyepos_lagged : np.ndarray [Trials, Time_Adjusted, Lags, 2]
+        The time dimension will be shorter by (history_bins + future_bins).
+    """
+    # eyepos is [N, T, 2]
+    # We want to slide over the T dimension (axis 1)
+    # The window size is history_bins + 1 + future_bins
+    window_size = history_bins + 1 + future_bins
+    
+    # sliding_window_view puts the window dim last
+    # Input: [N, T, 2] -> Output: [N, T_adj, 2, Window]
+    padded_view = sliding_window_view(eyepos, window_size, axis=1)
+    
+    # Transpose to get [N, T_adj, Window, 2] corresponding to your mcfarland function expcctation
+    # Dimensions of padded_view: [N, T_adj, 2, Win]
+    # We want: [N, T_adj, Win, 2]
+    eyepos_lagged = np.moveaxis(padded_view, -1, -2)
+    
+    return eyepos_lagged
+
+def analyze_fano_over_windows(robs, eyepos, window_sizes_ms, dt=1/240, 
+                              history_ms=50, buffer_ms=30, n_bins=20):
+    
+    results = {
+        'windows': [],
+        'ff_uncorrected': [],
+        'ff_corrected': [],
+        'alpha': []
+    }
+    
+    # Convert ms to bins
+    history_bins = int(history_ms / (dt * 1000))
+    buffer_bins = int(buffer_ms / (dt * 1000)) 
+    
+    for win_ms in window_sizes_ms:
+        win_bins = int(win_ms / (dt * 1000))
+        if win_bins < 1: continue
+        
+        # --- 1. AGGREGATE SPIKES (STRICT) ---
+        spikes_view = sliding_window_view(robs, win_bins, axis=1)
+        
+        # Identify windows that are fully valid (no NaNs allowed)
+        window_is_valid = np.all(np.isfinite(spikes_view), axis=-1)
+        
+        # Calculate sum, but force invalid windows to NaN immediately
+        # We use 'sum' not 'nansum', but masked by validity
+        robs_binned = np.sum(spikes_view, axis=-1)
+        robs_binned[~window_is_valid] = np.nan
+        
+        # --- 2. PREPARE EYE TRAJECTORY ---
+        traj_len = history_bins + win_bins - buffer_bins
+        if traj_len < 1: traj_len = 1
+        
+        eyepos_view = sliding_window_view(eyepos, traj_len, axis=1)
+        eyepos_lagged = np.moveaxis(eyepos_view, -1, -2)
+        
+        # --- 3. ALIGN ARRAYS ---
+        # Same alignment logic as before
+        n_common = min(robs_binned.shape[1], eyepos_lagged.shape[1])
+        
+        # We assume the spike window 'i' corresponds to the eye trajectory 
+        # starting at 'i - history' (relative to the spike window start)
+        # So we crop the first 'history_bins' from spikes to align with eyes
+        r_slice = robs_binned[:, history_bins : n_common]
+        e_slice = eyepos_lagged[:, 0 : n_common - history_bins]
+        
+        # Double check alignment length
+        min_len = min(r_slice.shape[1], e_slice.shape[1])
+        r_slice = r_slice[:, :min_len]
+        e_slice = e_slice[:, :min_len]
+
+        # --- 4. RUN MCFARLAND ANALYSIS ---
+        # Since r_slice contains NaNs for invalid windows, and e_slice likely does too,
+        # mcfarland2016's internal `np.nanmean` will correctly ignore them for BOTH
+        # total_var AND em_corrected_var.
+        
+        # Ensure we have enough data
+        valid_mask = np.isfinite(r_slice)
+        if np.sum(valid_mask) < 50: # Arbitrary check for low data
+             print(f"Skipping {win_ms}ms: Not enough valid windows.")
+             continue
+
+        out, _ = mcfarland2016(r_slice, e_slice, n_bins=np.linspace(0, 1, int(ppd)), plot=False)
+        
+        # --- 5. CALCULATE FANO FACTORS ---
+        # Recalculate mean from the clean slice (redundant with mcfarland but safe)
+        mean_count = np.nanmean(r_slice)
+        
+        # Uncorrected (PSTH-based) Noise Variance
+        # Var_noise = Total - PSTH
+        var_noise_uncorrected = out['total_var'] - out['rate_var']
+        ff_uncorrected = var_noise_uncorrected / mean_count
+        
+        # Corrected (FEM-based) Noise Variance
+        # Var_noise = Total - FEM_Driven
+        var_noise_corrected = out['total_var'] - out['em_corrected_var']
+        ff_corrected = var_noise_corrected / mean_count
+        
+        results['windows'].append(win_ms)
+        results['ff_uncorrected'].append(ff_uncorrected)
+        results['ff_corrected'].append(ff_corrected)
+        results['alpha'].append(out['alpha'])
+        
+        print(f"Win {win_ms}ms | FF_raw: {ff_uncorrected:.2f} | FF_cor: {ff_corrected:.2f} | Alpha: {out['alpha']:.2f}")
+
+    return results
+
+#%% Run Fano Factor Analysis
+
+# Define window sizes (e.g., 4ms to 200ms)
+window_sizes = [4, 10, 20, 40, 80, 100, 150, 200]
+
+# Pick a unit
+cid = cids_to_plot[2] 
+id = np.where(np.isin(cids, cid))[0]
+robs_unit = robs[:,:,id][:,:,0] # [N, T]
+
+# Run Analysis
+ff_results = analyze_fano_over_windows(
+    robs_unit, 
+    eyepos, 
+    window_sizes, 
+    dt=1/240, 
+    history_ms=50, # Standard from paper
+    buffer_ms=30   # Standard from paper
+)
+
+# Plot Results
+plt.figure(figsize=(6, 5))
+plt.plot(ff_results['windows'], ff_results['ff_uncorrected'], 'o-', label='Standard (PSTH-based)')
+plt.plot(ff_results['windows'], ff_results['ff_corrected'], 'o-', label='FEM-Corrected')
+plt.axhline(1.0, color='k', linestyle='--', alpha=0.5)
+
+plt.xlabel('Count Window (ms)')
+plt.ylabel('Fano Factor')
+plt.title(f'Fano Factor vs Window Size (Unit {cid})')
+plt.legend()
+plt.grid(True, alpha=0.3)
+plt.savefig(f'../figures/tejas_poster/ff_scaling_{sess.name}_{cid}.pdf', bbox_inches='tight', dpi=300)
 # %%
