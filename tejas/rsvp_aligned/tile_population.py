@@ -1588,86 +1588,94 @@ def plot_tiled_rasters(spike_times_trials, trial_t_bins, eyepos, start_time, end
 # =============================================================================
 # Run the visualization
 # =============================================================================
-from tejas.rsvp_util import get_fixrsvp_data
-subject = 'Allen'
-date = '2022-03-02'
+from tqdm import tqdm
+from DataYatesV1 import  get_complete_sessions
+for session in tqdm(get_complete_sessions(), desc='Processing sessions'):
+    try:
+        from tejas.rsvp_util import get_fixrsvp_data
+        # subject = 'Allen'
+        # # date = '2022-03-02' best
+        # date = '2022-04-04'
+        subject = session.name.split('_')[0]
+        date = session.name.split('_')[1]
+        print(f'Processing {subject} {date}')
 
-dataset_configs_path = '/home/tejas/VisionCore/experiments/dataset_configs/multi_basic_240_rsvp.yaml'
+        dataset_configs_path = '/home/tejas/VisionCore/experiments/dataset_configs/multi_basic_240_rsvp.yaml'
 
-data = get_fixrsvp_data(subject, date, dataset_configs_path, 
-use_cached_data=True, 
-salvageable_mismatch_time_threshold=25, verbose=True)
+        data = get_fixrsvp_data(subject, date, dataset_configs_path, 
+        use_cached_data=True, 
+        salvageable_mismatch_time_threshold=25, verbose=False)
 
-from tejas.metrics.gratings import get_gratings_for_dataset, plot_ori_tuning
-gratings_info = get_gratings_for_dataset(date, subject, cache = True)
+        from tejas.metrics.gratings import get_gratings_for_dataset, plot_ori_tuning
+        gratings_info = get_gratings_for_dataset(date, subject, cache = True)
 
-robs = data['robs']
-dfs = data['dfs']
-eyepos = data['eyepos']
-fix_dur = data['fix_dur']
-image_ids = data['image_ids']
-cids = data['cids']
-spike_times_trials = data['spike_times_trials']
-trial_t_bins = data['trial_t_bins']
-trial_time_windows = data['trial_time_windows']
-rsvp_images = data['rsvp_images']
-dataset = data['dataset']
+        robs = data['robs']
+        dfs = data['dfs']
+        eyepos = data['eyepos']
+        fix_dur = data['fix_dur']
+        image_ids = data['image_ids']
+        cids = data['cids']
+        spike_times_trials = data['spike_times_trials']
+        trial_t_bins = data['trial_t_bins']
+        trial_time_windows = data['trial_time_windows']
+        rsvp_images = data['rsvp_images']
+        dataset = data['dataset']
 
-preferred_orientations = gratings_info['oris'][np.argmax(gratings_info['ori_tuning'][cids], axis=-1)]
-
-#%%
-
-# Get number of cells from spike_times_trials structure
-n_cells = len(spike_times_trials[0])  # Number of cells per trial
-total_start_time = 40
-total_end_time = 80
-fig, ax, valid_trials, final_positions = plot_tiled_rasters(
-    spike_times_trials=spike_times_trials,
-    trial_t_bins=trial_t_bins,
-    eyepos=eyepos,
-    start_time=total_start_time,
-    end_time=total_end_time,
-    n_cells=n_cells,
-    dt=1/240,
-    microsaccade_threshold=0.15,
-    raster_width=0.15,
-    raster_height=0.15,
-    # raster_width=0.2,
-    # raster_height=0.2,
-    raster_spacing=0.02,  # Minimum gap between adjacent rasters
-    xlim=(-0.9, 0.9),  # Only include trials with median fixation in this x range
-    ylim=(-0.4, 1.2),  # Only include trials with median fixation in this y range
-    # xlim=(-1.2, 1.2),
-    # ylim=(-1.2, 1.2),
-    lim_dynamic=False,
-    # space_bounds is computed automatically from xlim/ylim with margin
-    layout_method='two_phase',  # 'greedy' or 'two_phase'
-    force_iterations=500,  # For two_phase method
-    search_radius=2.0,
-    search_step=0.01,
-    show_true_positions=True,
-    show_position_lines=True,
-    color_by_position=False,  # Use 2D colormap based on position (corners: blue, cyan, red, yellow)
-    position_line_color='red',  # Only used if color_by_position=False
-    position_line_alpha=0.6,
-    position_line_width=1.0,
-    figsize=(14, 10),
-    spike_linewidth=1.3,
-    spike_alpha=1,
-    title=f'Tiled Spike Rasters - {subject} {date}',
-    check_consistency=True,
-    # preferred_orientations=preferred_orientations,  # your array
-    # orientation_cmap='tab10',  # or 'twilight',
-    # highlight_orientations=[123.75],
-)
-
-plt.show()
+        preferred_orientations = gratings_info['oris'][np.argmax(gratings_info['ori_tuning'][cids], axis=-1)]
 
 
-#%%
-# Save the figure
-# fig.savefig(f'tiled_rasters_{subject}_{date}.pdf', dpi=150, bbox_inches='tight')
-# fig.savefig(f'tiled_rasters_{subject}_{date}.png', dpi=150, bbox_inches='tight')
+
+        # Get number of cells from spike_times_trials structure
+        n_cells = len(spike_times_trials[0])  # Number of cells per trial
+        total_start_time = 40
+        total_end_time = 80
+        fig, ax, valid_trials, final_positions = plot_tiled_rasters(
+            spike_times_trials=spike_times_trials,
+            trial_t_bins=trial_t_bins,
+            eyepos=eyepos,
+            start_time=total_start_time,
+            end_time=total_end_time,
+            n_cells=n_cells,
+            dt=1/240,
+            microsaccade_threshold=0.15,
+            # raster_width=0.15,
+            # raster_height=0.15,
+            raster_width=0.2,
+            raster_height=0.2,
+            raster_spacing=0.025,  # Minimum gap between adjacent rasters
+            # xlim=(-0.9, 0.9),  # Only include trials with median fixation in this x range
+            # ylim=(-0.4, 1.2),  # Only include trials with median fixation in this y range
+            # xlim=(-1.2, 1.2),
+            # ylim=(-1.2, 1.2),
+            lim_dynamic=True,
+            # space_bounds is computed automatically from xlim/ylim with margin
+            layout_method='two_phase',  # 'greedy' or 'two_phase'
+            force_iterations=500,  # For two_phase method
+            search_radius=2.0,
+            search_step=0.01,
+            show_true_positions=True,
+            show_position_lines=True,
+            color_by_position=False,  # Use 2D colormap based on position (corners: blue, cyan, red, yellow)
+            position_line_color='red',  # Only used if color_by_position=False
+            position_line_alpha=0.6,
+            position_line_width=1.0,
+            figsize=(14, 10),
+            spike_linewidth=1.3,
+            spike_alpha=1,
+            title=f'Tiled Spike Rasters - {subject} {date}',
+            check_consistency=True,
+            # preferred_orientations=preferred_orientations,  # your array
+            # orientation_cmap='tab10',  # or 'twilight',
+            # highlight_orientations=[123.75],
+        )
+        os.makedirs(f'tiled_rasters', exist_ok=True)
+        fig.savefig(f'tiled_rasters/tiled_rasters_{subject}_{date}.png', dpi=400, bbox_inches='tight')
+
+        plt.show()
+    except Exception as e:
+        print(f'Error processing {subject} {date}: {e}')
+        continue
+
 
 #%%
 # Create a movie with sliding time window

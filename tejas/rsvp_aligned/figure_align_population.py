@@ -2008,18 +2008,19 @@ def population_plot_movie(
     # =========================================================================
     
     # Create figure with GridSpec layout
+    # Row 0: image (left) + eye traces (right). Row 1: population plot full width.
     fig = plt.figure(figsize=(fig_width, fig_height), dpi=fig_dpi)
-    gs = GridSpec(3, 2, figure=fig, width_ratios=[1, 1.5], height_ratios=[1, 1, 2],
+    gs = GridSpec(2, 2, figure=fig, width_ratios=[1.5, 1], height_ratios=[1.3, 1.7],
                   hspace=0.3, wspace=0.3)
     
-    # Left: image + eye trajectories (spans all rows)
-    ax_image = fig.add_subplot(gs[:, 0])
-    # Right top: eye X trace
-    ax_eye_x = fig.add_subplot(gs[0, 1])
-    # Right middle: eye Y trace  
-    ax_eye_y = fig.add_subplot(gs[1, 1], sharex=ax_eye_x)
-    # Right bottom: raster plot
-    ax_raster = fig.add_subplot(gs[2, 1])
+    # Row 0 left: image + eye trajectories
+    ax_image = fig.add_subplot(gs[0, 0])
+    # Row 0 right: eye X and Y traces (stacked in same cell)
+    gs_traces = gs[0, 1].subgridspec(2, 1, hspace=0.1)
+    ax_eye_x = fig.add_subplot(gs_traces[0])
+    ax_eye_y = fig.add_subplot(gs_traces[1], sharex=ax_eye_x)
+    # Row 1: raster plot full width
+    ax_raster = fig.add_subplot(gs[1, :])
     
     # =========================================================================
     # Prepare data
@@ -2291,8 +2292,8 @@ def population_plot_movie(
         trail_line, = ax_image.plot([], [], color=color, linewidth=1.0, alpha=0.8)
         eye_trails.append(trail_line)
         # Current position marker
-        marker, = ax_image.plot([], [], 'o', color=color, markersize=6, 
-                                markeredgecolor='white', markeredgewidth=0.5)
+        marker, = ax_image.plot([], [], 'o', color=color, markersize=14, 
+                                markeredgecolor='white', markeredgewidth=0.8)
         eye_markers.append(marker)
     
     # Set image axis limits to match image_extent
@@ -2514,8 +2515,8 @@ for j in range(return_top_k_combos)[1:2]:
         save_path='population_movie.mp4',
         show=False,
         # Eye position parameters
-        show_unclustered_points=True,  # Only show clustered trials
-        plot_all_traces=True,  # Show all trials as gray background
+        show_unclustered_points=False,  # Only show clustered trials
+        plot_all_traces=False,  # Show all trials as gray background
         image_extent=0.8,  # Extent in degrees (radius from center)
         # Spike times parameters (same as plot_population_raster_NEW)
         use_spike_times=True,
@@ -2525,6 +2526,7 @@ for j in range(return_top_k_combos)[1:2]:
         show_psth=True,
         bins_x_axis=use_bins_x_axis,
         render="line",
+        gap=50,
     )
     plt.close(fig_movie)
 #%%
