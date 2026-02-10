@@ -40,6 +40,8 @@ print("Discovering available models...")
 checkpoint_dir = "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120_backimage_6/checkpoints"
 # checkpoint_dir = "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_240_backimage/checkpoints"
 
+checkpoint_dir ="/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_120_long/checkpoints"
+
 # checkpoint_dir = '/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_smooth_120/checkpoints'
 models_by_type = scan_checkpoints(checkpoint_dir, verbose=False)
 
@@ -63,7 +65,7 @@ checkpoint_path = None
 # checkpoint_path = os.path.join(checkpoint_dir, 'learned_res_small_film_ddp_bs256_ds30_lr1e-3_wd1e-5_corelrscale1.0_warmup10_zip/last.ckpt')
 # model_type = 'resnet'
 
-model_type = 'dense_concat_convgru'
+model_type = 'resnet_none_convgru'
 # model_type = 'learned_dense_concat_convgru_gaussian_ddp_bs256_ds30_lr1e-3_wd1e-4_corelrscale.5_warmup5'
 model, model_info = load_model(
         model_type=model_type,

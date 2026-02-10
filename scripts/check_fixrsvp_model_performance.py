@@ -192,11 +192,15 @@ plt.savefig(f"../figures/fixrsvp_{dataset.dsets[dset_idx].metadata['sess'].name}
 
 
 #%%
+
+
 plt.plot(np.maximum(ve_rate, -.2), np.maximum(ve_trial, -.2),'.')
 plt.plot(plt.xlim(), plt.xlim(), 'k')
 plt.axis('equal')
-# plt.xlim(-.2, 1)
-# plt.ylim(-.2, 1)
+plt.xlabel("Variance Explained by PSTH")
+plt.ylabel("Variance Explained by Model")
+plt.xlim(-.05, .2)
+plt.ylim(-.05, .2)
 # plt.plot(np.sort(ve_rate), '.')
 
 
@@ -217,6 +221,7 @@ axs[0].imshow(x, aspect='auto', cmap='gray_r', interpolation='none')
 axs[1].imshow(y, aspect='auto', cmap='gray_r', interpolation='none')
 axs[0].set_title(f'Observed {cc}')
 axs[1].set_title(f'Predicted {cc} rho={rhos[cc]:.2f}')
+
 plt.show()
 
 
@@ -228,8 +233,18 @@ iix = np.isfinite(rbar) & np.isfinite(rhatbar)
 rbar = rbar[iix]
 rhatbar = rhatbar[iix]
 
+dt = 1/120
+rbar = rbar/dt
+rhatbar = rhatbar/dt
+rhatstd = rhatstd/dt
+
 fig, ax = plt.subplots(1,1, figsize=(3,3))
 ax.plot(rbar, 'k')
-ax.plot(rhatbar, 'r')
-ax.fill_between(np.arange(len(rhatbar)), rhatbar - rhatstd, rhatbar + rhatstd, color='r', alpha=0.2)
+ax.plot(np.maximum(rhatbar, 0), 'r')
+ax.fill_between(np.arange(len(rhatbar)), 0, rhatbar + rhatstd, color='r', alpha=0.2)
+ax.set_xlabel('Time (bins of 10ms)')
+ax.set_ylabel('Firing Rate (Hz)')
+ax.set_title(f'Observed vs. Predicted {cc} rho={rhos[cc]:.2f}')
 rho = np.corrcoef(rbar, rhatbar)[0,1]
+
+# %%
