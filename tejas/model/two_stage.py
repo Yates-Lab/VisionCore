@@ -24,7 +24,7 @@ dfs = train_dset_loaded['dfs']
 
 n_lags = 5
 # Calculate spike-triggered averages (STAs)
-stas = calc_sta(stim.detach().cpu().squeeze()[:, 0, 10:-10, 10:-10],
+stas = calc_sta(stim.detach().cpu().squeeze()[:, 0, 5:-5, 5:-5],
                 robs.cpu(),
                 range(n_lags),
                 dfs=dfs.cpu().squeeze(),
@@ -32,7 +32,7 @@ stas = calc_sta(stim.detach().cpu().squeeze()[:, 0, 10:-10, 10:-10],
 
 # # Calculate spike-triggered second moments (STEs)
 # # Uses squared stimulus values via stim_modifier
-stes = calc_sta(stim.detach().cpu().squeeze()[:, 0, 10:-10, 10:-10],
+stes = calc_sta(stim.detach().cpu().squeeze()[:, 0, 5:-5, 5:-5],
                 robs.cpu(),
                 range(n_lags),
                 dfs=dfs.cpu().squeeze(),
@@ -83,6 +83,26 @@ class TwoStage(nn.Module):
         Returns the negative afferent map as a tensor of shape (n_neurons, n_lags, height, order+1, *image_shape)
         '''
         return self.w_neg.weight.reshape(self.n_neurons, self.n_lags, self.height, self.order+1, *self.image_shape)
+
+    @property
+    def linear_receptive_field(self):
+        """
+        Linear receptive fields in pixel space from (w+ - w-)/2.
+        Returns shape: (n_neurons, n_lags, H, W)
+        """
+        assert self.n_neurons == 1 and self.n_lags == 1, "linear_receptive_field currently expects n_neurons == 1 and n_lags == 1"
+        w_linear = 0.5 * (self.positive_afferent_map - self.negative_afferent_map)
+        dummy = torch.zeros(1, 1, *self.image_shape, device=w_linear.device, dtype=w_linear.dtype)
+        pyr_template = self.pyr(dummy)
+        pyr_coeffs = {}
+        for k, v in pyr_template.items():
+            if isinstance(k, tuple):
+                scale_idx, orient_idx = k
+                pyr_coeffs[k] = w_linear[0, 0, scale_idx, orient_idx].unsqueeze(0).unsqueeze(0)
+            else:
+                pyr_coeffs[k] = torch.zeros_like(v)
+        rf = self.pyr.recon_pyr(pyr_coeffs).squeeze(0).squeeze(0)
+        return rf.unsqueeze(0).unsqueeze(0)
     
     def get_pyr_feats(self, x):
         with torch.no_grad():
@@ -115,6 +135,76 @@ def sparsity_penalty(model):
     return w_star.norm(1) / w_star.norm(2)
 
 
+def get_w_star(positive_afferent_map, negative_afferent_map, eps=1e-8):
+    assert positive_afferent_map.ndim == 4 and negative_afferent_map.ndim == 4 and positive_afferent_map.shape == negative_afferent_map.shape, \
+        "Expected 4D (height, order+1, H, W), same shape"
+    return torch.sqrt(positive_afferent_map**2 + negative_afferent_map**2 + eps)
+
+
+def weighted_variance_along_dim(w_star, dim, circular=False, eps=1e-8):
+    assert w_star.ndim == 4, "Expected w_star to be 4D (height, order+1, H, W)"
+    size = w_star.shape[dim]
+    coords = torch.arange(size, device=w_star.device, dtype=w_star.dtype)
+    shape = [1] * w_star.ndim
+    shape[dim] = size
+    coord = coords.view(*shape)
+    w_sum = w_star.sum().clamp_min(eps)
+    if circular:
+        theta = 2 * torch.pi * coord / max(size, 1)
+        c = (w_star * torch.cos(theta)).sum() / w_sum
+        s = (w_star * torch.sin(theta)).sum() / w_sum
+        return (1.0 - torch.sqrt((c * c + s * s).clamp(min=0.0, max=1.0))).clamp_min(0.0)
+    mean = (w_star * coord).sum() / w_sum
+    second = (w_star * coord * coord).sum() / w_sum
+    return (second - mean * mean).clamp_min(0.0)
+
+
+def locality_penalty_from_maps(positive_afferent_map, negative_afferent_map, circular_dims=None, eps=1e-8):
+    w_star = get_w_star(positive_afferent_map, negative_afferent_map, eps=eps)
+    circular_dims = set() if circular_dims is None else set(circular_dims)
+    sigma_s2 = weighted_variance_along_dim(w_star, 0, circular=(0 in circular_dims), eps=eps)
+    sigma_o2 = weighted_variance_along_dim(w_star, 1, circular=(1 in circular_dims), eps=eps)
+    sigma_v2 = weighted_variance_along_dim(w_star, 2, circular=(2 in circular_dims), eps=eps)
+    sigma_h2 = weighted_variance_along_dim(w_star, 3, circular=(3 in circular_dims), eps=eps)
+    l_local = torch.sqrt(sigma_h2 + sigma_v2 + eps) + torch.sqrt(sigma_s2 + sigma_o2 + eps)
+    return l_local, (sigma_h2, sigma_v2, sigma_o2, sigma_s2)
+
+
+
+
+
+def visualize_afferent_map(positive_afferent_map, negative_afferent_map, figsize=None, title=None, eps=1e-8):
+    """Visualize 4D afferent maps (height, order+1, H, W) with hue = on/off proportion, saturation = amplitude w*."""
+    import matplotlib.colors as mcolors
+    w_plus = positive_afferent_map.detach().cpu().numpy() if torch.is_tensor(positive_afferent_map) else np.asarray(positive_afferent_map)
+    w_minus = negative_afferent_map.detach().cpu().numpy() if torch.is_tensor(negative_afferent_map) else np.asarray(negative_afferent_map)
+    assert w_plus.ndim == 4 and w_minus.ndim == 4 and w_plus.shape == w_minus.shape, "Expected 4D (height, order+1, H, W), same shape"
+    height, n_orient, H, W = w_plus.shape
+    w_star = np.sqrt(w_plus**2 + w_minus**2)
+    w_max = w_star.max() + eps
+    sat = np.clip(w_star / w_max, 0, 1)
+    angle = np.arctan2(w_minus, w_plus)
+    # Match paper legend orientation: right=On excitation, up=Off excitation, left=On inhibition, down=Off inhibition
+    hue = (1.0 / 3.0 - angle / (2 * np.pi)) % 1.0
+    val = np.ones_like(hue)
+    hsv = np.stack([hue, sat, val], axis=-1)
+    rgb = mcolors.hsv_to_rgb(hsv)
+    if figsize is None:
+        figsize = (2 * n_orient, 2 * height)
+    fig, axes = plt.subplots(height, n_orient, figsize=figsize, squeeze=False)
+    for i in range(height):
+        for j in range(n_orient):
+            axes[i, j].imshow(rgb[i, j])
+            axes[i, j].set_xticks([])
+            axes[i, j].set_yticks([])
+    axes[0, 0].figure.supylabel("Band spatial frequency")
+    axes[-1, n_orient // 2].set_xlabel("Band orientation (deg)")
+    if title:
+        fig.suptitle(title)
+    plt.tight_layout()
+    return fig, axes
+
+
 
 
 spike_loss = MaskedPoissonNLLLoss(pred_key='rhat', target_key='robs', mask_key='dfs')
@@ -138,10 +228,13 @@ val_loader = DataLoader(val_dset, batch_size=batch_size, shuffle=False, num_work
 # optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 optimizer = schedulefree.RAdamScheduleFree(model.parameters())
 # optimizer = schedulefree.AdamWScheduleFree(model.parameters(), lr=1e-3)
-lambda_sparsity = 1e-2
+lambda_reg = 1e-2
+gamma_local = lambda_reg * 1/10 #1/10 
+circular_dims = {1}
+# circular_dims = {}
 losses = []
 crop_size = 5
-cell_ids = [14]
+cell_ids = [16]
 for epoch in range(100):
     train_agg = PoissonBPSAggregator()
     val_agg = PoissonBPSAggregator()
@@ -156,8 +249,16 @@ for epoch in range(100):
         assert out['dfs'].shape == out['rhat'].shape == out['robs'].shape
         
         poisson_loss = spike_loss(out)
-        sparsity_loss = lambda_sparsity * sparsity_penalty(model)
-        loss = poisson_loss + sparsity_loss
+        pos_map = model.positive_afferent_map[0, 0]
+        neg_map = model.negative_afferent_map[0, 0]
+        l_sparse = sparsity_penalty(model)
+        l_local, _ = locality_penalty_from_maps(pos_map, neg_map, circular_dims=circular_dims)
+        reg_term = lambda_reg * l_sparse * (1.0 + gamma_local * l_local)
+        loss = poisson_loss + reg_term
+        poisson_last = poisson_loss.detach()
+        sparse_last = l_sparse.detach()
+        local_last = l_local.detach()
+        reg_last = reg_term.detach()
         losses.append(loss.item())
         
         loss.backward()
@@ -186,42 +287,38 @@ for epoch in range(100):
     # plt.show()
     pos = model.positive_afferent_map[0, 0]   # (height, order+1, H, W)
     neg = model.negative_afferent_map[0, 0]
-    fig, axes = visualize_afferent_map(pos, neg, title="Cell 14")
+    fig, axes = visualize_afferent_map(pos, neg, title=f"Cell {cell_ids[0]}")
     plt.show()
+    sta_img = stas[cell_ids[0], peak_lags[cell_ids[0]]]
+    fig, axes = plt.subplots(1, 2, figsize=(8, 4))
+    axes[0].imshow(model.linear_receptive_field[0, 0].detach().cpu().numpy(), cmap='coolwarm_r')
+    axes[0].set_title("Linear RF")
+    axes[0].axis('off')
+    axes[1].imshow(sta_img, cmap='coolwarm_r')
+    axes[1].set_title(f"STA (cell {cell_ids[0]})")
+    axes[1].axis('off')
+    plt.tight_layout()
+    plt.show()
+    locality_factor = gamma_local * local_last.item()
+    print(
+        f"poisson={poisson_last.item():.6f}, L_sparse={sparse_last.item():.6f}, "
+        f"L_local={local_last.item():.6f}, gamma*L_local={locality_factor:.6f} "
+        f"({100.0 * locality_factor:.2f}%), reg={reg_last.item():.6f}"
+    )
     print(bps.item())
     print(bps_val.item())
-    
 
 #%%
-def visualize_afferent_map(positive_afferent_map, negative_afferent_map, figsize=None, title=None, eps=1e-8):
-    """Visualize 4D afferent maps (height, order+1, H, W) with hue = on/off proportion, saturation = amplitude w*."""
-    import matplotlib.colors as mcolors
-    w_plus = positive_afferent_map.detach().cpu().numpy() if torch.is_tensor(positive_afferent_map) else np.asarray(positive_afferent_map)
-    w_minus = negative_afferent_map.detach().cpu().numpy() if torch.is_tensor(negative_afferent_map) else np.asarray(negative_afferent_map)
-    assert w_plus.ndim == 4 and w_minus.ndim == 4 and w_plus.shape == w_minus.shape, "Expected 4D (height, order+1, H, W), same shape"
-    height, n_orient, H, W = w_plus.shape
-    w_star = np.sqrt(w_plus**2 + w_minus**2)
-    w_max = w_star.max() + eps
-    sat = np.clip(w_star / w_max, 0, 1)
-    angle = np.arctan2(w_minus, w_plus)
-    hue = (angle + np.pi) / (2 * np.pi) % 1.0
-    val = np.ones_like(hue)
-    hsv = np.stack([hue, sat, val], axis=-1)
-    rgb = mcolors.hsv_to_rgb(hsv)
-    if figsize is None:
-        figsize = (2 * n_orient, 2 * height)
-    fig, axes = plt.subplots(height, n_orient, figsize=figsize, squeeze=False)
-    for i in range(height):
-        for j in range(n_orient):
-            axes[i, j].imshow(rgb[i, j])
-            axes[i, j].set_xticks([])
-            axes[i, j].set_yticks([])
-    axes[0, 0].figure.supylabel("Band spatial frequency")
-    axes[-1, n_orient // 2].set_xlabel("Band orientation (deg)")
-    if title:
-        fig.suptitle(title)
-    plt.tight_layout()
-    return fig, axes
+from pyr_utils import find_pyr_size_and_height_for_lowest_cpd
 
 
+# Example:
+cfg = find_pyr_size_and_height_for_lowest_cpd(
+    lowest_cpd_target=1.0,
+    ppd=train_dset.dsets[0].metadata["ppd"],
+    order=3,
+    rel_tolerance=0.3,
+    validate=True,
+)
+print(cfg)
 # %%
