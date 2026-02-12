@@ -79,6 +79,8 @@ class TwoStage(nn.Module):
         ppd=None,
         rel_tolerance=0.0,
         validate_cpd=True,
+        beta_init=0.0,
+        init_weight_scale=1.0,
     ):
         super().__init__()
         self.n_neurons = n_neurons
@@ -90,6 +92,7 @@ class TwoStage(nn.Module):
         self.ppd = ppd
         self.rel_tolerance = rel_tolerance
         self.validate_cpd = validate_cpd
+        self.init_weight_scale = init_weight_scale
 
         if self.lowest_cpd_target is not None:
             if self.ppd is None:
@@ -127,6 +130,9 @@ class TwoStage(nn.Module):
         n_feat_per_half = n_bands * n_lags * image_shape[0] * image_shape[1]
         self.w_pos = nn.Linear(n_feat_per_half, n_neurons, bias=False)
         self.w_neg = nn.Linear(n_feat_per_half, n_neurons, bias=False)
+        with torch.no_grad():
+            self.w_pos.weight.mul_(self.init_weight_scale)
+            self.w_neg.weight.mul_(self.init_weight_scale)
         hann_y = torch.hann_window(image_shape[0], periodic=False)
         hann_x = torch.hann_window(image_shape[1], periodic=False)
         hann_2d = torch.outer(hann_y, hann_x)
@@ -137,7 +143,7 @@ class TwoStage(nn.Module):
         )
         self.alpha_pos = nn.Parameter(torch.ones(n_neurons))
         self.alpha_neg = nn.Parameter(torch.ones(n_neurons))
-        self.beta = nn.Parameter(torch.zeros(n_neurons))
+        self.beta = nn.Parameter(torch.ones(n_neurons) * beta_init)
 
     def _windowed_weight(self, weight):
         return weight * self.hann_flat.unsqueeze(0)
@@ -314,7 +320,13 @@ def visualize_afferent_map(positive_afferent_map, negative_afferent_map, figsize
     return fig, axes
 
 
-
+lambda_reg = 1e-2
+gamma_local = lambda_reg * 4/20#1/10 
+circular_dims = {1}
+# circular_dims = {}
+losses = []
+crop_size = 5
+cell_ids = [16]
 
 spike_loss = MaskedPoissonNLLLoss(pred_key='rhat', target_key='robs', mask_key='dfs')
 # n_lags = len(dataset_config['keys_lags']['stim'])
@@ -323,6 +335,8 @@ n_lags = 1
 image_shape = (41, 41)
 # num_neurons = len(dataset_config['cids'])
 num_neurons = 1
+# beta_init = robs[:, cell_ids[0]].mean().item()
+beta_init = 0.0
 model = TwoStage(
     image_shape=image_shape,
     n_neurons=num_neurons,
@@ -333,13 +347,15 @@ model = TwoStage(
     ppd=train_dset.dsets[0].metadata["ppd"],
     rel_tolerance=0.3,
     validate_cpd=True,
+    beta_init=beta_init,
+    init_weight_scale=1e-4,
 )
 
 model.cuda()
 torch.cuda.empty_cache()
 train_dset.to('cpu')
 val_dset.to('cpu')
-batch_size = 1024 # 64
+batch_size = 1024  # 64
 
 train_loader = DataLoader(train_dset, batch_size=batch_size, shuffle=True, num_workers=16, pin_memory=True, persistent_workers=True, prefetch_factor=4)
 val_loader = DataLoader(val_dset, batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True, persistent_workers=True, prefetch_factor=4)
@@ -347,13 +363,7 @@ val_loader = DataLoader(val_dset, batch_size=batch_size, shuffle=False, num_work
 # optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 optimizer = schedulefree.RAdamScheduleFree(model.parameters())
 # optimizer = schedulefree.AdamWScheduleFree(model.parameters(), lr=1e-3)
-lambda_reg = 1e-2
-gamma_local = lambda_reg * 1/20#1/10 
-circular_dims = {1}
-# circular_dims = {}
-losses = []
-crop_size = 5
-cell_ids = [14]
+
 for epoch in range(100):
     train_agg = PoissonBPSAggregator()
     val_agg = PoissonBPSAggregator()
@@ -402,8 +412,7 @@ for epoch in range(100):
     bps = train_agg.closure().cpu().numpy()
     bps_val = val_agg.closure().cpu().numpy()
 
-    # plt.plot(losses)
-    # plt.show()
+    
     pos = model.positive_afferent_map[0, 0]   # (height, order+1, H, W)
     neg = model.negative_afferent_map[0, 0]
     fig, axes = visualize_afferent_map(pos, neg, title=f"Cell {cell_ids[0]}")
@@ -423,9 +432,13 @@ for epoch in range(100):
         f"poisson={poisson_last.item():.6f}, L_sparse={sparse_last.item():.6f}, "
         f"L_local={local_last.item():.6f}, gamma*L_local={locality_factor:.6f} "
         f"({100.0 * locality_factor:.2f}%), reg={reg_last.item():.6f}"
-    )
+    ) 
+    plt.plot(losses)
+    plt.show()
+    print("beta:", model.beta.item())
     print(bps.item())
     print(bps_val.item())
+   
 
 #%%
 
