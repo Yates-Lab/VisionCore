@@ -45,6 +45,19 @@ stes = calc_sta(stim.detach().cpu().squeeze()[:, 0, 5:-5, 5:-5],
 # plt.show()
 peak_lags = np.array([stes[cc].std((1,2)).argmax() for cc in range(stes.shape[0])])
 
+
+#%%
+from pyr_utils import find_pyr_size_and_height_for_lowest_cpd
+
+# Example:
+cfg = find_pyr_size_and_height_for_lowest_cpd(
+    lowest_cpd_target=1.0,
+    ppd=train_dset.dsets[0].metadata["ppd"],
+    order=3,
+    rel_tolerance=0.3,
+    validate=True,
+)
+print(cfg)
 #%%
 
 import torch
@@ -52,37 +65,125 @@ import torch.nn as nn
 import torch.nn.functional as F
 from plenoptic.simulate import SteerablePyramidFreq
 import plenoptic as po
+
+
 class TwoStage(nn.Module):
-    def __init__(self, image_shape, n_neurons, n_lags=1, height=3, order=5):
+    def __init__(
+        self,
+        image_shape,
+        n_neurons,
+        n_lags=1,
+        height=3,
+        order=5,
+        lowest_cpd_target=None,
+        ppd=None,
+        rel_tolerance=0.0,
+        validate_cpd=True,
+    ):
         super().__init__()
-        self.pyr = SteerablePyramidFreq(image_shape, height=height, order=order,
-                                         is_complex=False, downsample=False)
         self.n_neurons = n_neurons
-        self.image_shape = image_shape
+        self.image_shape = image_shape  # user-facing spatial shape
         self.n_lags = n_lags
-        self.height = height
+        self.height = height  # user-facing number of scales used in readout
         self.order = order
-        n_bands = height * (order + 1)  # 18
+        self.lowest_cpd_target = lowest_cpd_target
+        self.ppd = ppd
+        self.rel_tolerance = rel_tolerance
+        self.validate_cpd = validate_cpd
+
+        if self.lowest_cpd_target is not None:
+            if self.ppd is None:
+                raise ValueError("ppd must be provided when lowest_cpd_target is set.")
+            cfg = find_pyr_size_and_height_for_lowest_cpd(
+                lowest_cpd_target=self.lowest_cpd_target,
+                ppd=self.ppd,
+                order=self.order,
+                rel_tolerance=self.rel_tolerance,
+                validate=self.validate_cpd,
+            )
+            self.pyr_image_shape = tuple(cfg["image_shape"])
+            self.pyr_height = int(cfg["height"])
+            self.pyr_cfg = cfg
+        else:
+            self.pyr_image_shape = tuple(self.image_shape)
+            self.pyr_height = int(self.height)
+            self.pyr_cfg = None
+
+        if self.height > self.pyr_height:
+            raise ValueError(
+                f"user height ({self.height}) cannot exceed internal pyramid height ({self.pyr_height})."
+            )
+
+        self.used_scales = list(range(self.pyr_height - self.height, self.pyr_height))
+        self.pyr = SteerablePyramidFreq(
+            self.pyr_image_shape,
+            height=self.pyr_height,
+            order=self.order,
+            is_complex=False,
+            downsample=False,
+        )
+
+        n_bands = len(self.used_scales) * (order + 1)
         n_feat_per_half = n_bands * n_lags * image_shape[0] * image_shape[1]
         self.w_pos = nn.Linear(n_feat_per_half, n_neurons, bias=False)
         self.w_neg = nn.Linear(n_feat_per_half, n_neurons, bias=False)
+        hann_y = torch.hann_window(image_shape[0], periodic=False)
+        hann_x = torch.hann_window(image_shape[1], periodic=False)
+        hann_2d = torch.outer(hann_y, hann_x)
+        hann_2d = hann_2d / hann_2d.max().clamp_min(1e-8)
+        self.register_buffer(
+            "hann_flat",
+            hann_2d.reshape(-1).repeat(n_bands * n_lags),
+        )
         self.alpha_pos = nn.Parameter(torch.ones(n_neurons))
         self.alpha_neg = nn.Parameter(torch.ones(n_neurons))
         self.beta = nn.Parameter(torch.zeros(n_neurons))
+
+    def _windowed_weight(self, weight):
+        return weight * self.hann_flat.unsqueeze(0)
+
+    def _get_center_crop_slices(self):
+        h, w = self.image_shape
+        ph, pw = self.pyr_image_shape
+        if ph < h or pw < w:
+            raise ValueError("Internal pyramid image shape must be >= user image_shape.")
+        y0 = (ph - h) // 2
+        x0 = (pw - w) // 2
+        return slice(y0, y0 + h), slice(x0, x0 + w)
+
+    def _pad_to_pyr_shape(self, x4d):
+        # x4d: (N, 1, H, W)
+        h, w = x4d.shape[-2:]
+        ph, pw = self.pyr_image_shape
+        if (h, w) == (ph, pw):
+            return x4d
+        pad_h = ph - h
+        pad_w = pw - w
+        if pad_h < 0 or pad_w < 0:
+            raise ValueError("Input image larger than internal pyramid image shape.")
+        pad_top = pad_h // 2
+        pad_bottom = pad_h - pad_top
+        pad_left = pad_w // 2
+        pad_right = pad_w - pad_left
+        return F.pad(x4d, (pad_left, pad_right, pad_top, pad_bottom), mode="reflect")
     
     @property
     def positive_afferent_map(self):
         '''
         Returns the positive afferent map as a tensor of shape (n_neurons, n_lags, height, order+1, *image_shape)
         '''
-        return self.w_pos.weight.reshape(self.n_neurons, self.n_lags, self.height, self.order+1, *self.image_shape)
+        return self._windowed_weight(self.w_pos.weight).reshape(
+            self.n_neurons, self.n_lags, self.height, self.order+1, *self.image_shape
+        )
     
     @property
     def negative_afferent_map(self):
         '''
         Returns the negative afferent map as a tensor of shape (n_neurons, n_lags, height, order+1, *image_shape)
         '''
-        return self.w_neg.weight.reshape(self.n_neurons, self.n_lags, self.height, self.order+1, *self.image_shape)
+        return self._windowed_weight(self.w_neg.weight).reshape(
+            self.n_neurons, self.n_lags, self.height, self.order+1, *self.image_shape
+        )
 
     @property
     def linear_receptive_field(self):
@@ -92,28 +193,37 @@ class TwoStage(nn.Module):
         """
         assert self.n_neurons == 1 and self.n_lags == 1, "linear_receptive_field currently expects n_neurons == 1 and n_lags == 1"
         w_linear = 0.5 * (self.positive_afferent_map - self.negative_afferent_map)
-        dummy = torch.zeros(1, 1, *self.image_shape, device=w_linear.device, dtype=w_linear.dtype)
+        dummy = torch.zeros(1, 1, *self.pyr_image_shape, device=w_linear.device, dtype=w_linear.dtype)
         pyr_template = self.pyr(dummy)
+        ys, xs = self._get_center_crop_slices()
         pyr_coeffs = {}
         for k, v in pyr_template.items():
             if isinstance(k, tuple):
                 scale_idx, orient_idx = k
-                pyr_coeffs[k] = w_linear[0, 0, scale_idx, orient_idx].unsqueeze(0).unsqueeze(0)
+                pyr_coeffs[k] = torch.zeros_like(v)
+                if scale_idx in self.used_scales:
+                    local_scale_idx = self.used_scales.index(scale_idx)
+                    pyr_coeffs[k][:, :, ys, xs] = w_linear[0, 0, local_scale_idx, orient_idx].unsqueeze(0).unsqueeze(0)
             else:
                 pyr_coeffs[k] = torch.zeros_like(v)
-        rf = self.pyr.recon_pyr(pyr_coeffs).squeeze(0).squeeze(0)
+        rf_full = self.pyr.recon_pyr(pyr_coeffs).squeeze(0).squeeze(0)
+        rf = rf_full[ys, xs]
         return rf.unsqueeze(0).unsqueeze(0)
     
     def get_pyr_feats(self, x):
         with torch.no_grad():
             s = x['stim'][:, 0]  # [B, 1, lags, H, W] -> [B, lags, H, W]
             B, L, H, W = s.shape
-            pyr_out = self.pyr(s.reshape(B * L, 1, H, W))
+            s4d = s.reshape(B * L, 1, H, W)
+            s4d = self._pad_to_pyr_shape(s4d)
+            pyr_out = self.pyr(s4d, scales=list(self.used_scales))
+            ys, xs = self._get_center_crop_slices()
             pos_feats, neg_feats = [], []
             for k, v in pyr_out.items():
-                if isinstance(k, tuple):
-                    pos_feats.append(F.relu(v).reshape(B, -1))
-                    neg_feats.append(F.relu(-v).reshape(B, -1))
+                if isinstance(k, tuple) and (k[0] in self.used_scales):
+                    vc = v[..., ys, xs]
+                    pos_feats.append(F.relu(vc).reshape(B, -1))
+                    neg_feats.append(F.relu(-vc).reshape(B, -1))
 
             pos_feats = torch.cat(pos_feats, dim=-1)
             neg_feats = torch.cat(neg_feats, dim=-1)
@@ -122,8 +232,10 @@ class TwoStage(nn.Module):
 
     def forward(self, x):
         pos_feats, neg_feats, _ = self.get_pyr_feats(x)
-        
-        z = self.w_pos(pos_feats) + self.w_neg(neg_feats)
+
+        z = F.linear(pos_feats, self._windowed_weight(self.w_pos.weight)) + F.linear(
+            neg_feats, self._windowed_weight(self.w_neg.weight)
+        )
         # print(z.shape, pos_feats.shape, neg_feats.shape)
 
         x['rhat'] = (self.beta + self.alpha_pos * F.relu(z) + self.alpha_neg * F.relu(-z)).clamp(min=1e-6)
@@ -170,16 +282,13 @@ def locality_penalty_from_maps(positive_afferent_map, negative_afferent_map, cir
     return l_local, (sigma_h2, sigma_v2, sigma_o2, sigma_s2)
 
 
-
-
-
 def visualize_afferent_map(positive_afferent_map, negative_afferent_map, figsize=None, title=None, eps=1e-8):
     """Visualize 4D afferent maps (height, order+1, H, W) with hue = on/off proportion, saturation = amplitude w*."""
     import matplotlib.colors as mcolors
     w_plus = positive_afferent_map.detach().cpu().numpy() if torch.is_tensor(positive_afferent_map) else np.asarray(positive_afferent_map)
     w_minus = negative_afferent_map.detach().cpu().numpy() if torch.is_tensor(negative_afferent_map) else np.asarray(negative_afferent_map)
     assert w_plus.ndim == 4 and w_minus.ndim == 4 and w_plus.shape == w_minus.shape, "Expected 4D (height, order+1, H, W), same shape"
-    height, n_orient, H, W = w_plus.shape
+    height, n_orient, _, _ = w_plus.shape
     w_star = np.sqrt(w_plus**2 + w_minus**2)
     w_max = w_star.max() + eps
     sat = np.clip(w_star / w_max, 0, 1)
@@ -214,7 +323,17 @@ n_lags = 1
 image_shape = (41, 41)
 # num_neurons = len(dataset_config['cids'])
 num_neurons = 1
-model = TwoStage(image_shape=image_shape, n_neurons=num_neurons, n_lags=n_lags, height=3, order=5)
+model = TwoStage(
+    image_shape=image_shape,
+    n_neurons=num_neurons,
+    n_lags=n_lags,
+    height=3,
+    order=5,
+    lowest_cpd_target=1.0,
+    ppd=train_dset.dsets[0].metadata["ppd"],
+    rel_tolerance=0.3,
+    validate_cpd=True,
+)
 
 model.cuda()
 torch.cuda.empty_cache()
@@ -229,12 +348,12 @@ val_loader = DataLoader(val_dset, batch_size=batch_size, shuffle=False, num_work
 optimizer = schedulefree.RAdamScheduleFree(model.parameters())
 # optimizer = schedulefree.AdamWScheduleFree(model.parameters(), lr=1e-3)
 lambda_reg = 1e-2
-gamma_local = lambda_reg * 1/10 #1/10 
+gamma_local = lambda_reg * 1/20#1/10 
 circular_dims = {1}
 # circular_dims = {}
 losses = []
 crop_size = 5
-cell_ids = [16]
+cell_ids = [14]
 for epoch in range(100):
     train_agg = PoissonBPSAggregator()
     val_agg = PoissonBPSAggregator()
@@ -309,16 +428,5 @@ for epoch in range(100):
     print(bps_val.item())
 
 #%%
-from pyr_utils import find_pyr_size_and_height_for_lowest_cpd
 
-
-# Example:
-cfg = find_pyr_size_and_height_for_lowest_cpd(
-    lowest_cpd_target=1.0,
-    ppd=train_dset.dsets[0].metadata["ppd"],
-    order=3,
-    rel_tolerance=0.3,
-    validate=True,
-)
-print(cfg)
 # %%
