@@ -253,6 +253,20 @@ def sparsity_penalty(model):
     return w_star.norm(1) / w_star.norm(2)
 
 
+def prox_group_l21_(w_pos, w_neg, tau, eps=1e-12):
+    """
+    In-place proximal step on paired weights (w_pos, w_neg):
+    prox_{tau * ||.||_2}(v) per feature pair.
+    """
+    if tau <= 0:
+        return
+    with torch.no_grad():
+        norm = torch.sqrt(w_pos.pow(2) + w_neg.pow(2) + eps)
+        scale = (1.0 - tau / norm).clamp_min(0.0)
+        w_pos.mul_(scale)
+        w_neg.mul_(scale)
+
+
 def get_w_star(positive_afferent_map, negative_afferent_map, eps=1e-8):
     assert positive_afferent_map.ndim == 4 and negative_afferent_map.ndim == 4 and positive_afferent_map.shape == negative_afferent_map.shape, \
         "Expected 4D (height, order+1, H, W), same shape"
@@ -322,11 +336,14 @@ def visualize_afferent_map(positive_afferent_map, negative_afferent_map, figsize
 
 lambda_reg = 1e-2
 gamma_local = lambda_reg * 4/20#1/10 
+sparsity_mode = "ratio_l1_l2"  # options: "ratio_l1_l2", "prox_l1"
+lambda_prox = 1e-4  # used only when sparsity_mode == "prox_l1"
+lambda_local_prox = 1e-1  # optional locality weight in prox mode
 circular_dims = {1}
 # circular_dims = {}
 losses = []
 crop_size = 5
-cell_ids = [16]
+cell_ids = [15]
 
 spike_loss = MaskedPoissonNLLLoss(pred_key='rhat', target_key='robs', mask_key='dfs')
 # n_lags = len(dataset_config['keys_lags']['stim'])
@@ -367,6 +384,7 @@ optimizer = schedulefree.RAdamScheduleFree(model.parameters())
 for epoch in range(100):
     train_agg = PoissonBPSAggregator()
     val_agg = PoissonBPSAggregator()
+    prox_tau_last = 0.0
     
     for i, batch in enumerate(tqdm(train_loader)):
         optimizer.train()
@@ -380,9 +398,15 @@ for epoch in range(100):
         poisson_loss = spike_loss(out)
         pos_map = model.positive_afferent_map[0, 0]
         neg_map = model.negative_afferent_map[0, 0]
-        l_sparse = sparsity_penalty(model)
         l_local, _ = locality_penalty_from_maps(pos_map, neg_map, circular_dims=circular_dims)
-        reg_term = lambda_reg * l_sparse * (1.0 + gamma_local * l_local)
+        if sparsity_mode == "ratio_l1_l2":
+            l_sparse = sparsity_penalty(model)
+            reg_term = lambda_reg * l_sparse * (1.0 + gamma_local * l_local)
+        elif sparsity_mode == "prox_l1":
+            l_sparse = l_local.new_zeros(())
+            reg_term = lambda_local_prox * l_local
+        else:
+            raise ValueError(f"Unknown sparsity_mode: {sparsity_mode}")
         loss = poisson_loss + reg_term
         poisson_last = poisson_loss.detach()
         sparse_last = l_sparse.detach()
@@ -393,6 +417,10 @@ for epoch in range(100):
         loss.backward()
 
         optimizer.step()
+        if sparsity_mode == "prox_l1":
+            lr = float(optimizer.param_groups[0].get("lr", 1e-3))
+            prox_tau_last = lr * lambda_prox
+            prox_group_l21_(model.w_pos.weight, model.w_neg.weight, tau=prox_tau_last)
         optimizer.zero_grad()
 
 
@@ -429,12 +457,13 @@ for epoch in range(100):
     plt.show()
     locality_factor = gamma_local * local_last.item()
     print(
-        f"poisson={poisson_last.item():.6f}, L_sparse={sparse_last.item():.6f}, "
-        f"L_local={local_last.item():.6f}, gamma*L_local={locality_factor:.6f} "
-        f"({100.0 * locality_factor:.2f}%), reg={reg_last.item():.6f}"
+        f"mode={sparsity_mode}, poisson={poisson_last.item():.6f}, "
+        f"L_sparse={sparse_last.item():.6f}, L_local={local_last.item():.6f}, "
+        f"gamma*L_local={locality_factor:.6f} ({100.0 * locality_factor:.2f}%), "
+        f"prox_tau={prox_tau_last:.6e}, reg={reg_last.item():.6f}"
     ) 
-    plt.plot(losses)
-    plt.show()
+    # plt.plot(losses)
+    # plt.show()
     print("beta:", model.beta.item())
     print(bps.item())
     print(bps_val.item())
