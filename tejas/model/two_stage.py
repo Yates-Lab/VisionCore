@@ -47,7 +47,13 @@ peak_lags = np.array([stes[cc].std((1,2)).argmax() for cc in range(stes.shape[0]
 
 
 #%%
-from pyr_utils import find_pyr_size_and_height_for_lowest_cpd
+from pyr_utils import (
+    find_pyr_size_and_height_for_lowest_cpd,
+    get_pyr_band_frequencies,
+    get_sf_info,
+    calibrate_pyr_orientation_labels,
+    to_display_orientation_convention,
+)
 
 # Example:
 cfg = find_pyr_size_and_height_for_lowest_cpd(
@@ -125,6 +131,33 @@ class TwoStage(nn.Module):
             is_complex=False,
             downsample=False,
         )
+        self.pyr_freq_info = []
+        self.pyr_levels_to_cpd = {}
+        # User-facing orientation degrees follow the visualization convention.
+        self.orientation_degrees = [float(o * 180.0 / (self.order + 1)) for o in range(self.order + 1)]
+        # Keep an explicit calibrated (non-mirrored) variant for diagnostics.
+        self.orientation_calibrated_degrees = list(self.orientation_degrees)
+        if self.ppd is not None:
+            self.pyr_freq_info = get_pyr_band_frequencies(self.pyr, self.pyr_image_shape, self.ppd)
+            sf_meta = get_sf_info(self.pyr_freq_info, return_full=True)
+            self.pyr_levels_to_cpd = sf_meta["levels_to_cpd"]
+            if len(sf_meta["orientation_degrees"]) == (self.order + 1):
+                self.orientation_calibrated_degrees = sf_meta["orientation_degrees"]
+        # Calibrate orientation labels from basis reconstructions so axis labels/icons
+        # match bar orientation in image space (not raw frequency-axis convention).
+        self.orientation_calibrated_degrees, self.orientation_check = calibrate_pyr_orientation_labels(
+            self.pyr,
+            image_shape=self.pyr_image_shape,
+            num_orientations=(self.order + 1),
+            scales=self.used_scales,
+            device=self.pyr.lo0mask.device,
+        )
+        # Display convention for afferent-map figure: mirror handedness to match
+        # paper-style orientation ordering (e.g., 90, 60, 30, 0, 150, 120).
+        self.orientation_display_degrees = to_display_orientation_convention(self.orientation_calibrated_degrees)
+        # Make default orientation metadata match what is shown in the figure.
+        self.orientation_degrees = list(self.orientation_display_degrees)
+        self.used_scale_cpd = [self.pyr_levels_to_cpd.get(scale, float("nan")) for scale in self.used_scales]
 
         n_bands = len(self.used_scales) * (order + 1)
         n_feat_per_half = n_bands * n_lags * image_shape[0] * image_shape[1]
@@ -135,7 +168,7 @@ class TwoStage(nn.Module):
             self.w_neg.weight.mul_(self.init_weight_scale)
         hann_y = torch.hann_window(image_shape[0], periodic=False)
         hann_x = torch.hann_window(image_shape[1], periodic=False)
-        hann_2d = torch.outer(hann_y, hann_x)
+        hann_2d = torch.outer(hann_y, hann_x) ** 1
         hann_2d = hann_2d / hann_2d.max().clamp_min(1e-8)
         self.register_buffer(
             "hann_flat",
@@ -172,7 +205,26 @@ class TwoStage(nn.Module):
         pad_left = pad_w // 2
         pad_right = pad_w - pad_left
         return F.pad(x4d, (pad_left, pad_right, pad_top, pad_bottom), mode="reflect")
+
+    @property
+    def positive_afferent_map_unwindowed(self):
+        '''
+        Returns the positive afferent map as a tensor of shape (n_neurons, n_lags, height, order+1, *image_shape)
+        '''
+        return self.w_pos.weight.reshape(
+            self.n_neurons, self.n_lags, self.height, self.order+1, *self.image_shape
+        )
     
+    @property
+    def negative_afferent_map_unwindowed(self):
+        '''
+        Returns the negative afferent map as a tensor of shape (n_neurons, n_lags, height, order+1, *image_shape)
+        '''
+        return self.w_neg.weight.reshape(
+            self.n_neurons, self.n_lags, self.height, self.order+1, *self.image_shape
+        )
+
+
     @property
     def positive_afferent_map(self):
         '''
@@ -215,6 +267,79 @@ class TwoStage(nn.Module):
         rf_full = self.pyr.recon_pyr(pyr_coeffs).squeeze(0).squeeze(0)
         rf = rf_full[ys, xs]
         return rf.unsqueeze(0).unsqueeze(0)
+
+    @property
+    def energy_receptive_fields(self):
+        """
+        Energy receptive field images in pixel space from we = (w+ + w-)/2.
+        Returns a tuple: (exc_rf, inh_rf), each shape (n_neurons, n_lags, H, W),
+        where exc_rf is built from we > 0 and inh_rf from we < 0.
+
+        Characteristic-image approximation: for each spatial-frequency/orientation
+        band, pick a global sign (+/-) greedily to reduce destructive interference
+        during reconstruction.
+        """
+        assert self.n_neurons == 1 and self.n_lags == 1, "energy_receptive_fields currently expects n_neurons == 1 and n_lags == 1"
+        w_energy = 0.5 * (self.positive_afferent_map + self.negative_afferent_map)
+        w_exc = F.relu(w_energy)
+        w_inh = F.relu(-w_energy)
+
+        dummy = torch.zeros(1, 1, *self.pyr_image_shape, device=w_energy.device, dtype=w_energy.dtype)
+        pyr_template = self.pyr(dummy)
+        ys, xs = self._get_center_crop_slices()
+
+        def _zero_coeffs():
+            return {k: torch.zeros_like(v) for k, v in pyr_template.items()}
+
+        def _characteristic_recon(w_nonneg):
+            band_contrib = {}
+            band_energy = {}
+            for k in pyr_template:
+                if not isinstance(k, tuple):
+                    continue
+                scale_idx, orient_idx = k
+                if scale_idx not in self.used_scales:
+                    continue
+                local_scale_idx = self.used_scales.index(scale_idx)
+                band_map = w_nonneg[0, 0, local_scale_idx, orient_idx]
+                energy = float((band_map * band_map).sum().item())
+                if energy <= 0.0:
+                    continue
+                coeffs_single = _zero_coeffs()
+                coeffs_single[k][:, :, ys, xs] = band_map.unsqueeze(0).unsqueeze(0)
+                contrib = self.pyr.recon_pyr(coeffs_single).squeeze(0).squeeze(0)[ys, xs]
+                band_contrib[k] = contrib
+                band_energy[k] = energy
+
+            ordered = sorted(band_energy.keys(), key=lambda kk: band_energy[kk], reverse=True)
+            accum = torch.zeros(
+                (self.image_shape[0], self.image_shape[1]),
+                device=w_nonneg.device,
+                dtype=w_nonneg.dtype,
+            )
+            band_sign = {}
+            for k in ordered:
+                contrib = band_contrib[k]
+                dot = torch.sum(accum * contrib)
+                sign = -1.0 if dot < 0 else 1.0
+                band_sign[k] = sign
+                accum = accum + sign * contrib
+
+            coeffs_final = _zero_coeffs()
+            for k in ordered:
+                scale_idx, orient_idx = k
+                local_scale_idx = self.used_scales.index(scale_idx)
+                band_map = w_nonneg[0, 0, local_scale_idx, orient_idx]
+                coeffs_final[k][:, :, ys, xs] = (
+                    band_sign[k] * band_map
+                ).unsqueeze(0).unsqueeze(0)
+
+            rf_full = self.pyr.recon_pyr(coeffs_final).squeeze(0).squeeze(0)
+            return rf_full[ys, xs]
+
+        rf_exc = _characteristic_recon(w_exc)
+        rf_inh = _characteristic_recon(w_inh)
+        return rf_exc.unsqueeze(0).unsqueeze(0), rf_inh.unsqueeze(0).unsqueeze(0)
     
     def get_pyr_feats(self, x):
         with torch.no_grad():
@@ -250,6 +375,7 @@ class TwoStage(nn.Module):
 
 def sparsity_penalty(model):
     w_star = torch.sqrt(model.w_pos.weight**2 + model.w_neg.weight**2)
+    # w_star = get_w_star(model.positive_afferent_map[0, 0], model.negative_afferent_map[0, 0])
     return w_star.norm(1) / w_star.norm(2)
 
 
@@ -271,6 +397,7 @@ def get_w_star(positive_afferent_map, negative_afferent_map, eps=1e-8):
     assert positive_afferent_map.ndim == 4 and negative_afferent_map.ndim == 4 and positive_afferent_map.shape == negative_afferent_map.shape, \
         "Expected 4D (height, order+1, H, W), same shape"
     return torch.sqrt(positive_afferent_map**2 + negative_afferent_map**2 + eps)
+
 
 
 def weighted_variance_along_dim(w_star, dim, circular=False, eps=1e-8):
@@ -302,13 +429,57 @@ def locality_penalty_from_maps(positive_afferent_map, negative_afferent_map, cir
     return l_local, (sigma_h2, sigma_v2, sigma_o2, sigma_s2)
 
 
-def visualize_afferent_map(positive_afferent_map, negative_afferent_map, figsize=None, title=None, eps=1e-8):
-    """Visualize 4D afferent maps (height, order+1, H, W) with hue = on/off proportion, saturation = amplitude w*."""
+def visualize_afferent_map(model, figsize=None, title=None, eps=1e-8, show_examples=True):
+    """Visualize model afferent maps with hue=on/off proportion and saturation=amplitude."""
     import matplotlib.colors as mcolors
-    w_plus = positive_afferent_map.detach().cpu().numpy() if torch.is_tensor(positive_afferent_map) else np.asarray(positive_afferent_map)
-    w_minus = negative_afferent_map.detach().cpu().numpy() if torch.is_tensor(negative_afferent_map) else np.asarray(negative_afferent_map)
+    import matplotlib.patches as patches
+
+    def _draw_gabor_icon(ax, theta_deg, sf_rank, sf_count, color="#36b76f"):
+        # Paper-style cartoon: two touching oriented lobes, one filled and one unfilled.
+        frac = 0.0 if sf_count <= 1 else float(sf_rank) * 1.5 / float(sf_count - 1) 
+        lobe_len = 0.9 - 0.22 * frac
+        lobe_thick = lobe_len * 0.451 - 0.05 * frac
+        # Side-by-side touching means center shift along the MINOR axis (perpendicular).
+        sep = lobe_thick * 1 # touching / slight overlap for visibility
+        th_perp = np.deg2rad(theta_deg + 90.0)
+        dx = 0.5 * sep * np.cos(th_perp)
+        dy = 0.5 * sep * np.sin(th_perp)
+        c1 = (0.5 - dx, 0.5 - dy)
+        c2 = (0.5 + dx, 0.5 + dy)
+        # Unfilled lobe
+        ax.add_patch(
+            patches.Ellipse(
+                c1, width=lobe_len, height=lobe_thick, angle=theta_deg,
+                facecolor="white", edgecolor=color, linewidth=2.4
+            )
+        )
+        # Filled lobe
+        ax.add_patch(
+            patches.Ellipse(
+                c2, width=lobe_len, height=lobe_thick, angle=theta_deg,
+                facecolor=color, edgecolor=color, linewidth=2.4, alpha=0.6
+            )
+        )
+        ax.set_xlim(0.0, 1.0)
+        ax.set_ylim(0.0, 1.0)
+        ax.set_aspect("equal")
+        ax.axis("off")
+
+    w_plus = model.positive_afferent_map[0, 0].detach().cpu().numpy()
+    w_minus = model.negative_afferent_map[0, 0].detach().cpu().numpy()
     assert w_plus.ndim == 4 and w_minus.ndim == 4 and w_plus.shape == w_minus.shape, "Expected 4D (height, order+1, H, W), same shape"
     height, n_orient, _, _ = w_plus.shape
+    row_order = np.arange(height)
+    if getattr(model, "ppd", None) is not None:
+        cpd_arr = np.asarray(model.used_scale_cpd[:height], dtype=float)
+        finite_idx = np.where(np.isfinite(cpd_arr))[0]
+        nonfinite_idx = np.where(~np.isfinite(cpd_arr))[0]
+        if finite_idx.size > 0:
+            row_order = np.concatenate(
+                [finite_idx[np.argsort(cpd_arr[finite_idx])], nonfinite_idx]
+            )
+            w_plus = w_plus[row_order]
+            w_minus = w_minus[row_order]
     w_star = np.sqrt(w_plus**2 + w_minus**2)
     w_max = w_star.max() + eps
     sat = np.clip(w_star / w_max, 0, 1)
@@ -326,16 +497,82 @@ def visualize_afferent_map(positive_afferent_map, negative_afferent_map, figsize
             axes[i, j].imshow(rgb[i, j])
             axes[i, j].set_xticks([])
             axes[i, j].set_yticks([])
-    axes[0, 0].figure.supylabel("Band spatial frequency")
-    axes[-1, n_orient // 2].set_xlabel("Band orientation (deg)")
+    display_orientations = getattr(model, "orientation_display_degrees", model.orientation_degrees)
+    x_labels = [f"{deg:.0f}" for deg in display_orientations[:n_orient]]
+    if getattr(model, "ppd", None) is None:
+        y_labels = [f"scale {model.used_scales[idx]}" for idx in row_order]
+        y_axis_label = "Band spatial frequency (scale)"
+    else:
+        cpd_vals = np.asarray(model.used_scale_cpd[:height], dtype=float)[row_order]
+        y_labels = [f"{cpd:.2f}" if np.isfinite(cpd) else "n/a" for cpd in cpd_vals]
+        y_axis_label = "Band spatial frequency (cpd)"
+    for j, lbl in enumerate(x_labels):
+        axes[-1, j].set_xlabel(lbl)
+    for i, lbl in enumerate(y_labels):
+        axes[i, 0].set_ylabel(lbl, rotation=0, va="center", ha="right", labelpad=14)
+    fig.supxlabel("Band orientation (deg)", y=0.08)
+    fig.supylabel(y_axis_label, x=0.12)
     if title:
         fig.suptitle(title)
-    plt.tight_layout()
+    plt.tight_layout(rect=(0.16, 0.14, 0.98, 0.95))
+
+    if show_examples:
+        ori_examples = [float(d) for d in display_orientations[:n_orient]]
+
+        # Left-side example cartoon gabors for spatial-frequency progression.
+        # Keep these vertically oriented to match the paper-style side legend.
+        for i in range(height):
+            pos = axes[i, 0].get_position()
+            box_h = pos.height * 0.30
+            box_w = pos.width * 0.30
+            x0 = pos.x0 - box_w * 2.75
+            y0 = pos.y0 + (pos.height - box_h) * 0.5
+            gax = fig.add_axes([x0, y0, box_w, box_h])
+            _draw_gabor_icon(gax, theta_deg=90.0, sf_rank=i, sf_count=height)
+
+        # Bottom example cartoon gabors for orientation progression.
+        sf_mid_rank = max(0, height // 2)
+        for j in range(n_orient):
+            pos = axes[-1, j].get_position()
+            box_h = pos.height * 0.30
+            box_w = pos.width * 0.30
+            x0 = pos.x0 + (pos.width - box_w) * 0.5
+            y0 = pos.y0 - box_h * 2.05
+            gax = fig.add_axes([x0, y0, box_w, box_h])
+            _draw_gabor_icon(gax, theta_deg=ori_examples[j], sf_rank=sf_mid_rank, sf_count=height)
+
     return fig, axes
 
 
+def render_energy_component_rgb(component, hue_rgb, amp_scale=None, carrier_scale=None, bg_gray=0.90, eps=1e-8):
+    """
+    Render one energy component using:
+    - phase-invariant power envelope (|component|) for color strength
+    - signed carrier (component) for light/dark sinusoidal structure
+    """
+    arr = component.detach().cpu().numpy() if torch.is_tensor(component) else np.asarray(component)
+    arr = np.asarray(arr, dtype=np.float32)
+    abs_arr = np.abs(arr)
+    if amp_scale is None:
+        amp_scale = float(np.percentile(abs_arr, 99))
+    if carrier_scale is None:
+        carrier_scale = float(abs_arr.max())
+    amp = np.clip(abs_arr / (amp_scale + eps), 0.0, 1.0)
+    carrier = np.clip(arr / (carrier_scale + eps), -1.0, 1.0)
+
+    # Warm/cool hue saturation from power envelope.
+    hue = np.asarray(hue_rgb, dtype=np.float32).reshape(1, 1, 3)
+    base = np.full((*arr.shape, 3), fill_value=bg_gray, dtype=np.float32)
+    rgb = (1.0 - amp[..., None]) * base + amp[..., None] * hue
+
+    # Signed carrier controls local brightness to reveal sinusoidal phase.
+    light = 0.5 + 0.5 * carrier
+    rgb = rgb * (0.65 + 0.35 * light[..., None])
+    return np.clip(rgb, 0.0, 1.0)
+
+
 lambda_reg = 1e-2
-gamma_local = lambda_reg * 4/20#1/10 
+gamma_local = lambda_reg * 4/20#4/20 #4/20#1/10 
 sparsity_mode = "ratio_l1_l2"  # options: "ratio_l1_l2", "prox_l1"
 lambda_prox = 1e-4  # used only when sparsity_mode == "prox_l1"
 lambda_local_prox = 1e-1  # optional locality weight in prox mode
@@ -343,7 +580,7 @@ circular_dims = {1}
 # circular_dims = {}
 losses = []
 crop_size = 5
-cell_ids = [15]
+cell_ids = [76]
 
 spike_loss = MaskedPoissonNLLLoss(pred_key='rhat', target_key='robs', mask_key='dfs')
 # n_lags = len(dataset_config['keys_lags']['stim'])
@@ -379,7 +616,7 @@ val_loader = DataLoader(val_dset, batch_size=batch_size, shuffle=False, num_work
 
 # optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 optimizer = schedulefree.RAdamScheduleFree(model.parameters())
-# optimizer = schedulefree.AdamWScheduleFree(model.parameters(), lr=1e-3)
+# optimizer = schedulefree.AdamWScheduleFree(model.parameters(), lr=1e-5)
 
 for epoch in range(100):
     train_agg = PoissonBPSAggregator()
@@ -401,6 +638,7 @@ for epoch in range(100):
         l_local, _ = locality_penalty_from_maps(pos_map, neg_map, circular_dims=circular_dims)
         if sparsity_mode == "ratio_l1_l2":
             l_sparse = sparsity_penalty(model)
+            gamma_local = 0.05/l_local.detach().item()
             reg_term = lambda_reg * l_sparse * (1.0 + gamma_local * l_local)
         elif sparsity_mode == "prox_l1":
             l_sparse = l_local.new_zeros(())
@@ -440,35 +678,56 @@ for epoch in range(100):
     bps = train_agg.closure().cpu().numpy()
     bps_val = val_agg.closure().cpu().numpy()
 
-    
-    pos = model.positive_afferent_map[0, 0]   # (height, order+1, H, W)
-    neg = model.negative_afferent_map[0, 0]
-    fig, axes = visualize_afferent_map(pos, neg, title=f"Cell {cell_ids[0]}")
-    plt.show()
-    sta_img = stas[cell_ids[0], peak_lags[cell_ids[0]]]
-    fig, axes = plt.subplots(1, 2, figsize=(8, 4))
-    axes[0].imshow(model.linear_receptive_field[0, 0].detach().cpu().numpy(), cmap='coolwarm_r')
-    axes[0].set_title("Linear RF")
-    axes[0].axis('off')
-    axes[1].imshow(sta_img, cmap='coolwarm_r')
-    axes[1].set_title(f"STA (cell {cell_ids[0]})")
-    axes[1].axis('off')
-    plt.tight_layout()
-    plt.show()
-    locality_factor = gamma_local * local_last.item()
-    print(
-        f"mode={sparsity_mode}, poisson={poisson_last.item():.6f}, "
-        f"L_sparse={sparse_last.item():.6f}, L_local={local_last.item():.6f}, "
-        f"gamma*L_local={locality_factor:.6f} ({100.0 * locality_factor:.2f}%), "
-        f"prox_tau={prox_tau_last:.6e}, reg={reg_last.item():.6f}"
-    ) 
-    # plt.plot(losses)
-    # plt.show()
-    print("beta:", model.beta.item())
-    print(bps.item())
-    print(bps_val.item())
-   
+    if epoch % 5 == 0:
+        fig, axes = visualize_afferent_map(model, title=f"Cell {cell_ids[0]}")
+        plt.show()
+        sta_img = stas[cell_ids[0], peak_lags[cell_ids[0]]]
+        energy_exc_rf, energy_inh_rf = model.energy_receptive_fields
+        energy_exc_np = energy_exc_rf[0, 0].detach().cpu().numpy()
+        energy_inh_np = energy_inh_rf[0, 0].detach().cpu().numpy()
+        joint_abs = np.concatenate([np.abs(energy_exc_np).reshape(-1), np.abs(energy_inh_np).reshape(-1)])
+        joint_amp_scale = float(np.percentile(joint_abs, 99))
+        joint_carrier_scale = float(joint_abs.max())
+        exc_rgb = render_energy_component_rgb(
+            energy_exc_np,
+            hue_rgb=(0.95, 0.70, 0.35),
+            amp_scale=joint_amp_scale,
+            carrier_scale=joint_carrier_scale,
+        )
+        inh_rgb = render_energy_component_rgb(
+            energy_inh_np,
+            hue_rgb=(0.45, 0.70, 0.95),
+            amp_scale=joint_amp_scale,
+            carrier_scale=joint_carrier_scale,
+        )
+        fig, axes = plt.subplots(1, 4, figsize=(16, 4))
+        axes[0].imshow(model.linear_receptive_field[0, 0].detach().cpu().numpy(), cmap='coolwarm_r')
+        axes[0].set_title("Linear RF")
+        axes[0].axis('off')
+        axes[1].imshow(exc_rgb)
+        axes[1].set_title("Energy Exc RF")
+        axes[1].axis('off')
+        axes[2].imshow(inh_rgb)
+        axes[2].set_title("Energy Inh RF")
+        axes[2].axis('off')
+        axes[3].imshow(sta_img, cmap='coolwarm_r')
+        axes[3].set_title(f"STA (cell {cell_ids[0]})")
+        axes[3].axis('off')
+        plt.tight_layout()
+        plt.show()
+        locality_factor = gamma_local * local_last.item()
+        print(
+            f"mode={sparsity_mode}, poisson={poisson_last.item():.6f}, "
+            f"L_sparse={sparse_last.item():.6f}, L_local={local_last.item():.6f}, "
+            f"gamma*L_local={locality_factor:.6f} ({100.0 * locality_factor:.2f}%), "
+            f"prox_tau={prox_tau_last:.6e}, reg={reg_last.item():.6f}"
+        ) 
+        # plt.plot(losses)
+        # plt.show()
 
-#%%
+        print("beta:", model.beta.item())
+        print(bps.item())
+        print(bps_val.item())
+    
 
 # %%
