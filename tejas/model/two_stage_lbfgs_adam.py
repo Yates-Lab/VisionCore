@@ -177,7 +177,8 @@ class TwoStage(nn.Module):
         )
         self.alpha_pos = nn.Parameter(torch.ones(n_neurons))
         self.alpha_neg = nn.Parameter(torch.ones(n_neurons))
-        self.beta = nn.Parameter(torch.ones(n_neurons) * beta_init)
+        # self.beta = nn.Parameter(torch.ones(n_neurons) * beta_init)
+        self.beta = torch.ones(n_neurons).cuda() * beta_init
 
     def _windowed_weight(self, weight):
         return weight * self.hann_flat.unsqueeze(0)
@@ -369,6 +370,7 @@ class TwoStage(nn.Module):
             neg_feats, self._windowed_weight(self.w_neg.weight)
         )
         # print(z.shape, pos_feats.shape, neg_feats.shape)
+        self.beta.data = self.beta.data.clamp(min=1e-6)
 
         x['rhat'] = (self.beta + self.alpha_pos * F.relu(z) + self.alpha_neg * F.relu(-z)).clamp(min=1e-6)
         # x['rhat'] = (self.beta + F.relu(z)).clamp(min=1e-6)
@@ -629,7 +631,7 @@ def render_energy_component_rgb(component, hue_rgb, amp_scale=None, carrier_scal
 lambda_reg_lbfgs = 1e-4
 gamma_local_lbfgs = lambda_reg_lbfgs * 4 / 20
 # Adam stage mirrors two_stage.py behavior.
-lambda_reg_adam = 1e-2 #1e-5
+lambda_reg_adam = 1e-4 #1e-5
 sparsity_mode = "ratio_l1_l2"  # options: "ratio_l1_l2", "prox_l1"
 lambda_prox = 1e-4  # used only when sparsity_mode == "prox_l1"
 lambda_local_prox = 1e-1  # optional locality weight in prox mode
@@ -639,7 +641,7 @@ losses = []
 crop_size = 5
 cell_ids = [16]
 num_epochs = 100
-lbfgs_epochs = 3
+lbfgs_epochs = 10
 
 spike_loss = MaskedPoissonNLLLoss(pred_key='rhat', target_key='robs', mask_key='dfs')
 # spike_loss =  MaskedLoss(nn.MSELoss(reduction='none'), pred_key='rhat', target_key='robs', mask_key='dfs')
@@ -649,8 +651,8 @@ n_lags = 1
 image_shape = (41, 41)
 # num_neurons = len(dataset_config['cids'])
 num_neurons = 1
-# beta_init = robs[:, cell_ids[0]].mean().item()
-beta_init = 0.0
+beta_init = robs[:, cell_ids[0]].mean().item()
+# beta_init = 0.0
 model = TwoStage(
     image_shape=image_shape,
     n_neurons=num_neurons,
@@ -828,6 +830,9 @@ for epoch in range(num_epochs):
                 train_agg(out)
         else:
             optimizer_adam.train()
+            #don't allow beta to train in adam stage
+            model.beta.requires_grad = False
+
             out = model(batch)
             out['robs'] = out['robs'][:, cell_ids]
             out['dfs'] = out['dfs'][:, cell_ids]
