@@ -629,7 +629,7 @@ def render_energy_component_rgb(component, hue_rgb, amp_scale=None, carrier_scal
 lambda_reg_lbfgs = 1e-4
 gamma_local_lbfgs = lambda_reg_lbfgs * 4 / 20
 # Adam stage mirrors two_stage.py behavior.
-lambda_reg_adam = 1e-2
+lambda_reg_adam = 1e-2 #1e-5
 sparsity_mode = "ratio_l1_l2"  # options: "ratio_l1_l2", "prox_l1"
 lambda_prox = 1e-4  # used only when sparsity_mode == "prox_l1"
 lambda_local_prox = 1e-1  # optional locality weight in prox mode
@@ -637,7 +637,7 @@ circular_dims = {1}
 # circular_dims = {}
 losses = []
 crop_size = 5
-cell_ids = [14]
+cell_ids = [16]
 num_epochs = 100
 lbfgs_epochs = 3
 
@@ -709,7 +709,7 @@ torch.cuda.empty_cache()
 train_dset.to('cpu')
 val_dset.to('cpu')
 batch_size_lbfgs = 10024  # matched to two_stage_lbfgs.py
-batch_size_adam = 1024  # matched to two_stage.py
+batch_size_adam = 10024  # matched to two_stage.py
 
 train_loader_lbfgs = DataLoader(
     train_dset,
@@ -756,6 +756,7 @@ optimizer_lbfgs = torch.optim.LBFGS(
     line_search_fn="strong_wolfe",
 )
 optimizer_adam = schedulefree.RAdamScheduleFree(model.parameters())
+# optimizer_adam = schedulefree.AdamWScheduleFree(model.parameters(), lr=1e-4, warmup_steps = 30)
 
 for epoch in range(num_epochs):
     train_agg = PoissonBPSAggregator()
