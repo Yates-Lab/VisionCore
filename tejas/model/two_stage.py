@@ -168,7 +168,7 @@ class TwoStage(nn.Module):
             self.w_neg.weight.mul_(self.init_weight_scale)
         hann_y = torch.hann_window(image_shape[0], periodic=False)
         hann_x = torch.hann_window(image_shape[1], periodic=False)
-        hann_2d = torch.outer(hann_y, hann_x) ** 1
+        hann_2d = torch.outer(hann_y, hann_x) ** 2
         hann_2d = hann_2d / hann_2d.max().clamp_min(1e-8)
         self.register_buffer(
             "hann_flat",
@@ -370,6 +370,7 @@ class TwoStage(nn.Module):
         # print(z.shape, pos_feats.shape, neg_feats.shape)
 
         x['rhat'] = (self.beta + self.alpha_pos * F.relu(z) + self.alpha_neg * F.relu(-z)).clamp(min=1e-6)
+        # x['rhat'] = (self.beta + F.relu(z)).clamp(min=1e-6)
         return x
 
 
@@ -419,14 +420,65 @@ def weighted_variance_along_dim(w_star, dim, circular=False, eps=1e-8):
 
 
 def locality_penalty_from_maps(positive_afferent_map, negative_afferent_map, circular_dims=None, eps=1e-8):
+    """
+    Convolution-style 4D locality penalty over (scale, orientation, y, x).
+
+    Matches the `locality_conv` idea by applying distance-weighted convolution
+    on squared energy marginals per dimension, then summing contributions.
+    Orientation can be treated as circular via `circular_dims={1}`.
+    Input shape: (height, order+1, H, W).
+    """
     w_star = get_w_star(positive_afferent_map, negative_afferent_map, eps=eps)
+    # Match locality_conv behavior by using squared magnitude.
+    e = w_star.pow(2)
     circular_dims = set() if circular_dims is None else set(circular_dims)
-    sigma_s2 = weighted_variance_along_dim(w_star, 0, circular=(0 in circular_dims), eps=eps)
-    sigma_o2 = weighted_variance_along_dim(w_star, 1, circular=(1 in circular_dims), eps=eps)
-    sigma_v2 = weighted_variance_along_dim(w_star, 2, circular=(2 in circular_dims), eps=eps)
-    sigma_h2 = weighted_variance_along_dim(w_star, 3, circular=(3 in circular_dims), eps=eps)
-    l_local = torch.sqrt(sigma_h2 + sigma_v2 + eps) + torch.sqrt(sigma_s2 + sigma_o2 + eps)
-    return l_local, (sigma_h2, sigma_v2, sigma_o2, sigma_s2)
+    n_s, n_o, n_v, n_h = [int(x) for x in e.shape]
+
+    # FFT domain shape: linear dims use full-conv size (2n-1), circular dims keep size n.
+    fft_shape = [
+        n_s if 0 in circular_dims else (2 * n_s - 1),
+        n_o if 1 in circular_dims else (2 * n_o - 1),
+        n_v if 2 in circular_dims else (2 * n_v - 1),
+        n_h if 3 in circular_dims else (2 * n_h - 1),
+    ]
+    denom = float(2 * (n_s + n_o + n_v + n_h) ** 2)
+
+    def _axis_distance(n, circular, fft_n, device, dtype):
+        if circular:
+            idx = torch.arange(fft_n, device=device, dtype=dtype)
+            return torch.minimum(idx, (fft_n - idx).to(dtype)).pow(2) / max(denom, 1.0)
+        offs = torch.arange(fft_n, device=device, dtype=dtype) - (n - 1)
+        return offs.pow(2) / max(denom, 1.0)
+
+    ds = _axis_distance(n_s, (0 in circular_dims), fft_shape[0], e.device, e.dtype)
+    do = _axis_distance(n_o, (1 in circular_dims), fft_shape[1], e.device, e.dtype)
+    dv = _axis_distance(n_v, (2 in circular_dims), fft_shape[2], e.device, e.dtype)
+    dh = _axis_distance(n_h, (3 in circular_dims), fft_shape[3], e.device, e.dtype)
+
+    # Joint 4D distance kernel (single 4D volume convolution).
+    k = (
+        ds[:, None, None, None]
+        + do[None, :, None, None]
+        + dv[None, None, :, None]
+        + dh[None, None, None, :]
+    )
+
+    # Embed energy in FFT volume.
+    e_pad = e.new_zeros(tuple(fft_shape))
+    e_pad[:n_s, :n_o, :n_v, :n_h] = e
+
+    conv_full = torch.fft.ifftn(torch.fft.fftn(e_pad) * torch.fft.fftn(k)).real
+
+    # Extract "same" region along linear dims, direct region along circular dims.
+    s0 = 0 if 0 in circular_dims else (n_s - 1)
+    o0 = 0 if 1 in circular_dims else (n_o - 1)
+    v0 = 0 if 2 in circular_dims else (n_v - 1)
+    h0 = 0 if 3 in circular_dims else (n_h - 1)
+    conv_same = conv_full[s0:s0 + n_s, o0:o0 + n_o, v0:v0 + n_v, h0:h0 + n_h]
+
+    l_local = torch.sum(e * conv_same)
+    z = l_local.new_zeros(())
+    return l_local, (z, z, z, z)
 
 
 def visualize_afferent_map(model, figsize=None, title=None, eps=1e-8, show_examples=True):
@@ -580,9 +632,10 @@ circular_dims = {1}
 # circular_dims = {}
 losses = []
 crop_size = 5
-cell_ids = [76]
+cell_ids = [66]
 
 spike_loss = MaskedPoissonNLLLoss(pred_key='rhat', target_key='robs', mask_key='dfs')
+# spike_loss =  MaskedLoss(nn.MSELoss(reduction='none'), pred_key='rhat', target_key='robs', mask_key='dfs')
 # n_lags = len(dataset_config['keys_lags']['stim'])
 n_lags = 1
 # image_shape = train_dset[0]['stim'].shape[2:]
@@ -678,7 +731,7 @@ for epoch in range(100):
     bps = train_agg.closure().cpu().numpy()
     bps_val = val_agg.closure().cpu().numpy()
 
-    if epoch % 5 == 0:
+    if epoch % 1 == 0:
         fig, axes = visualize_afferent_map(model, title=f"Cell {cell_ids[0]}")
         plt.show()
         sta_img = stas[cell_ids[0], peak_lags[cell_ids[0]]]
