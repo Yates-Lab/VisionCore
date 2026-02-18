@@ -251,6 +251,78 @@ def render_energy_component_rgb(component, hue_rgb, amp_scale=None, carrier_scal
     return np.clip(rgb, 0.0, 1.0)
 
 
+def show_epoch_diagnostics(
+    model,
+    stas,
+    peak_lags,
+    cell_id,
+    sparsity_mode,
+    poisson_last,
+    sparse_last,
+    local_last,
+    gamma_local,
+    prox_tau_last,
+    reg_last,
+    bps,
+    bps_val,
+    phase=None,
+    epoch=None,
+):
+    fig, axes = visualize_afferent_map(model, title=f"Cell {cell_id}")
+    plt.show()
+    sta_img = stas[cell_id, peak_lags[cell_id]]
+    energy_exc_rf, energy_inh_rf = model.energy_receptive_fields
+    energy_exc_np = energy_exc_rf[0, 0].detach().cpu().numpy()
+    energy_inh_np = energy_inh_rf[0, 0].detach().cpu().numpy()
+    joint_abs = np.concatenate(
+        [np.abs(energy_exc_np).reshape(-1), np.abs(energy_inh_np).reshape(-1)]
+    )
+    joint_amp_scale = float(np.percentile(joint_abs, 99))
+    joint_carrier_scale = float(joint_abs.max())
+    exc_rgb = render_energy_component_rgb(
+        energy_exc_np,
+        hue_rgb=(0.95, 0.70, 0.35),
+        amp_scale=joint_amp_scale,
+        carrier_scale=joint_carrier_scale,
+    )
+    inh_rgb = render_energy_component_rgb(
+        energy_inh_np,
+        hue_rgb=(0.45, 0.70, 0.95),
+        amp_scale=joint_amp_scale,
+        carrier_scale=joint_carrier_scale,
+    )
+    fig, axes = plt.subplots(1, 4, figsize=(16, 4))
+    axes[0].imshow(model.linear_receptive_field[0, 0].detach().cpu().numpy(), cmap="coolwarm_r")
+    axes[0].set_title("Linear RF")
+    axes[0].axis("off")
+    axes[1].imshow(exc_rgb)
+    axes[1].set_title("Energy Exc RF")
+    axes[1].axis("off")
+    axes[2].imshow(inh_rgb)
+    axes[2].set_title("Energy Inh RF")
+    axes[2].axis("off")
+    axes[3].imshow(sta_img, cmap="coolwarm_r")
+    axes[3].set_title(f"STA (cell {cell_id})")
+    axes[3].axis("off")
+    plt.tight_layout()
+    plt.show()
+
+    locality_factor = gamma_local * local_last
+    print(
+        f"mode={sparsity_mode}, poisson={poisson_last:.6f}, "
+        f"L_sparse={sparse_last:.6f}, L_local={local_last:.6f}, "
+        f"gamma*L_local={locality_factor:.6f} ({100.0 * locality_factor:.2f}%), "
+        f"prox_tau={prox_tau_last:.6e}, reg={reg_last:.6f}"
+    )
+    print("beta:", model.beta.item())
+    print(bps.item())
+    print(bps_val.item())
+    if phase is not None and epoch is not None:
+        print(f"phase={phase}, epoch={epoch}")
+    elif phase is not None:
+        print(f"phase={phase}")
+
+
 def _resolve_output_indices(requested_ids, out_dict):
     """
     Resolve prediction and target indices for single-cell or multi-cell runs.

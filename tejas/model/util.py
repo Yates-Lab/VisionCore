@@ -72,9 +72,11 @@ def get_dataset_info(dataset_configs_path, subject, date, image_shape):
     assert image_shape[0] == image_shape[1] and (stim.shape[-1] - image_shape[0]) % 2 == 0, "Image shape must be square and resulting crop size must be even"
 
     crop_size = (stim.shape[-1] - image_shape[0]) // 2
+    y_slice = slice(crop_size, -crop_size) if crop_size > 0 else slice(None)
+    x_slice = slice(crop_size, -crop_size) if crop_size > 0 else slice(None)
     n_lags = 5
     # Calculate spike-triggered averages (STAs)
-    stas = calc_sta(stim.detach().cpu().squeeze()[:, 0, crop_size:-crop_size, crop_size:-crop_size],
+    stas = calc_sta(stim.detach().cpu().squeeze()[:, 0, y_slice, x_slice],
                     robs.cpu(),
                     range(n_lags),
                     dfs=dfs.cpu().squeeze(),
@@ -82,7 +84,7 @@ def get_dataset_info(dataset_configs_path, subject, date, image_shape):
 
     # # Calculate spike-triggered second moments (STEs)
     # # Uses squared stimulus values via stim_modifier
-    stes = calc_sta(stim.detach().cpu().squeeze()[:, 0, crop_size:-crop_size, crop_size:-crop_size],
+    stes = calc_sta(stim.detach().cpu().squeeze()[:, 0, y_slice, x_slice],
                     robs.cpu(),
                     range(n_lags),
                     dfs=dfs.cpu().squeeze(),
@@ -104,4 +106,5 @@ def get_dataset_info(dataset_configs_path, subject, date, image_shape):
     'dataset_config': dataset_config,
     'stim': stim,
     'robs': robs,
-    'dfs': dfs}
+    'dfs': dfs,
+    'crop_size': crop_size}

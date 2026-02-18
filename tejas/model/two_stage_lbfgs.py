@@ -5,7 +5,6 @@ enable_autoreload()
 from models.losses import MaskedPoissonNLLLoss, PoissonBPSAggregator, MaskedLoss
 from tqdm import tqdm
 from torch.utils.data import DataLoader
-import matplotlib.pyplot as plt
 import schedulefree
 import numpy as np
 from util import get_dataset_info
@@ -24,29 +23,26 @@ train_dset = dataset_info['train_dset']
 val_dset = dataset_info['val_dset']
 dataset_config = dataset_info['dataset_config']
 robs = dataset_info['robs']
+crop_size = dataset_info['crop_size']
 #%%
 from two_stage_core import TwoStage
 #%%
 
 from two_stage_helpers import (
-    _resolve_output_indices,
-    locality_penalty_from_maps,
-    prox_group_l21_,
-    render_energy_component_rgb,
-    sparsity_penalty,
-    visualize_afferent_map,
+    show_epoch_diagnostics,
 )
+from two_stage_trainer import eval_step, prepare_batch, train_step_lbfgs
 
 
 lambda_reg = 1e-4 
 gamma_local = lambda_reg * 4/20#4/20 #4/20#1/10 
+gamma_local_fixed = gamma_local
 sparsity_mode = "ratio_l1_l2"  # options: "ratio_l1_l2", "prox_l1"
 lambda_prox = 1e-4  # used only when sparsity_mode == "prox_l1"
 lambda_local_prox = 1e-1  # optional locality weight in prox mode
 circular_dims = {1}
 # circular_dims = {}
 losses = []
-crop_size = 5
 cell_ids = [16]
 num_epochs = 80
 target_bps_val = 2
@@ -109,54 +105,29 @@ for epoch in range(num_epochs):
     train_agg = PoissonBPSAggregator()
     val_agg = PoissonBPSAggregator()
     prox_tau_last = 0.0
+    poisson_last = sparse_last = local_last = reg_last = 0.0
+    gamma_local = gamma_local_fixed
     
     for i, batch in enumerate(tqdm(train_loader)):
         model.train()
-        batch = {k: v.cuda() for k, v in batch.items()}
-        batch['stim'] = batch['stim'][:, :, peak_lags[cell_ids], crop_size:-crop_size, crop_size:-crop_size]
-        step_stats = {}
-
-        def closure():
-            optimizer.zero_grad()
-            out = model(batch)
-            pred_idx, target_idx = _resolve_output_indices(cell_ids, out)
-            out['rhat'] = out['rhat'][:, pred_idx]
-            out['robs'] = out['robs'][:, target_idx]
-            out['dfs'] = out['dfs'][:, target_idx]
-            assert out['dfs'].shape == out['rhat'].shape == out['robs'].shape
-
-            poisson_loss = spike_loss(out)
-            pos_map = model.positive_afferent_map[0, 0]
-            neg_map = model.negative_afferent_map[0, 0]
-            l_local, _ = locality_penalty_from_maps(pos_map, neg_map, circular_dims=circular_dims)
-            if sparsity_mode == "ratio_l1_l2":
-                l_sparse = sparsity_penalty(model)
-                # gamma_local_local = 0.05 / max(l_local.detach().item(), 1e-12)
-                gamma_local_local = gamma_local
-                reg_term = lambda_reg * l_sparse * (1.0 + gamma_local_local * l_local)
-            elif sparsity_mode == "prox_l1":
-                l_sparse = l_local.new_zeros(())
-                gamma_local_local = 0.0
-                reg_term = lambda_local_prox * l_local
-            else:
-                raise ValueError(f"Unknown sparsity_mode: {sparsity_mode}")
-            loss = poisson_loss + reg_term
-            loss.backward()
-            step_stats["poisson"] = float(poisson_loss.detach().item())
-            step_stats["sparse"] = float(l_sparse.detach().item())
-            step_stats["local"] = float(l_local.detach().item())
-            step_stats["reg"] = float(reg_term.detach().item())
-            step_stats["gamma_local"] = float(gamma_local_local)
-            step_stats["loss"] = float(loss.detach().item())
-            return loss
-
-        optimizer.step(closure)
-        if sparsity_mode == "prox_l1":
-            lr = float(optimizer.param_groups[0].get("lr", 1e-3))
-            prox_tau_last = lr * lambda_prox
-            prox_group_l21_(model.w_pos.weight, model.w_neg.weight, tau=prox_tau_last)
+        batch = prepare_batch(batch, peak_lags=peak_lags, cell_ids=cell_ids, crop_size=crop_size)
+        step_stats, out = train_step_lbfgs(
+            model=model,
+            optimizer=optimizer,
+            batch=batch,
+            spike_loss=spike_loss,
+            cell_ids=cell_ids,
+            sparsity_mode=sparsity_mode,
+            lambda_reg=lambda_reg,
+            lambda_local_prox=lambda_local_prox,
+            circular_dims=circular_dims,
+            gamma_mode="fixed",
+            gamma_value=gamma_local_fixed,
+            lambda_prox=lambda_prox,
+            use_resolver=True,
+        )
         losses.append(step_stats["loss"])
-
+        prox_tau_last = step_stats["prox_tau"]
         poisson_last = step_stats["poisson"]
         sparse_last = step_stats["sparse"]
         local_last = step_stats["local"]
@@ -164,88 +135,31 @@ for epoch in range(num_epochs):
         gamma_local = step_stats["gamma_local"]
 
         with torch.no_grad():
-            out = model(batch)
-            pred_idx, target_idx = _resolve_output_indices(cell_ids, out)
-            out['rhat'] = out['rhat'][:, pred_idx]
-            out['robs'] = out['robs'][:, target_idx]
-            out['dfs'] = out['dfs'][:, target_idx]
             train_agg(out)
     
     for batch in val_loader:
         model.eval()
-        with torch.no_grad():
-            batch = {k: v.cuda() for k, v in batch.items()}
-            batch['stim'] = batch['stim'][:, :, peak_lags[cell_ids], crop_size:-crop_size, crop_size:-crop_size]
-            out = model(batch)
-            pred_idx, target_idx = _resolve_output_indices(cell_ids, out)
-            out['rhat'] = out['rhat'][:, pred_idx]
-            out['robs'] = out['robs'][:, target_idx]
-            out['dfs'] = out['dfs'][:, target_idx]
-            assert out['dfs'].shape == out['rhat'].shape == out['robs'].shape
-            val_agg(out)
+        batch = prepare_batch(batch, peak_lags=peak_lags, cell_ids=cell_ids, crop_size=crop_size)
+        out = eval_step(model=model, batch=batch, cell_ids=cell_ids, use_resolver=True)
+        val_agg(out)
     bps = train_agg.closure().cpu().numpy()
     bps_val = val_agg.closure().cpu().numpy()
 
     if plot_every > 0 and (epoch % plot_every == 0):
-        fig, axes = visualize_afferent_map(model, title=f"Cell {cell_ids[0]}")
-        plt.show()
-        sta_img = stas[cell_ids[0], peak_lags[cell_ids[0]]]
-        energy_exc_rf, energy_inh_rf = model.energy_receptive_fields
-        energy_exc_np = energy_exc_rf[0, 0].detach().cpu().numpy()
-        energy_inh_np = energy_inh_rf[0, 0].detach().cpu().numpy()
-        joint_abs = np.concatenate([np.abs(energy_exc_np).reshape(-1), np.abs(energy_inh_np).reshape(-1)])
-        joint_amp_scale = float(np.percentile(joint_abs, 99))
-        joint_carrier_scale = float(joint_abs.max())
-        exc_rgb = render_energy_component_rgb(
-            energy_exc_np,
-            hue_rgb=(0.95, 0.70, 0.35),
-            amp_scale=joint_amp_scale,
-            carrier_scale=joint_carrier_scale,
+        show_epoch_diagnostics(
+            model=model,
+            stas=stas,
+            peak_lags=peak_lags,
+            cell_id=cell_ids[0],
+            sparsity_mode=sparsity_mode,
+            poisson_last=poisson_last,
+            sparse_last=sparse_last,
+            local_last=local_last,
+            gamma_local=gamma_local,
+            prox_tau_last=prox_tau_last,
+            reg_last=reg_last,
+            bps=bps,
+            bps_val=bps_val,
         )
-        inh_rgb = render_energy_component_rgb(
-            energy_inh_np,
-            hue_rgb=(0.45, 0.70, 0.95),
-            amp_scale=joint_amp_scale,
-            carrier_scale=joint_carrier_scale,
-        )
-        fig, axes = plt.subplots(1, 4, figsize=(16, 4))
-        axes[0].imshow(model.linear_receptive_field[0, 0].detach().cpu().numpy(), cmap='coolwarm_r')
-        axes[0].set_title("Linear RF")
-        axes[0].axis('off')
-        axes[1].imshow(exc_rgb)
-        axes[1].set_title("Energy Exc RF")
-        axes[1].axis('off')
-        axes[2].imshow(inh_rgb)
-        axes[2].set_title("Energy Inh RF")
-        axes[2].axis('off')
-        axes[3].imshow(sta_img, cmap='coolwarm_r')
-        axes[3].set_title(f"STA (cell {cell_ids[0]})")
-        axes[3].axis('off')
-        plt.tight_layout()
-        plt.show()
-        locality_factor = gamma_local * local_last
-        print(
-            f"mode={sparsity_mode}, poisson={poisson_last:.6f}, "
-            f"L_sparse={sparse_last:.6f}, L_local={local_last:.6f}, "
-            f"gamma*L_local={locality_factor:.6f} ({100.0 * locality_factor:.2f}%), "
-            f"prox_tau={prox_tau_last:.6e}, reg={reg_last:.6f}"
-        ) 
-        # plt.plot(losses)
-        # plt.show()
-
-        print("beta:", model.beta.item())
-        print(bps.item())
-        print(bps_val.item())
-
-    bps_train_scalar = float(np.asarray(bps).reshape(-1)[0])
-    bps_val_scalar = float(np.asarray(bps_val).reshape(-1)[0])
-    print(
-        f"epoch={epoch:03d} bps_train={bps_train_scalar:.4f} "
-        f"bps_val={bps_val_scalar:.4f} poisson={poisson_last:.6f} reg={reg_last:.6f}"
-    )
-    if bps_val_scalar >= target_bps_val:
-        print(f"Reached target validation BPS {bps_val_scalar:.4f} >= {target_bps_val:.4f} at epoch {epoch}.")
-        break
-    
 
 # %%
