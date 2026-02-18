@@ -39,7 +39,7 @@ lambda_local_prox = 1e-1  # optional locality weight in prox mode
 circular_dims = {1}
 # circular_dims = {}
 losses = []
-cell_ids = [14]
+cell_ids = [16]
 
 spike_loss = MaskedPoissonNLLLoss(pred_key='rhat', target_key='robs', mask_key='dfs')
 # spike_loss =  MaskedLoss(nn.MSELoss(reduction='none'), pred_key='rhat', target_key='robs', mask_key='dfs')
