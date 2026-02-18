@@ -1,4 +1,4 @@
-# NOTE: LBFGS variant of two_stage.py (optimizer/training loop changed).
+# NOTE: LBFGS-Adam hybrid variant of two_stage.py.
 #%%
 from DataYatesV1 import get_gaborium_sta_ste, get_session, plot_stas, enable_autoreload,calc_sta
 enable_autoreload()
@@ -8,63 +8,28 @@ from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 import schedulefree
 import numpy as np
+from util import get_dataset_info
+import torch
 #%%
-
-from util import get_dataset_from_config
 dataset_configs_path = '/home/tejas/VisionCore/experiments/dataset_configs/multi_basic_240_gaborium_20lags.yaml'
-train_dset, val_dset, dataset_config = get_dataset_from_config('Allen', '2022-04-13', dataset_configs_path)
-cids = dataset_config['cids']
-
+subject = 'Allen'
+date = '2022-04-13'
+image_shape = (41, 41)
+dataset_info = get_dataset_info(dataset_configs_path, subject, date, image_shape)
+peak_lags = dataset_info['peak_lags']
+stas = dataset_info['stas']
+stes = dataset_info['stes']
+cids = dataset_info['cids']
+train_dset = dataset_info['train_dset']
+val_dset = dataset_info['val_dset']
+dataset_config = dataset_info['dataset_config']
+robs = dataset_info['robs']
 #%%
-train_dset_loaded = train_dset[:]
 
-
-stim = train_dset_loaded['stim']
-robs = train_dset_loaded['robs']
-dfs = train_dset_loaded['dfs']
-
-n_lags = 5
-# Calculate spike-triggered averages (STAs)
-stas = calc_sta(stim.detach().cpu().squeeze()[:, 0, 5:-5, 5:-5],
-                robs.cpu(),
-                range(n_lags),
-                dfs=dfs.cpu().squeeze(),
-                progress=True).cpu().squeeze().numpy()
-
-# # Calculate spike-triggered second moments (STEs)
-# # Uses squared stimulus values via stim_modifier
-stes = calc_sta(stim.detach().cpu().squeeze()[:, 0, 5:-5, 5:-5],
-                robs.cpu(),
-                range(n_lags),
-                dfs=dfs.cpu().squeeze(),
-                stim_modifier=lambda x: x**2,
-                progress=True).cpu().squeeze().numpy()
-
-# plot_stas(stas[:, :, None, :, :])
-# plt.show()
-# plot_stas(stes[:, :, None, :, :])
-# plt.show()
-peak_lags = np.array([stes[cc].std((1,2)).argmax() for cc in range(stes.shape[0])])
-
-
-#%%
-from pyr_utils import (
-    find_pyr_size_and_height_for_lowest_cpd,
-)
 from two_stage_core import TwoStage
 
-# Example:
-cfg = find_pyr_size_and_height_for_lowest_cpd(
-    lowest_cpd_target=1.0,
-    ppd=train_dset.dsets[0].metadata["ppd"],
-    order=3,
-    rel_tolerance=0.3,
-    validate=True,
-)
-print(cfg)
-#%%
 
-import torch
+
 from two_stage_helpers import (
     _resolve_output_indices,
     locality_penalty_from_maps,
@@ -80,7 +45,7 @@ from two_stage_helpers import (
 lambda_reg_lbfgs = 1e-4
 gamma_local_lbfgs = lambda_reg_lbfgs * 4 / 20
 # Adam stage mirrors two_stage.py behavior.
-lambda_reg_adam = 1e-4 #1e-5
+lambda_reg_adam = 1e-2 #1e-5
 sparsity_mode = "ratio_l1_l2"  # options: "ratio_l1_l2", "prox_l1"
 lambda_prox = 1e-4  # used only when sparsity_mode == "prox_l1"
 lambda_local_prox = 1e-1  # optional locality weight in prox mode
@@ -88,16 +53,14 @@ circular_dims = {1}
 # circular_dims = {}
 losses = []
 crop_size = 5
-cell_ids = [16]
+cell_ids = [14]
 num_epochs = 100
-lbfgs_epochs = 10
+lbfgs_epochs = 2
 
 spike_loss = MaskedPoissonNLLLoss(pred_key='rhat', target_key='robs', mask_key='dfs')
 # spike_loss =  MaskedLoss(nn.MSELoss(reduction='none'), pred_key='rhat', target_key='robs', mask_key='dfs')
 # n_lags = len(dataset_config['keys_lags']['stim'])
 n_lags = 1
-# image_shape = train_dset[0]['stim'].shape[2:]
-image_shape = (41, 41)
 # num_neurons = len(dataset_config['cids'])
 num_neurons = 1
 beta_init = robs[:, cell_ids[0]].mean().item()

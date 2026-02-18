@@ -8,63 +8,26 @@ from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 import schedulefree
 import numpy as np
-#%%
-
-from util import get_dataset_from_config
-dataset_configs_path = '/home/tejas/VisionCore/experiments/dataset_configs/multi_basic_240_gaborium_20lags.yaml'
-train_dset, val_dset, dataset_config = get_dataset_from_config('Allen', '2022-04-13', dataset_configs_path)
-cids = dataset_config['cids']
-
-#%%
-train_dset_loaded = train_dset[:]
-
-
-stim = train_dset_loaded['stim']
-robs = train_dset_loaded['robs']
-dfs = train_dset_loaded['dfs']
-
-n_lags = 5
-# Calculate spike-triggered averages (STAs)
-stas = calc_sta(stim.detach().cpu().squeeze()[:, 0, 5:-5, 5:-5],
-                robs.cpu(),
-                range(n_lags),
-                dfs=dfs.cpu().squeeze(),
-                progress=True).cpu().squeeze().numpy()
-
-# # Calculate spike-triggered second moments (STEs)
-# # Uses squared stimulus values via stim_modifier
-stes = calc_sta(stim.detach().cpu().squeeze()[:, 0, 5:-5, 5:-5],
-                robs.cpu(),
-                range(n_lags),
-                dfs=dfs.cpu().squeeze(),
-                stim_modifier=lambda x: x**2,
-                progress=True).cpu().squeeze().numpy()
-
-# plot_stas(stas[:, :, None, :, :])
-# plt.show()
-# plot_stas(stes[:, :, None, :, :])
-# plt.show()
-peak_lags = np.array([stes[cc].std((1,2)).argmax() for cc in range(stes.shape[0])])
-
-
-#%%
-from pyr_utils import (
-    find_pyr_size_and_height_for_lowest_cpd,
-)
-from two_stage_core import TwoStage
-
-# Example:
-cfg = find_pyr_size_and_height_for_lowest_cpd(
-    lowest_cpd_target=1.0,
-    ppd=train_dset.dsets[0].metadata["ppd"],
-    order=3,
-    rel_tolerance=0.3,
-    validate=True,
-)
-print(cfg)
-#%%
-
+from util import get_dataset_info
 import torch
+#%%
+dataset_configs_path = '/home/tejas/VisionCore/experiments/dataset_configs/multi_basic_240_gaborium_20lags.yaml'
+subject = 'Allen'
+date = '2022-04-13'
+image_shape = (41, 41)
+dataset_info = get_dataset_info(dataset_configs_path, subject, date, image_shape)
+peak_lags = dataset_info['peak_lags']
+stas = dataset_info['stas']
+stes = dataset_info['stes']
+cids = dataset_info['cids']
+train_dset = dataset_info['train_dset']
+val_dset = dataset_info['val_dset']
+dataset_config = dataset_info['dataset_config']
+robs = dataset_info['robs']
+#%%
+from two_stage_core import TwoStage
+#%%
+
 from two_stage_helpers import (
     _resolve_output_indices,
     locality_penalty_from_maps,
@@ -93,8 +56,6 @@ spike_loss = MaskedPoissonNLLLoss(pred_key='rhat', target_key='robs', mask_key='
 # spike_loss =  MaskedLoss(nn.MSELoss(reduction='none'), pred_key='rhat', target_key='robs', mask_key='dfs')
 # n_lags = len(dataset_config['keys_lags']['stim'])
 n_lags = 1
-# image_shape = train_dset[0]['stim'].shape[2:]
-image_shape = (41, 41)
 # num_neurons = len(dataset_config['cids'])
 num_neurons = 1
 # beta_init = robs[:, cell_ids[0]].mean().item()
