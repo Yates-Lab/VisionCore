@@ -84,7 +84,7 @@ def unique_preserve_order(vals: list[int]) -> list[int]:
 
 
 def compute_sta_feature_weights(
-    model: TwoStage,
+    feature_model: TwoStage,
     dset,
     cell_ids: list[int],
     lag_indices: list[int],
@@ -92,8 +92,6 @@ def compute_sta_feature_weights(
     batch_size: int,
     num_workers: int,
     device: str,
-    activation_softmax: bool = False,
-    activation_softmax_temp: float = 0.35,
 ):
     loader_kwargs = dict(num_workers=num_workers, pin_memory=True, shuffle=False)
     if num_workers > 0:
@@ -102,47 +100,34 @@ def compute_sta_feature_weights(
     loader = DataLoader(dset, batch_size=batch_size, **loader_kwargs)
 
     n_cells = len(cell_ids)
-    n_feat = model.w_pos.weight.shape[1]
-    acc_pos = torch.zeros((n_cells, n_feat), device=device)
-    acc_neg = torch.zeros((n_cells, n_feat), device=device)
-    acc_den = torch.zeros((n_cells,), device=device)
+    n_lags = len(lag_indices)
+    n_feat = feature_model.w_pos.weight.shape[1]
+    acc_pos = torch.zeros((n_cells, n_lags, n_feat), device=device)
+    acc_neg = torch.zeros((n_cells, n_lags, n_feat), device=device)
+    acc_den = torch.zeros((n_cells, n_lags), device=device)
 
     ys = crop_slice(crop_size)
     xs = crop_slice(crop_size)
 
-    model.eval()
+    feature_model.eval()
+    lag_tensors = [torch.tensor([int(lg)], device=device, dtype=torch.long) for lg in lag_indices]
     with torch.no_grad():
         for batch in tqdm(loader, desc="Computing STA afferent weights"):
             batch = {k: v.to(device, non_blocking=True) for k, v in batch.items()}
-            batch["stim"] = batch["stim"][:, :, lag_indices, ys, xs]
-
-            pos_feats, neg_feats, _ = model.get_pyr_feats(batch)
-            if activation_softmax:
-                temp = max(float(activation_softmax_temp), 1e-6)
-                act = (pos_feats + neg_feats).clamp_min(0.0)
-                gate = torch.softmax(act / temp, dim=1)
-                pos_feats = pos_feats * gate
-                neg_feats = neg_feats * gate
-
             robs = batch["robs"][:, cell_ids]
             dfs = batch["dfs"][:, cell_ids]
             weights = (robs * dfs).clamp_min(0.0)
+            for lag_slot, lag_tensor in enumerate(lag_tensors):
+                batch_lag = dict(batch)
+                batch_lag["stim"] = batch["stim"][:, :, lag_tensor, ys, xs]
+                pos_feats, neg_feats, _ = feature_model.get_pyr_feats(batch_lag)
+                acc_pos[:, lag_slot] += weights.transpose(0, 1) @ pos_feats
+                acc_neg[:, lag_slot] += weights.transpose(0, 1) @ neg_feats
+                acc_den[:, lag_slot] += weights.sum(dim=0)
 
-            acc_pos += weights.transpose(0, 1) @ pos_feats
-            acc_neg += weights.transpose(0, 1) @ neg_feats
-            acc_den += weights.sum(dim=0)
-
-    den = acc_den.clamp_min(1e-8).unsqueeze(1)
+    den = acc_den.clamp_min(1e-8).unsqueeze(-1)
     w_pos_init = acc_pos / den
     w_neg_init = acc_neg / den
-
-    # Normalize per cell so visual structure is comparable across cells.
-    scale = torch.maximum(
-        w_pos_init.abs().amax(dim=1, keepdim=True),
-        w_neg_init.abs().amax(dim=1, keepdim=True),
-    ).clamp_min(1e-8)
-    w_pos_init = w_pos_init / scale
-    w_neg_init = w_neg_init / scale
     return w_pos_init, w_neg_init
 
 
@@ -261,8 +246,8 @@ def main():
     raw_lags = [int(peak_lags[cid]) for cid in cell_ids]
     clipped_lags = [min(lg, max_valid_lag) for lg in raw_lags]
     if args.export_mode == "all":
-        # In batch export mode, always visualize each cell at its own clipped peak lag.
-        selected_lags = unique_preserve_order(clipped_lags)
+        # Batch export mode: compute all lag maps, then pick each cell's own peak lag.
+        selected_lags = list(range(max_valid_lag + 1))
         lag_slots = [selected_lags.index(lg) for lg in clipped_lags]
     elif args.lag_mode == "median_peak":
         selected_lags = [int(np.rint(np.median(clipped_lags)))]
@@ -275,10 +260,26 @@ def main():
         selected_lags = unique_preserve_order(clipped_lags)
         lag_slots = [selected_lags.index(lg) for lg in clipped_lags]
 
-    model = TwoStage(
+    feature_model = TwoStage(
         image_shape=image_shape,
-        n_neurons=len(cell_ids),
-        n_lags=len(selected_lags),
+        n_neurons=1,
+        n_lags=1,
+        height=args.height,
+        order=args.order,
+        lowest_cpd_target=args.lowest_cpd_target,
+        ppd=train_dset.dsets[0].metadata["ppd"],
+        rel_tolerance=args.rel_tolerance,
+        validate_cpd=True,
+        init_weight_scale=1e-4,
+        beta_init=0.0,
+        beta_as_parameter=True,
+        clamp_beta_min=1e-6,
+    ).to(device)
+
+    render_model = TwoStage(
+        image_shape=image_shape,
+        n_neurons=1,
+        n_lags=1,
         height=args.height,
         order=args.order,
         lowest_cpd_target=args.lowest_cpd_target,
@@ -292,8 +293,8 @@ def main():
     ).to(device)
 
     train_dset.to("cpu")
-    w_pos_init, w_neg_init = compute_sta_feature_weights(
-        model=model,
+    w_pos_by_lag, w_neg_by_lag = compute_sta_feature_weights(
+        feature_model=feature_model,
         dset=train_dset,
         cell_ids=cell_ids,
         lag_indices=selected_lags,
@@ -301,13 +302,7 @@ def main():
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         device=device,
-        activation_softmax=args.activation_softmax,
-        activation_softmax_temp=args.activation_softmax_temp,
     )
-
-    with torch.no_grad():
-        model.w_pos.weight.copy_(w_pos_init)
-        model.w_neg.weight.copy_(w_neg_init)
 
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -321,14 +316,28 @@ def main():
     for local_idx in tqdm(export_local_indices, desc="Saving cell PNGs"):
         cell_id = int(cell_ids[local_idx])
         lag_idx = int(lag_slots[local_idx])
+        w_pos_vec = w_pos_by_lag[local_idx, lag_idx].clone()
+        w_neg_vec = w_neg_by_lag[local_idx, lag_idx].clone()
+        if args.activation_softmax:
+            temp = max(float(args.activation_softmax_temp), 1e-6)
+            act = (w_pos_vec + w_neg_vec).clamp_min(0.0)
+            gate = torch.softmax(act / temp, dim=0)
+            w_pos_vec = w_pos_vec * gate
+            w_neg_vec = w_neg_vec * gate
+        scale = torch.maximum(w_pos_vec.abs().amax(), w_neg_vec.abs().amax()).clamp_min(1e-8)
+        w_pos_vec = w_pos_vec / scale
+        w_neg_vec = w_neg_vec / scale
+        with torch.no_grad():
+            render_model.w_pos.weight.copy_(w_pos_vec.unsqueeze(0))
+            render_model.w_neg.weight.copy_(w_neg_vec.unsqueeze(0))
         out_png = out_dir / f"sta_afferent_cell_{cell_id:03d}.png"
         save_combined_preview(
-            model=model,
+            model=render_model,
             stas=info["stas"],
             cell_id=cell_id,
-            lag_idx=lag_idx,
+            lag_idx=0,
             lag_value=selected_lags[lag_idx],
-            neuron_idx=local_idx,
+            neuron_idx=0,
             out_png=out_png,
             lag_mode=args.lag_mode,
             activation_softmax=args.activation_softmax,
@@ -341,3 +350,5 @@ if __name__ == "__main__":
 '''
 uv run python "two_stage_sta_afferent_preview.py" --cell-ids 66 --example-cell-id 66 --activation-softmax --activation-softmax-temp 0.10 --output-dir "tejas/model"
 '''
+
+#for all cells: uv run python "/home/tejas/VisionCore/tejas/model/two_stage_sta_afferent_preview.py" --activation-softmax --activation-softmax-temp 0.01 --output-dir "/home/tejas/VisionCore/tejas/model/sta_afferent_maps_0.01"
