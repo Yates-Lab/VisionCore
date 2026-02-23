@@ -160,6 +160,7 @@ for epoch in range(num_epochs):
             reg_last=reg_last,
             bps=bps,
             bps_val=bps_val,
+            
         )
 
 # %%

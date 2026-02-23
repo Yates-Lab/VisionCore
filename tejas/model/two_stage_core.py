@@ -192,10 +192,20 @@ class TwoStage(nn.Module):
     @property
     def linear_receptive_field(self):
         """
-        Linear receptive fields in pixel space from (w+ - w-)/2.
-        Returns shape: (n_neurons, n_lags, H, W)
+        Backward-compatible single-index helper.
+        Returns shape: (1, 1, H, W)
         """
-        assert self.n_neurons == 1 and self.n_lags == 1, "linear_receptive_field currently expects n_neurons == 1 and n_lags == 1"
+        return self.linear_receptive_field_at(neuron_idx=0, lag_idx=0)
+
+    def linear_receptive_field_at(self, neuron_idx=0, lag_idx=0):
+        """
+        Linear receptive field in pixel space from (w+ - w-)/2 for one neuron/lag.
+        Returns shape: (1, 1, H, W)
+        """
+        if not (0 <= int(neuron_idx) < self.n_neurons):
+            raise IndexError(f"neuron_idx={neuron_idx} out of bounds for n_neurons={self.n_neurons}")
+        if not (0 <= int(lag_idx) < self.n_lags):
+            raise IndexError(f"lag_idx={lag_idx} out of bounds for n_lags={self.n_lags}")
         w_linear = 0.5 * (self.positive_afferent_map - self.negative_afferent_map)
         dummy = torch.zeros(1, 1, *self.pyr_image_shape, device=w_linear.device, dtype=w_linear.dtype)
         pyr_template = self.pyr(dummy)
@@ -207,7 +217,9 @@ class TwoStage(nn.Module):
                 pyr_coeffs[k] = torch.zeros_like(v)
                 if scale_idx in self.used_scales:
                     local_scale_idx = self.used_scales.index(scale_idx)
-                    pyr_coeffs[k][:, :, ys, xs] = w_linear[0, 0, local_scale_idx, orient_idx].unsqueeze(0).unsqueeze(0)
+                    pyr_coeffs[k][:, :, ys, xs] = (
+                        w_linear[neuron_idx, lag_idx, local_scale_idx, orient_idx].unsqueeze(0).unsqueeze(0)
+                    )
             else:
                 pyr_coeffs[k] = torch.zeros_like(v)
         rf_full = self.pyr.recon_pyr(pyr_coeffs).squeeze(0).squeeze(0)
@@ -217,15 +229,20 @@ class TwoStage(nn.Module):
     @property
     def energy_receptive_fields(self):
         """
-        Energy receptive field images in pixel space from we = (w+ + w-)/2.
-        Returns a tuple: (exc_rf, inh_rf), each shape (n_neurons, n_lags, H, W),
-        where exc_rf is built from we > 0 and inh_rf from we < 0.
-
-        Characteristic-image approximation: for each spatial-frequency/orientation
-        band, pick a global sign (+/-) greedily to reduce destructive interference
-        during reconstruction.
+        Backward-compatible single-index helper.
+        Returns (exc_rf, inh_rf), each shape: (1, 1, H, W)
         """
-        assert self.n_neurons == 1 and self.n_lags == 1, "energy_receptive_fields currently expects n_neurons == 1 and n_lags == 1"
+        return self.energy_receptive_fields_at(neuron_idx=0, lag_idx=0)
+
+    def energy_receptive_fields_at(self, neuron_idx=0, lag_idx=0):
+        """
+        Energy receptive fields in pixel space from we = (w+ + w-)/2 for one neuron/lag.
+        Returns (exc_rf, inh_rf), each shape: (1, 1, H, W)
+        """
+        if not (0 <= int(neuron_idx) < self.n_neurons):
+            raise IndexError(f"neuron_idx={neuron_idx} out of bounds for n_neurons={self.n_neurons}")
+        if not (0 <= int(lag_idx) < self.n_lags):
+            raise IndexError(f"lag_idx={lag_idx} out of bounds for n_lags={self.n_lags}")
         w_energy = 0.5 * (self.positive_afferent_map + self.negative_afferent_map)
         w_exc = F.relu(w_energy)
         w_inh = F.relu(-w_energy)
@@ -247,7 +264,7 @@ class TwoStage(nn.Module):
                 if scale_idx not in self.used_scales:
                     continue
                 local_scale_idx = self.used_scales.index(scale_idx)
-                band_map = w_nonneg[0, 0, local_scale_idx, orient_idx]
+                band_map = w_nonneg[neuron_idx, lag_idx, local_scale_idx, orient_idx]
                 energy = float((band_map * band_map).sum().item())
                 if energy <= 0.0:
                     continue
@@ -275,7 +292,7 @@ class TwoStage(nn.Module):
             for k in ordered:
                 scale_idx, orient_idx = k
                 local_scale_idx = self.used_scales.index(scale_idx)
-                band_map = w_nonneg[0, 0, local_scale_idx, orient_idx]
+                band_map = w_nonneg[neuron_idx, lag_idx, local_scale_idx, orient_idx]
                 coeffs_final[k][:, :, ys, xs] = (
                     band_sign[k] * band_map
                 ).unsqueeze(0).unsqueeze(0)

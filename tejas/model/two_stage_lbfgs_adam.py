@@ -47,7 +47,7 @@ lambda_local_prox = 1e-1  # optional locality weight in prox mode
 circular_dims = {1}
 # circular_dims = {}
 losses = []
-cell_ids = [14]
+cell_ids = [16]
 num_epochs = 100
 lbfgs_epochs = 2
 
@@ -221,6 +221,7 @@ for epoch in range(num_epochs):
             bps_val=bps_val,
             phase=phase,
             epoch=epoch,
+            show_colorwheel=True,
         )
     
 

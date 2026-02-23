@@ -3,6 +3,98 @@ import numpy as np
 import torch
 
 
+def afferent_hue_from_signed_maps(w_plus, w_minus):
+    """Map signed on/off responses to hue used in afferent visualizations."""
+    angle = np.arctan2(w_minus, w_plus)
+    # Keep exact mapping used by visualize_afferent_map.
+    return (1.0 / 3.0 - angle / (2 * np.pi)) % 1.0
+
+
+def afferent_saturation_from_signed_maps(w_plus, w_minus, eps=1e-8):
+    """Map afferent magnitude to saturation in [0, 1]."""
+    w_star = np.sqrt(w_plus**2 + w_minus**2)
+    w_max = w_star.max() + eps
+    return np.clip(w_star / w_max, 0, 1)
+
+
+def afferent_rgb_from_signed_maps(w_plus, w_minus, eps=1e-8):
+    """Render afferent map RGB using shared hue/saturation logic."""
+    import matplotlib.colors as mcolors
+
+    hue = afferent_hue_from_signed_maps(w_plus, w_minus)
+    sat = afferent_saturation_from_signed_maps(w_plus, w_minus, eps=eps)
+    val = np.ones_like(hue)
+    hsv = np.stack([hue, sat, val], axis=-1)
+    return mcolors.hsv_to_rgb(hsv)
+
+
+def draw_afferent_colorwheel(
+    ax=None,
+    resolution=401,
+    add_labels=True,
+    title=None,
+    background=0.90,
+    axis_limit=1.35,
+):
+    """
+    Draw the afferent-map colorwheel used by visualize_afferent_map.
+
+    If `ax` is None, creates and returns a standalone figure+axis.
+    If `ax` is provided, draws in-place and returns (None, ax).
+    """
+    import matplotlib.colors as mcolors
+
+    created_fig = False
+    if ax is None:
+        created_fig = True
+        fig, ax = plt.subplots(figsize=(4.2, 4.2))
+    else:
+        fig = None
+
+    lin = np.linspace(-1.0, 1.0, int(resolution), dtype=float)
+    xx, yy = np.meshgrid(lin, lin)
+    rr = np.sqrt(xx**2 + yy**2)
+    wheel_mask = rr <= 1.0
+
+    hue = afferent_hue_from_signed_maps(xx, yy)
+    sat = np.clip(rr, 0.0, 1.0)
+    val = np.ones_like(sat)
+    hsv = np.stack([hue, sat, val], axis=-1)
+    rgb = mcolors.hsv_to_rgb(hsv)
+
+    bg = np.array([background, background, background], dtype=float)
+    rgb[~wheel_mask] = bg
+    ax.imshow(rgb, origin="lower", extent=(-1.0, 1.0, -1.0, 1.0), interpolation="nearest")
+
+    # Dashed cardinal axes through colorwheel.
+    ax.plot([-axis_limit, axis_limit], [0, 0], color="k", linestyle=(0, (4, 4)), linewidth=1.8, alpha=0.85)
+    ax.plot([0, 0], [-axis_limit, axis_limit], color="k", linestyle=(0, (4, 4)), linewidth=1.8, alpha=0.85)
+
+    # Arrowheads at axis ends.
+    ah = dict(arrowstyle="-|>", color="k", linewidth=1.6, mutation_scale=12)
+    ax.annotate("", xy=(axis_limit, 0), xytext=(axis_limit - 0.20, 0), arrowprops=ah)
+    ax.annotate("", xy=(-axis_limit, 0), xytext=(-axis_limit + 0.20, 0), arrowprops=ah)
+    ax.annotate("", xy=(0, axis_limit), xytext=(0, axis_limit - 0.20), arrowprops=ah)
+    ax.annotate("", xy=(0, -axis_limit), xytext=(0, -axis_limit + 0.20), arrowprops=ah)
+
+    if add_labels:
+        ax.text(0.0, axis_limit + 0.09, "'Off' excitation", ha="center", va="bottom", fontsize=12, style="italic")
+        ax.text(axis_limit + 0.09, 0.0, "'On' excitation", ha="left", va="center", fontsize=12, style="italic")
+        ax.text(0.0, -axis_limit - 0.09, "'Off' inhibition", ha="center", va="top", fontsize=12, style="italic")
+        ax.text(-axis_limit - 0.09, 0.0, "'On' inhibition", ha="right", va="center", fontsize=12, style="italic")
+
+    if title:
+        ax.set_title(title)
+    ax.set_xlim(-axis_limit, axis_limit)
+    ax.set_ylim(-axis_limit, axis_limit)
+    ax.set_aspect("equal")
+    ax.axis("off")
+
+    if created_fig:
+        return fig, ax
+    return None, ax
+
+
 def sparsity_penalty(model):
     w_star = torch.sqrt(model.w_pos.weight**2 + model.w_neg.weight**2)
     # w_star = get_w_star(model.positive_afferent_map[0, 0], model.negative_afferent_map[0, 0])
@@ -109,9 +201,18 @@ def locality_penalty_from_maps(positive_afferent_map, negative_afferent_map, cir
     return l_local, (z, z, z, z)
 
 
-def visualize_afferent_map(model, figsize=None, title=None, eps=1e-8, show_examples=True):
+def visualize_afferent_map(
+    model,
+    figsize=None,
+    title=None,
+    eps=1e-8,
+    show_examples=True,
+    show_colorwheel=False,
+    colorwheel_kwargs=None,
+    neuron_idx=0,
+    lag_idx=0,
+):
     """Visualize model afferent maps with hue=on/off proportion and saturation=amplitude."""
-    import matplotlib.colors as mcolors
     import matplotlib.patches as patches
 
     def _draw_gabor_icon(ax, theta_deg, sf_rank, sf_count, color="#36b76f"):
@@ -145,8 +246,8 @@ def visualize_afferent_map(model, figsize=None, title=None, eps=1e-8, show_examp
         ax.set_aspect("equal")
         ax.axis("off")
 
-    w_plus = model.positive_afferent_map[0, 0].detach().cpu().numpy()
-    w_minus = model.negative_afferent_map[0, 0].detach().cpu().numpy()
+    w_plus = model.positive_afferent_map[neuron_idx, lag_idx].detach().cpu().numpy()
+    w_minus = model.negative_afferent_map[neuron_idx, lag_idx].detach().cpu().numpy()
     assert w_plus.ndim == 4 and w_minus.ndim == 4 and w_plus.shape == w_minus.shape, "Expected 4D (height, order+1, H, W), same shape"
     height, n_orient, _, _ = w_plus.shape
     row_order = np.arange(height)
@@ -160,15 +261,7 @@ def visualize_afferent_map(model, figsize=None, title=None, eps=1e-8, show_examp
             )
             w_plus = w_plus[row_order]
             w_minus = w_minus[row_order]
-    w_star = np.sqrt(w_plus**2 + w_minus**2)
-    w_max = w_star.max() + eps
-    sat = np.clip(w_star / w_max, 0, 1)
-    angle = np.arctan2(w_minus, w_plus)
-    # Match paper legend orientation: right=On excitation, up=Off excitation, left=On inhibition, down=Off inhibition
-    hue = (1.0 / 3.0 - angle / (2 * np.pi)) % 1.0
-    val = np.ones_like(hue)
-    hsv = np.stack([hue, sat, val], axis=-1)
-    rgb = mcolors.hsv_to_rgb(hsv)
+    rgb = afferent_rgb_from_signed_maps(w_plus, w_minus, eps=eps)
     if figsize is None:
         figsize = (2 * n_orient, 2 * height)
     fig, axes = plt.subplots(height, n_orient, figsize=figsize, squeeze=False)
@@ -194,7 +287,8 @@ def visualize_afferent_map(model, figsize=None, title=None, eps=1e-8, show_examp
     fig.supylabel(y_axis_label, x=0.12)
     if title:
         fig.suptitle(title)
-    plt.tight_layout(rect=(0.16, 0.14, 0.98, 0.95))
+    right_edge = 0.82 if show_colorwheel else 0.98
+    plt.tight_layout(rect=(0.16, 0.14, right_edge, 0.95))
 
     if show_examples:
         ori_examples = [float(d) for d in display_orientations[:n_orient]]
@@ -220,6 +314,22 @@ def visualize_afferent_map(model, figsize=None, title=None, eps=1e-8, show_examp
             y0 = pos.y0 - box_h * 2.05
             gax = fig.add_axes([x0, y0, box_w, box_h])
             _draw_gabor_icon(gax, theta_deg=ori_examples[j], sf_rank=sf_mid_rank, sf_count=height)
+
+    if show_colorwheel:
+        # Anchor colorwheel to afferent map panel bounds.
+        positions = [axes[i, j].get_position() for i in range(height) for j in range(n_orient)]
+        x1 = max(p.x1 for p in positions)
+        y0 = min(p.y0 for p in positions)
+        y1 = max(p.y1 for p in positions)
+        panel_h = y1 - y0
+        wheel_h = panel_h * 0.82
+        wheel_w = 0.14
+        wheel_x0 = min(0.99 - wheel_w, x1 + 0.02)
+        wheel_y0 = y0 + (panel_h - wheel_h) * 0.5
+        cax = fig.add_axes([wheel_x0, wheel_y0, wheel_w, wheel_h])
+        _wheel_defaults = dict(add_labels=True, axis_limit=1.30)
+        _wheel_defaults.update(colorwheel_kwargs or {})
+        draw_afferent_colorwheel(ax=cax, **_wheel_defaults)
 
     return fig, axes
 
@@ -267,11 +377,44 @@ def show_epoch_diagnostics(
     bps_val,
     phase=None,
     epoch=None,
+    show_colorwheel=True,
+    colorwheel_kwargs=None,
+    neuron_idx=0,
+    lag_idx=0,
+    save_dir=None,
+    save_prefix=None,
+    close_figs=False,
+    show_plots=True,
 ):
-    fig, axes = visualize_afferent_map(model, title=f"Cell {cell_id}")
-    plt.show()
+    bps_np = np.asarray(bps.detach().cpu().numpy() if torch.is_tensor(bps) else bps).reshape(-1)
+    bps_val_np = np.asarray(bps_val.detach().cpu().numpy() if torch.is_tensor(bps_val) else bps_val).reshape(-1)
+    if 0 <= int(neuron_idx) < bps_np.size:
+        bps_cell = float(bps_np[int(neuron_idx)])
+        bps_val_cell = float(bps_val_np[int(neuron_idx)])
+    else:
+        bps_cell = float(bps_np.mean()) if bps_np.size else float("nan")
+        bps_val_cell = float(bps_val_np.mean()) if bps_val_np.size else float("nan")
+
+    aff_title = f"Cell {cell_id} | train_bps={bps_cell:.3f} val_bps={bps_val_cell:.3f}"
+    if phase is not None and epoch is not None:
+        aff_title = f"{aff_title} | {phase} e{int(epoch):03d}"
+    elif phase is not None:
+        aff_title = f"{aff_title} | {phase}"
+
+    aff_fig, axes = visualize_afferent_map(
+        model,
+        title=aff_title,
+        show_colorwheel=show_colorwheel,
+        colorwheel_kwargs=colorwheel_kwargs,
+        neuron_idx=neuron_idx,
+        lag_idx=lag_idx,
+    )
+    if show_plots:
+        plt.show()
     sta_img = stas[cell_id, peak_lags[cell_id]]
-    energy_exc_rf, energy_inh_rf = model.energy_receptive_fields
+    energy_exc_rf, energy_inh_rf = model.energy_receptive_fields_at(
+        neuron_idx=neuron_idx, lag_idx=lag_idx
+    )
     energy_exc_np = energy_exc_rf[0, 0].detach().cpu().numpy()
     energy_inh_np = energy_inh_rf[0, 0].detach().cpu().numpy()
     joint_abs = np.concatenate(
@@ -291,8 +434,14 @@ def show_epoch_diagnostics(
         amp_scale=joint_amp_scale,
         carrier_scale=joint_carrier_scale,
     )
-    fig, axes = plt.subplots(1, 4, figsize=(16, 4))
-    axes[0].imshow(model.linear_receptive_field[0, 0].detach().cpu().numpy(), cmap="coolwarm_r")
+    rf_fig, axes = plt.subplots(1, 4, figsize=(16, 4))
+    axes[0].imshow(
+        model.linear_receptive_field_at(neuron_idx=neuron_idx, lag_idx=lag_idx)[0, 0]
+        .detach()
+        .cpu()
+        .numpy(),
+        cmap="coolwarm_r",
+    )
     axes[0].set_title("Linear RF")
     axes[0].axis("off")
     axes[1].imshow(exc_rgb)
@@ -304,8 +453,46 @@ def show_epoch_diagnostics(
     axes[3].imshow(sta_img, cmap="coolwarm_r")
     axes[3].set_title(f"STA (cell {cell_id})")
     axes[3].axis("off")
+    rf_fig.suptitle(f"train_bps={bps_cell:.3f} | val_bps={bps_val_cell:.3f}", y=0.98)
     plt.tight_layout()
-    plt.show()
+    if save_dir is not None:
+        import os
+
+        def _fig_to_rgb_arr(fig):
+            fig.canvas.draw()
+            rgba = np.asarray(fig.canvas.buffer_rgba(), dtype=np.uint8)
+            return rgba[..., :3]
+
+        prefix = save_prefix or f"cell_{cell_id}"
+        os.makedirs(save_dir, exist_ok=True)
+        aff_img = _fig_to_rgb_arr(aff_fig)
+        rf_img = _fig_to_rgb_arr(rf_fig)
+
+        pad = 16
+        out_w = max(aff_img.shape[1], rf_img.shape[1])
+
+        def _pad_to_width(img, width):
+            if img.shape[1] == width:
+                return img
+            left = (width - img.shape[1]) // 2
+            right = width - img.shape[1] - left
+            return np.pad(
+                img,
+                ((0, 0), (left, right), (0, 0)),
+                mode="constant",
+                constant_values=255,
+            )
+
+        aff_pad = _pad_to_width(aff_img, out_w)
+        rf_pad = _pad_to_width(rf_img, out_w)
+        gap = np.full((pad, out_w, 3), 255, dtype=np.uint8)
+        combined = np.concatenate([aff_pad, gap, rf_pad], axis=0)
+        out_path = os.path.join(save_dir, f"{prefix}_diagnostics.png")
+        plt.imsave(out_path, combined)
+    if show_plots:
+        plt.show()
+    if close_figs:
+        plt.close("all")
 
     locality_factor = gamma_local * local_last
     print(
@@ -314,9 +501,15 @@ def show_epoch_diagnostics(
         f"gamma*L_local={locality_factor:.6f} ({100.0 * locality_factor:.2f}%), "
         f"prox_tau={prox_tau_last:.6e}, reg={reg_last:.6f}"
     )
-    print("beta:", model.beta.item())
-    print(bps.item())
-    print(bps_val.item())
+    print("beta:", model.beta.detach().cpu().numpy().tolist())
+    if bps_np.size == 1:
+        print(float(bps_np[0]))
+    else:
+        print(np.round(bps_np, 4).tolist())
+    if bps_val_np.size == 1:
+        print(float(bps_val_np[0]))
+    else:
+        print(np.round(bps_val_np, 4).tolist())
     if phase is not None and epoch is not None:
         print(f"phase={phase}, epoch={epoch}")
     elif phase is not None:
