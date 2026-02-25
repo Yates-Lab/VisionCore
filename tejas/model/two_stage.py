@@ -28,6 +28,7 @@ from two_stage_core import TwoStage
 #%%
 
 from two_stage_helpers import show_epoch_diagnostics
+from two_stage_sta_afferent_preview import initialize_model_afferents_from_sta
 from two_stage_trainer import eval_step, prepare_batch, train_step_adam
 
 
@@ -69,6 +70,7 @@ model.cuda()
 torch.cuda.empty_cache()
 train_dset.to('cpu')
 val_dset.to('cpu')
+# initialize_model_afferents_from_sta(model, train_dset, peak_lags, cell_ids, crop_size)
 batch_size = 1024  # 64
 
 train_loader = DataLoader(train_dset, batch_size=batch_size, shuffle=True, num_workers=16, pin_memory=True, persistent_workers=True, prefetch_factor=4)

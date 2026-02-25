@@ -334,5 +334,6 @@ class TwoStage(nn.Module):
             with torch.no_grad():
                 self.beta.clamp_(min=float(self.clamp_beta_min))
 
-        x["rhat"] = (self.beta + self.alpha_pos * F.relu(z) + self.alpha_neg * F.relu(-z)).clamp(min=1e-6)
+        # x["rhat"] = (self.beta + self.alpha_pos * F.relu(z) + self.alpha_neg * F.relu(-z)).clamp(min=1e-6)
+        x["rhat"] = (self.beta + F.relu(z)).clamp(min=1e-6)
         return x

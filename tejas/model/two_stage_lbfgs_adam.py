@@ -37,7 +37,7 @@ from two_stage_trainer import eval_step, prepare_batch, train_step_adam, train_s
 
 # Phase-specific regularization settings (matched to source files).
 # LBFGS stage mirrors two_stage_lbfgs.py behavior.
-lambda_reg_lbfgs = 1e-4
+lambda_reg_lbfgs = 1e-4 
 gamma_local_lbfgs = lambda_reg_lbfgs * 4 / 20
 # Adam stage mirrors two_stage.py behavior.
 lambda_reg_adam = 1e-2 #1e-5
@@ -49,7 +49,7 @@ circular_dims = {1}
 losses = []
 cell_ids = [16]
 num_epochs = 100
-lbfgs_epochs = 2
+lbfgs_epochs = 3
 
 spike_loss = MaskedPoissonNLLLoss(pred_key='rhat', target_key='robs', mask_key='dfs')
 # spike_loss =  MaskedLoss(nn.MSELoss(reduction='none'), pred_key='rhat', target_key='robs', mask_key='dfs')
@@ -71,7 +71,7 @@ model = TwoStage(
     validate_cpd=True,
     beta_init=beta_init,
     init_weight_scale=1e-4,
-    beta_as_parameter=False,
+    beta_as_parameter=True,
     clamp_beta_min=1e-6,
 )
 
@@ -143,6 +143,7 @@ for epoch in range(num_epochs):
         model.train()
         batch = prepare_batch(batch, peak_lags=peak_lags, cell_ids=cell_ids, crop_size=crop_size)
         if phase == "lbfgs":
+            model.alpha_pos.requires_grad = False
             step_stats, out = train_step_lbfgs(
                 model=model,
                 optimizer=optimizer_lbfgs,

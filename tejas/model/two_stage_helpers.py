@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -361,6 +363,88 @@ def render_energy_component_rgb(component, hue_rgb, amp_scale=None, carrier_scal
     return np.clip(rgb, 0.0, 1.0)
 
 
+def fig_to_rgb_arr(fig):
+    fig.canvas.draw()
+    rgba = np.asarray(fig.canvas.buffer_rgba(), dtype=np.uint8)
+    return rgba[..., :3]
+
+
+def _pad_image_to_width(img, width):
+    if img.shape[1] == width:
+        return img
+    left = (width - img.shape[1]) // 2
+    right = width - img.shape[1] - left
+    return np.pad(img, ((0, 0), (left, right), (0, 0)), mode="constant", constant_values=255)
+
+
+def save_stacked_figures_png(top_fig, bottom_fig, out_png, pad=16):
+    top_img = fig_to_rgb_arr(top_fig)
+    bottom_img = fig_to_rgb_arr(bottom_fig)
+    out_w = max(top_img.shape[1], bottom_img.shape[1])
+    top_pad = _pad_image_to_width(top_img, out_w)
+    bottom_pad = _pad_image_to_width(bottom_img, out_w)
+    gap = np.full((int(pad), out_w, 3), 255, dtype=np.uint8)
+    combined = np.concatenate([top_pad, gap, bottom_pad], axis=0)
+    plt.imsave(out_png, combined)
+
+
+def build_rf_sta_figure(
+    model,
+    sta_rf,
+    cell_id,
+    neuron_idx=0,
+    lag_idx=0,
+    suptitle=None,
+    figsize=(16, 4),
+):
+    model_lin = (
+        model.linear_receptive_field_at(neuron_idx=neuron_idx, lag_idx=lag_idx)[0, 0]
+        .detach()
+        .cpu()
+        .numpy()
+    )
+    energy_exc_rf, energy_inh_rf = model.energy_receptive_fields_at(
+        neuron_idx=neuron_idx, lag_idx=lag_idx
+    )
+    energy_exc_np = energy_exc_rf[0, 0].detach().cpu().numpy()
+    energy_inh_np = energy_inh_rf[0, 0].detach().cpu().numpy()
+    joint_abs = np.concatenate(
+        [np.abs(energy_exc_np).reshape(-1), np.abs(energy_inh_np).reshape(-1)]
+    )
+    amp_scale = float(np.percentile(joint_abs, 99)) if joint_abs.size else 1.0
+    carrier_scale = float(joint_abs.max()) if joint_abs.size else 1.0
+    exc_rgb = render_energy_component_rgb(
+        energy_exc_np,
+        hue_rgb=(0.95, 0.70, 0.35),
+        amp_scale=amp_scale,
+        carrier_scale=carrier_scale,
+    )
+    inh_rgb = render_energy_component_rgb(
+        energy_inh_np,
+        hue_rgb=(0.45, 0.70, 0.95),
+        amp_scale=amp_scale,
+        carrier_scale=carrier_scale,
+    )
+
+    rf_fig, axes = plt.subplots(1, 4, figsize=figsize)
+    axes[0].imshow(model_lin, cmap="coolwarm_r")
+    axes[0].set_title("Linear RF")
+    axes[0].axis("off")
+    axes[1].imshow(exc_rgb)
+    axes[1].set_title("Energy Exc RF")
+    axes[1].axis("off")
+    axes[2].imshow(inh_rgb)
+    axes[2].set_title("Energy Inh RF")
+    axes[2].axis("off")
+    axes[3].imshow(sta_rf, cmap="coolwarm_r")
+    axes[3].set_title(f"STA (cell {cell_id})")
+    axes[3].axis("off")
+    if suptitle:
+        rf_fig.suptitle(suptitle, y=0.98)
+    plt.tight_layout()
+    return rf_fig, axes
+
+
 def show_epoch_diagnostics(
     model,
     stas,
@@ -401,7 +485,7 @@ def show_epoch_diagnostics(
     elif phase is not None:
         aff_title = f"{aff_title} | {phase}"
 
-    aff_fig, axes = visualize_afferent_map(
+    aff_fig, _ = visualize_afferent_map(
         model,
         title=aff_title,
         show_colorwheel=show_colorwheel,
@@ -411,84 +495,21 @@ def show_epoch_diagnostics(
     )
     if show_plots:
         plt.show()
-    sta_img = stas[cell_id, peak_lags[cell_id]]
-    energy_exc_rf, energy_inh_rf = model.energy_receptive_fields_at(
-        neuron_idx=neuron_idx, lag_idx=lag_idx
+    sta_rf = np.asarray(stas[cell_id, peak_lags[cell_id]], dtype=np.float32)
+    rf_fig, _ = build_rf_sta_figure(
+        model=model,
+        sta_rf=sta_rf,
+        cell_id=cell_id,
+        neuron_idx=neuron_idx,
+        lag_idx=lag_idx,
+        suptitle=f"train_bps={bps_cell:.3f} | val_bps={bps_val_cell:.3f}",
     )
-    energy_exc_np = energy_exc_rf[0, 0].detach().cpu().numpy()
-    energy_inh_np = energy_inh_rf[0, 0].detach().cpu().numpy()
-    joint_abs = np.concatenate(
-        [np.abs(energy_exc_np).reshape(-1), np.abs(energy_inh_np).reshape(-1)]
-    )
-    joint_amp_scale = float(np.percentile(joint_abs, 99))
-    joint_carrier_scale = float(joint_abs.max())
-    exc_rgb = render_energy_component_rgb(
-        energy_exc_np,
-        hue_rgb=(0.95, 0.70, 0.35),
-        amp_scale=joint_amp_scale,
-        carrier_scale=joint_carrier_scale,
-    )
-    inh_rgb = render_energy_component_rgb(
-        energy_inh_np,
-        hue_rgb=(0.45, 0.70, 0.95),
-        amp_scale=joint_amp_scale,
-        carrier_scale=joint_carrier_scale,
-    )
-    rf_fig, axes = plt.subplots(1, 4, figsize=(16, 4))
-    axes[0].imshow(
-        model.linear_receptive_field_at(neuron_idx=neuron_idx, lag_idx=lag_idx)[0, 0]
-        .detach()
-        .cpu()
-        .numpy(),
-        cmap="coolwarm_r",
-    )
-    axes[0].set_title("Linear RF")
-    axes[0].axis("off")
-    axes[1].imshow(exc_rgb)
-    axes[1].set_title("Energy Exc RF")
-    axes[1].axis("off")
-    axes[2].imshow(inh_rgb)
-    axes[2].set_title("Energy Inh RF")
-    axes[2].axis("off")
-    axes[3].imshow(sta_img, cmap="coolwarm_r")
-    axes[3].set_title(f"STA (cell {cell_id})")
-    axes[3].axis("off")
-    rf_fig.suptitle(f"train_bps={bps_cell:.3f} | val_bps={bps_val_cell:.3f}", y=0.98)
-    plt.tight_layout()
     if save_dir is not None:
-        import os
-
-        def _fig_to_rgb_arr(fig):
-            fig.canvas.draw()
-            rgba = np.asarray(fig.canvas.buffer_rgba(), dtype=np.uint8)
-            return rgba[..., :3]
-
         prefix = save_prefix or f"cell_{cell_id}"
-        os.makedirs(save_dir, exist_ok=True)
-        aff_img = _fig_to_rgb_arr(aff_fig)
-        rf_img = _fig_to_rgb_arr(rf_fig)
-
-        pad = 16
-        out_w = max(aff_img.shape[1], rf_img.shape[1])
-
-        def _pad_to_width(img, width):
-            if img.shape[1] == width:
-                return img
-            left = (width - img.shape[1]) // 2
-            right = width - img.shape[1] - left
-            return np.pad(
-                img,
-                ((0, 0), (left, right), (0, 0)),
-                mode="constant",
-                constant_values=255,
-            )
-
-        aff_pad = _pad_to_width(aff_img, out_w)
-        rf_pad = _pad_to_width(rf_img, out_w)
-        gap = np.full((pad, out_w, 3), 255, dtype=np.uint8)
-        combined = np.concatenate([aff_pad, gap, rf_pad], axis=0)
-        out_path = os.path.join(save_dir, f"{prefix}_diagnostics.png")
-        plt.imsave(out_path, combined)
+        save_path = Path(save_dir)
+        save_path.mkdir(parents=True, exist_ok=True)
+        out_path = save_path / f"{prefix}_diagnostics.png"
+        save_stacked_figures_png(aff_fig, rf_fig, out_path)
     if show_plots:
         plt.show()
     if close_figs:
