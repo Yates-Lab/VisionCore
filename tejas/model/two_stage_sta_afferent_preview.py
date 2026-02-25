@@ -1,7 +1,19 @@
 from __future__ import annotations
 
-import argparse
+"""
+Interactive STA afferent preview script.
+
+Edit `DEFAULT_CONFIG`, then run:
+    uv run python /home/tejas/VisionCore/tejas/model/two_stage_sta_afferent_preview.py
+
+For reuse from other scripts:
+    - `compute_initial_sta_weights(config)` returns (context, w_pos_by_lag, w_neg_by_lag)
+    - `run_sta_afferent_preview(config)` computes weights and exports PNG previews
+"""
+
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,59 +26,55 @@ from two_stage_helpers import render_energy_component_rgb, visualize_afferent_ma
 from util import get_dataset_info
 
 
-def parse_args():
-    p = argparse.ArgumentParser(description="Preview STA-initialized afferent maps.")
-    p.add_argument(
-        "--cell-ids",
-        type=str,
-        default="",
-        help="Comma-separated cell IDs. Leave empty to use all cells.",
-    )
-    p.add_argument("--example-cell-id", type=int, default=14)
-    p.add_argument(
-        "--export-mode",
-        type=str,
-        choices=["all", "single"],
-        default="all",
-        help="Export one PNG per selected cell ('all') or only --example-cell-id ('single').",
-    )
-    p.add_argument(
-        "--dataset-configs-path",
-        type=str,
-        default="/home/tejas/VisionCore/experiments/dataset_configs/multi_basic_240_gaborium_20lags.yaml",
-    )
-    p.add_argument("--subject", type=str, default="Allen")
-    p.add_argument("--date", type=str, default="2022-04-13")
-    p.add_argument("--image-shape", type=int, nargs=2, default=[41, 41])
-    p.add_argument("--lag-mode", type=str, choices=["peak_bank", "median_peak", "all"], default="peak_bank")
-    p.add_argument("--batch-size", type=int, default=2048)
-    p.add_argument("--num-workers", type=int, default=8)
-    p.add_argument("--height", type=int, default=3)
-    p.add_argument("--order", type=int, default=5)
-    p.add_argument("--lowest-cpd-target", type=float, default=1.0)
-    p.add_argument("--rel-tolerance", type=float, default=0.3)
-    p.add_argument("--output-dir", type=str, default="/home/tejas/VisionCore/tejas/model")
-    p.add_argument("--seed", type=int, default=0)
-    p.add_argument(
-        "--activation-softmax",
-        action="store_true",
-        default=False,
-        help="Apply softmax reweighting over feature activations before STA accumulation.",
-    )
-    p.add_argument(
-        "--activation-softmax-temp",
-        type=float,
-        default=0.35,
-        help="Softmax temperature for activation reweighting (smaller = sharper).",
-    )
-    return p.parse_args()
+ExportMode = Literal["all", "single"]
+LagMode = Literal["peak_bank", "median_peak", "all"]
 
 
-def parse_cell_ids(cell_ids_str: str) -> list[int]:
-    ids = [int(x.strip()) for x in cell_ids_str.split(",") if x.strip()]
-    if not ids:
-        raise ValueError("No valid cell IDs were provided.")
-    return ids
+@dataclass
+class StaPreviewConfig:
+    """
+    Editable run configuration for interactive use.
+    """
+
+    cell_ids: list[int] | None = None
+    example_cell_id: int = 14
+    export_mode: ExportMode = "all"
+    dataset_configs_path: str = (
+        "/home/tejas/VisionCore/experiments/dataset_configs/multi_basic_240_gaborium_20lags.yaml"
+    )
+    subject: str = "Allen"
+    date: str = "2022-04-13"
+    image_shape: tuple[int, int] = (41, 41)
+    lag_mode: LagMode = "peak_bank"
+    batch_size: int = 2048
+    num_workers: int = 8
+    height: int = 3
+    order: int = 5
+    lowest_cpd_target: float = 1.0
+    rel_tolerance: float = 0.3
+    output_dir: str = "/home/tejas/VisionCore/tejas/model"
+    seed: int = 0
+    activation_softmax: bool = False
+    activation_softmax_temp: float = 0.35
+
+
+@dataclass
+class StaRunContext:
+    config: StaPreviewConfig
+    device: str
+    image_shape: tuple[int, int]
+    info: dict
+    cell_ids: list[int]
+    selected_lags: list[int]
+    lag_slots: list[int]
+    train_dset: object
+    crop_size: int
+    feature_model: TwoStage
+    render_model: TwoStage
+
+
+# Edit these values for interactive runs.
+DEFAULT_CONFIG = StaPreviewConfig()
 
 
 def crop_slice(crop_size: int):
@@ -81,6 +89,92 @@ def unique_preserve_order(vals: list[int]) -> list[int]:
             seen.add(v)
             out.append(v)
     return out
+
+
+def build_run_context(config: StaPreviewConfig) -> StaRunContext:
+    np.random.seed(config.seed)
+    torch.manual_seed(config.seed)
+    torch.cuda.manual_seed_all(config.seed)
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    image_shape = tuple(config.image_shape)
+
+    info = get_dataset_info(config.dataset_configs_path, config.subject, config.date, image_shape)
+    n_all_cells = int(info["stas"].shape[0])
+    if config.cell_ids is None:
+        cell_ids = list(range(n_all_cells))
+    else:
+        if len(config.cell_ids) == 0:
+            raise ValueError("cell_ids cannot be empty when provided.")
+        cell_ids = [int(cid) for cid in config.cell_ids]
+
+    peak_lags = info["peak_lags"]
+    train_dset = info["train_dset"]
+    crop_size = info["crop_size"]
+    max_valid_lag = int(info["stim"].shape[2]) - 1
+
+    raw_lags = [int(peak_lags[cid]) for cid in cell_ids]
+    clipped_lags = [min(lg, max_valid_lag) for lg in raw_lags]
+    if config.export_mode == "all":
+        # Batch export mode: compute all lag maps, then pick each cell's own peak lag.
+        selected_lags = list(range(max_valid_lag + 1))
+        lag_slots = [selected_lags.index(lg) for lg in clipped_lags]
+    elif config.lag_mode == "median_peak":
+        selected_lags = [int(np.rint(np.median(clipped_lags)))]
+        selected_lags[0] = max(0, min(selected_lags[0], max_valid_lag))
+        lag_slots = [0 for _ in clipped_lags]
+    elif config.lag_mode == "all":
+        selected_lags = list(range(max_valid_lag + 1))
+        lag_slots = [selected_lags.index(lg) for lg in clipped_lags]
+    else:
+        selected_lags = unique_preserve_order(clipped_lags)
+        lag_slots = [selected_lags.index(lg) for lg in clipped_lags]
+
+    feature_model = TwoStage(
+        image_shape=image_shape,
+        n_neurons=1,
+        n_lags=1,
+        height=config.height,
+        order=config.order,
+        lowest_cpd_target=config.lowest_cpd_target,
+        ppd=train_dset.dsets[0].metadata["ppd"],
+        rel_tolerance=config.rel_tolerance,
+        validate_cpd=True,
+        init_weight_scale=1e-4,
+        beta_init=0.0,
+        beta_as_parameter=True,
+        clamp_beta_min=1e-6,
+    ).to(device)
+
+    render_model = TwoStage(
+        image_shape=image_shape,
+        n_neurons=1,
+        n_lags=1,
+        height=config.height,
+        order=config.order,
+        lowest_cpd_target=config.lowest_cpd_target,
+        ppd=train_dset.dsets[0].metadata["ppd"],
+        rel_tolerance=config.rel_tolerance,
+        validate_cpd=True,
+        init_weight_scale=1e-4,
+        beta_init=0.0,
+        beta_as_parameter=True,
+        clamp_beta_min=1e-6,
+    ).to(device)
+
+    return StaRunContext(
+        config=config,
+        device=device,
+        image_shape=image_shape,
+        info=info,
+        cell_ids=cell_ids,
+        selected_lags=selected_lags,
+        lag_slots=lag_slots,
+        train_dset=train_dset,
+        crop_size=crop_size,
+        feature_model=feature_model,
+        render_model=render_model,
+    )
 
 
 def compute_sta_feature_weights(
@@ -223,103 +317,41 @@ def save_combined_preview(
     plt.close(sta_fig)
 
 
-def main():
-    args = parse_args()
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    torch.cuda.manual_seed_all(args.seed)
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    image_shape = tuple(args.image_shape)
-
-    info = get_dataset_info(args.dataset_configs_path, args.subject, args.date, image_shape)
-    n_all_cells = int(info["stas"].shape[0])
-    if args.cell_ids.strip():
-        cell_ids = parse_cell_ids(args.cell_ids)
-    else:
-        cell_ids = list(range(n_all_cells))
-    peak_lags = info["peak_lags"]
-    train_dset = info["train_dset"]
-    crop_size = info["crop_size"]
-    max_valid_lag = int(info["stim"].shape[2]) - 1
-
-    raw_lags = [int(peak_lags[cid]) for cid in cell_ids]
-    clipped_lags = [min(lg, max_valid_lag) for lg in raw_lags]
-    if args.export_mode == "all":
-        # Batch export mode: compute all lag maps, then pick each cell's own peak lag.
-        selected_lags = list(range(max_valid_lag + 1))
-        lag_slots = [selected_lags.index(lg) for lg in clipped_lags]
-    elif args.lag_mode == "median_peak":
-        selected_lags = [int(np.rint(np.median(clipped_lags)))]
-        selected_lags[0] = max(0, min(selected_lags[0], max_valid_lag))
-        lag_slots = [0 for _ in clipped_lags]
-    elif args.lag_mode == "all":
-        selected_lags = list(range(max_valid_lag + 1))
-        lag_slots = [selected_lags.index(lg) for lg in clipped_lags]
-    else:
-        selected_lags = unique_preserve_order(clipped_lags)
-        lag_slots = [selected_lags.index(lg) for lg in clipped_lags]
-
-    feature_model = TwoStage(
-        image_shape=image_shape,
-        n_neurons=1,
-        n_lags=1,
-        height=args.height,
-        order=args.order,
-        lowest_cpd_target=args.lowest_cpd_target,
-        ppd=train_dset.dsets[0].metadata["ppd"],
-        rel_tolerance=args.rel_tolerance,
-        validate_cpd=True,
-        init_weight_scale=1e-4,
-        beta_init=0.0,
-        beta_as_parameter=True,
-        clamp_beta_min=1e-6,
-    ).to(device)
-
-    render_model = TwoStage(
-        image_shape=image_shape,
-        n_neurons=1,
-        n_lags=1,
-        height=args.height,
-        order=args.order,
-        lowest_cpd_target=args.lowest_cpd_target,
-        ppd=train_dset.dsets[0].metadata["ppd"],
-        rel_tolerance=args.rel_tolerance,
-        validate_cpd=True,
-        init_weight_scale=1e-4,
-        beta_init=0.0,
-        beta_as_parameter=True,
-        clamp_beta_min=1e-6,
-    ).to(device)
-
-    train_dset.to("cpu")
+def compute_initial_sta_weights(config: StaPreviewConfig):
+    ctx = build_run_context(config)
+    ctx.train_dset.to("cpu")
     w_pos_by_lag, w_neg_by_lag = compute_sta_feature_weights(
-        feature_model=feature_model,
-        dset=train_dset,
-        cell_ids=cell_ids,
-        lag_indices=selected_lags,
-        crop_size=crop_size,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        device=device,
+        feature_model=ctx.feature_model,
+        dset=ctx.train_dset,
+        cell_ids=ctx.cell_ids,
+        lag_indices=ctx.selected_lags,
+        crop_size=ctx.crop_size,
+        batch_size=ctx.config.batch_size,
+        num_workers=ctx.config.num_workers,
+        device=ctx.device,
     )
+    return ctx, w_pos_by_lag, w_neg_by_lag
 
-    out_dir = Path(args.output_dir)
+
+def render_and_save_cell_previews(ctx: StaRunContext, w_pos_by_lag: torch.Tensor, w_neg_by_lag: torch.Tensor):
+    out_dir = Path(ctx.config.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    if args.export_mode == "single":
-        if args.example_cell_id not in cell_ids:
-            raise ValueError(f"example_cell_id={args.example_cell_id} is not in cell_ids={cell_ids}")
-        export_local_indices = [cell_ids.index(args.example_cell_id)]
+    if ctx.config.export_mode == "single":
+        if ctx.config.example_cell_id not in ctx.cell_ids:
+            raise ValueError(
+                f"example_cell_id={ctx.config.example_cell_id} is not in cell_ids={ctx.cell_ids}"
+            )
+        export_local_indices = [ctx.cell_ids.index(ctx.config.example_cell_id)]
     else:
-        export_local_indices = list(range(len(cell_ids)))
+        export_local_indices = list(range(len(ctx.cell_ids)))
 
     for local_idx in tqdm(export_local_indices, desc="Saving cell PNGs"):
-        cell_id = int(cell_ids[local_idx])
-        lag_idx = int(lag_slots[local_idx])
+        cell_id = int(ctx.cell_ids[local_idx])
+        lag_idx = int(ctx.lag_slots[local_idx])
         w_pos_vec = w_pos_by_lag[local_idx, lag_idx].clone()
         w_neg_vec = w_neg_by_lag[local_idx, lag_idx].clone()
-        if args.activation_softmax:
-            temp = max(float(args.activation_softmax_temp), 1e-6)
+        if ctx.config.activation_softmax:
+            temp = max(float(ctx.config.activation_softmax_temp), 1e-6)
             act = (w_pos_vec + w_neg_vec).clamp_min(0.0)
             gate = torch.softmax(act / temp, dim=0)
             w_pos_vec = w_pos_vec * gate
@@ -328,27 +360,28 @@ def main():
         w_pos_vec = w_pos_vec / scale
         w_neg_vec = w_neg_vec / scale
         with torch.no_grad():
-            render_model.w_pos.weight.copy_(w_pos_vec.unsqueeze(0))
-            render_model.w_neg.weight.copy_(w_neg_vec.unsqueeze(0))
+            ctx.render_model.w_pos.weight.copy_(w_pos_vec.unsqueeze(0))
+            ctx.render_model.w_neg.weight.copy_(w_neg_vec.unsqueeze(0))
         out_png = out_dir / f"sta_afferent_cell_{cell_id:03d}.png"
         save_combined_preview(
-            model=render_model,
-            stas=info["stas"],
+            model=ctx.render_model,
+            stas=ctx.info["stas"],
             cell_id=cell_id,
             lag_idx=0,
-            lag_value=selected_lags[lag_idx],
+            lag_value=ctx.selected_lags[lag_idx],
             neuron_idx=0,
             out_png=out_png,
-            lag_mode=args.lag_mode,
-            activation_softmax=args.activation_softmax,
+            lag_mode=ctx.config.lag_mode,
+            activation_softmax=ctx.config.activation_softmax,
         )
         tqdm.write(f"Saved: {out_png}")
 
 
-if __name__ == "__main__":
-    main()
-'''
-uv run python "two_stage_sta_afferent_preview.py" --cell-ids 66 --example-cell-id 66 --activation-softmax --activation-softmax-temp 0.10 --output-dir "tejas/model"
-'''
+def run_sta_afferent_preview(config: StaPreviewConfig = DEFAULT_CONFIG):
+    ctx, w_pos_by_lag, w_neg_by_lag = compute_initial_sta_weights(config)
+    render_and_save_cell_previews(ctx, w_pos_by_lag, w_neg_by_lag)
+    return ctx, w_pos_by_lag, w_neg_by_lag
 
-#for all cells: uv run python "/home/tejas/VisionCore/tejas/model/two_stage_sta_afferent_preview.py" --activation-softmax --activation-softmax-temp 0.01 --output-dir "/home/tejas/VisionCore/tejas/model/sta_afferent_maps_0.01"
+
+if __name__ == "__main__":
+    run_sta_afferent_preview(DEFAULT_CONFIG)
