@@ -47,7 +47,7 @@ lambda_local_prox = 1e-1  # optional locality weight in prox mode
 circular_dims = {1}
 # circular_dims = {}
 losses = []
-cell_ids = [16]
+cell_ids = [66]
 num_epochs = 100
 lbfgs_epochs = 3
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+from collections import OrderedDict
 
 import numpy as np
 import torch
@@ -50,6 +51,12 @@ def parse_args():
     p.add_argument("--sparsity-mode", type=str, default="ratio_l1_l2", choices=["ratio_l1_l2", "prox_l1"])
     p.add_argument("--lambda-prox", type=float, default=1e-4)
     p.add_argument("--lbfgs-lr", type=float, default=1.0)
+    p.add_argument(
+        "--shared-lbfgs-lr",
+        type=float,
+        default=0.2,
+        help="LBFGS learning rate used when training a shared multicell model (n_neurons > 1).",
+    )
     p.add_argument("--lbfgs-max-iter", type=int, default=5)
     p.add_argument("--lbfgs-history-size", type=int, default=10)
     p.add_argument("--seed", type=int, default=0)
@@ -74,8 +81,27 @@ def parse_args():
             "to avoid shared line-search coupling."
         ),
     )
+    p.add_argument(
+        "--shared-loss-mode",
+        type=str,
+        default="global_masked",
+        choices=["global_masked", "equal_cells"],
+        help="Loss reduction used only when training shared multicell models.",
+    )
+    p.add_argument(
+        "--shared-lambda-reg-scale",
+        type=float,
+        default=1.0,
+        help="Multiplier on lambda_reg used only for shared multicell models.",
+    )
     p.add_argument("--save-diagnostics", action="store_true", default=False)
     p.add_argument("--diagnostics-dir", type=str, default="/home/tejas/VisionCore/tejas/model/lbfgs_all_cells_diagnostics")
+    p.add_argument(
+        "--save-best-epoch-only",
+        action="store_true",
+        default=False,
+        help="When saving diagnostics, keep only one PNG per cell from the best validation epoch.",
+    )
     return p.parse_args()
 
 
@@ -85,7 +111,12 @@ def set_seed(seed: int):
     torch.cuda.manual_seed_all(seed)
 
 
-def parse_cell_ids(cell_ids_str: str) -> list[int]:
+def parse_cell_ids(cell_ids_str: str, n_total_cells: int | None = None) -> list[int]:
+    raw = cell_ids_str.strip().lower()
+    if raw == "all":
+        if n_total_cells is None:
+            raise ValueError("n_total_cells is required when using --cell-ids all")
+        return list(range(int(n_total_cells)))
     cell_ids = [int(x.strip()) for x in cell_ids_str.split(",") if x.strip()]
     if not cell_ids:
         raise ValueError("No valid --cell-ids provided.")
@@ -242,6 +273,8 @@ def train_lbfgs(
     args,
     run_name: str,
     device: str,
+    shared_loss_mode: str = "global_masked",
+    shared_lambda_reg_scale: float = 1.0,
 ) -> TrainResult:
     peak_lags = dataset_info["peak_lags"]
     stas = dataset_info["stas"]
@@ -284,19 +317,24 @@ def train_lbfgs(
     train_loader = DataLoader(train_dset, batch_size=args.batch_size, shuffle=True, **{k: v for k, v in loader_kwargs.items() if k != "shuffle"})
     val_loader = DataLoader(val_dset, batch_size=args.batch_size, **loader_kwargs)
 
+    lbfgs_lr = float(args.shared_lbfgs_lr) if n_neurons > 1 else float(args.lbfgs_lr)
     optimizer = torch.optim.LBFGS(
         model.parameters(),
-        lr=args.lbfgs_lr,
+        lr=lbfgs_lr,
         max_iter=args.lbfgs_max_iter,
         history_size=args.lbfgs_history_size,
         line_search_fn="strong_wolfe",
     )
     spike_loss = MaskedPoissonNLLLoss(pred_key="rhat", target_key="robs", mask_key="dfs")
-    gamma_local = float(args.lambda_reg) * 4.0 / 20.0
+    lambda_reg_effective = float(args.lambda_reg) * float(shared_lambda_reg_scale)
+    gamma_local = lambda_reg_effective * 4.0 / 20.0
     circular_dims = {1}
 
     train_bps_hist: list[np.ndarray] = []
     val_bps_hist: list[np.ndarray] = []
+    best_val_mean = -np.inf
+    best_epoch = -1
+    best_state: OrderedDict[str, torch.Tensor] | None = None
     for epoch in range(args.num_epochs):
         train_agg = PoissonBPSAggregator()
         val_agg = PoissonBPSAggregator()
@@ -312,11 +350,14 @@ def train_lbfgs(
                 optimizer.zero_grad()
                 out_c = model(dict(batch))
                 out_c = align_outputs(out_c, cell_ids=cell_ids)
-                poisson = masked_poisson_loss_equal_cells(out_c)
+                if n_neurons > 1 and shared_loss_mode == "global_masked":
+                    poisson = spike_loss(out_c)
+                else:
+                    poisson = masked_poisson_loss_equal_cells(out_c)
                 l_sparse, l_local, reg_term, gamma_val = compute_regularization(
                     model=model,
                     sparsity_mode=args.sparsity_mode,
-                    lambda_reg=args.lambda_reg,
+                    lambda_reg=lambda_reg_effective,
                     lambda_local_prox=args.lambda_local_prox,
                     circular_dims=circular_dims,
                     gamma_value=gamma_local,
@@ -354,17 +395,23 @@ def train_lbfgs(
         bps_val = np.asarray(val_agg.closure().detach().cpu().numpy(), dtype=np.float32).reshape(-1)
         train_bps_hist.append(bps_train)
         val_bps_hist.append(bps_val)
+        val_mean = float(np.mean(bps_val))
+        if val_mean > best_val_mean:
+            best_val_mean = val_mean
+            best_epoch = int(epoch)
+            best_state = OrderedDict((k, v.detach().clone()) for k, v in model.state_dict().items())
 
         print(
             f"{run_name} epoch={epoch:03d} "
             f"train_bps={np.round(bps_train, 4).tolist()} "
             f"val_bps={np.round(bps_val, 4).tolist()} "
+            f"lbfgs_lr={lbfgs_lr:.4f} "
             f"poisson={poisson_last:.6f} sparse={sparse_last:.6f} "
             f"local={local_last:.6f} gamma*local={(gamma_local * local_last):.6f} "
             f"prox_tau={prox_tau_last:.3e} reg={reg_last:.6f}"
         )
 
-        if args.save_diagnostics:
+        if args.save_diagnostics and not args.save_best_epoch_only:
             for local_idx, cid in enumerate(cell_ids):
                 show_epoch_diagnostics(
                     model=model,
@@ -389,6 +436,60 @@ def train_lbfgs(
                     close_figs=True,
                     show_plots=False,
                 )
+
+    if best_state is not None and best_epoch >= 0 and best_epoch != (args.num_epochs - 1):
+        model.load_state_dict(best_state)
+        restored_train_agg = PoissonBPSAggregator()
+        restored_val_agg = PoissonBPSAggregator()
+        for batch in train_loader:
+            model.eval()
+            batch = prepare_batch_with_lags(batch, lag_indices=lag_indices, crop_size=crop_size, device=device)
+            with torch.no_grad():
+                out = model(dict(batch))
+                out = align_outputs(out, cell_ids=cell_ids)
+                restored_train_agg(out)
+        for batch in val_loader:
+            model.eval()
+            batch = prepare_batch_with_lags(batch, lag_indices=lag_indices, crop_size=crop_size, device=device)
+            with torch.no_grad():
+                out = model(dict(batch))
+                out = align_outputs(out, cell_ids=cell_ids)
+                restored_val_agg(out)
+        train_bps_hist[-1] = np.asarray(restored_train_agg.closure().detach().cpu().numpy(), dtype=np.float32).reshape(-1)
+        val_bps_hist[-1] = np.asarray(restored_val_agg.closure().detach().cpu().numpy(), dtype=np.float32).reshape(-1)
+        print(
+            f"{run_name} restored_best_epoch={best_epoch:03d} best_val_mean={best_val_mean:.4f} "
+            f"restored_train_bps={np.round(train_bps_hist[-1], 4).tolist()} "
+            f"restored_val_bps={np.round(val_bps_hist[-1], 4).tolist()}"
+        )
+
+    if args.save_diagnostics and args.save_best_epoch_only:
+        bps_train_final = train_bps_hist[-1]
+        bps_val_final = val_bps_hist[-1]
+        for local_idx, cid in enumerate(cell_ids):
+            show_epoch_diagnostics(
+                model=model,
+                stas=stas,
+                peak_lags=peak_lags,
+                cell_id=int(cid),
+                sparsity_mode=args.sparsity_mode,
+                poisson_last=poisson_last,
+                sparse_last=sparse_last,
+                local_last=local_last,
+                gamma_local=gamma_local,
+                prox_tau_last=prox_tau_last,
+                reg_last=reg_last,
+                bps=bps_train_final,
+                bps_val=bps_val_final,
+                phase=run_name,
+                epoch=best_epoch if best_epoch >= 0 else (args.num_epochs - 1),
+                neuron_idx=int(local_idx),
+                lag_idx=int(cell_lag_slots[local_idx]),
+                save_dir=args.diagnostics_dir,
+                save_prefix=f"cell_{int(cid):03d}",
+                close_figs=True,
+                show_plots=False,
+            )
 
     return TrainResult(
         cell_ids=list(cell_ids),
@@ -457,7 +558,8 @@ def main():
     image_shape = tuple(args.image_shape)
 
     dataset_info = get_dataset_info(args.dataset_configs_path, args.subject, args.date, image_shape)
-    cell_ids = parse_cell_ids(args.cell_ids)
+    n_total_cells = int(dataset_info["robs"].shape[1])
+    cell_ids = parse_cell_ids(args.cell_ids, n_total_cells=n_total_cells)
     stim = dataset_info["stim"]
     if stim.ndim == 5:
         lag_dim = 2
@@ -491,6 +593,8 @@ def main():
         grouped_results: dict[int, TrainResult] = {}
         for lag, group_cells in sorted(lag_to_cells.items()):
             print(f"\n--- joint group lag={lag} cells={group_cells} mode={args.joint_within_lag_mode} ---")
+            # Keep each group's optimization independent from loop order.
+            set_seed(args.seed)
             if args.joint_within_lag_mode == "shared" or len(group_cells) == 1:
                 grouped_results[lag] = train_lbfgs(
                     dataset_info=dataset_info,
@@ -501,10 +605,13 @@ def main():
                     args=args,
                     run_name=f"joint_lag_{int(lag)}",
                     device=device,
+                    shared_loss_mode=args.shared_loss_mode,
+                    shared_lambda_reg_scale=args.shared_lambda_reg_scale,
                 )
             else:
                 per_cell_results = []
                 for cid in group_cells:
+                    set_seed(args.seed)
                     per_cell_results.append(
                         train_lbfgs(
                             dataset_info=dataset_info,
@@ -515,6 +622,8 @@ def main():
                             args=args,
                             run_name=f"joint_lag_{int(lag)}_cell_{int(cid)}",
                             device=device,
+                            shared_loss_mode=args.shared_loss_mode,
+                            shared_lambda_reg_scale=args.shared_lambda_reg_scale,
                         )
                     )
                 # Compose one lag result object for unified reporting.
@@ -545,6 +654,7 @@ def main():
     print("\nRunning independent-cell optimization (single command, all requested cells automated).")
     independent_results: dict[int, TrainResult] = {}
     for cid in cell_ids:
+        set_seed(args.seed)
         cid_raw = int(peak_lags[int(cid)])
         cid_lag = max(0, min(cid_raw, max_valid_lag))
         print(f"\n--- independent all-cells run: cell={cid} lag={cid_lag} (raw={cid_raw}) ---")
@@ -557,6 +667,8 @@ def main():
             args=args,
             run_name=f"all_cells_independent_{int(cid)}",
             device=device,
+            shared_loss_mode=args.shared_loss_mode,
+            shared_lambda_reg_scale=args.shared_lambda_reg_scale,
         )
 
     print("\n=== Independent-Mode Final Metrics ===")
