@@ -1,0 +1,2 @@
+best_val_bps,best_train_bps,best_epoch,lambda_reg,timestamp,checkpoint_dir_name,done,training_iteration,trial_id,date,time_this_iter_s,time_total_s,pid,hostname,node_ip,time_since_restore,iterations_since_restore
+0.0013360203010961413,0.0012415152741596103,2,0.0003727593720314938,1772095612,,False,1,2d29e_00009,2026-02-26_00-46-52,63.5415940284729,63.5415940284729,1423687,yoru,169.229.228.105,63.5415940284729,1

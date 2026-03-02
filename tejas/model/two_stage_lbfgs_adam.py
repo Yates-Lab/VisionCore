@@ -37,8 +37,9 @@ from two_stage_trainer import eval_step, prepare_batch, train_step_adam, train_s
 
 # Phase-specific regularization settings (matched to source files).
 # LBFGS stage mirrors two_stage_lbfgs.py behavior.
-lambda_reg_lbfgs = 1e-4 
-gamma_local_lbfgs = lambda_reg_lbfgs * 4 / 20
+# lambda_reg_lbfgs = 1e-4 
+lambda_reg_lbfgs = 2e-4
+gamma_local_lbfgs = 0 * lambda_reg_lbfgs * 4 / 20
 # Adam stage mirrors two_stage.py behavior.
 lambda_reg_adam = 1e-2 #1e-5
 sparsity_mode = "ratio_l1_l2"  # options: "ratio_l1_l2", "prox_l1"
@@ -47,7 +48,7 @@ lambda_local_prox = 1e-1  # optional locality weight in prox mode
 circular_dims = {1}
 # circular_dims = {}
 losses = []
-cell_ids = [66]
+cell_ids = [16]
 num_epochs = 100
 lbfgs_epochs = 3
 
@@ -80,7 +81,7 @@ model.cuda()
 torch.cuda.empty_cache()
 train_dset.to('cpu')
 val_dset.to('cpu')
-batch_size_lbfgs = 10024  # matched to two_stage_lbfgs.py
+batch_size_lbfgs = 20024  # matched to two_stage_lbfgs.py
 batch_size_adam = 10024  # matched to two_stage.py
 
 train_loader_lbfgs = DataLoader(
