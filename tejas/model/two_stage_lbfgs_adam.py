@@ -81,7 +81,7 @@ model.cuda()
 torch.cuda.empty_cache()
 train_dset.to('cpu')
 val_dset.to('cpu')
-batch_size_lbfgs = 20024  # matched to two_stage_lbfgs.py
+batch_size_lbfgs = 10024  # matched to two_stage_lbfgs.py
 batch_size_adam = 10024  # matched to two_stage.py
 
 train_loader_lbfgs = DataLoader(

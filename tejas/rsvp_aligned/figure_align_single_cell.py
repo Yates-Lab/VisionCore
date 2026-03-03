@@ -786,7 +786,7 @@ for cc in [115, 92]:
         t_end = total_end_time / 240
 
         fig, axes = plot_robs(robs_list, iix_list[2:], cc, distances_along_line = distances_to_use[2:], 
-                        num_psth=None, bins_x_axis = False, linear_distance = True,
+                        num_psth=2, bins_x_axis = False, linear_distance = True,
                         # empty_row_style="hatch",
                         empty_row_style=None,
                         use_spike_times=True,
@@ -830,4 +830,192 @@ for cc in [115, 92]:
 
 
 #%%
+
+universal_eyepos = False
+trial_stitching = False
+for cc in [29, 122]:
+# for cc in [115]:
+
+    def display(max_orientation):
+        # plot_ori_tuning(gratings_info, cc)
+        # plt.show()
+        # print(np.var(gratings_info['ori_tuning'][cc]))
+        # max_orientation = gratings_info['oris'][np.argmax(gratings_info['ori_tuning'][cc])]
+        # max_orientation = 90
+        # max_orientation = max_orientation - 90
+        len_of_each_segment = 25
+        iix_list = []
+        robs_list = []
+        total_start_time = 0
+        total_end_time = 250
+        # total_end_time = 100
+        distances_to_use = None
+        for i in range(total_start_time, total_end_time, len_of_each_segment):
+            start_time = i
+            end_time = start_time + len_of_each_segment
+            #eyepos is shape [num_trial, time, 2]
+            # iix = get_iix_distance_from_median_eyepos(eyepos, start_time, end_time)
+            distance_from_line_threshold = 0.3
+            psth = np.nanmean(robs[:, :, cids.index(cc)], axis=0)
+            iix, distances_along_line = get_iix_projection_on_orthogonal_line(eyepos, 
+                            start_time, end_time, 
+                            max_orientation, distance_from_line_threshold, cc,
+                            psth = psth, universal_eyepos = universal_eyepos)
+
+            if trial_stitching:
+            
+                robs_list.append(robs[:, start_time:end_time, :])
+                iix_list.append(iix)
+
+
+            if np.isclose(psth[start_time:end_time].max(), psth[total_start_time:total_end_time].max(), atol=1e-10):
+                
+                fig, axes = plot_eyepos(iix, start_time, end_time, max_orientation, cc, universal_eyepos = universal_eyepos, use_bins = False)
+                fig.savefig(f'eyepos_single_cell_aligned_{cc}.pdf', dpi=500, bbox_inches='tight')
+                
+                # plot_eyepos_quiver(iix, start_time, end_time, max_orientation)
+                print(f'start time {start_time} end time {end_time}')
+
+                distances_to_use = distances_along_line
+
+                if not trial_stitching:
+                    robs_list = robs[:, total_start_time:total_end_time, :]
+                    iix_list = iix
+
+        
+        # plot_robs(robs[:, start_time:end_time, :], iix, cc)
+        # plot_robs(robs[:, start_time:end_time, :], iix, cc, num_psth = 4)
+        spike_times_cc = [spike_times_trials[t][cids.index(cc)] for t in range(len(spike_times_trials))]
+        t_start = 0.0
+        t_end = total_end_time / 240
+
+        # slice_index = slice(6, -3)
+        slice_index = slice(None)
+
+        fig, axes = plot_robs(robs_list, iix_list[slice_index], cc, distances_along_line = distances_to_use[slice_index], 
+                        num_psth=2, bins_x_axis = False, linear_distance = True,
+                        empty_row_style="shade",
+                        # empty_row_style=None,
+                        use_spike_times=True,
+                        spike_times=spike_times_cc,
+                        dt=1/240,
+                        # tick_height = 1.5,
+                        # tick_linewidth = 1,
+                        tick_height = 0.6,
+                        tick_linewidth = 1,
+                        trial_t_bins=trial_t_bins,  # ADD THIS
+                        debug=False,
+                        empty_row_margin=0.0,
+
+                       )
+        fig.savefig(f'raster_single_cell_aligned_{cc}.pdf', dpi=1200, bbox_inches='tight')
+        plt.show()
+        # plot_robs(robs_list, iix_list, cc, num_psth = 4)
+
+        fig, ax = plot_unit_sta_ste(subject, date, 
+                    cc, 
+                    unit_sta_ste_dict,
+                    contour_metrics = None, 
+                    gaussian_fit_metrics = None, 
+                    sampling_rate = None, 
+                    ax = None, 
+                    show_ln_energy_fit = False)
+        fig.savefig(f'sta_ste_single_cell_aligned_{cc}.pdf', dpi=1200, bbox_inches='tight')
+        plt.show()
+
+        return robs_list, iix_list, distances_to_use
+
+    
+    max_orientation = gratings_info['oris'][np.argmax(gratings_info['ori_tuning'][cc])]
+    print(f'for max orientation {max_orientation}')
+    robs_list, iix_list, distances_to_use = display(max_orientation)
+
+    # print(f'for max orientation 90')
+    # display(90)
+
+    # print(f'for max orientation max_orientation-90')
+    # display(max_orientation-90)
+
+#%%
+universal_eyepos = False
+trial_stitching = False
+for cc in [122]:
+    # cc = cids.index(cc)
+#nothing from Allen_2022-02-18
+# 61 from Allen_2022-02-24
+# 142, 51 from Allen_2022-03-02 
+#154, 122, 115, 92 from Allen_2022-03-04 time range 0,250
+# 132, 76, 30 from Allen_2022-03-30 time range 0,250
+# 112 from Allen_2022-04-01 time range 0,250
+# 179, 174, 158, 91, 9 from Allen_2022-04-06  0, 250 
+#99, 77, 61 from Allen_2022-04-08 are okay (not great) 0, 250
+# 49, 122 from Allen_2022-04-13
+# 122, 154 from Allen_2022-04-15 time range 0,150
+# 70 from Allen_2022-04-15 time range 100,200
+
+# 154 from Allen_2022-04-15 and 158 from Allen_2022-04-06 are best
+
+
+    def display(max_orientation):
+        # plot_ori_tuning(gratings_info, cc)
+        # plt.show()
+        # print(np.var(gratings_info['ori_tuning'][cc]))
+        # max_orientation = gratings_info['oris'][np.argmax(gratings_info['ori_tuning'][cc])]
+        # max_orientation = 90
+        # max_orientation = max_orientation - 90
+        len_of_each_segment = 25
+        iix_list = []
+        robs_list = []
+        total_start_time = 0
+        total_end_time = 250
+        # total_end_time = 100
+        distances_to_use = None
+        for i in range(total_start_time, total_end_time, len_of_each_segment):
+            start_time = i
+            end_time = start_time + len_of_each_segment
+            #eyepos is shape [num_trial, time, 2]
+            # iix = get_iix_distance_from_median_eyepos(eyepos, start_time, end_time)
+            distance_from_line_threshold = 0.3
+            psth = np.nanmean(robs[:, :, cids.index(cc)], axis=0)
+            iix, distances_along_line = get_iix_projection_on_orthogonal_line(eyepos, 
+                            start_time, end_time, 
+                            max_orientation, distance_from_line_threshold, cc,
+                            psth = psth, universal_eyepos = universal_eyepos)
+
+            if trial_stitching:
+                robs_list.append(robs[:, start_time:end_time, :])
+                iix_list.append(iix)
+            
+
+
+            if np.isclose(psth[start_time:end_time].max(), psth[total_start_time:total_end_time].max(), atol=1e-10) and not universal_eyepos:
+                
+                plot_eyepos(iix, start_time, end_time, max_orientation, cc)
+                plt.show()
+                # print(f'start time {start_time} end time {end_time}')
+
+                distances_to_use = distances_along_line
+
+                if not trial_stitching:
+                    robs_list = robs[:, total_start_time:total_end_time, :]
+                    iix_list = iix
+
+        
+        # plot_robs(robs[:, start_time:end_time, :], iix, cc)
+        # plot_robs(robs[:, start_time:end_time, :], iix, cc, num_psth = 4)
+        plot_robs(robs_list, iix_list, cc, distances_along_line = distances_to_use, num_psth = 2, render="img")
+        plt.show()
+        # plot_robs(robs_list, iix_list, cc, num_psth = 4)
+
+    
+    max_orientation = gratings_info['oris'][np.argmax(gratings_info['ori_tuning'][cc])]
+    print(f'for max orientation {max_orientation}')
+    display(max_orientation)
+
+    # print(f'for max orientation 90')
+    # display(90)
+
+    # print(f'for max orientation max_orientation-90')
+    # display(max_orientation-90)
+
 

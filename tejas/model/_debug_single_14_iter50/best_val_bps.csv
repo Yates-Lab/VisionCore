@@ -1,0 +1,2 @@
+cell_id,best_val_bps,train_bps_at_best,best_lag_group,best_epoch,best_prox_mult,best_local_mult
+14,0.722773015499115,0.7616627216339111,1,0,1.0,1.0

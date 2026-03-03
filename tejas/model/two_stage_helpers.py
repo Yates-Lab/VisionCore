@@ -108,11 +108,20 @@ def prox_group_l21_(w_pos, w_neg, tau, eps=1e-12):
     In-place proximal step on paired weights (w_pos, w_neg):
     prox_{tau * ||.||_2}(v) per feature pair.
     """
-    if tau <= 0:
-        return
+    tau_is_tensor = torch.is_tensor(tau)
+    if tau_is_tensor:
+        tau_t = tau.to(device=w_pos.device, dtype=w_pos.dtype)
+        if torch.all(tau_t <= 0):
+            return
+    else:
+        if tau <= 0:
+            return
     with torch.no_grad():
         norm = torch.sqrt(w_pos.pow(2) + w_neg.pow(2) + eps)
-        scale = (1.0 - tau / norm).clamp_min(0.0)
+        if tau_is_tensor:
+            scale = (1.0 - tau_t / norm).clamp_min(0.0)
+        else:
+            scale = (1.0 - tau / norm).clamp_min(0.0)
         w_pos.mul_(scale)
         w_neg.mul_(scale)
 
@@ -199,6 +208,46 @@ def locality_penalty_from_maps(positive_afferent_map, negative_afferent_map, cir
     conv_same = conv_full[s0:s0 + n_s, o0:o0 + n_o, v0:v0 + n_v, h0:h0 + n_h]
 
     l_local = torch.sum(e * conv_same)
+    z = l_local.new_zeros(())
+    return l_local, (z, z, z, z)
+
+
+def convex_locality_weighted_l21_from_maps(
+    positive_afferent_map,
+    negative_afferent_map,
+    circular_dims=None,
+    eps=1e-8,
+):
+    """
+    Convex locality regularizer on map amplitudes.
+
+    R_local = sum_i d_i^2 * sqrt(w_plus_i^2 + w_minus_i^2 + eps),
+    where d_i is distance-to-center in the 4D map grid
+    (scale, orientation, y, x), with optional circular axes.
+    """
+    assert (
+        positive_afferent_map.ndim == 4
+        and negative_afferent_map.ndim == 4
+        and positive_afferent_map.shape == negative_afferent_map.shape
+    ), "Expected 4D (height, order+1, H, W), same shape"
+    circular_dims = set() if circular_dims is None else set(circular_dims)
+
+    amp = torch.sqrt(positive_afferent_map.pow(2) + negative_afferent_map.pow(2) + eps)
+    dist2 = amp.new_zeros(amp.shape)
+
+    for dim, size in enumerate(amp.shape):
+        coords = torch.arange(size, device=amp.device, dtype=amp.dtype)
+        center = 0.5 * float(size - 1)
+        delta = (coords - center).abs()
+        if dim in circular_dims and size > 1:
+            delta = torch.minimum(delta, float(size) - delta)
+        norm = max(center, 1.0)
+        d = (delta / norm).pow(2)
+        shape = [1] * amp.ndim
+        shape[dim] = size
+        dist2 = dist2 + d.view(*shape)
+
+    l_local = torch.sum(dist2 * amp)
     z = l_local.new_zeros(())
     return l_local, (z, z, z, z)
 

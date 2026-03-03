@@ -1,4 +1,4 @@
-# NOTE: LBFGS-Adam hybrid variant of two_stage.py.
+# NOTE: LBFGS EXP variant of two_stage.py.
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
@@ -11,6 +11,8 @@ from torch.utils.data import DataLoader
 import schedulefree
 from util import get_dataset_info
 import torch
+import numpy as np
+import math
 #%%
 dataset_configs_path = '/home/tejas/VisionCore/experiments/dataset_configs/multi_basic_240_gaborium_20lags.yaml'
 subject = 'Allen'
@@ -25,6 +27,7 @@ train_dset = dataset_info['train_dset']
 val_dset = dataset_info['val_dset']
 dataset_config = dataset_info['dataset_config']
 robs = dataset_info['robs']
+dfs = dataset_info['dfs']
 crop_size = dataset_info['crop_size']
 #%%
 
@@ -39,40 +42,59 @@ from two_stage_trainer import eval_step, prepare_batch, train_step_adam, train_s
 
 
 # Phase-specific regularization settings (matched to source files).
-# LBFGS stage mirrors two_stage_lbfgs.py behavior.
+# Toggle between exp variants:
+# - "plain": current two_stage_lbfgs_exp behavior
+# - "convex_sparse": exp + prox_l1 behavior
+# - "convex_sparse_local": prox_l1 + convex weighted locality
+exp_mode = "convex_sparse_local"  # options: "plain", "convex_sparse", "convex_sparse_local"
 
-lambda_reg_lbfgs = 1e-4
-gamma_local_lbfgs = 0 * lambda_reg_lbfgs * 4 / 20
-# Adam stage mirrors two_stage.py behavior.
-sparsity_mode = "ratio_l1_l2"  # options: "ratio_l1_l2", "prox_l1"
-lambda_prox = 1e-4  # used only when sparsity_mode == "prox_l1"
-lambda_local_prox = 1e-1  # optional locality weight in prox mode
+lambda_reg_lbfgs = 0.0
+gamma_local_lbfgs = 0.0
+lambda_local_prox = 0.0
 circular_dims = {1}
+locality_mode = "legacy_fft"
 # circular_dims = {}
 losses = []
 cell_ids = [66]
-num_epochs = 100
-lbfgs_epochs = 3
+num_epochs = 1
+lbfgs_epochs = 1
 # LBFGS step mode:
 # - "full_dataset_accum": one LBFGS step per epoch over micro-batches (OOM-safe, full-batch equivalent)
 # - "per_batch": legacy behavior, one LBFGS step per DataLoader batch
 lbfgs_step_mode = "full_dataset_accum"
 
 spike_loss = MaskedPoissonNLLLoss(pred_key='rhat', target_key='robs', mask_key='dfs')
-# Optional exp/log-rate path (kept available in TwoStage):
-# spike_loss = MaskedLoss(
-#     torch.nn.PoissonNLLLoss(log_input=True, full=False, reduction='none'),
-#     pred_key='eta',
-#     target_key='robs',
-#     mask_key='dfs',
-# )
-# spike_loss =  MaskedLoss(nn.MSELoss(reduction='none'), pred_key='rhat', target_key='robs', mask_key='dfs')
+# Convex sparse per-cell prox strengths.
+# cell_lambda_prox = {14: 1.00e-04, 16: 1.00e-04, 66: 2.68e-05, 76: 1.93e-06}
+cell_lambda_prox = {14: 1.00e-04, 16: 1.00e-04, 66: 2.68e-05, 76: 1.93e-06}
+cell_lambda_local = {14: 1.00e-04, 16: 1.00e-04, 66: 1.00e-04, 76: 1.00e-04}
+if exp_mode == "convex_sparse":
+    sparsity_mode = "prox_l1"
+    lambda_prox = float(cell_lambda_prox.get(int(cell_ids[0]), 1e-2))
+    phase_name = "lbfgs_exp_convex_sparse"
+elif exp_mode == "convex_sparse_local":
+    sparsity_mode = "prox_l1"
+    lambda_prox = float(cell_lambda_prox.get(int(cell_ids[0]), 1e-2))
+    lambda_local_prox = float(cell_lambda_local.get(int(cell_ids[0]), 1e-4))
+    locality_mode = "weighted_l21"
+    phase_name = "lbfgs_exp_convex_sparse_local"
+else:
+    sparsity_mode = "ratio_l1_l2"
+    lambda_prox = 0.0
+    phase_name = "lbfgs_exp"
+
 # n_lags = len(dataset_config['keys_lags']['stim'])
 n_lags = 1
 # num_neurons = len(dataset_config['cids'])
 num_neurons = 1
 
-beta_init = robs[:, cell_ids[0]].mean().item()
+# EXP path uses beta as log-rate intercept.
+eps = 1e-12
+masked_rate_mean = float((robs[:, cell_ids[0]] * dfs[:, cell_ids[0]]).sum().item()) / max(
+    float(dfs[:, cell_ids[0]].sum().item()),
+    eps,
+)
+beta_init = float(np.log(max(masked_rate_mean, 1e-8)))
 # beta_init = 0.0
 model = TwoStage(
     image_shape=image_shape,
@@ -87,9 +109,9 @@ model = TwoStage(
     beta_init=beta_init,
     init_weight_scale=1e-4,
     beta_as_parameter=True,
-    clamp_beta_min=1e-6,
+    clamp_beta_min=None,
     hann_window_power=2,
-    output_nonlinearity="relu",
+    output_nonlinearity="exp",
 )
 
 
@@ -97,45 +119,73 @@ model.cuda()
 torch.cuda.empty_cache()
 train_dset.to('cpu')
 val_dset.to('cpu')
-batch_size_lbfgs = 10024  # micro-batch size for full-dataset LBFGS accumulation
+batch_size_lbfgs = 2048  # micro-batch size for full-dataset LBFGS accumulation
 batch_size_adam = 10024  # matched to two_stage.py
 
 train_loader_lbfgs_accum = DataLoader(
     train_dset,
     batch_size=batch_size_lbfgs,
     shuffle=False,
-    num_workers=16,
+    num_workers=8,
     pin_memory=True,
-    persistent_workers=True,
+    persistent_workers=False,
     prefetch_factor=4,
 )
 train_loader_lbfgs_legacy = DataLoader(
     train_dset,
     batch_size=batch_size_lbfgs,
     shuffle=True,
-    num_workers=16,
+    num_workers=8,
     pin_memory=True,
-    persistent_workers=True,
+    persistent_workers=False,
     prefetch_factor=4,
 )
 val_loader_lbfgs = DataLoader(
     val_dset,
     batch_size=batch_size_lbfgs,
     shuffle=False,
-    num_workers=16,
+    num_workers=8,
     pin_memory=True,
-    persistent_workers=True,
+    persistent_workers=False,
     prefetch_factor=4,
 )
 
 
+def calibrate_exp_intercept_full_dataset():
+    # Closed-form correction for beta given current weights/features:
+    # beta <- beta + log(sum(mask*robs)/sum(mask*rhat))
+    pred_num = 0.0
+    target_num = 0.0
+    with torch.no_grad():
+        for batch in train_loader_lbfgs_accum:
+            batch = prepare_batch(
+                batch,
+                peak_lags=peak_lags,
+                cell_ids=cell_ids,
+                crop_size=crop_size,
+            )
+            out = eval_step(model=model, batch=batch, cell_ids=cell_ids, use_resolver=True)
+            mask = out["dfs"]
+            pred_num += float((out["rhat"] * mask).sum().item())
+            target_num += float((out["robs"] * mask).sum().item())
+    correction = math.log(max(target_num, eps) / max(pred_num, eps))
+    with torch.no_grad():
+        model.beta.add_(correction)
+
+
+calibrate_exp_intercept_full_dataset()
+
+
 optimizer_lbfgs = torch.optim.LBFGS(
     model.parameters(),
-    lr=1,
-    max_iter=5,
+    lr=.1,
+    max_iter=10,
     history_size=10,
     line_search_fn="strong_wolfe",
 )
+
+best_val_bps = -1e9
+best_epoch = -1
 
 for epoch in range(num_epochs):
     train_agg = PoissonBPSAggregator()
@@ -171,6 +221,7 @@ for epoch in range(num_epochs):
             gamma_value=gamma_local_lbfgs,
             lambda_prox=lambda_prox,
             use_resolver=True,
+            locality_mode=locality_mode,
         )
         losses.append(step_stats["loss"])
         prox_tau_last = step_stats["prox_tau"]
@@ -201,6 +252,7 @@ for epoch in range(num_epochs):
                 gamma_value=gamma_local_lbfgs,
                 lambda_prox=lambda_prox,
                 use_resolver=True,
+                locality_mode=locality_mode,
             )
             losses.append(step_stats["loss"])
             prox_tau_last = step_stats["prox_tau"]
@@ -228,6 +280,10 @@ for epoch in range(num_epochs):
         val_agg(out)
     bps = train_agg.closure().cpu().numpy()
     bps_val = val_agg.closure().cpu().numpy()
+    val_bps_scalar = float(np.asarray(bps_val).reshape(-1)[0])
+    if val_bps_scalar > best_val_bps:
+        best_val_bps = val_bps_scalar
+        best_epoch = epoch
 
     if epoch % 1 == 0:
         if lbfgs_step_mode == "full_dataset_accum":
@@ -257,11 +313,12 @@ for epoch in range(num_epochs):
             reg_last=reg_last,
             bps=bps,
             bps_val=bps_val,
-            phase='lbfgs',
+            phase=phase_name,
             epoch=epoch,
             show_colorwheel=True,
         )
-    
+
+print(f"[final] best_val_bps={best_val_bps:.4f} best_epoch={best_epoch}")
 
 # %%
-#allen 2-24
+# allen exp

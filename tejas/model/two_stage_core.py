@@ -28,6 +28,8 @@ class TwoStage(nn.Module):
         init_weight_scale=1.0,
         beta_as_parameter=True,
         clamp_beta_min=None,
+        hann_window_power=2,
+        output_nonlinearity="relu",
     ):
         super().__init__()
         self.n_neurons = n_neurons
@@ -42,6 +44,8 @@ class TwoStage(nn.Module):
         self.init_weight_scale = init_weight_scale
         self.beta_as_parameter = bool(beta_as_parameter)
         self.clamp_beta_min = clamp_beta_min
+        self.hann_window_power = hann_window_power
+        self.output_nonlinearity = str(output_nonlinearity)
 
         if self.lowest_cpd_target is not None:
             if self.ppd is None:
@@ -111,7 +115,7 @@ class TwoStage(nn.Module):
             self.w_neg.weight.mul_(self.init_weight_scale)
         hann_y = torch.hann_window(image_shape[0], periodic=False)
         hann_x = torch.hann_window(image_shape[1], periodic=False)
-        hann_2d = torch.outer(hann_y, hann_x) ** 2
+        hann_2d = torch.outer(hann_y, hann_x) ** self.hann_window_power
         hann_2d = hann_2d / hann_2d.max().clamp_min(1e-8)
         self.register_buffer(
             "hann_flat",
@@ -334,6 +338,15 @@ class TwoStage(nn.Module):
             with torch.no_grad():
                 self.beta.clamp_(min=float(self.clamp_beta_min))
 
-        # x["rhat"] = (self.beta + self.alpha_pos * F.relu(z) + self.alpha_neg * F.relu(-z)).clamp(min=1e-6)
-        x["rhat"] = (self.beta + F.relu(z)).clamp(min=1e-6)
+        if self.output_nonlinearity == "relu":
+            # Historical two-stage parameterization (not convex in parameters).
+            x["rhat"] = (self.beta + F.relu(z)).clamp(min=1e-6)
+        elif self.output_nonlinearity == "exp":
+            # Convex Poisson-GLM style parameterization:
+            # eta is affine in parameters and rhat = exp(eta).
+            eta = self.beta + z
+            x["eta"] = eta
+            x["rhat"] = torch.exp(eta)
+        else:
+            raise ValueError(f"Unknown output_nonlinearity: {self.output_nonlinearity}")
         return x
