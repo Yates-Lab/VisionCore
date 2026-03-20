@@ -364,7 +364,13 @@ def run_model(model, batch, dataset_idx):
         Batch with added 'rhat' predictions
     """
     batch = {k: v.to(model.device) for k, v in batch.items()}
-    
+
+    # Ensure stim is 5D (N, C, T, H, W). The eval data loader may produce
+    # 4D (N, T, H, W) when the channel-unsqueeze transform is missing from
+    # the stored dataset config.
+    if 'stim' in batch and batch['stim'].dim() == 4:
+        batch['stim'] = batch['stim'].unsqueeze(1)
+
     with torch.no_grad():
         if hasattr(model, 'is_modulator_only') and model.is_modulator_only:
             output = model.model(None, dataset_idx, batch.get('behavior'))

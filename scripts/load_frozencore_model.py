@@ -12,8 +12,15 @@ from pathlib import Path
 from training.pl_modules import FrozenCoreModel
 
 #%% Configuration
-# Path to the trained checkpoint
-checkpoint_path = "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/frozencore_readouts_120/checkpoints/frozencore_resnet_none_convgru_bs256_ds30_lr1e-3_wd1.0e-5_warmup5/last.ckpt"
+# Path to the checkpoint directory
+checkpoint_dir = Path("/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/frozencore_readouts_120/checkpoints/frozencore_resnet_none_convgru_bs256_ds30_lr1e-3_wd1.0e-5_warmup5")
+
+# Find the latest checkpoint (last-vN.ckpt with highest N, or last.ckpt if no versioned ones)
+last_checkpoints = sorted(checkpoint_dir.glob("last*.ckpt"), key=lambda p: p.stat().st_mtime)
+if not last_checkpoints:
+    raise FileNotFoundError(f"No last*.ckpt files found in {checkpoint_dir}")
+checkpoint_path = str(last_checkpoints[-1])  # Most recently modified
+print(f"Using latest checkpoint: {checkpoint_path}")
 
 # Device to load on
 device = 'cuda' if torch.cuda.is_available() else 'cpu'

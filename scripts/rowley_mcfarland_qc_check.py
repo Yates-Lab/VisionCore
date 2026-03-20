@@ -35,6 +35,7 @@ else:
 # Computation parameters
 batch_size = 10000
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
+device = 'cpu'
 
 #%%
 # Preprocess stimulus and create valid mask
@@ -514,7 +515,7 @@ plt.show()
 
 
 #%%
-rf_v1_cids = np.where(region_mask)[0][rf
+rf_v1_cids = np.where(region_mask)[0][rf_cids]
 #%%
 # Combine serial data into trial aligned data
 robs = dset['robs'].numpy()
