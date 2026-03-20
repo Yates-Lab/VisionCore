@@ -9,4 +9,11 @@
 *.txt
 jake/*
 *.pyc
+*.egg-info/
+__pycache__/
+.venv/
 logs/*
+outputs/
+plans/
+docs/plans/
+ray_results/
