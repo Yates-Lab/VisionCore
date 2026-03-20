@@ -244,7 +244,7 @@ def main():
     trainer = pl.Trainer(
         max_epochs=args.max_epochs,
         limit_train_batches=args.steps_per_epoch,
-        limit_val_batches=0.05,
+        limit_val_batches=1.0,
         num_sanity_val_steps=0,
 
         accelerator="gpu",

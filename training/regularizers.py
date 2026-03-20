@@ -239,7 +239,7 @@ class Regularizer:
             return torch.tensor(0.0, device=self.params[0].device if self.params else None)
 
         # Only apply loss penalties for these types
-        if self.kind not in {"l1", "l2", "group_lasso"}:
+        if self.kind not in {"l1", "l2", "group_lasso", "ortho"}:
             return torch.tensor(0.0, device=self.params[0].device)
 
         if self.kind == "l1":
@@ -249,6 +249,19 @@ class Regularizer:
         elif self.kind == "group_lasso":
             # Group lasso: sum of L2 norms of parameter groups
             return effective_lambda * torch.stack([p.norm(p=2) for p in self.params]).sum()
+        elif self.kind == "ortho":
+            # Orthogonality penalty: ||W W^T - I||_F^2
+            # Reshapes each param to [num_filters, -1] and penalizes off-diagonal
+            # correlations in the Gram matrix, encouraging decorrelated filters.
+            penalties = []
+            for p in self.params:
+                W = p.reshape(p.shape[0], -1)  # [num_filters, filter_size]
+                # Normalize rows so penalty is scale-invariant
+                W_norm = F.normalize(W, dim=1)
+                G = W_norm @ W_norm.T  # [num_filters, num_filters]
+                I = torch.eye(G.shape[0], device=G.device, dtype=G.dtype)
+                penalties.append((G - I).pow(2).sum())
+            return effective_lambda * torch.stack(penalties).sum()
         else:
             return torch.tensor(0.0, device=self.params[0].device)
 

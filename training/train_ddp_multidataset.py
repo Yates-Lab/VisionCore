@@ -48,7 +48,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import from modular training package
 from training.pl_modules import MultiDatasetModel, MultiDatasetDM
-from training.callbacks import EpochHeartbeat, CurriculumCallback, ModelLoggingCallback
+from training.callbacks import EpochHeartbeat, CurriculumCallback, ModelLoggingCallback, TimeBudgetCallback
 
 # Set PyTorch matmul precision
 torch.set_float32_matmul_precision('medium')
@@ -136,10 +136,20 @@ def main():
                    help="Directory for saving checkpoints")
     
     # Early stopping
-    p.add_argument("--early_stopping_patience", type=int, default=10,
-                   help="Early stopping patience (epochs)")
+    p.add_argument("--early_stopping_patience", type=int, default=None,
+                   help="Early stopping patience (epochs). Disabled if not set.")
     p.add_argument("--early_stopping_min_delta", type=float, default=0.0,
                    help="Minimum change to qualify as improvement")
+
+    # Validation
+    p.add_argument("--limit_val_batches", type=float, default=1.0,
+                   help="Fraction of validation data to use each epoch (0.0-1.0)")
+
+    # Time budget
+    p.add_argument("--time_budget_minutes", type=float, default=None,
+                   help="Wall-clock time budget in minutes. If set, benchmarks step time "
+                        "early in training and dynamically adjusts max_epochs to fit the budget. "
+                        "LR scheduler is updated accordingly.")
 
     # Model logging
     p.add_argument("--enable_logging", action="store_true", default=False,
@@ -213,17 +223,25 @@ def main():
         LearningRateMonitor(logging_interval="epoch"),
         # Epoch heartbeat
         EpochHeartbeat(metric_key="train_loss"),
-        # Early stopping
-        EarlyStopping(
-            monitor="val_bps_overall",
-            mode="max",
-            patience=args.early_stopping_patience,
-            min_delta=args.early_stopping_min_delta,
-            verbose=True,
-            check_on_train_epoch_end=False
-        )
     ]
+
+    # Early stopping (optional)
+    if args.early_stopping_patience is not None:
+        callbacks.append(
+            EarlyStopping(
+                monitor="val_bps_overall",
+                mode="max",
+                patience=args.early_stopping_patience,
+                min_delta=args.early_stopping_min_delta,
+                verbose=True,
+                check_on_train_epoch_end=False
+            )
+        )
     
+    # Add time budget callback if requested
+    if args.time_budget_minutes is not None:
+        callbacks.append(TimeBudgetCallback(time_budget_minutes=args.time_budget_minutes))
+
     # Add curriculum callback if enabled
     if args.enable_curriculum:
         callbacks.append(CurriculumCallback())
@@ -259,7 +277,7 @@ def main():
         # Training duration
         max_epochs=args.max_epochs,
         limit_train_batches=args.steps_per_epoch,
-        limit_val_batches=0.05,  # Use 5% of validation data
+        limit_val_batches=args.limit_val_batches,
         num_sanity_val_steps=0,
         
         # Hardware

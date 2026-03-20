@@ -115,6 +115,122 @@ class EpochHeartbeat(pl.Callback):
             self._print(f"epoch {trainer.current_epoch} finished")
 
 
+class TimeBudgetCallback(pl.Callback):
+    """
+    Benchmark step time early in training and cap total epochs to a wall-clock budget.
+
+    During the first epoch, times training steps (after a short warmup to let
+    GPU caches settle). Once enough samples are collected, computes the average
+    time per epoch (training + validation) and sets ``trainer.fit_loop.max_epochs``
+    and the LR scheduler's ``max_epochs`` so that training fits within
+    ``time_budget_minutes``.
+
+    Parameters
+    ----------
+    time_budget_minutes : float
+        Total wall-clock time budget for training, in minutes.
+    benchmark_steps : int, optional
+        Number of steps to time after warmup (default: 20).
+    warmup_steps : int, optional
+        Number of initial steps to skip before timing (default: 5).
+    """
+
+    def __init__(self, time_budget_minutes: float, benchmark_steps: int = 20,
+                 warmup_steps: int = 5):
+        super().__init__()
+        self.time_budget_secs = time_budget_minutes * 60.0
+        self.benchmark_steps = benchmark_steps
+        self.warmup_steps = warmup_steps
+        self._step_start = None
+        self._step_times = []
+        self._benchmarked = False
+        self._training_start = None
+        self._first_val_duration = None
+        self._val_start = None
+        self.rank = int(os.environ.get("LOCAL_RANK", 0))
+
+    def _print(self, msg: str):
+        if self.rank == 0:
+            stamp = time.strftime("[%H:%M:%S] ")
+            print(stamp + msg, flush=True)
+
+    def on_train_start(self, trainer, pl_module):
+        self._training_start = time.perf_counter()
+
+    def on_validation_start(self, trainer, pl_module):
+        if not self._benchmarked and self._first_val_duration is None:
+            self._val_start = time.perf_counter()
+
+    def on_validation_end(self, trainer, pl_module):
+        if not self._benchmarked and self._val_start is not None:
+            self._first_val_duration = time.perf_counter() - self._val_start
+            self._val_start = None
+
+    def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
+        if not self._benchmarked:
+            self._step_start = time.perf_counter()
+
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+        if self._benchmarked or self._step_start is None:
+            return
+
+        elapsed = time.perf_counter() - self._step_start
+
+        # Skip warmup steps (GPU caches, JIT, etc.)
+        if batch_idx < self.warmup_steps:
+            return
+
+        self._step_times.append(elapsed)
+
+        if len(self._step_times) >= self.benchmark_steps:
+            self._apply_budget(trainer, pl_module)
+
+    def _apply_budget(self, trainer, pl_module):
+        self._benchmarked = True
+        avg_step_time = sum(self._step_times) / len(self._step_times)
+        steps_per_epoch = trainer.limit_train_batches
+
+        # Estimate per-epoch wall time: training steps + validation
+        train_epoch_secs = avg_step_time * steps_per_epoch
+        val_epoch_secs = self._first_val_duration or 0.0
+        epoch_secs = train_epoch_secs + val_epoch_secs
+
+        # Time already spent (warmup + benchmark + first val)
+        time_spent = time.perf_counter() - self._training_start
+        remaining_secs = self.time_budget_secs - time_spent
+
+        if remaining_secs <= 0:
+            self._print(f"[TimeBudget] Budget already exceeded! "
+                        f"Spent {time_spent:.0f}s, budget {self.time_budget_secs:.0f}s")
+            return
+
+        # Epochs that fit in remaining budget (at least finish current epoch)
+        remaining_epochs = max(1, int(remaining_secs / epoch_secs))
+        # +1 because current epoch (epoch 0) is already in progress
+        new_max_epochs = trainer.current_epoch + 1 + remaining_epochs
+
+        old_max_epochs = trainer.fit_loop.max_epochs
+        trainer.fit_loop.max_epochs = new_max_epochs
+
+        # Update LR scheduler max_epochs so cosine annealing targets the right horizon
+        if trainer.lr_scheduler_configs:
+            for cfg in trainer.lr_scheduler_configs:
+                sched = cfg.scheduler
+                if hasattr(sched, 'max_epochs'):
+                    sched.max_epochs = new_max_epochs
+
+        self._print(
+            f"[TimeBudget] avg step: {avg_step_time:.3f}s | "
+            f"train/epoch: {train_epoch_secs:.1f}s | val/epoch: {val_epoch_secs:.1f}s | "
+            f"epoch total: {epoch_secs:.1f}s"
+        )
+        self._print(
+            f"[TimeBudget] budget: {self.time_budget_secs/60:.1f}min | "
+            f"spent: {time_spent:.1f}s | remaining: {remaining_secs:.1f}s | "
+            f"max_epochs: {old_max_epochs} -> {new_max_epochs}"
+        )
+
+
 class CurriculumCallback(pl.Callback):
     """
     Update the contrast-weighted sampler with the current training step.

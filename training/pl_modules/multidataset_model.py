@@ -189,6 +189,13 @@ class MultiDatasetModel(pl.LightningModule):
 
         self.bps_aggs = [PoissonBPSAggregator() for _ in self.names]
         self.val_losses = []
+        self.val_losses_by_ds = {i: [] for i in range(len(self.names))}
+
+        # Build subject -> dataset index mapping (subject = name before first '_')
+        self._subject_ds = {}
+        for i, name in enumerate(self.names):
+            subj = name.split("_")[0]
+            self._subject_ds.setdefault(subj, []).append(i)
 
     def _load_pretrained_components(self, pretrained_checkpoint: str, freeze_vision: bool = False):
         """
@@ -296,6 +303,65 @@ class MultiDatasetModel(pl.LightningModule):
 
         return None
 
+    def on_fit_start(self):
+        """Initialize readout biases from empirical firing rates."""
+        super().on_fit_start()
+        dm = self.trainer.datamodule
+        if not hasattr(dm, 'train_dsets') or not dm.train_dsets:
+            return
+
+        if self.global_rank == 0:
+            print("Initializing readout biases from empirical firing rates...")
+        for idx, name in enumerate(self.names):
+            if name not in dm.train_dsets:
+                continue
+
+            dset = dm.train_dsets[name]
+            # Unwrap Float32View if present
+            combined = dset.base if hasattr(dset, 'base') else dset
+
+            # Accumulate weighted mean firing rate across all sub-datasets
+            total_rate = None
+            total_weight = None
+            for sub_dset in combined.dsets:
+                robs = sub_dset['robs'].float()   # (T, N)
+                dfs = sub_dset['dfs'].float() if 'dfs' in sub_dset else torch.ones_like(robs)
+                # sum(robs * dfs, dim=0) / sum(dfs, dim=0) = weighted mean per neuron
+                weighted_sum = (robs * dfs).sum(dim=0)
+                weight_sum = dfs.sum(dim=0)
+                if total_rate is None:
+                    total_rate = weighted_sum
+                    total_weight = weight_sum
+                else:
+                    total_rate += weighted_sum
+                    total_weight += weight_sum
+
+            if total_rate is None:
+                continue
+
+            mean_rate = total_rate / total_weight.clamp(min=1.0)
+
+            # Compute inverse of output activation to get bias
+            if self.log_input:
+                # Identity activation → PoissonNLL with log_input=True → bias = log(rate)
+                bias = torch.log(mean_rate.clamp(min=1e-8))
+            else:
+                # Softplus activation → inverse softplus: log(exp(x) - 1)
+                # Numerically stable: for large x, inv_softplus ≈ x
+                clamped = mean_rate.clamp(min=1e-6)
+                bias = torch.where(
+                    clamped > 20.0,
+                    clamped,
+                    torch.log(torch.expm1(clamped))
+                )
+
+            readout = self.model.readouts[idx]
+            if hasattr(readout, 'bias') and readout.bias is not None:
+                readout.bias.data = bias.to(dtype=readout.bias.dtype, device=readout.bias.device)
+                if self.global_rank == 0:
+                    print(f"  {name}: bias range [{bias.min():.3f}, {bias.max():.3f}], "
+                          f"mean_rate range [{mean_rate.min():.4f}, {mean_rate.max():.4f}]")
+
     def on_train_epoch_start(self):
         """Set up for training epoch."""
         super().on_train_epoch_start()
@@ -394,8 +460,10 @@ class MultiDatasetModel(pl.LightningModule):
                         batch_loss['rhat'] = torch.exp(batch_loss['rhat'])
 
                     # update BPS
-                    self.bps_aggs[b["dataset_idx"][0]](batch_loss)
+                    ds_idx = b["dataset_idx"][0]
+                    self.bps_aggs[ds_idx](batch_loss)
                     self.val_losses.append(loss.detach())
+                    self.val_losses_by_ds[ds_idx].append(loss.detach())
             else:
                 self.log(f"{tag}_nan_skip/{name}", 1, on_step=True, sync_dist=False)
 
@@ -426,6 +494,13 @@ class MultiDatasetModel(pl.LightningModule):
 
         # Get base loss from datasets
         base_loss = self._step(bl_list, "train")
+
+        # Log overall train loss
+        if self.global_rank == 0:
+            bs = sum(b["robs"].shape[0] for b in bl_list)
+            self.log("train_loss", base_loss,
+                     batch_size=bs,
+                     on_step=True, on_epoch=True, prog_bar=True, sync_dist=False)
 
         # Add auxiliary loss for PC modulator if present
         aux_loss = self._compute_auxiliary_loss()
@@ -462,6 +537,8 @@ class MultiDatasetModel(pl.LightningModule):
         """Reset BPS aggregators at the start of validation."""
         for agg in self.bps_aggs:
             agg.reset()
+        for v in self.val_losses_by_ds.values():
+            v.clear()
 
     def on_validation_epoch_end(self):
         """Compute and log validation metrics at the end of each epoch."""
@@ -474,7 +551,8 @@ class MultiDatasetModel(pl.LightningModule):
 
         # 2. BPS per-dataset & overall
         per_ds = []
-        for name, agg in zip(self.names, self.bps_aggs):
+        per_ds_bps = {}  # dataset_idx -> bps_mean, for per-subject aggregation
+        for ds_i, (name, agg) in enumerate(zip(self.names, self.bps_aggs)):
 
             # a) build local SUM & COUNT tensors on *every* rank
             if len(agg.robs) == 0:  # aggregator is empty
@@ -506,6 +584,7 @@ class MultiDatasetModel(pl.LightningModule):
             if global_count > 0:
                 bps_mean = global_sum / global_count
                 per_ds.append(bps_mean)
+                per_ds_bps[ds_i] = bps_mean
 
                 # Log per-dataset BPS only on rank-0 to avoid duplication
                 if self.global_rank == 0:
@@ -521,6 +600,25 @@ class MultiDatasetModel(pl.LightningModule):
 
         # Log with sync_dist=True so all ranks have access to the metric
         self.log("val_bps_overall", overall, prog_bar=True, sync_dist=True, rank_zero_only=False)
+
+        # 3. Per-subject aggregated val_loss and val_bps
+        if self.global_rank == 0:
+            for subj, ds_idxs in self._subject_ds.items():
+                # Aggregate val_loss across sessions for this subject
+                subj_losses = []
+                for i in ds_idxs:
+                    subj_losses.extend(self.val_losses_by_ds[i])
+                if subj_losses:
+                    self.log(f"val_loss/{subj}",
+                             torch.stack(subj_losses).mean(),
+                             sync_dist=False)
+
+                # Aggregate val_bps across sessions for this subject
+                subj_bps = [per_ds_bps[i] for i in ds_idxs if i in per_ds_bps]
+                if subj_bps:
+                    self.log(f"val_bps/{subj}",
+                             torch.stack(subj_bps).mean(),
+                             sync_dist=False)
 
         torch.cuda.empty_cache()
         

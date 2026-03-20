@@ -136,10 +136,10 @@ def get_gaborium_sta_ste(sess, n_lags, cids=None):
         Spike-triggered second moments with shape (n_cells, n_lags, n_y, n_x)
     """
     # Verify that the dataset exists
-    assert (sess.sess_dir / 'shifter' / 'gaborium_shifted.dset').exists()
+    assert (sess.sess_dir / 'datasets' / 'gaborium.dset').exists()
 
     # Define cache file path
-    cache_dir = sess.sess_dir / 'shifter' / 'gaborium_sta_ste.npy'
+    cache_dir = sess.sess_dir / 'datasets' / 'gaborium_sta_ste.npy'
 
     # Try to load from cache if it exists
     if cache_dir.exists():
@@ -159,7 +159,7 @@ def get_gaborium_sta_ste(sess, n_lags, cids=None):
         print('Cached STAs/STEs not found. Calculating...')
 
     # Load and preprocess the dataset
-    dset = DictDataset.load(sess.sess_dir / 'shifter' / 'gaborium_shifted.dset')
+    dset = DictDataset.load(sess.sess_dir / 'datasets' / 'gaborium.dset')
     dset['stim'] = dset['stim'].float()
     # Normalize stimulus (mean-centered)
     dset['stim'] = (dset['stim'] - dset['stim'].mean()) / 255
@@ -392,6 +392,13 @@ def prepare_data(dataset_config: Dict[str, Any], strict: bool = True):
     
     sess = get_session(*sess_name.split("_"))
 
+    # For Rowley sessions, datasets live under {eye}_eye/ subdirectories
+    if lab.lower() == "rowley":
+        eye = dataset_config.get("eye", "right")
+        dataset_config["directory"] = str(
+            sess.processed_path / "datasets" / f"{eye}_eye"
+        )
+
     # -------------------------------------------------------------------------
     # Calculate downsampling factor if sampling config is present
     # -------------------------------------------------------------------------
@@ -448,6 +455,11 @@ def prepare_data(dataset_config: Dict[str, Any], strict: bool = True):
     for dt in dset_types.copy():
         try:
             dset = sess.get_dataset(dt, config=dataset_config)
+
+            if dset is None:
+                print(f"WARNING: Dataset '{dt}' returned None for session. Skipping.")
+                dset_types.remove(dt)
+                continue
 
             # -------------------------------------------------------------
             # Apply downsampling if specified
