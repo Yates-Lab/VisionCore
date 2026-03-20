@@ -11,13 +11,9 @@
 # Usage:
 #   ./experiments/learn_readouts_frozencore_120.sh
 
-# Activate environment based on user
-if [ "$USER" = "ryanress" ]; then
-    source /home/ryanress/VisionCore/.venv/bin/activate
-else
-    source /home/jake/miniconda3/etc/profile.d/conda.sh
-    conda activate yatesfv
-fi
+# Work from the VisionCore root so relative paths resolve correctly
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$SCRIPT_DIR"
 
 
 # ---------- DDP / NCCL (2x PCIe, no NVLink) ----------
@@ -69,7 +65,7 @@ CHECKPOINT_DIR="/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/frozencore_rea
 
 # Training hyperparameters
 BATCH_SIZE=256
-MAX_DATASETS=30
+MAX_DATASETS=50
 LEARNING_RATE=1e-3
 WEIGHT_DECAY=1.0e-5
 LR_SCHEDULER="cosine_warmup_restart"
@@ -86,8 +82,14 @@ ENABLE_LOGGING=true
 
 # ============================================================
 
-# Create checkpoint directory
+# Create checkpoint directory and clean up old checkpoints from previous runs
 mkdir -p $CHECKPOINT_DIR
+EXPERIMENT_CHECKPOINT_DIR="$CHECKPOINT_DIR/frozencore_${MODEL_TYPE}_bs${BATCH_SIZE}_ds${MAX_DATASETS}_lr${LEARNING_RATE}_wd${WEIGHT_DECAY}_warmup${WARMUP_EPOCHS}"
+if [ -d "$EXPERIMENT_CHECKPOINT_DIR" ]; then
+    echo "Cleaning up old checkpoints in $EXPERIMENT_CHECKPOINT_DIR..."
+    rm -f "$EXPERIMENT_CHECKPOINT_DIR"/*.ckpt
+    echo "✓ Old checkpoints removed"
+fi
 
 # Build experiment name
 EXPERIMENT_NAME="frozencore_${MODEL_TYPE}_bs${BATCH_SIZE}_ds${MAX_DATASETS}_lr${LEARNING_RATE}_wd${WEIGHT_DECAY}_warmup${WARMUP_EPOCHS}"
@@ -117,7 +119,7 @@ echo "============================================================"
 echo ""
 
 # Build training command
-TRAINING_CMD="python training/train_frozencore_newreadouts.py \
+TRAINING_CMD="uv run python training/train_frozencore_newreadouts.py \
     --pretrained_checkpoint \"$PRETRAINED_CHECKPOINT_DIR\" \
     --model_type \"$MODEL_TYPE\" \
     --dataset_configs_path \"$DATASET_CONFIGS_PATH\" \

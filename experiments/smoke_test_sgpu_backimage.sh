@@ -4,9 +4,9 @@
 # Modeled after experiments/run_all_models_backimage.sh, but uses the
 # single-GPU training script and very short run settings.
 
-# Activate conda environment (adjust if needed)
-source ~/miniconda3/etc/profile.d/conda.sh
-conda activate yatesfv
+# Work from the VisionCore root so relative paths resolve correctly
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$SCRIPT_DIR"
 
 # Basic CUDA / logging env (no DDP used here)
 export PYTHONPATH="${PYTHONPATH}:$(pwd)"
@@ -51,7 +51,7 @@ run_training() {
     local EXPERIMENT_NAME="${MODEL_NAME}_sgpu_smoke_ds${MAX_DATASETS}_ep${MAX_EPOCHS}"
 
     local TRAINING_CMD=(
-        python training/train_multidataset.py
+        uv run python training/train_multidataset.py
             --model_config "$MODEL_CONFIG"
             --dataset_configs_path "$DATASET_CONFIGS_PATH"
             --max_datasets $MAX_DATASETS

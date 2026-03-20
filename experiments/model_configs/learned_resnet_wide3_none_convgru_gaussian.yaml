@@ -1,0 +1,153 @@
+# V1 model configuration - Wide 3-block ResNet with orthogonal frontend
+# Based on learned_resnet_none_convgru_gaussian.yaml with:
+#   - Wider convnet channels: [64, 128] -> [128, 192, 256]
+#   - Added 3rd ResNet block with smaller kernel (spatial dims already reduced)
+#   - Stem widened: 8 -> 16
+#   - Frontend orthogonality penalty to decorrelate temporal channels
+model_type: v1multi
+
+# Model dimensions
+initial_input_channels: 1
+
+# Adapter configuration
+adapter:
+  type: adapter
+  params:
+    init_sigma: 1.0
+    grid_size: 51
+    transform: scale
+
+# Frontend configuration
+frontend:
+  type: learnable_temporal
+  params:
+    kernel_size: 16
+    num_channels: 4
+    init_type: gaussian_derivatives
+    split_MP: False
+    aa_signal: true
+    aa_window: hann
+    aa_window_kwargs:
+      power: .25
+    use_weight_norm: false
+    keep_unit_norm: false
+    causal: true
+    bias: false
+
+# Convnet configuration - Wide 3-block ResNet
+convnet:
+  type: resnet
+  params:
+    channels: [96, 128, 192]
+    checkpointing: false
+    stem_config:
+      out_channels: 16
+      conv_params:
+        type: standard
+        kernel_size: [1, 7, 7]
+        padding: [0, 0, 0]
+        stride: 1
+        dilation: [1, 1, 1]
+        aa_signal: true
+        weight_norm_dim: 0
+        use_weight_norm: true
+        keep_unit_norm: true
+      norm_type: rms
+      act_type: splitrelu
+      pool_params: null
+      dropout: 0.0
+      order: [pad, conv, norm, act]
+    block_configs:
+      - conv_params:
+          type: standard
+          kernel_size: [3, 9, 9]
+          aa_signal: true
+          aa_window: hann
+          aa_window_kwargs:
+            power: 1.0
+          use_weight_norm: true
+          keep_unit_norm: true
+          padding: [0, 0, 0]
+        norm_type: grn
+        act_type: splitrelu
+        dropout: 0.0
+        pool_params:
+          type: max
+          kernel_size: 2
+          stride: 2
+      - conv_params:
+          type: standard
+          kernel_size: [3, 7, 7]
+          use_weight_norm: true
+          keep_unit_norm: true
+          aa_signal: true
+          padding: [0, 0, 0]
+        norm_type: grn
+        act_type: splitrelu
+        dropout: 0.0
+        pool_params: null
+      - conv_params:
+          type: standard
+          kernel_size: [3, 5, 5]
+          use_weight_norm: true
+          keep_unit_norm: true
+          aa_signal: true
+          padding: [0, 0, 0]
+        norm_type: grn
+        act_type: splitrelu
+        dropout: 0.0
+        pool_params: null
+
+# Modulator configuration
+modulator:
+  type: none
+  params: {}
+
+# Recurrent configuration - ConvGRU (hidden dim unchanged)
+recurrent:
+  type: convgru
+  params:
+    n_layers: 1
+    hidden_dim: 128
+    kernel_size: 3
+
+# Readout configuration
+readout:
+  type: gaussian
+  params:
+    n_units: 8
+    bias: true
+    initial_std: 0.5
+    initial_mean_scale: 0.1
+
+output_activation: softplus
+
+regularization:
+  - name: readout_sparsity
+    type: l1
+    lambda: 1.0e-7
+    apply_to: ["readouts/features"]
+    schedule:
+      kind: warmup
+      start_epoch: 30
+  - name: decay_readout_std
+    type: proximal_clamp_positive
+    lambda: 1.5  # final max std value
+    apply_to: ["readouts/std"]  # matches readouts.X.std_*
+    schedule:
+      kind: linear_decay
+      start_epoch: 0
+      end_epoch: 50
+      start_lambda: 10.0  # initial max
+  - name: exclude_means_from_wd
+    type: l2
+    lambda: 0.0  # No penalty, but excludes from weight decay
+    apply_to: ["readouts/mean"]
+    schedule:
+      kind: constant
+  - name: frontend_ortho
+    type: ortho
+    lambda: 1.0e-5
+    apply_to: ["frontend/weight"]
+    schedule:
+      kind: constant

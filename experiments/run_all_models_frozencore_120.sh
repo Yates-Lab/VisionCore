@@ -4,9 +4,9 @@
 # Uses learned_res_small as the pretrained vision model for all modulator experiments.
 # This script automatically finds the best learned_res_small checkpoint and uses it for pretraining.
 
-# Activate conda environment
-source ~/miniconda3/etc/profile.d/conda.sh
-conda activate yatesfv
+# Work from the VisionCore root so relative paths resolve correctly
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$SCRIPT_DIR"
 
 # Set environment variables for optimal performance
 export CUDA_VISIBLE_DEVICES=0,1
@@ -133,7 +133,7 @@ run_training() {
     echo "============================================================"
     
     # Build the training command
-    local TRAINING_CMD="python training/train_ddp_multidataset.py \
+    local TRAINING_CMD="uv run python training/train_ddp_multidataset.py \
         --model_config \"$MODEL_CONFIG\" \
         --dataset_configs_path \"$DATASET_CONFIGS_PATH\" \
         --pretrained_checkpoint \"$PRETRAINED_CHECKPOINT\" \
@@ -192,7 +192,7 @@ run_baseline_training() {
     echo "============================================================"
     
     # Build the baseline training command
-    local BASELINE_CMD="python training/train_ddp_multidataset.py \
+    local BASELINE_CMD="uv run python training/train_ddp_multidataset.py \
         --model_config \"$MODEL_CONFIG\" \
         --dataset_configs_path \"$DATASET_CONFIGS_PATH\" \
         --max_datasets $MAX_DATASETS \
