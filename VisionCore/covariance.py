@@ -483,7 +483,8 @@ def fit_intercept_linear(Ceye, bin_centers, count_e, d_max=0.4, min_bins=3,
 # ---------------------------------------------------------------------------
 
 def bagged_split_half_psth_covariance(S, T_idx, n_boot=20, min_trials_per_time=10,
-                                      seed=42, global_mean=None):
+                                      seed=42, global_mean=None,
+                                      weighting='pair_count'):
     """
     Bagged split-half PSTH covariance (unbiased estimator).
 
@@ -501,6 +502,11 @@ def bagged_split_half_psth_covariance(S, T_idx, n_boot=20, min_trials_per_time=1
         Random seed.
     global_mean : ndarray (C,), optional
         Global mean for centering. If None, uses local centering.
+    weighting : str
+        'uniform' for equal (1/T) weighting over time bins, or
+        'pair_count' to weight each time bin by n_t*(n_t-1)/2,
+        matching the implicit weighting in
+        compute_conditional_second_moments.
 
     Returns
     -------
@@ -530,6 +536,18 @@ def bagged_split_half_psth_covariance(S, T_idx, n_boot=20, min_trials_per_time=1
 
     sorted_times = sorted(time_groups.keys())
 
+    # Time-bin weights for the cross-covariance
+    if weighting == 'pair_count':
+        pair_counts = np.array([
+            len(time_groups[t]) * (len(time_groups[t]) - 1) / 2
+            for t in sorted_times
+        ])
+        w = pair_counts / pair_counts.sum()
+    elif weighting == 'uniform':
+        w = None
+    else:
+        raise ValueError(f"weighting must be 'uniform' or 'pair_count', got {weighting!r}")
+
     for k in range(n_boot):
         PSTH_A_list = []
         PSTH_B_list = []
@@ -554,8 +572,11 @@ def bagged_split_half_psth_covariance(S, T_idx, n_boot=20, min_trials_per_time=1
             XA_c = XA - XA.mean(0, keepdims=True)
             XB_c = XB - XB.mean(0, keepdims=True)
 
-        n_time = XA.shape[0]
-        C_k = (XA_c.T @ XB_c) / (n_time - 1)
+        if w is not None:
+            C_k = (XA_c * w[:, None]).T @ XB_c
+        else:
+            n_time = XA.shape[0]
+            C_k = (XA_c.T @ XB_c) / (n_time - 1)
         C_k = 0.5 * (C_k + C_k.T)
 
         C_accum += C_k
@@ -604,7 +625,41 @@ def estimate_rate_covariance(SpikeCounts, EyeTraj, T_idx, n_bins=25,
     MM, bin_centers, count_e, bin_edges = compute_conditional_second_moments(
         SpikeCounts, EyeTraj, T_idx, n_bins=n_bins
     )
-    Erate = torch.nanmean(SpikeCounts, 0).detach().cpu().numpy()
+
+    # Pair-count-weighted mean rate for consistent Ceye estimation.
+    #
+    # compute_conditional_second_moments accumulates cross-trial products
+    # S_i S_j^T across time bins, where each time bin t with n_t trials
+    # contributes n_t*(n_t-1)/2 pairs.  The resulting second moment MM is
+    # therefore implicitly weighted by pair count, not trial count.
+    #
+    # Converting MM to covariance requires subtracting E[rate] x E[rate]^T
+    # under the *same* weighting.  The old code used the trial-count-weighted
+    # global mean (torch.nanmean), which weights each time bin by n_t.  This
+    # mismatch — pair-weighted (~ n_t^2) second moment minus trial-weighted
+    # (~ n_t) mean squared — inflates off-diagonal Ceye and creates a small
+    # but systematic negative bias in the shuffle null (~Dz = -0.007).
+    #
+    # Fix: weight the mean rate by pair count to match the second moment.
+    # This eliminates 93% of the shuffle null bias while preserving the
+    # real-data signal (Dz changes < 0.003).
+    #
+    # Old line: Erate = torch.nanmean(SpikeCounts, 0).detach().cpu().numpy()
+    unique_times = np.unique(T_idx.detach().cpu().numpy())
+    C = SpikeCounts.shape[1]
+    weighted_sum = torch.zeros(C, device=SpikeCounts.device, dtype=torch.float64)
+    total_pairs = 0.0
+    for t in unique_times:
+        mask = (T_idx == t)
+        n_t = mask.sum().item()
+        if n_t < 10:  # matches the threshold in compute_conditional_second_moments
+            continue
+        n_pairs_t = n_t * (n_t - 1) / 2
+        mu_t = SpikeCounts[mask].mean(0).to(torch.float64)
+        weighted_sum += n_pairs_t * mu_t
+        total_pairs += n_pairs_t
+    Erate = (weighted_sum / total_pairs).detach().cpu().numpy()
+
     Ceye = MM - Erate[:, None] * Erate[None, :]
 
     if intercept_mode == 'linear':

@@ -460,7 +460,7 @@ class MultiDatasetModel(pl.LightningModule):
                         batch_loss['rhat'] = torch.exp(batch_loss['rhat'])
 
                     # update BPS
-                    ds_idx = b["dataset_idx"][0]
+                    ds_idx = b["dataset_idx"][0].item()
                     self.bps_aggs[ds_idx](batch_loss)
                     self.val_losses.append(loss.detach())
                     self.val_losses_by_ds[ds_idx].append(loss.detach())
