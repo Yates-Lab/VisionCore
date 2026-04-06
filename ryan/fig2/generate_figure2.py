@@ -44,6 +44,35 @@ from VisionCore.subspace import (
 )
 from DataYatesV1 import get_free_device
 
+
+def load_contam_rate(session_name, subject, n_neurons_total):
+    """Load per-neuron min contamination rate from QC data.
+
+    Returns array of shape (n_neurons_total,) with min contamination
+    proportion per neuron, or None if unavailable.
+    """
+    if subject in ("Allen", "Logan"):
+        from DataYatesV1.utils.io import YatesV1Session
+        try:
+            sess = YatesV1Session(session_name)
+            refractory = np.load(
+                sess.sess_dir / 'qc' / 'refractory' / 'refractory.npz'
+            )
+            min_contam_props = refractory['min_contam_props']
+            # min across refractory periods for each neuron
+            contam_rate = np.array([
+                np.min(min_contam_props[i]) for i in range(len(min_contam_props))
+            ])
+            return contam_rate
+        except Exception as e:
+            print(f"  Warning: Could not load QC data: {e}")
+            return None
+    else:
+        raise NotImplementedError(
+            f"QC loading not implemented for subject {subject}"
+        )
+
+
 # Matplotlib publication defaults
 mpl.rcParams["pdf.fonttype"] = 42
 mpl.rcParams["ps.fonttype"] = 42
@@ -184,6 +213,18 @@ else:
             device=str(DEVICE),
         )
 
+        # Trial-averaged PSTH (neurons passing neuron_mask only)
+        psth = robs.mean(axis=0)  # (n_time, n_neurons_used)
+
+        # QC: contamination rate
+        try:
+            contam_rate = load_contam_rate(
+                session_name, subject, meta['n_neurons_total']
+            )
+        except NotImplementedError:
+            contam_rate = None
+            print(f"  QC: contamination not available for {subject}")
+
         session_results.append({
             "session": session_name,
             "subject": subject,
@@ -191,6 +232,8 @@ else:
             "mats": mats,
             "neuron_mask": neuron_mask,
             "meta": meta,
+            "psth": psth,
+            "qc": {"contam_rate": contam_rate},
         })
 
     # Cache results
@@ -299,9 +342,11 @@ for w_idx in range(n_windows):
         all_ff_corr.append(ff_c)
         all_erate.append(erate[valid])
 
-        # PSD project before correlation (removes negative eigenvalues from estimation noise)
-        NoiseCorrU = cov_to_corr(project_to_psd(CnoiseU[np.ix_(valid, valid)]), min_var=MIN_VAR)
-        NoiseCorrC = cov_to_corr(project_to_psd(CnoiseC[np.ix_(valid, valid)]), min_var=MIN_VAR)
+        # Raw pairwise correlations (no PSD projection — not needed for
+        # pairwise r_ij and can introduce asymmetric bias between U and C;
+        # PSD projection is reserved for eigendecomposition / subspace analyses)
+        NoiseCorrU = cov_to_corr(CnoiseU[np.ix_(valid, valid)], min_var=MIN_VAR)
+        NoiseCorrC = cov_to_corr(CnoiseC[np.ix_(valid, valid)], min_var=MIN_VAR)
         rho_u = get_upper_triangle(NoiseCorrU)
         rho_c = get_upper_triangle(NoiseCorrC)
 
@@ -343,7 +388,7 @@ for w_idx in range(n_windows):
                 CnoiseC_shuf = Ctotal - Crate_shuf
                 CnoiseC_shuf = 0.5 * (CnoiseC_shuf + CnoiseC_shuf.T)
                 NC_shuf = cov_to_corr(
-                    project_to_psd(CnoiseC_shuf[np.ix_(valid, valid)]), min_var=MIN_VAR
+                    CnoiseC_shuf[np.ix_(valid, valid)], min_var=MIN_VAR
                 )
                 rho_c_shuf = get_upper_triangle(NC_shuf)
                 ok = np.isfinite(rho_c_shuf) & pair_ok

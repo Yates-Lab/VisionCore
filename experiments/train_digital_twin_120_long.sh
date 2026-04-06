@@ -26,12 +26,14 @@ CORE_LR_SCALE="1.0"
 LR_SCHEDULER="cosine_warmup"
 WARMUP_EPOCHS=2
 BATCH_SIZE=256
-ACCUMULATE_GRAD_BATCHES=4
+ACCUMULATE_GRAD_BATCHES=1 # Previously 4, trying to reduce training time by using larger effective batch size and fewer gradient steps per epoch
 STEPS_PER_EPOCH=512 # Really just determines how often to validate and log, not the actual epoch length
-MAX_EPOCHS=50
+MAX_EPOCHS=9999  # Time budget is the real stopping criterion
 #TIME_BUDGET="720" # In minutes. Set to empty string for no time limit.
 TIME_BUDGET="2880" # 48 hours
 TAG=""
+CKPT_PATH=""
+GPU_IDS="1"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -45,9 +47,11 @@ while [[ $# -gt 0 ]]; do
         --max_epochs)   MAX_EPOCHS="$2";     shift 2 ;;
         --time_budget)  TIME_BUDGET="$2";    shift 2 ;;
         --tag)          TAG="$2";            shift 2 ;;
+        --ckpt_path)    CKPT_PATH="$2";      shift 2 ;;
+        --gpu_ids)      GPU_IDS="$2";        shift 2 ;;
         *)
             echo "Unknown argument: $1"
-            echo "Valid flags: --lr, --model_config, --wd, --core_lr_scale, --lr_scheduler, --warmup_epochs, --batch_size, --max_epochs, --time_budget, --tag"
+            echo "Valid flags: --lr, --model_config, --wd, --core_lr_scale, --lr_scheduler, --warmup_epochs, --batch_size, --max_epochs, --time_budget, --tag, --ckpt_path, --gpu_ids"
             exit 1
             ;;
     esac
@@ -189,6 +193,7 @@ echo "Checkpoint dir:     $CHECKPOINT_DIR"
 echo "Dataset config:     $DATASET_CONFIGS_PATH"
 echo "Steps/epoch:        $STEPS_PER_EPOCH"
 echo "Val fraction:       $LIMIT_VAL_BATCHES"
+echo "GPU IDs:            ${GPU_IDS:-auto ($NUM_GPUS)}"
 echo "Tag:                ${TAG:-<none>}"
 echo "============================================================"
 echo ""
@@ -228,6 +233,14 @@ fi
 
 if [ -n "$TIME_BUDGET" ]; then
     TRAINING_CMD="$TRAINING_CMD --time_budget_minutes $TIME_BUDGET"
+fi
+
+if [ -n "$CKPT_PATH" ]; then
+    TRAINING_CMD="$TRAINING_CMD --ckpt_path \"$CKPT_PATH\""
+fi
+
+if [ -n "$GPU_IDS" ]; then
+    TRAINING_CMD="$TRAINING_CMD --gpu_ids $GPU_IDS"
 fi
 
 eval $TRAINING_CMD

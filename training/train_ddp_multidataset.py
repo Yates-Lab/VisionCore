@@ -120,8 +120,10 @@ def main():
     p.add_argument("--dset_dtype", type=str, default="uint8",
                    choices=["uint8", "bfloat16", "float32"],
                    help="Dataset storage dtype in CPU RAM (uint8=1x, bfloat16=2x, float32=4x memory)")
-    p.add_argument("--num_gpus", type=int, default=2,
-                   help="Number of GPUs to use")
+    p.add_argument("--num_gpus", type=int, default=None,
+                   help="Number of GPUs to use (ignored if --gpu_ids is set)")
+    p.add_argument("--gpu_ids", type=str, default=None,
+                   help="Comma-separated GPU device IDs to use (e.g. '1' or '0,1')")
     p.add_argument("--num_workers", type=int, default=16,
                    help="Number of dataloader workers")
     p.add_argument("--steps_per_epoch", type=int, default=1000,
@@ -134,6 +136,8 @@ def main():
                    help="Experiment name (auto-generated if not provided)")
     p.add_argument("--checkpoint_dir", type=str, default="./checkpoints",
                    help="Directory for saving checkpoints")
+    p.add_argument("--ckpt_path", type=str, default=None,
+                   help="Path to checkpoint to resume training from (e.g. last.ckpt)")
     
     # Early stopping
     p.add_argument("--early_stopping_patience", type=int, default=None,
@@ -162,6 +166,14 @@ def main():
                    help="Dataset index to evaluate during slow logging")
 
     args = p.parse_args()
+
+    # Resolve GPU devices: --gpu_ids takes priority over --num_gpus
+    if args.gpu_ids is not None:
+        args.devices = [int(x) for x in args.gpu_ids.split(",")]
+    elif args.num_gpus is not None:
+        args.devices = args.num_gpus
+    else:
+        args.devices = 2  # default
 
     # -------------------------------------------------------------------------
     # Experiment name
@@ -282,7 +294,7 @@ def main():
         
         # Hardware
         accelerator="gpu",
-        devices=args.num_gpus,
+        devices=args.devices,
         precision=args.precision,
         
         # Distributed strategy
@@ -322,7 +334,7 @@ def main():
     # -------------------------------------------------------------------------
     # Train!
     # -------------------------------------------------------------------------
-    trainer.fit(model, datamodule=dm)
+    trainer.fit(model, datamodule=dm, ckpt_path=args.ckpt_path)
 
 
 if __name__ == "__main__":

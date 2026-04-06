@@ -1,6 +1,6 @@
 types: [backimage, gaborium]
 session_dir: ./sessions
-sessions: [Luke_2025-08-04, Luke_2025-08-05]
+sessions: [Luke_2025-08-04, Luke_2025-08-05, Luke_2026-03-02]
 sampling:
   source_rate: 240
   target_rate: 120

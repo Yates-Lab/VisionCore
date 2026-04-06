@@ -44,8 +44,9 @@ output_dir.mkdir(exist_ok=True, parents=True)
 
 # Manual filter: only include these sessions for now
 ALLOWED_SESSIONS = [
-    "Luke_2025-08-04",
-    "Luke_2025-08-05",
+    #"Luke_2025-08-04",
+    #"Luke_2025-08-05",
+    "Luke_2026-03-02",
 ]
 
 sessions = [s for s in V1_SESSIONS if s['session_name'] in ALLOWED_SESSIONS]

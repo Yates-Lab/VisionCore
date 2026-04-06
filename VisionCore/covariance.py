@@ -666,6 +666,8 @@ def estimate_rate_covariance(SpikeCounts, EyeTraj, T_idx, n_bins=25,
         Crate = fit_intercept_linear(Ceye, bin_centers, count_e, eval_at_first_bin=True)
     elif intercept_mode == 'isotonic':
         Crate = fit_intercept_pava(Ceye, count_e)
+    elif intercept_mode == 'lowest_bin':
+        Crate = Ceye[0].copy()
     else:
         Crate = Ceye[0].copy()
 

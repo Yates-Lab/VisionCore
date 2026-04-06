@@ -144,6 +144,7 @@ class TimeBudgetCallback(pl.Callback):
         self._step_start = None
         self._step_times = []
         self._benchmarked = False
+        self._target_max_epochs = None
         self._training_start = None
         self._first_val_duration = None
         self._val_start = None
@@ -154,8 +155,35 @@ class TimeBudgetCallback(pl.Callback):
             stamp = time.strftime("[%H:%M:%S] ")
             print(stamp + msg, flush=True)
 
+    def state_dict(self):
+        return {
+            "benchmarked": self._benchmarked,
+            "target_max_epochs": self._target_max_epochs,
+        }
+
+    def load_state_dict(self, state_dict):
+        self._benchmarked = state_dict.get("benchmarked", False)
+        self._target_max_epochs = state_dict.get("target_max_epochs", None)
+
+    def _set_max_epochs(self, trainer, max_epochs):
+        """Apply target max_epochs to trainer and LR schedulers."""
+        trainer.fit_loop.max_epochs = max_epochs
+        if trainer.lr_scheduler_configs:
+            for cfg in trainer.lr_scheduler_configs:
+                sched = cfg.scheduler
+                if hasattr(sched, 'max_epochs'):
+                    sched.max_epochs = max_epochs
+
     def on_train_start(self, trainer, pl_module):
         self._training_start = time.perf_counter()
+        # On resume, restore the profiled target directly — no re-profiling
+        if self._benchmarked and self._target_max_epochs is not None:
+            old_max = trainer.fit_loop.max_epochs
+            self._set_max_epochs(trainer, self._target_max_epochs)
+            self._print(
+                f"[TimeBudget] Resumed — restoring profiled target: "
+                f"max_epochs: {old_max} -> {self._target_max_epochs}"
+            )
 
     def on_validation_start(self, trainer, pl_module):
         if not self._benchmarked and self._first_val_duration is None:
@@ -210,14 +238,8 @@ class TimeBudgetCallback(pl.Callback):
         new_max_epochs = trainer.current_epoch + 1 + remaining_epochs
 
         old_max_epochs = trainer.fit_loop.max_epochs
-        trainer.fit_loop.max_epochs = new_max_epochs
-
-        # Update LR scheduler max_epochs so cosine annealing targets the right horizon
-        if trainer.lr_scheduler_configs:
-            for cfg in trainer.lr_scheduler_configs:
-                sched = cfg.scheduler
-                if hasattr(sched, 'max_epochs'):
-                    sched.max_epochs = new_max_epochs
+        self._target_max_epochs = new_max_epochs
+        self._set_max_epochs(trainer, new_max_epochs)
 
         self._print(
             f"[TimeBudget] avg step: {avg_step_time:.3f}s | "
