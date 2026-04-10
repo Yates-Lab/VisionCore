@@ -472,30 +472,43 @@ for w_idx, m_dict in enumerate(metrics):
     print(f"  Shuffle null mean 95% CI: [{null_mean_ci[0]:.3f}, {null_mean_ci[1]:.3f}]")
     print(f"  Empirical p={p_emp:.4f}")
 
-# Plot: histogram for primary window
+# Plot: histogram for primary window — per-animal overlay
 m0_full = m_by_window[0]
 s0 = alpha_stats[WINDOWS_MS[0]]
 labels = metrics[0]["subject_per_neuron"]
 
-for suffix, mask in subject_iter(labels):
-    m0 = m0_full[mask]
-    if len(m0) == 0:
+subject_colors = {"Allen": "tab:blue", "Logan": "tab:green", "Luke": "tab:orange"}
+
+fig_c, ax_c = plt.subplots(figsize=(4, 3.5))
+
+# Shared bin edges across subjects
+valid_m0 = m0_full[np.isfinite(m0_full)]
+bins = np.linspace(np.nanmin(valid_m0), np.nanmax(valid_m0), 31)
+
+for subj in SUBJECTS:
+    mask = labels == subj
+    if not mask.any():
         continue
-    fig_c, ax_c = plt.subplots(figsize=(4, 3))
-    ax_c.hist(m0, bins=30, color="steelblue", edgecolor="white", alpha=0.8)
-    ax_c.axvline(np.nanmedian(m0), color="red", linewidth=2,
-                 label=f"median={np.nanmedian(m0):.3f}")
-    if suffix == "":
-        ax_c.axvspan(s0["null_ci"][0], s0["null_ci"][1], alpha=0.2, color="gray",
-                     label="shuffle 95% CI")
-    ax_c.set_xlabel("1 - α (FEM modulation fraction)")
-    ax_c.set_ylabel("Neuron count")
-    tag = suffix.lstrip("_") if suffix else "All"
-    ax_c.set_title(f"Panel C: FEM modulation ({WINDOWS_MS[0]:.1f} ms, {tag})")
-    ax_c.legend(frameon=False, fontsize=8)
-    fig_c.tight_layout()
-    fig_c.savefig(FIG_DIR / f"panel_c_alpha{suffix}.pdf", bbox_inches="tight", dpi=300)
-    show_or_close(fig_c)
+    m0 = m0_full[mask]
+    color = subject_colors[subj]
+    ax_c.hist(m0, bins=bins, color=color, edgecolor="white", alpha=0.5)
+    ax_c.axvline(np.nanmedian(m0), color=color, linewidth=2, ls=(0, (1,1)),
+                 label=f"Median={np.nanmedian(m0):.2f}")
+
+#ax_c.axvspan(s0["null_ci"][0], s0["null_ci"][1], alpha=0.2, color="gray",
+             #label="shuffle 95% CI")
+ax_c.set_xlabel("Fraction of rate modulation\ndue to FEM (1-α)", fontsize=11)
+ax_c.set_ylabel("Count", fontsize=11)
+#ax_c.set_title(f"Panel C: FEM modulation ({WINDOWS_MS[0]:.1f} ms)")
+ax_c.legend(frameon=False, fontsize=11)
+ax_c.grid(True, alpha=0.3, zorder=-1)
+# Remove top and right spines
+ax_c.spines["top"].set_visible(False)
+ax_c.spines["right"].set_visible(False)
+
+fig_c.tight_layout()
+fig_c.savefig(FIG_DIR / "panel_c_alpha.pdf", bbox_inches="tight", dpi=300)
+show_or_close(fig_c)
 
 # %% Panel D-E: Fano factors
 # D: mean-variance scatter (single window) with slope fits
