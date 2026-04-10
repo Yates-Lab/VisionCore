@@ -44,67 +44,13 @@ output_dir.mkdir(exist_ok=True, parents=True)
 
 # Manual filter: only include these sessions for now
 ALLOWED_SESSIONS = [
-    #"Luke_2025-08-04",
-    #"Luke_2025-08-05",
     "Luke_2026-03-02",
+    "Luke_2025-08-05",
+    "Luke_2025-08-04",
 ]
 
 sessions = [s for s in V1_SESSIONS if s['session_name'] in ALLOWED_SESSIONS]
 print(f"Found {len(sessions)} sessions (filtered from {len(V1_SESSIONS)} total)")
-
-
-#%% Helper: compute SNR from a gaborium dataset
-
-def compute_snr_from_gaborium(dset_path, region='V1'):
-    """Load gaborium dataset and compute per-unit SNR from STEs.
-
-    Returns dict with keys: stes, cluster_snr, cluster_lag, num_spikes, robs, dset.
-    Returns None if dataset missing.
-    """
-    if not dset_path.exists():
-        return None
-
-    dset = DictDataset.load(dset_path)
-
-    # Filter to region
-    if 'region' in dset.metadata:
-        regions = dset.metadata['region']
-        region_mask = regions == region
-        robs = dset['robs'][:, region_mask]
-    else:
-        robs = dset['robs']
-
-    # Preprocess stimulus and valid mask
-    stim = normalize_stimulus(dset['stim'])
-    dfs = create_valid_eyepos_mask(dset['eyepos'], dset['dpi_valid'], valid_eyepos_radius).float()
-
-    # Compute STEs
-    stes = calc_sta(
-        stim, robs, n_lags, dfs,
-        device=device, batch_size=batch_size,
-        stim_modifier=lambda x: x**2,
-        progress=True,
-    ).cpu().numpy()
-
-    signal = np.abs(stes - np.median(stes, axis=(2, 3), keepdims=True))
-    signal = gaussian_filter(signal, sigma=[0, 0, 4, 4])
-    noise = np.median(signal[:, 0], axis=(1, 2))
-    noise = np.maximum(noise, 1e-10)  # avoid division by zero
-    snr_per_lag = np.max(signal, axis=(2, 3)) / noise[:, None]
-    cluster_snr = snr_per_lag.max(axis=1)
-    cluster_lag = snr_per_lag.argmax(axis=1)
-
-    # Num spikes
-    robs_np = robs.numpy() if hasattr(robs, 'numpy') else np.asarray(robs)
-    dpi = dset['dpi_valid'].numpy() if hasattr(dset['dpi_valid'], 'numpy') else np.asarray(dset['dpi_valid'])
-    if dpi.ndim == 1:
-        dpi = dpi[:, None]
-    num_spikes = (robs_np * dpi).sum(axis=0)
-
-    return {
-        'stes': stes, 'cluster_snr': cluster_snr, 'cluster_lag': cluster_lag,
-        'num_spikes': num_spikes, 'robs': robs, 'dset': dset,
-    }
 
 
 #%% Process all sessions
@@ -116,29 +62,68 @@ for session_config in tqdm(sessions, desc="Processing sessions"):
     eyes = session_config['eyes']
     sess = RowleySession(session_name)
 
+    # Get V1 cluster IDs upfront — these are the ground-truth IDs we'll write to YAML
+    v1_shanks = [k for k, v in session_config['shanks'].items() if v == region]
+    v1_global_cids = sess.get_cluster_ids(shanks=v1_shanks)
+
     # --- Phase 1: evaluate all eyes, plot diagnostics, pick the best ---
     eye_scores = {}
     eye_results = {}
 
     for eye in eyes:
         dset_path = sess.processed_path / 'datasets' / f'{eye}_eye' / 'gaborium.dset'
-        result = compute_snr_from_gaborium(dset_path, region=region)
-        if result is None:
+        if not dset_path.exists():
             print(f"  [SKIP] {session_name} / {eye} eye: gaborium.dset not found")
             continue
 
-        cluster_snr = result['cluster_snr']
-        cluster_lag = result['cluster_lag']
-        num_spikes = result['num_spikes']
-        stes = result['stes']
-        n_units = result['robs'].shape[1]
+        dset = DictDataset.load(dset_path)
+
+        # Filter to region
+        if 'region' in dset.metadata:
+            region_mask = dset.metadata['region'] == region
+            robs = dset['robs'][:, region_mask]
+        else:
+            print(f"  [WARN] No region info in dataset, using all units")
+            robs = dset['robs']
+
+        n_units = robs.shape[1]
+
+        # Preprocess stimulus and valid mask
+        stim = normalize_stimulus(dset['stim'])
+        dfs = create_valid_eyepos_mask(dset['eyepos'], dset['dpi_valid'], valid_eyepos_radius).float()
+
+        # Compute STEs
+        stes = calc_sta(
+            stim, robs, n_lags, dfs,
+            device=device, batch_size=batch_size,
+            stim_modifier=lambda x: x**2,
+            progress=True,
+        ).cpu().numpy()
+
+        signal = np.abs(stes - np.median(stes, axis=(2, 3), keepdims=True))
+        signal = gaussian_filter(signal, sigma=[0, 0, 4, 4])
+        noise = np.median(signal[:, 0], axis=(1, 2))
+        noise = np.maximum(noise, 1e-10)
+        snr_per_lag = np.max(signal, axis=(2, 3)) / noise[:, None]
+        cluster_snr = snr_per_lag.max(axis=1)
+        cluster_lag = snr_per_lag.argmax(axis=1)
+
+        # Num spikes
+        robs_np = robs.numpy() if hasattr(robs, 'numpy') else np.asarray(robs)
+        dpi = dset['dpi_valid'].numpy() if hasattr(dset['dpi_valid'], 'numpy') else np.asarray(dset['dpi_valid'])
+        if dpi.ndim == 1:
+            dpi = dpi[:, None]
+        num_spikes = (robs_np * dpi).sum(axis=0)
 
         vis_mask = (cluster_snr > snr_thresh) & (num_spikes >= spike_thresh)
         visual_units = np.where(vis_mask)[0]
 
         score = float(np.sum(np.maximum(cluster_snr - snr_thresh, 0)))
         eye_scores[eye] = score
-        eye_results[eye] = result
+        eye_results[eye] = {
+            'stes': stes, 'cluster_snr': cluster_snr, 'cluster_lag': cluster_lag,
+            'num_spikes': num_spikes, 'robs': robs, 'dset': dset,
+        }
         print(f"  {session_name} / {eye} eye: score = {score:.1f} "
               f"({np.sum(cluster_snr > snr_thresh)}/{n_units} above threshold)")
 
@@ -216,11 +201,7 @@ for session_config in tqdm(sessions, desc="Processing sessions"):
 
     # --- QC metrics (amplitude truncation / missing spikes) ---
     try:
-        v1_shanks = [k for k, v in session_config['shanks'].items() if v == region]
-
         qc_cids, qc_time_windows, qc_mpcts = sess.get_missing_pct_qc(shanks=v1_shanks)
-
-        v1_global_cids = sess.get_cluster_ids(shanks=v1_shanks)
 
         med_missing_pct = np.zeros(n_units)
         for i, cid in enumerate(v1_global_cids):
@@ -234,23 +215,31 @@ for session_config in tqdm(sessions, desc="Processing sessions"):
         med_missing_pct = np.zeros(n_units)
         not_missing = np.arange(n_units)
 
+    # --- Map positional indices to actual cluster IDs ---
+    visual_cids = v1_global_cids[visual_units].tolist()
+    qcmissing_cids = v1_global_cids[not_missing].tolist()
+
     # --- Save YAML ---
     session_yaml = {
         'session': session_name,
         'lab': 'rowley',
         'eye': best_eye,
-        'cids': visual_units.tolist(),
-        'visual': visual_units.tolist(),
-        'qcmissing': not_missing.tolist(),
+        'cids': list(visual_cids),
+        'visual': list(visual_cids),
+        'qcmissing': list(qcmissing_cids),
     }
+
+    class NoAliasDumper(yaml.SafeDumper):
+        def ignore_aliases(self, data):
+            return True
 
     def represent_list(dumper, data):
         return dumper.represent_sequence('tag:yaml.org,2002:seq', data, flow_style=True)
-    yaml.add_representer(list, represent_list)
+    NoAliasDumper.add_representer(list, represent_list)
 
     output_file = output_dir / f"{session_name}.yaml"
     with open(output_file, 'w') as f:
-        yaml.dump(session_yaml, f, default_flow_style=False, sort_keys=False)
+        yaml.dump(session_yaml, f, Dumper=NoAliasDumper, default_flow_style=False, sort_keys=False)
     print(f"  Saved: {output_file}")
 
     stats = {

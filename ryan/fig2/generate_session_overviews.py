@@ -226,6 +226,7 @@ def plot_analysis_page(sr, fig):
     # Compute per-window metrics for this session
     # ---------------------------------------------------------------
     n_windows = len(sr["results"])
+    windows_ms = [r["window_ms"] for r in sr["results"]]
     per_window = []
 
     for w_idx in range(n_windows):
@@ -321,7 +322,7 @@ def plot_analysis_page(sr, fig):
                          label=f"median={np.nanmedian(m0):.3f}")
         ax_alpha.set_xlabel("1 - α")
         ax_alpha.set_ylabel("Count")
-        ax_alpha.set_title(f"FEM modulation ({WINDOWS_MS[0]:.1f} ms)")
+        ax_alpha.set_title(f"FEM modulation ({windows_ms[0]:.1f} ms)")
         ax_alpha.legend(fontsize=7, frameon=False)
 
     # ---------------------------------------------------------------
@@ -337,7 +338,7 @@ def plot_analysis_page(sr, fig):
         ax_meanvar.plot(x_line, pw0["slope_cor"] * x_line, "r--", linewidth=1)
         ax_meanvar.set_xlabel("Mean rate")
         ax_meanvar.set_ylabel("Variance")
-        ax_meanvar.set_title(f"Mean-variance ({WINDOWS_MS[0]:.1f} ms)")
+        ax_meanvar.set_title(f"Mean-variance ({windows_ms[0]:.1f} ms)")
         ax_meanvar.legend(fontsize=7, frameon=False)
 
     # ---------------------------------------------------------------
@@ -345,15 +346,15 @@ def plot_analysis_page(sr, fig):
     # ---------------------------------------------------------------
     slopes_u = [pw["slope_unc"] if pw else np.nan for pw in per_window]
     slopes_c = [pw["slope_cor"] if pw else np.nan for pw in per_window]
-    ax_fano_win.plot(WINDOWS_MS, slopes_u, "o-", color="tab:blue", label="Uncorrected")
-    ax_fano_win.plot(WINDOWS_MS, slopes_c, "o-", color="tab:red", label="Corrected")
+    ax_fano_win.plot(windows_ms, slopes_u, "o-", color="tab:blue", label="Uncorrected")
+    ax_fano_win.plot(windows_ms, slopes_c, "o-", color="tab:red", label="Corrected")
     ax_fano_win.axhline(1.0, color="gray", linestyle=":", alpha=0.5, label="Poisson")
     ax_fano_win.set_xlabel("Window (ms)")
     ax_fano_win.set_ylabel("Population FF")
     ax_fano_win.set_title("Fano factor vs window")
     ax_fano_win.set_xscale("log")
-    ax_fano_win.set_xticks(WINDOWS_MS)
-    ax_fano_win.set_xticklabels([f"{w:.0f}" for w in WINDOWS_MS])
+    ax_fano_win.set_xticks(windows_ms)
+    ax_fano_win.set_xticklabels([f"{w:.0f}" for w in windows_ms])
     ax_fano_win.legend(fontsize=7, frameon=False)
 
     # ---------------------------------------------------------------
@@ -363,17 +364,17 @@ def plot_analysis_page(sr, fig):
     zc_means = [pw["z_c_mean"] if pw else np.nan for pw in per_window]
     zu_sems = [pw["z_u_sem"] if pw else np.nan for pw in per_window]
     zc_sems = [pw["z_c_sem"] if pw else np.nan for pw in per_window]
-    ax_fisherz.errorbar(WINDOWS_MS, zu_means, yerr=zu_sems,
+    ax_fisherz.errorbar(windows_ms, zu_means, yerr=zu_sems,
                         fmt="o-", color="tab:blue", capsize=3, label="Uncorrected")
-    ax_fisherz.errorbar(WINDOWS_MS, zc_means, yerr=zc_sems,
+    ax_fisherz.errorbar(windows_ms, zc_means, yerr=zc_sems,
                         fmt="o-", color="tab:red", capsize=3, label="Corrected")
     ax_fisherz.axhline(0, color="gray", linestyle=":", alpha=0.5)
     ax_fisherz.set_xlabel("Window (ms)")
     ax_fisherz.set_ylabel("Mean Fisher z")
     ax_fisherz.set_title("Noise corr vs window")
     ax_fisherz.set_xscale("log")
-    ax_fisherz.set_xticks(WINDOWS_MS)
-    ax_fisherz.set_xticklabels([f"{w:.0f}" for w in WINDOWS_MS])
+    ax_fisherz.set_xticks(windows_ms)
+    ax_fisherz.set_xticklabels([f"{w:.0f}" for w in windows_ms])
     ax_fisherz.legend(fontsize=7, frameon=False)
 
     # ---------------------------------------------------------------
@@ -381,15 +382,15 @@ def plot_analysis_page(sr, fig):
     # ---------------------------------------------------------------
     dz_means = [pw["dz_mean"] if pw else np.nan for pw in per_window]
     dz_sems = [pw["dz_sem"] if pw else np.nan for pw in per_window]
-    ax_deltaz.errorbar(WINDOWS_MS, dz_means, yerr=dz_sems,
+    ax_deltaz.errorbar(windows_ms, dz_means, yerr=dz_sems,
                        fmt="o-", color="black", capsize=3)
     ax_deltaz.axhline(0, color="gray", linestyle=":", alpha=0.5)
     ax_deltaz.set_xlabel("Window (ms)")
     ax_deltaz.set_ylabel("Δz (corr - uncorr)")
     ax_deltaz.set_title("Effect size vs window")
     ax_deltaz.set_xscale("log")
-    ax_deltaz.set_xticks(WINDOWS_MS)
-    ax_deltaz.set_xticklabels([f"{w:.0f}" for w in WINDOWS_MS])
+    ax_deltaz.set_xticks(windows_ms)
+    ax_deltaz.set_xticklabels([f"{w:.0f}" for w in windows_ms])
 
     # ---------------------------------------------------------------
     # Row 1, Col 2: Eigenspectrum (PSTH + FEM)
@@ -442,7 +443,7 @@ def plot_analysis_page(sr, fig):
         ax_eigen.set_yscale("log")
         ax_eigen.set_xlabel("Eigenvalue rank")
         ax_eigen.set_ylabel("Frac. total var")
-        ax_eigen.set_title(f"Eigenspectra ({WINDOWS_MS[sub_w_idx]:.1f} ms)")
+        ax_eigen.set_title(f"Eigenspectra ({windows_ms[sub_w_idx]:.1f} ms)")
         ax_eigen.legend(fontsize=7, frameon=False)
 
         # Scorecard computations
@@ -480,19 +481,25 @@ def plot_analysis_page(sr, fig):
     pr_fem_hm = participation_ratio(Cfem_hm)
 
     cmap = plt.get_cmap("RdBu")
-    v = np.nanmax(np.abs(Ctotal_hm)) * 0.5
 
-    for ax, mat, title in [
-        (ax_cov_total, Ctotal_hm, "Total"),
-        (ax_cov_fem, Cfem_hm, f"FEM (PR={pr_fem_hm:.1f})"),
-        (ax_cov_psth, Cpsth_hm, f"PSTH (PR={pr_psth_hm:.1f})"),
-        (ax_cov_noise, CnoiseC_hm, "Noise (Corr)"),
-    ]:
-        vscale = 0.5 if "PSTH" in title else 1.0
-        ax.imshow(mat, cmap=cmap, interpolation="nearest",
-                  vmin=-v * vscale, vmax=v * vscale)
-        ax.set_title(title, fontsize=9)
-        ax.axis("off")
+    if Ctotal_hm.size > 0:
+        v = np.nanmax(np.abs(Ctotal_hm)) * 0.5
+        for ax, mat, title in [
+            (ax_cov_total, Ctotal_hm, "Total"),
+            (ax_cov_fem, Cfem_hm, f"FEM (PR={pr_fem_hm:.1f})"),
+            (ax_cov_psth, Cpsth_hm, f"PSTH (PR={pr_psth_hm:.1f})"),
+            (ax_cov_noise, CnoiseC_hm, "Noise (Corr)"),
+        ]:
+            vscale = 0.5 if "PSTH" in title else 1.0
+            ax.imshow(mat, cmap=cmap, interpolation="nearest",
+                      vmin=-v * vscale, vmax=v * vscale)
+            ax.set_title(title, fontsize=9)
+            ax.axis("off")
+    else:
+        for ax in [ax_cov_total, ax_cov_fem, ax_cov_psth, ax_cov_noise]:
+            ax.text(0.5, 0.5, "Insufficient neurons",
+                    ha="center", va="center", transform=ax.transAxes)
+            ax.axis("off")
 
     # ---------------------------------------------------------------
     # Row 2, Col 4: Scorecard
@@ -527,12 +534,15 @@ with PdfPages(PDF_PATH) as pdf:
         fig1 = plt.figure(figsize=(12, 8))
         plot_qc_page(sr, fig1)
         pdf.savefig(fig1, bbox_inches="tight", dpi=150)
-        plt.close(fig1)
+        #plt.close(fig1)
+        plt.show()
 
         # Page 2: Analysis
         fig2 = plt.figure(figsize=(16, 12))
         plot_analysis_page(sr, fig2)
         pdf.savefig(fig2, bbox_inches="tight", dpi=150)
-        plt.close(fig2)
+        #plt.close(fig2)
+        plt.show()
+        plt.close("all")
 
 print(f"\nDone. {n_sessions} sessions ({n_sessions * 2} pages) saved to {PDF_PATH}")

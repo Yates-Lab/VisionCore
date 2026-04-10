@@ -83,10 +83,10 @@ mpl.rcParams["font.sans-serif"] = ["Arial", "Helvetica", "DejaVu Sans"]
 # Analysis parameters
 # ---------------------------------------------------------------------------
 RECOMPUTE = True # set True to rerun decomposition from raw data
-DT = 1 / 240                # seconds per bin (native 240 Hz sampling)
-WINDOW_BINS = [2, 4, 8, 16] # counting windows in bins (powers of two)
+DT = 1 / 120                # seconds per bin (native 240 Hz sampling)
+WINDOW_BINS = [1, 2, 4, 8] # counting windows in bins (powers of two)
 N_SHUFFLES = 100             # shuffle null iterations
-MIN_TOTAL_SPIKES = 500       # neuron inclusion threshold (in align step)
+MIN_TOTAL_SPIKES = 200       # neuron inclusion threshold (in align step)
 MIN_VAR = 0                  # minimum variance for correlation computation
 EPS_RHO = 1e-3               # floor for correlation denominators
 SUBJECTS = ["Allen", "Logan", "Luke"]
@@ -209,6 +209,8 @@ else:
             window_sizes_bins=WINDOW_BINS,
             dt=DT,
             n_shuffles=N_SHUFFLES,
+            intercept_mode="lowest_bin",
+
             seed=42,
             device=str(DEVICE),
         )
@@ -342,11 +344,9 @@ for w_idx in range(n_windows):
         all_ff_corr.append(ff_c)
         all_erate.append(erate[valid])
 
-        # Raw pairwise correlations (no PSD projection — not needed for
-        # pairwise r_ij and can introduce asymmetric bias between U and C;
-        # PSD projection is reserved for eigendecomposition / subspace analyses)
-        NoiseCorrU = cov_to_corr(CnoiseU[np.ix_(valid, valid)], min_var=MIN_VAR)
-        NoiseCorrC = cov_to_corr(CnoiseC[np.ix_(valid, valid)], min_var=MIN_VAR)
+        # PSD project before correlation (removes negative eigenvalues from estimation noise)
+        NoiseCorrU = cov_to_corr(project_to_psd(CnoiseU[np.ix_(valid, valid)]), min_var=MIN_VAR)
+        NoiseCorrC = cov_to_corr(project_to_psd(CnoiseC[np.ix_(valid, valid)]), min_var=MIN_VAR)
         rho_u = get_upper_triangle(NoiseCorrU)
         rho_c = get_upper_triangle(NoiseCorrC)
 
@@ -388,7 +388,7 @@ for w_idx in range(n_windows):
                 CnoiseC_shuf = Ctotal - Crate_shuf
                 CnoiseC_shuf = 0.5 * (CnoiseC_shuf + CnoiseC_shuf.T)
                 NC_shuf = cov_to_corr(
-                    CnoiseC_shuf[np.ix_(valid, valid)], min_var=MIN_VAR
+                    project_to_psd(CnoiseC_shuf[np.ix_(valid, valid)]), min_var=MIN_VAR
                 )
                 rho_c_shuf = get_upper_triangle(NC_shuf)
                 ok = np.isfinite(rho_c_shuf) & pair_ok
@@ -635,7 +635,7 @@ for suffix, mask in subject_iter(metrics[0]["subject_per_neuron"]):
     tag = suffix.lstrip("_") if suffix else "All"
     ax_e.set_title(f"Panel E: Pop. FF vs window ({tag})")
     ax_e.legend(frameon=False, fontsize=8)
-    ax_e.set_xscale("log")
+    #ax_e.set_xscale("log")
     ax_e.set_xticks(WINDOWS_MS)
     ax_e.set_xticklabels([f"{w:.1f}" for w in WINDOWS_MS])
     fig_e.tight_layout()
@@ -759,7 +759,7 @@ for suffix, mask in subject_iter(np.array(metrics[0]["subject_by_ds"])):
     tag = suffix.lstrip("_") if suffix else "All"
     ax_g.set_title(f"Panel G: Noise corr vs window ({tag})")
     ax_g.legend(frameon=False, fontsize=8)
-    ax_g.set_xscale("log")
+    #ax_g.set_xscale("log")
     ax_g.set_xticks(WINDOWS_MS)
     ax_g.set_xticklabels([f"{w:.1f}" for w in WINDOWS_MS])
     fig_g.tight_layout()
@@ -802,7 +802,7 @@ for suffix, mask in subject_iter(np.array(metrics[0]["subject_by_ds"])):
     tag = suffix.lstrip("_") if suffix else "All"
     ax_h.set_title(f"Panel H: Effect size ({tag})")
     ax_h.legend(frameon=False, fontsize=8)
-    ax_h.set_xscale("log")
+    #ax_h.set_xscale("log")
     ax_h.set_xticks(WINDOWS_MS)
     ax_h.set_xticklabels([f"{w:.1f}" for w in WINDOWS_MS])
     fig_h.tight_layout()
@@ -925,7 +925,7 @@ for suffix, mask in subject_iter(np.array(sub_subjects)):
         dims = np.arange(1, max_dims + 1)
         ax_i.plot(dims, median, color=color, label=label)
         ax_i.fill_between(dims, q25, q75, color=color, alpha=0.2)
-    ax_i.set_xscale("log")
+    #ax_i.set_xscale("log")
     ax_i.set_yscale("log")
     ax_i.set_xlabel("Eigenvalue rank")
     ax_i.set_ylabel("Fraction of total variance")
@@ -1145,7 +1145,7 @@ ax.set_xlabel("Counting window (ms)")
 ax.set_ylabel("Population Fano factor")
 ax.set_title("E")
 ax.legend(frameon=False, fontsize=7)
-ax.set_xscale("log")
+#ax.set_xscale("log")
 ax.set_xticks(WINDOWS_MS)
 ax.set_xticklabels([f"{w:.0f}" for w in WINDOWS_MS])
 
@@ -1175,7 +1175,7 @@ ax.set_xlabel("Counting window (ms)")
 ax.set_ylabel("Mean Fisher z")
 ax.set_title("G")
 ax.legend(frameon=False, fontsize=7)
-ax.set_xscale("log")
+#ax.set_xscale("log")
 ax.set_xticks(WINDOWS_MS)
 ax.set_xticklabels([f"{w:.0f}" for w in WINDOWS_MS])
 
@@ -1197,7 +1197,7 @@ ax.set_xlabel("Counting window (ms)")
 ax.set_ylabel("Δz (corr - uncorr)")
 ax.set_title("H")
 ax.legend(frameon=False, fontsize=7)
-ax.set_xscale("log")
+#ax.set_xscale("log")
 ax.set_xticks(WINDOWS_MS)
 ax.set_xticklabels([f"{w:.0f}" for w in WINDOWS_MS])
 
@@ -1216,7 +1216,7 @@ for spec, color, label in [(spectra_psth, "tab:blue", "PSTH"),
     dims = np.arange(1, max_dims + 1)
     ax.plot(dims, median, color=color, label=label)
     ax.fill_between(dims, q25, q75, color=color, alpha=0.2)
-ax.set_xscale("log")
+#ax.set_xscale("log")
 ax.set_yscale("log")
 ax.set_xlabel("Eigenvalue rank")
 ax.set_ylabel("Frac. total variance")

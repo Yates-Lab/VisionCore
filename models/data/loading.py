@@ -95,7 +95,7 @@ def get_embedded_datasets(sess, types=None, keys_lags=None, train_val_split=None
 
     # Print dataset statistics
     for iD, dset in enumerate(dsets):
-        print(f'{types[iD]} dataset size: {len(dset)} / {len(dset_inds[iD])} ({len(dset_inds[iD])/len(dset)*100:.2f}%)')
+        print(f'{types[iD]} dataset size: {len(dset_inds[iD])} / {len(dset)} ({len(dset_inds[iD])/len(dset)*100:.2f}%)')
 
     # Split indices into training and validation sets by trial
     train_inds, val_inds = [], []

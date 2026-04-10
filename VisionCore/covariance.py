@@ -6,6 +6,7 @@ explicit arguments instead of reading from self.
 """
 import numpy as np
 import torch
+from scipy.linalg import logm, expm
 from tqdm import tqdm
 
 from VisionCore.subspace import project_to_psd  # re-export for convenience
@@ -478,6 +479,160 @@ def fit_intercept_linear(Ceye, bin_centers, count_e, d_max=0.4, min_bins=3,
     return C_intercept
 
 
+def fit_intercept_log_euclidean(Ceye, bin_centers, count_e, d_max=0.4,
+                                min_bins=3, ridge=1e-6, eval_at_first_bin=True):
+    """
+    Log-Euclidean intercept fitting: weighted linear regression in the space
+    of matrix logarithms, guaranteeing a positive semi-definite result.
+
+    Mathematical background
+    -----------------------
+    The set of symmetric positive definite (SPD) matrices forms a Riemannian
+    manifold — a curved space where straight-line (Euclidean) interpolation
+    between two SPD matrices can exit the cone and produce indefinite results.
+    This is exactly why element-wise linear regression on Ceye[k] can yield a
+    non-PSD intercept matrix.
+
+    The Log-Euclidean framework (Arsigny et al., 2006, "Log-Euclidean metrics
+    for fast and simple calculus on diffusion tensors") addresses this by
+    mapping SPD matrices into an unconstrained vector space via the matrix
+    logarithm:
+
+        S = logm(C)          C ∈ SPD(n)  →  S ∈ Sym(n)
+
+    In this "log domain", the symmetric matrices form a flat vector space
+    where standard linear operations (weighted mean, linear regression) are
+    well-defined. The inverse map (matrix exponential) sends any symmetric
+    matrix back to an SPD matrix:
+
+        C = expm(S)          S ∈ Sym(n)  →  C ∈ SPD(n)
+
+    Algorithm
+    ---------
+    1. Regularize: each bin's covariance Ceye[k] is projected to SPD by
+       adding a small ridge (ε·I) to ensure strict positive definiteness,
+       which is required for the matrix logarithm to be real-valued.
+
+    2. Map to log domain: S[k] = logm(Ceye[k] + ε·I) for each distance bin.
+
+    3. Fit weighted linear regression on each element (i, j) of S[k] against
+       bin center distance d[k], using pair counts as weights — identical to
+       fit_intercept_linear but operating on the log-domain matrices.
+
+    4. Evaluate the fitted line at the target distance (first bin center or
+       d = 0) to get S_intercept.
+
+    5. Map back: C_intercept = expm(S_intercept). The matrix exponential of
+       any real symmetric matrix is guaranteed SPD, so the result is always a
+       valid covariance matrix.
+
+    Why this is better than project_to_psd post-hoc
+    ------------------------------------------------
+    The current pipeline fits element-wise in Euclidean space (which can leave
+    the SPD cone), then projects back via eigenvalue clamping. That projection
+    finds the nearest PSD matrix in Frobenius norm, but it distorts the
+    carefully fitted element values — especially off-diagonal covariances,
+    which carry the noise correlation signal.
+
+    Log-Euclidean regression never leaves the SPD cone, so no post-hoc
+    correction is needed. The regression "straight line" in log-space
+    corresponds to a geodesic-like curve in SPD space that respects the
+    manifold geometry.
+
+    Parameters
+    ----------
+    Ceye : ndarray (n_bins, n_cells, n_cells)
+        Covariance matrices conditioned on eye-trajectory distance bin.
+    bin_centers : ndarray (n_bins,)
+        Distance bin centers.
+    count_e : ndarray (n_bins,)
+        Number of pairs in each bin (regression weights).
+    d_max : float
+        Maximum distance to include in the regression.
+    min_bins : int
+        Minimum number of usable bins required.
+    ridge : float
+        Small positive constant added to diagonals before taking logm,
+        ensuring strict positive definiteness. Should be small relative
+        to typical variances (default 1e-6).
+    eval_at_first_bin : bool
+        If True, evaluate the fitted line at the first bin center
+        (conservative, avoids extrapolation). If False, extrapolate to d=0.
+
+    Returns
+    -------
+    C_intercept : ndarray (n_cells, n_cells)
+        Estimated covariance at zero eye-trajectory distance. Guaranteed
+        symmetric positive definite.
+    """
+    n_bins, n_cells, _ = Ceye.shape
+
+    x = np.asarray(bin_centers, dtype=np.float64)
+    w_all = np.asarray(count_e, dtype=np.float64)
+
+    # Select bins within distance range with valid data
+    use_mask = np.isfinite(x) & (x > 0) & (x <= d_max) & np.isfinite(w_all) & (w_all > 0)
+    idx = np.where(use_mask)[0]
+
+    if idx.size < min_bins:
+        # Fall back to the nearest valid bin, regularized
+        k0 = np.where(np.isfinite(x) & np.isfinite(w_all) & (w_all > 0))[0]
+        if k0.size > 0:
+            C0 = Ceye[k0[0]].copy()
+            C0 = 0.5 * (C0 + C0.T)
+            C0 = np.nan_to_num(C0, nan=0.0)
+            C0 += ridge * np.eye(n_cells)
+            return expm(logm(C0))  # round-trip ensures SPD
+        return np.full((n_cells, n_cells), np.nan, dtype=Ceye.dtype)
+
+    x_loc = x[idx]
+    w_loc = w_all[idx]
+    x_eval = x_loc[0] if eval_at_first_bin else 0.0
+
+    # --- Step 1-2: Regularize each bin and map to log domain ---
+    S = np.empty((len(idx), n_cells, n_cells), dtype=np.float64)
+    for k_i, k in enumerate(idx):
+        Ck = Ceye[k].copy().astype(np.float64)
+        Ck = 0.5 * (Ck + Ck.T)
+        Ck = np.nan_to_num(Ck, nan=0.0)
+        Ck += ridge * np.eye(n_cells)
+        S[k_i] = logm(Ck).real  # .real guards against tiny imaginary residuals
+
+    # --- Step 3: Weighted linear regression on each element of S ---
+    # Same WLS formula as fit_intercept_linear:
+    #   beta0 = (Sxx * Sy - Sx * Sxy) / det
+    #   beta1 = (S0 * Sxy - Sx * Sy) / det
+    #   intercept_value = beta0 + beta1 * x_eval
+    S0 = np.sum(w_loc)
+    Sx = np.sum(w_loc * x_loc)
+    Sxx = np.sum(w_loc * x_loc ** 2)
+    det = S0 * Sxx - Sx ** 2
+
+    if det / (S0 * S0) < 1e-8:
+        # Degenerate case: all bins at same distance, use weighted mean
+        S_intercept = np.average(S, axis=0, weights=w_loc)
+    else:
+        # Vectorized WLS across all matrix elements at once
+        # S has shape (n_used_bins, n_cells, n_cells)
+        Sy = np.einsum('k,kij->ij', w_loc, S)
+        Sxy = np.einsum('k,k,kij->ij', w_loc, x_loc, S)
+        beta0 = (Sxx * Sy - Sx * Sxy) / det
+        beta1 = (S0 * Sxy - Sx * Sy) / det
+        S_intercept = beta0 + beta1 * x_eval
+
+    # --- Step 4: Symmetrize (guards against float accumulation) ---
+    S_intercept = 0.5 * (S_intercept + S_intercept.T)
+
+    # --- Step 5: Map back to SPD via matrix exponential ---
+    C_intercept = expm(S_intercept).real
+
+    # Symmetrize the result (expm of a symmetric matrix is symmetric,
+    # but floating point can introduce ~1e-16 asymmetry)
+    C_intercept = 0.5 * (C_intercept + C_intercept.T)
+
+    return C_intercept
+
+
 # ---------------------------------------------------------------------------
 # PSTH covariance
 # ---------------------------------------------------------------------------
@@ -611,7 +766,7 @@ def estimate_rate_covariance(SpikeCounts, EyeTraj, T_idx, n_bins=25,
     Ctotal : ndarray (C, C), optional
         Total covariance for physical limit check.
     intercept_mode : str
-        'linear', 'isotonic', or 'raw'.
+        'linear', 'isotonic', 'log_euclidean', or 'lowest_bin'.
 
     Returns
     -------
@@ -666,10 +821,13 @@ def estimate_rate_covariance(SpikeCounts, EyeTraj, T_idx, n_bins=25,
         Crate = fit_intercept_linear(Ceye, bin_centers, count_e, eval_at_first_bin=True)
     elif intercept_mode == 'isotonic':
         Crate = fit_intercept_pava(Ceye, count_e)
+    elif intercept_mode == 'log_euclidean':
+        Crate = fit_intercept_log_euclidean(Ceye, bin_centers, count_e,
+                                            eval_at_first_bin=True)
     elif intercept_mode == 'lowest_bin':
         Crate = Ceye[0].copy()
     else:
-        Crate = Ceye[0].copy()
+        raise ValueError(f"Invalid intercept_mode: {intercept_mode!r}")
 
     if Ctotal is not None:
         bad_mask = np.diag(Crate) > 0.99 * np.diag(Ctotal)
