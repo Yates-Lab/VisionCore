@@ -7,10 +7,11 @@ Run interactively with IPython (#%% cells) or as a script with uv run.
 
 Panels:
   A  Architecture schematic (fig3-schematic.svg, placed manually)
-  B  Example neuron PSTHs with twin predictions (1 per animal)
-  C  Histogram of normalized correlation (ccnorm)
-  D  Single-trial r^2 scatter: model vs PSTH
-  E  Improvement over PSTH vs FEM modulation (1-alpha)
+  B  Example neuron PSTH overlay (observed + twin)
+  C  Single-trial rasters: observed | twin (same neuron as B)
+  D  Histogram of normalized correlation (ccnorm)
+  E  Single-trial r^2 scatter: model vs PSTH
+  F  Improvement over PSTH vs FEM modulation (1-alpha)
 """
 import sys
 
@@ -41,6 +42,14 @@ MIN_FIX_DUR = 20             # minimum fixation duration (bins)
 MIN_TOTAL_SPIKES = 200       # neuron inclusion threshold
 CCNORM_N_SPLITS = 500        # split-half iterations for ccnorm
 CCMAX_THRESHOLD = 0.80       # reliability threshold for "good" neurons
+PANEL_B_MIN_DUR_S = 0.5      # minimum trial length for PCA ordering + raster (sec).
+                             # Bounded by the model's temporal warmup (~32 bins),
+                             # which leaves ~88 bins (~0.73s) of valid data max.
+# Panel B example neuron. Set both to None to auto-pick the highest-ccnorm
+# reliable neuron across all sessions. Otherwise pin a specific example:
+# PANEL_B_NEURON_ID is the original neuron index (matches sr["neuron_mask"][ni]).
+PANEL_B_SESSION = "Allen_2022-04-08"
+PANEL_B_NEURON_ID = 62
 SUBJECTS = ["Allen", "Logan"]
 SUBJECT_COLORS = {"Allen": "tab:blue", "Logan": "tab:green"}
 
@@ -378,6 +387,10 @@ else:
             # Traces (trial-averaged, for Panel B)
             "rhat_mean": rhat_mean,  # (n_time, n_neurons)
             "robs_mean": robs_mean,
+            # Per-trial data (for Panel B raster/heatmaps)
+            "robs_used": robs_used,   # (n_trials, n_time, n_neurons)
+            "rhat_used": rhat_used,   # (n_trials, n_time, n_neurons)
+            "dfs_used": dfs_used,     # (n_trials, n_time, n_neurons)
             # Performance metrics (per-neuron)
             "rhos": rhos,
             "ccnorm": ccnorm,
@@ -457,55 +470,319 @@ good = ccmax > CCMAX_THRESHOLD
 print(f"Good neurons (ccmax > {CCMAX_THRESHOLD}): {good.sum()}")
 
 
-# %% Panel B: Example neuron PSTHs with twin predictions
-# For each animal, select the neuron with the highest ccnorm among reliable
-# neurons (ccmax > threshold). Plot the trial-averaged observed firing rate
-# (black) and model prediction (colored) over time.
+# %% Helper: filter long trials and order by observed PC1
+# For the single-neuron raster plots, we restrict to trials with at least
+# PANEL_B_MIN_DUR_S seconds of valid data, truncate to that window, and sort
+# trials by their projection onto the first PC of the observed (trials × time)
+# matrix. Applying the same ordering to the model predictions lets the
+# raster reveal whether the twin captures the dominant trial-to-trial mode.
 
-tbins = np.arange(VALID_TIME_BINS) * DT  # time axis in seconds
+PANEL_B_MIN_BINS = int(round(PANEL_B_MIN_DUR_S / DT))
+tbins = np.arange(VALID_TIME_BINS) * DT  # time axis in seconds (pre-shift)
 
-fig_b, axs_b = plt.subplots(1, 2, figsize=(6, 2.5), sharey=False)
 
-for ax, subj in zip(axs_b, SUBJECTS):
-    mask = (subjects == subj) & good & np.isfinite(ccnorm)
-    if not mask.any():
-        ax.set_title(f"{subj}: no good neurons")
+def order_single_neuron_by_pc1(robs_trials, rhat_trials, dfs_trials,
+                                min_bins=PANEL_B_MIN_BINS):
+    """Filter trials with ≥ min_bins valid bins (in the plotting window),
+    truncate, and order by PC1 of the observed (trials × time) matrix.
+
+    Leading bins that are NaN across all trials (model temporal-context warmup)
+    are skipped first, so the returned window starts at the first bin with any
+    valid data. Missing bins within the window (brief fixation dropouts) are
+    per-timepoint-mean imputed for PCA only; display arrays keep NaN.
+
+    Parameters
+    ----------
+    robs_trials, rhat_trials, dfs_trials : (n_trials, n_time) arrays
+
+    Returns
+    -------
+    robs_sorted, rhat_sorted : (n_kept, min_bins) with NaN at invalid bins
+    order : indices into filtered set giving the PC1 sort
+    first_bin : int, leading bin of the returned window in the full trial axis
+    """
+    # Drop leading bins with no valid data in any trial (model warmup).
+    any_valid = (dfs_trials > 0).any(axis=0)
+    if not any_valid.any():
+        empty = np.empty((0, min_bins))
+        return empty, empty, np.arange(0), 0
+    first_bin = int(np.argmax(any_valid))
+    end_bin = first_bin + min_bins
+    if end_bin > dfs_trials.shape[1]:
+        empty = np.empty((0, min_bins))
+        return empty, empty, np.arange(0), first_bin
+
+    # Keep trials whose valid-bin count in the plotting window meets the minimum.
+    window_valid = dfs_trials[:, first_bin:end_bin] > 0
+    trial_valid_count = window_valid.sum(axis=1)
+    keep = trial_valid_count >= min_bins
+
+    robs_k = robs_trials[keep, first_bin:end_bin].astype(float).copy()
+    rhat_k = rhat_trials[keep, first_bin:end_bin].astype(float).copy()
+    dfs_k = dfs_trials[keep, first_bin:end_bin]
+    valid_k = dfs_k > 0
+
+    if robs_k.shape[0] < 2:
+        robs_k[~valid_k] = np.nan
+        rhat_k[~valid_k] = np.nan
+        return robs_k, rhat_k, np.arange(robs_k.shape[0]), first_bin
+
+    # Impute missing bins with per-timepoint mean across retained trials
+    # so PCA isn't distorted by zeros / NaNs at dropped fixation bins.
+    obs_masked = np.where(valid_k, robs_k, np.nan)
+    col_mean = np.nanmean(obs_masked, axis=0, keepdims=True)
+    col_mean = np.where(np.isfinite(col_mean), col_mean, 0.0)
+    obs_filled = np.where(valid_k, robs_k, np.broadcast_to(col_mean, robs_k.shape))
+
+    obs_centered = obs_filled - obs_filled.mean(axis=0, keepdims=True)
+    U, S, _ = np.linalg.svd(obs_centered, full_matrices=False)
+    pc1_scores = U[:, 0] * S[0]
+    order = np.argsort(pc1_scores)
+
+    robs_k[~valid_k] = np.nan
+    rhat_k[~valid_k] = np.nan
+    return robs_k[order], rhat_k[order], order, first_bin
+
+
+# Hard-coded display window for Panel B (and candidates). PSTH and raster
+# halves are both this wide so everything lines up.
+PANEL_B_WINDOW_S = 0.5
+n_bins_b = int(round(PANEL_B_WINDOW_S / DT))
+
+
+def _draw_raster_pair(ax, robs_rate, rhat_rate, *, window_s, vmin, vmax,
+                      scale_len_s=0.1, n_trials_scale=10,
+                      label_fontsize=9, scale_fontsize=8):
+    """Concatenated observed|twin raster on one axes with a vertical divider,
+    top 'Observed'/'Twin' labels, no tick marks/spines, and time + trial
+    scale bars. Returns the AxesImage for colorbar construction.
+
+    Both halves are rendered in a single imshow so they have identical aspect
+    ratios and pixel sizes — subplot-spacing jitter can't desync them.
+    """
+    combined = np.concatenate([robs_rate, rhat_rate], axis=1)
+    n_trials_local = combined.shape[0]
+    im = ax.imshow(
+        combined, aspect="auto", origin="upper",
+        extent=[0, 2 * window_s, n_trials_local, 0],
+        vmin=vmin, vmax=vmax, cmap="binary", interpolation="none",
+    )
+    ax.axvline(window_s, color="k", linewidth=0.8)
+    ax.text(0.25, 1.02, "Observed", transform=ax.transAxes,
+            ha="center", va="bottom", fontsize=label_fontsize)
+    ax.text(0.75, 1.02, "Twin", transform=ax.transAxes,
+            ha="center", va="bottom", fontsize=label_fontsize)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for side in ("top", "right", "left", "bottom"):
+        ax.spines[side].set_visible(False)
+    # Time scale bar below the image: x in data, y in axes fraction.
+    trans_x = ax.get_xaxis_transform()
+    ax.plot([0.0, scale_len_s], [-0.06, -0.06], "k-", linewidth=2,
+            transform=trans_x, clip_on=False)
+    ax.text(scale_len_s / 2, -0.11, f"{int(round(scale_len_s * 1000))} ms",
+            transform=trans_x, ha="center", va="top",
+            fontsize=scale_fontsize, clip_on=False)
+    # Trials scale bar to the left: x in axes fraction, y in data.
+    # Image is origin='upper' with ylim=[n_trials, 0], so bottom of image
+    # is y_data=n_trials; 10 trials up from the bottom = n_trials - 10.
+    trans_y = ax.get_yaxis_transform()
+    n_scale = min(n_trials_scale, n_trials_local)
+    y0, y1 = n_trials_local, n_trials_local - n_scale
+    ax.plot([-0.02, -0.02], [y0, y1], "k-", linewidth=2,
+            transform=trans_y, clip_on=False)
+    ax.text(-0.04, (y0 + y1) / 2, f"{n_scale} trials",
+            transform=trans_y, ha="right", va="center", rotation=90,
+            fontsize=scale_fontsize, clip_on=False)
+    return im
+
+
+# Panel B candidates: top 30 neurons by ccnorm
+# Quick visual survey to pick the best-looking example for Panel B.
+# Each row is one neuron: PSTH overlay (left) and concatenated observed|twin
+# raster (right). Trials are filtered to ≥ PANEL_B_WINDOW_S and sorted by PC1
+# of the observed trial-by-time matrix; the same sort is applied to the twin.
+
+mask_all_cand = good & np.isfinite(ccnorm)
+candidates_ranked = np.where(mask_all_cand)[0]
+candidates_ranked = candidates_ranked[np.argsort(ccnorm[candidates_ranked])[::-1]]
+n_show = min(50, len(candidates_ranked))
+
+for rank in range(n_show):
+    idx_local = candidates_ranked[rank]
+    idx_global = valid_indices[idx_local]
+    si_c, ni_c = all_trace_neuron_session[idx_global]
+    sr_c = session_results[si_c]
+
+    # Per-trial data for this neuron
+    robs_t_full = sr_c["robs_used"][:, :, ni_c]
+    rhat_t_full = sr_c["rhat_used"][:, :, ni_c]
+    dfs_t_full = sr_c["dfs_used"][:, :, ni_c]
+
+    robs_sorted, rhat_sorted, _, first_bin_c = order_single_neuron_by_pc1(
+        robs_t_full, rhat_t_full, dfs_t_full
+    )
+    if robs_sorted.shape[0] < 2:
         continue
+    robs_rate = (robs_sorted / DT)[:, :n_bins_b]
+    rhat_rate = (rhat_sorted / DT)[:, :n_bins_b]
 
-    # Best neuron by ccnorm
-    candidates = np.where(mask)[0]
-    best_local = candidates[np.nanargmax(ccnorm[candidates])]
+    # Trial-averaged traces shifted so first_bin_c → t=0, then clipped to window.
+    robs_tr = all_robs_mean[idx_global] / DT
+    rhat_tr = all_rhat_mean[idx_global] / DT
+    tt = (np.arange(len(robs_tr)) - first_bin_c) * DT
+    window_c = (np.isfinite(robs_tr) & np.isfinite(rhat_tr)
+                & (tt >= 0) & (tt <= PANEL_B_WINDOW_S))
+
+    vm = 0
+    vx = np.nanpercentile(
+        np.concatenate([robs_rate.ravel(), rhat_rate.ravel()]), 97
+    )
+
+    fig_cand = plt.figure(figsize=(8, 3))
+    gs_cand = fig_cand.add_gridspec(1, 2, width_ratios=[1, 2], wspace=0.35)
+    ax_psth_c = fig_cand.add_subplot(gs_cand[0, 0])
+    ax_rast_c = fig_cand.add_subplot(gs_cand[0, 1])
+
+    fig_cand.suptitle(
+        f"Rank {rank+1}: {sr_c['session']} neuron {sr_c['neuron_mask'][ni_c]} "
+        f"({sr_c['subject']}) — ccnorm={ccnorm[idx_local]:.3f}, "
+        f"N_trials={robs_sorted.shape[0]}",
+        fontsize=9,
+    )
+
+    ax_psth_c.plot(tt[window_c], robs_tr[window_c], 'k', linewidth=1,
+                   label="Observed")
+    ax_psth_c.plot(tt[window_c], rhat_tr[window_c], 'tab:red', linewidth=1,
+                   label="Twin")
+    ax_psth_c.set_xlim(0, PANEL_B_WINDOW_S)
+    ax_psth_c.set_xlabel("Time (s)")
+    ax_psth_c.set_ylabel("Rate (sp/s)")
+    ax_psth_c.legend(frameon=False, fontsize=7)
+    ax_psth_c.spines["top"].set_visible(False)
+    ax_psth_c.spines["right"].set_visible(False)
+
+    im_cand = _draw_raster_pair(
+        ax_rast_c, robs_rate, rhat_rate,
+        window_s=PANEL_B_WINDOW_S, vmin=vm, vmax=vx,
+    )
+    fig_cand.colorbar(im_cand, ax=ax_rast_c, shrink=0.8, pad=0.02, label="sp/s")
+    plt.show()
+    plt.close(fig_cand)
+
+
+# %% Panels B and C: Example neuron — PSTH overlay (B) + single-trial rasters (C)
+# Select the neuron with the highest ccnorm among reliable neurons across all
+# animals (or honor the PANEL_B_SESSION / PANEL_B_NEURON_ID override). Panel B
+# is the trial-averaged observed (black) and twin (red) rates; Panel C is the
+# concatenated observed|twin single-trial raster. Same 0.5 s window in both.
+
+# Select best neuron across all subjects, unless a specific example is pinned.
+if PANEL_B_SESSION is not None and PANEL_B_NEURON_ID is not None:
+    si = next(
+        (i for i, sr in enumerate(session_results)
+         if sr["session"] == PANEL_B_SESSION),
+        None,
+    )
+    if si is None:
+        raise ValueError(
+            f"PANEL_B_SESSION={PANEL_B_SESSION!r} not found in session_results"
+        )
+    nmask = session_results[si]["neuron_mask"]
+    matches = np.where(np.asarray(nmask) == PANEL_B_NEURON_ID)[0]
+    if len(matches) == 0:
+        raise ValueError(
+            f"PANEL_B_NEURON_ID={PANEL_B_NEURON_ID} not in session "
+            f"{PANEL_B_SESSION} (neurons passing spike threshold: "
+            f"{sorted(int(x) for x in nmask)})"
+        )
+    ni = int(matches[0])
+    best_global = all_trace_neuron_session.index((si, ni))
+    loc = np.where(valid_indices == best_global)[0]
+    if len(loc) == 0:
+        raise ValueError(
+            f"Pinned neuron (session={PANEL_B_SESSION}, id={PANEL_B_NEURON_ID}) "
+            "was filtered out (non-finite rho)"
+        )
+    best_local = int(loc[0])
+else:
+    mask_all = good & np.isfinite(ccnorm)
+    candidates_all = np.where(mask_all)[0]
+    best_local = candidates_all[np.nanargmax(ccnorm[candidates_all])]
     best_global = valid_indices[best_local]
     si, ni = all_trace_neuron_session[best_global]
 
-    robs_trace = all_robs_mean[best_global] / DT  # convert to spikes/sec
-    rhat_trace = all_rhat_mean[best_global] / DT
+best_sr = session_results[si]
+best_subj = best_sr["subject"]
 
-    # Only plot time bins with valid data
-    t_valid = np.isfinite(robs_trace) & np.isfinite(rhat_trace)
-    t = tbins[:len(robs_trace)]
+print(f"Panel B — example neuron: {best_sr['session']}, "
+      f"neuron {best_sr['neuron_mask'][ni]}, "
+      f"ccnorm={ccnorm[best_local]:.2f}")
 
-    ax.plot(t[t_valid], robs_trace[t_valid], 'k', linewidth=1, label="Observed")
-    ax.plot(t[t_valid], rhat_trace[t_valid], color=SUBJECT_COLORS[subj],
-            linewidth=1, label="Twin")
-    ax.set_xlabel("Time (s)")
-    ax.set_ylabel("Rate (sp/s)")
-    ax.set_title(f"{subj} (ccnorm={ccnorm[best_local]:.2f})")
-    ax.legend(frameon=False, fontsize=8)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
+# Extract per-trial data for this neuron and order by PC1 of observed
+robs_trials = best_sr["robs_used"][:, :, ni]   # (n_trials, n_time)
+rhat_trials = best_sr["rhat_used"][:, :, ni]
+dfs_trials = best_sr["dfs_used"][:, :, ni]
 
+robs_sorted_b, rhat_sorted_b, _, first_bin_b = order_single_neuron_by_pc1(
+    robs_trials, rhat_trials, dfs_trials
+)
+# Truncate to the hard-coded display window so PSTH and rasters match length.
+robs_trials_rate = (robs_sorted_b / DT)[:, :n_bins_b]
+rhat_trials_rate = (rhat_sorted_b / DT)[:, :n_bins_b]
+
+print(f"  Panel B raster: {robs_sorted_b.shape[0]} trials "
+      f"(≥ {PANEL_B_WINDOW_S:.1f}s) ordered by PC1 of observed, "
+      f"starting at bin {first_bin_b} ({tbins[first_bin_b]*1000:.0f} ms → t=0)")
+
+# Trial-averaged traces (full window, shifted so first_bin_b → t=0)
+robs_trace = all_robs_mean[best_global] / DT
+rhat_trace = all_rhat_mean[best_global] / DT
+t_valid = np.isfinite(robs_trace) & np.isfinite(rhat_trace)
+t = (np.arange(len(robs_trace)) - first_bin_b) * DT
+psth_window = t_valid & (t >= 0) & (t <= PANEL_B_WINDOW_S)
+
+# Shared color limits for raster plots
+vmin = 0
+vmax = np.nanpercentile(
+    np.concatenate([robs_trials_rate.ravel(), rhat_trials_rate.ravel()]), 97
+)
+
+
+# --- Panel B: PSTH overlay (its own figure) ---
+fig_b, ax_psth_b = plt.subplots(figsize=(3, 2.5))
+ax_psth_b.plot(t[psth_window], robs_trace[psth_window], 'k',
+               linewidth=1, label="Observed")
+ax_psth_b.plot(t[psth_window], rhat_trace[psth_window], color='tab:red',
+               linewidth=1, label="Twin")
+ax_psth_b.set_xlim(0, PANEL_B_WINDOW_S)
+ax_psth_b.set_xlabel("Time (s)")
+ax_psth_b.set_ylabel("Rate (sp/s)")
+ax_psth_b.set_title(f"ccnorm = {ccnorm[best_local]:.2f}")
+ax_psth_b.legend(frameon=False, fontsize=8)
+ax_psth_b.spines["top"].set_visible(False)
+ax_psth_b.spines["right"].set_visible(False)
 fig_b.tight_layout()
-fig_b.savefig(FIG_DIR / "panel_b_example_traces.pdf", bbox_inches="tight", dpi=300)
+fig_b.savefig(FIG_DIR / "panel_b_psth.pdf", bbox_inches="tight", dpi=300)
 show_or_close(fig_b)
 
+# --- Panel C: concatenated observed|twin single-trial raster ---
+fig_c_rast, ax_rast_c_fig = plt.subplots(figsize=(4.5, 2.5))
+im = _draw_raster_pair(
+    ax_rast_c_fig, robs_trials_rate, rhat_trials_rate,
+    window_s=PANEL_B_WINDOW_S, vmin=vmin, vmax=vmax,
+)
+fig_c_rast.colorbar(im, ax=ax_rast_c_fig, shrink=0.8, pad=0.02, label="sp/s")
+fig_c_rast.savefig(FIG_DIR / "panel_c_rasters.pdf", bbox_inches="tight", dpi=300)
+show_or_close(fig_c_rast)
 
-# %% Panel C: Histogram of normalized correlation (ccnorm)
+
+# %% Panel D: Histogram of normalized correlation (ccnorm)
 # ccnorm = CCabs / CCmax normalizes each neuron's prediction accuracy by its
 # noise ceiling. A value of 1.0 means the model explains all explainable variance.
 # We report per-animal distributions with median and IQR.
 
-fig_c, ax_c = plt.subplots(figsize=(3.5, 2.5))
+fig_d, ax_d_hist = plt.subplots(figsize=(3.5, 2.5))
 
 # Shared bins across subjects
 valid_ccnorm = ccnorm[good & np.isfinite(ccnorm)]
@@ -520,53 +797,53 @@ for subj in SUBJECTS:
     med = np.nanmedian(vals)
     q25, q75 = np.nanpercentile(vals, [25, 75])
 
-    ax_c.hist(vals, bins=bins, color=color, edgecolor="white", alpha=0.5)
-    ax_c.axvline(med, color=color, linewidth=2, ls=(0, (1, 1)),
-                 label=f"{subj}: {med:.2f} [{q25:.2f}, {q75:.2f}]")
+    ax_d_hist.hist(vals, bins=bins, color=color, edgecolor="white", alpha=0.5)
+    ax_d_hist.axvline(med, color=color, linewidth=2, ls=(0, (1, 1)),
+                      label=f"{subj}: {med:.2f} [{q25:.2f}, {q75:.2f}]")
 
-    print(f"Panel C — {subj} (N={mask.sum()}): "
+    print(f"Panel D — {subj} (N={mask.sum()}): "
           f"median ccnorm={med:.2f}, IQR=[{q25:.2f}, {q75:.2f}]")
 
-ax_c.set_xlabel("Normalized correlation (ccnorm)")
-ax_c.set_ylabel("Count")
-ax_c.legend(frameon=False, fontsize=8)
-ax_c.spines["top"].set_visible(False)
-ax_c.spines["right"].set_visible(False)
+ax_d_hist.set_xlabel("Normalized correlation (ccnorm)")
+ax_d_hist.set_ylabel("Count")
+ax_d_hist.legend(frameon=False, fontsize=8)
+ax_d_hist.spines["top"].set_visible(False)
+ax_d_hist.spines["right"].set_visible(False)
 
-fig_c.tight_layout()
-fig_c.savefig(FIG_DIR / "panel_c_ccnorm_hist.pdf", bbox_inches="tight", dpi=300)
-show_or_close(fig_c)
+fig_d.tight_layout()
+fig_d.savefig(FIG_DIR / "panel_d_ccnorm_hist.pdf", bbox_inches="tight", dpi=300)
+show_or_close(fig_d)
 
 
-# %% Panel D: Single-trial r^2 — model vs PSTH
+# %% Panel E: Single-trial r^2 — model vs PSTH
 # Each point is one neuron. X-axis = r^2 using leave-one-out PSTH as predictor.
 # Y-axis = r^2 using the digital twin as predictor. Points above the unity line
 # indicate the model captures more trial-by-trial variance than the PSTH alone.
 
-fig_d, ax_d = plt.subplots(figsize=(3, 2.5))
+fig_e, ax_e_scat = plt.subplots(figsize=(3, 2.5))
 
 for subj in SUBJECTS:
     mask = (subjects == subj) & good
     if not mask.any():
         continue
-    ax_d.scatter(
+    ax_e_scat.scatter(
         ve_psth[mask], ve_model[mask],
         s=5, alpha=0.5, color=SUBJECT_COLORS[subj], label=subj,
     )
 
 lims = [0, max(0.4, np.nanmax(ve_model[good]) * 1.1)]
-ax_d.plot(lims, lims, 'k--', linewidth=0.5, alpha=0.5)
-ax_d.set_xlim(lims)
-ax_d.set_ylim(lims)
-ax_d.set_xlabel("Single-trial $r^2$ (PSTH)")
-ax_d.set_ylabel("Single-trial $r^2$ (Model)")
-ax_d.legend(frameon=False, fontsize=8)
-ax_d.spines["top"].set_visible(False)
-ax_d.spines["right"].set_visible(False)
+ax_e_scat.plot(lims, lims, 'k--', linewidth=0.5, alpha=0.5)
+ax_e_scat.set_xlim(lims)
+ax_e_scat.set_ylim(lims)
+ax_e_scat.set_xlabel("Single-trial $r^2$ (PSTH)")
+ax_e_scat.set_ylabel("Single-trial $r^2$ (Model)")
+ax_e_scat.legend(frameon=False, fontsize=8)
+ax_e_scat.spines["top"].set_visible(False)
+ax_e_scat.spines["right"].set_visible(False)
 
-fig_d.tight_layout()
-fig_d.savefig(FIG_DIR / "panel_d_r2_scatter.pdf", bbox_inches="tight", dpi=300)
-show_or_close(fig_d)
+fig_e.tight_layout()
+fig_e.savefig(FIG_DIR / "panel_e_r2_scatter.pdf", bbox_inches="tight", dpi=300)
+show_or_close(fig_e)
 
 # Stats: Wilcoxon signed-rank (model r^2 > PSTH r^2)
 from scipy.stats import wilcoxon
@@ -581,17 +858,17 @@ for subj in SUBJECTS + ["All"]:
     x, y = x[ok], y[ok]
     d = x - y
     stat, p = wilcoxon(d, alternative='greater')
-    print(f"Panel D — {subj} (N={len(d)}): "
+    print(f"Panel E — {subj} (N={len(d)}): "
           f"median model r^2={np.median(x):.3f}, PSTH r^2={np.median(y):.3f}, "
           f"Wilcoxon stat={stat:.1f}, p={p:.3g}")
 
 
-# %% Panel E: Improvement over PSTH vs FEM modulation (1-alpha)
+# %% Panel F: Improvement over PSTH vs FEM modulation (1-alpha)
 # The digital twin captures eye-movement-driven variability that the PSTH misses.
 # We expect the largest improvement for neurons most modulated by FEMs (high 1-alpha).
 # Improvement ratio = r^2(model) / r^2(PSTH). Values > 1 mean the model is better.
 
-fig_e, ax_e = plt.subplots(figsize=(3, 2.5))
+fig_f, ax_f = plt.subplots(figsize=(3, 2.5))
 
 # Only neurons with valid alpha and positive PSTH r^2
 has_alpha = good & np.isfinite(alpha) & (ve_psth > 0)
@@ -602,20 +879,20 @@ for subj in SUBJECTS:
         continue
     fem_mod = 1 - alpha[mask]
     improvement = ve_model[mask] / ve_psth[mask]
-    ax_e.scatter(fem_mod, improvement, s=5, alpha=0.5,
+    ax_f.scatter(fem_mod, improvement, s=5, alpha=0.5,
                  color=SUBJECT_COLORS[subj], label=subj)
 
-ax_e.axhline(1, color='k', linestyle='--', linewidth=0.5, alpha=0.5)
-ax_e.set_xlabel("FEM modulation (1 - α)")
-ax_e.set_ylabel("$r^2$ improvement (Model / PSTH)")
-ax_e.set_ylim(0, 5)
-ax_e.legend(frameon=False, fontsize=8)
-ax_e.spines["top"].set_visible(False)
-ax_e.spines["right"].set_visible(False)
+ax_f.axhline(1, color='k', linestyle='--', linewidth=0.5, alpha=0.5)
+ax_f.set_xlabel("FEM modulation (1 - α)")
+ax_f.set_ylabel("$r^2$ improvement (Model / PSTH)")
+ax_f.set_ylim(0, 5)
+ax_f.legend(frameon=False, fontsize=8)
+ax_f.spines["top"].set_visible(False)
+ax_f.spines["right"].set_visible(False)
 
-fig_e.tight_layout()
-fig_e.savefig(FIG_DIR / "panel_e_improvement_vs_fem.pdf", bbox_inches="tight", dpi=300)
-show_or_close(fig_e)
+fig_f.tight_layout()
+fig_f.savefig(FIG_DIR / "panel_f_improvement_vs_fem.pdf", bbox_inches="tight", dpi=300)
+show_or_close(fig_f)
 
 # Stats: Spearman correlation between 1-alpha and improvement ratio
 for subj in SUBJECTS + ["All"]:
@@ -626,23 +903,25 @@ for subj in SUBJECTS + ["All"]:
     improvement = ve_model[mask] / ve_psth[mask]
     ok = np.isfinite(fem_mod) & np.isfinite(improvement)
     r_s, p_s = sp_stats.spearmanr(fem_mod[ok], improvement[ok])
-    print(f"Panel E — {subj} (N={ok.sum()}): "
+    print(f"Panel F — {subj} (N={ok.sum()}): "
           f"Spearman r={r_s:.3f}, p={p_s:.3g}")
 
 # %% Composite figure
-# Layout:
-#   Row 1: [A: schematic]  [B: example traces (2 subplots)]
-#   Row 2: [C: ccnorm hist] [D: r^2 scatter] [E: improvement vs FEM]
+# Layout (2 rows × 3 cols; PSTH and rasters get their own cells):
+#   Row 1: [A: schematic] [B: PSTH] [C: rasters]   (width_ratios 1, 1, 2)
+#   Row 2: [D: ccnorm hist] [E: r^2 scatter] [F: improvement vs FEM]
 
 import cairosvg
 from PIL import Image
 import io
 
-fig_comp = plt.figure(figsize=(10, 7))
-gs = fig_comp.add_gridspec(2, 3, height_ratios=[1, 1], hspace=0.35, wspace=0.35)
+fig_comp = plt.figure(figsize=(10, 5), constrained_layout=True)
+gs_outer = fig_comp.add_gridspec(2, 1)
+gs_top = gs_outer[0].subgridspec(1, 3, width_ratios=[1, 1, 1.2], wspace=0.1)
+gs_bot = gs_outer[1].subgridspec(1, 3, wspace=0.15)
 
 # --- Panel A: schematic from SVG ---
-ax_a = fig_comp.add_subplot(gs[0, 0])
+ax_a = fig_comp.add_subplot(gs_top[0, 0])
 svg_path = str(VISIONCORE_ROOT / "ryan" / "fig3" / "fig3-schematic.svg")
 png_data = cairosvg.svg2png(url=svg_path, output_width=800)
 img = Image.open(io.BytesIO(png_data))
@@ -650,35 +929,32 @@ ax_a.imshow(img)
 ax_a.set_title("A", fontweight="bold", loc="left")
 ax_a.axis("off")
 
-# --- Panel B: example neuron PSTHs (2 subplots in columns 1-2 of row 0) ---
-gs_b = gs[0, 1:].subgridspec(1, 2, wspace=0.3)
-for idx, subj in enumerate(SUBJECTS):
-    ax = fig_comp.add_subplot(gs_b[0, idx])
-    mask = (subjects == subj) & good & np.isfinite(ccnorm)
-    if not mask.any():
-        ax.set_title(f"{subj}: no good neurons")
-        continue
-    candidates = np.where(mask)[0]
-    best_local = candidates[np.nanargmax(ccnorm[candidates])]
-    best_global = valid_indices[best_local]
-    si, ni = all_trace_neuron_session[best_global]
-    robs_trace = all_robs_mean[best_global] / DT
-    rhat_trace = all_rhat_mean[best_global] / DT
-    t_valid = np.isfinite(robs_trace) & np.isfinite(rhat_trace)
-    t = tbins[:len(robs_trace)]
-    ax.plot(t[t_valid], robs_trace[t_valid], 'k', linewidth=1, label="Observed")
-    ax.plot(t[t_valid], rhat_trace[t_valid], color=SUBJECT_COLORS[subj],
-            linewidth=1, label="Twin")
-    ax.set_xlabel("Time (s)")
-    if idx == 0:
-        ax.set_ylabel("Rate (sp/s)")
-    ax.set_title(f"{'B' if idx == 0 else ''}", fontweight="bold", loc="left")
-    ax.legend(frameon=False, fontsize=7)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
+# --- Panel B: example neuron PSTH overlay ---
+ax_b_comp = fig_comp.add_subplot(gs_top[0, 1])
+ax_b_comp.plot(t[psth_window], robs_trace[psth_window],
+               'k', linewidth=1, label="Observed")
+ax_b_comp.plot(t[psth_window], rhat_trace[psth_window],
+               color='tab:red', linewidth=1, label="Twin")
+ax_b_comp.set_xlim(0, PANEL_B_WINDOW_S)
+ax_b_comp.set_xlabel("Time (s)")
+ax_b_comp.set_ylabel("Rate (sp/s)")
+ax_b_comp.set_title("B", fontweight="bold", loc="left")
+ax_b_comp.legend(frameon=False, fontsize=7)
+ax_b_comp.spines["top"].set_visible(False)
+ax_b_comp.spines["right"].set_visible(False)
 
-# --- Panel C: ccnorm histogram ---
-ax = fig_comp.add_subplot(gs[1, 0])
+# --- Panel C: concatenated observed|twin raster ---
+ax_c_comp = fig_comp.add_subplot(gs_top[0, 2])
+im_comp = _draw_raster_pair(
+    ax_c_comp, robs_trials_rate, rhat_trials_rate,
+    window_s=PANEL_B_WINDOW_S, vmin=vmin, vmax=vmax,
+    label_fontsize=8, scale_fontsize=7,
+)
+ax_c_comp.set_title("C", fontweight="bold", loc="left")
+fig_comp.colorbar(im_comp, ax=ax_c_comp, shrink=0.8, pad=0.02, label="sp/s")
+
+# --- Panel D: ccnorm histogram ---
+ax = fig_comp.add_subplot(gs_bot[0, 0])
 bins_comp = np.linspace(0, 1, 21)
 for subj in SUBJECTS:
     mask = (subjects == subj) & good & np.isfinite(ccnorm)
@@ -693,32 +969,32 @@ for subj in SUBJECTS:
                label=f"{subj}: {med:.2f} [{q25:.2f}, {q75:.2f}]")
 ax.set_xlabel("Normalized correlation (ccnorm)")
 ax.set_ylabel("Count")
-ax.set_title("C", fontweight="bold", loc="left")
+ax.set_title("D", fontweight="bold", loc="left")
 ax.legend(frameon=False, fontsize=7)
 ax.spines["top"].set_visible(False)
 ax.spines["right"].set_visible(False)
 
-# --- Panel D: single-trial r^2 scatter ---
-ax = fig_comp.add_subplot(gs[1, 1])
+# --- Panel E: single-trial r^2 scatter ---
+ax = fig_comp.add_subplot(gs_bot[0, 1])
 for subj in SUBJECTS:
     mask = (subjects == subj) & good
     if not mask.any():
         continue
     ax.scatter(ve_psth[mask], ve_model[mask], s=5, alpha=0.5,
                color=SUBJECT_COLORS[subj], label=subj)
-lims_d = [0, max(0.4, np.nanmax(ve_model[good]) * 1.1)]
-ax.plot(lims_d, lims_d, 'k--', linewidth=0.5, alpha=0.5)
-ax.set_xlim(lims_d)
-ax.set_ylim(lims_d)
+lims_e = [0, max(0.4, np.nanmax(ve_model[good]) * 1.1)]
+ax.plot(lims_e, lims_e, 'k--', linewidth=0.5, alpha=0.5)
+ax.set_xlim(lims_e)
+ax.set_ylim(lims_e)
 ax.set_xlabel("Single-trial $r^2$ (PSTH)")
 ax.set_ylabel("Single-trial $r^2$ (Model)")
-ax.set_title("D", fontweight="bold", loc="left")
+ax.set_title("E", fontweight="bold", loc="left")
 ax.legend(frameon=False, fontsize=7)
 ax.spines["top"].set_visible(False)
 ax.spines["right"].set_visible(False)
 
-# --- Panel E: improvement vs FEM modulation ---
-ax = fig_comp.add_subplot(gs[1, 2])
+# --- Panel F: improvement vs FEM modulation ---
+ax = fig_comp.add_subplot(gs_bot[0, 2])
 for subj in SUBJECTS:
     mask = has_alpha & (subjects == subj)
     if not mask.any():
@@ -731,7 +1007,7 @@ ax.axhline(1, color='k', linestyle='--', linewidth=0.5, alpha=0.5)
 ax.set_xlabel("FEM modulation (1 - α)")
 ax.set_ylabel("$r^2$ improvement (Model / PSTH)")
 ax.set_ylim(0, 5)
-ax.set_title("E", fontweight="bold", loc="left")
+ax.set_title("F", fontweight="bold", loc="left")
 ax.legend(frameon=False, fontsize=7)
 ax.spines["top"].set_visible(False)
 ax.spines["right"].set_visible(False)

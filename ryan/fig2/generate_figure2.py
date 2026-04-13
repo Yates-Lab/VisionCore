@@ -14,6 +14,7 @@ import sys
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 from scipy import stats as sp_stats
 import dill
 
@@ -90,6 +91,7 @@ MIN_TOTAL_SPIKES = 200       # neuron inclusion threshold (in align step)
 MIN_VAR = 0                  # minimum variance for correlation computation
 EPS_RHO = 1e-3               # floor for correlation denominators
 SUBJECTS = ["Allen", "Logan", "Luke"]
+SUBJECT_COLORS = {"Allen": "tab:blue", "Logan": "tab:green", "Luke": "tab:orange"}
 DEVICE = get_free_device()
 
 # Data config (uses the same configs as model training, no weights needed)
@@ -120,28 +122,6 @@ def show_or_close(fig):
     else:
         plt.close(fig)
 
-
-def subject_iter(labels):
-    """Yield (suffix, mask) for each subject then pooled.
-
-    Parameters
-    ----------
-    labels : array-like of str
-        Subject label per element (neuron, pair, or session).
-
-    Yields
-    ------
-    suffix : str
-        "" for pooled, "_Allen" etc. for per-subject.
-    mask : ndarray of bool
-        Boolean mask into the labels array.
-    """
-    labels = np.asarray(labels)
-    for subj in SUBJECTS:
-        mask = labels == subj
-        if mask.any():
-            yield f"_{subj}", mask
-    yield "", np.ones(len(labels), dtype=bool)
 
 
 # %% Load or compute covariance decomposition
@@ -289,6 +269,7 @@ for w_idx in range(n_windows):
     shuff_alphas = []        # (n_shuffles, n_neurons)
     shuff_rho_delta_meanz = []
     shuff_rho_c_meanz = []
+    shuff_rho_subject = []   # subject label per shuffle entry
 
     subject_by_ds = []  # track subject for each session contributing to this window
     subject_per_neuron = []  # one label per neuron (for alpha, ff, erate)
@@ -398,6 +379,7 @@ for w_idx in range(n_windows):
                         fisher_z_mean(rho_c_shuf[ok], eps=EPS_RHO)
                         - fisher_z_mean(rho_u[ok[:len(rho_u)]], eps=EPS_RHO)
                     )
+                    shuff_rho_subject.append(sr["subject"])
 
     metrics.append({
         "window_ms": WINDOWS_MS[w_idx],
@@ -423,6 +405,7 @@ for w_idx in range(n_windows):
         "shuff_alphas": shuff_alphas,  # list of arrays (inhomogeneous neuron counts)
         "shuff_rho_delta_meanz": np.array(shuff_rho_delta_meanz),
         "shuff_rho_c_meanz": np.array(shuff_rho_c_meanz),
+        "shuff_rho_subject": np.array(shuff_rho_subject),
     })
 
     m = metrics[-1]
@@ -477,8 +460,6 @@ m0_full = m_by_window[0]
 s0 = alpha_stats[WINDOWS_MS[0]]
 labels = metrics[0]["subject_per_neuron"]
 
-subject_colors = {"Allen": "tab:blue", "Logan": "tab:green", "Luke": "tab:orange"}
-
 fig_c, ax_c = plt.subplots(figsize=(4, 3.5))
 
 # Shared bin edges across subjects
@@ -490,7 +471,7 @@ for subj in SUBJECTS:
     if not mask.any():
         continue
     m0 = m0_full[mask]
-    color = subject_colors[subj]
+    color = SUBJECT_COLORS[subj]
     ax_c.hist(m0, bins=bins, color=color, edgecolor="white", alpha=0.5)
     ax_c.axvline(np.nanmedian(m0), color=color, linewidth=2, ls=(0, (1,1)),
                  label=f"Median={np.nanmedian(m0):.2f}")
@@ -527,6 +508,7 @@ for w_idx, m_dict in enumerate(metrics):
     # Filter to valid neurons (finite, positive rate and FF)
     ff_u_v, ff_c_v, mask = paired_valid(ff_u, ff_c, positive=True)
     erate_v = erate[mask]
+    subject_labels_v = m_dict["subject_per_neuron"][mask]
     n_valid = len(ff_u_v)
 
     # Per-neuron geometric means
@@ -576,6 +558,7 @@ for w_idx, m_dict in enumerate(metrics):
         "slope_diff": slope_diff, "slope_diff_ci": slope_diff_ci,
         "p_slope": p_slope, "null_ratio_ci": null_ratio_ci,
         "erate": erate_v, "var_u": var_u, "var_c": var_c,
+        "subject_per_neuron": subject_labels_v,
     }
 
     print(f"\nWindow {WINDOWS_MS[w_idx]:.1f} ms (N={n_valid}):")
@@ -585,46 +568,50 @@ for w_idx, m_dict in enumerate(metrics):
     print(f"  Population FF: uncorr={slope_unc:.3f}, corr={slope_cor:.3f}")
     print(f"  Slope diff={slope_diff:.3f} CI [{slope_diff_ci[0]:.3f}, {slope_diff_ci[1]:.3f}]")
 
-# --- Plot Panel D: mean-variance scatter (10 ms) ---
+# --- Plot Panel D: mean-variance scatter (split Allen / Logan) ---
 s0 = fano_stats[WINDOWS_MS[0]]
-labels = metrics[0]["subject_per_neuron"]
+labels_d = s0["subject_per_neuron"]
 
-for suffix, mask in subject_iter(labels):
+fig_d, (ax_da, ax_db) = plt.subplots(1, 2, figsize=(7, 3.5))
+for ax_d_sub, subj in [(ax_da, "Allen"), (ax_db, "Logan")]:
+    mask = labels_d == subj
+    if not mask.any():
+        continue
     e_sub = s0["erate"][mask]
     vu_sub = s0["var_u"][mask]
     vc_sub = s0["var_c"][mask]
-    if len(e_sub) == 0:
-        continue
-    # Recompute slopes for this subset
+    color = SUBJECT_COLORS[subj]
     slope_u = float(np.sum(e_sub * vu_sub) / np.sum(e_sub ** 2))
     slope_c = float(np.sum(e_sub * vc_sub) / np.sum(e_sub ** 2))
-    fig_d, ax_d = plt.subplots(figsize=(4, 3.5))
-    ax_d.scatter(e_sub, vu_sub, s=8, alpha=0.3, c="tab:blue",
-                 label=f"Uncorr FF={slope_u:.3f}")
-    ax_d.scatter(e_sub, vc_sub, s=8, alpha=0.3, c="tab:red",
-                 label=f"Corr FF={slope_c:.3f}")
+    ax_d_sub.scatter(e_sub, vu_sub, s=8, alpha=0.3, c=color)
+    ax_d_sub.scatter(e_sub, vc_sub, s=8, alpha=0.3, c=color, marker="^")
     x_line = np.linspace(0, e_sub.max(), 100)
-    ax_d.plot(x_line, slope_u * x_line, "b--", linewidth=1.5)
-    ax_d.plot(x_line, slope_c * x_line, "r--", linewidth=1.5)
-    ax_d.set_xlabel("Mean rate")
-    ax_d.set_ylabel("Variance")
-    tag = suffix.lstrip("_") if suffix else "All"
-    ax_d.set_title(f"Panel D: Mean-variance ({WINDOWS_MS[0]:.1f} ms, {tag})")
-    ax_d.legend(frameon=False, fontsize=8)
-    fig_d.tight_layout()
-    fig_d.savefig(FIG_DIR / f"panel_d_mean_var{suffix}.pdf", bbox_inches="tight", dpi=300)
-    show_or_close(fig_d)
+    ax_d_sub.plot(x_line, slope_u * x_line, color=color, ls="--", linewidth=1.5,
+                  label=f"Uncorr={slope_u:.3f}")
+    ax_d_sub.plot(x_line, slope_c * x_line, color=color, ls=":", linewidth=1.5,
+                  label=f"Corr={slope_c:.3f}")
+    ax_d_sub.set_xlabel("Mean rate")
+    ax_d_sub.set_xscale("log")
+    ax_d_sub.set_yscale("log")
+    ax_d_sub.xaxis.set_minor_formatter(mticker.NullFormatter())
+    ax_d_sub.yaxis.set_minor_formatter(mticker.NullFormatter())
+    ax_d_sub.set_title(subj)
+    ax_d_sub.legend(frameon=False, fontsize=8)
+    ax_d_sub.grid(True, alpha=0.3)
+    ax_d_sub.spines["right"].set_visible(False)
+    ax_d_sub.spines["top"].set_visible(False)
+ax_da.set_ylabel("Variance")
+fig_d.tight_layout()
+fig_d.savefig(FIG_DIR / "panel_d_mean_var.pdf", bbox_inches="tight", dpi=300)
+show_or_close(fig_d)
 
 # --- Plot Panel E: population FF vs window ---
-for suffix, mask in subject_iter(metrics[0]["subject_per_neuron"]):
-    # Recompute per-window slopes for this subject subset
+fig_e, ax_e = plt.subplots(figsize=(4, 3))
+for subj in SUBJECTS:
     slopes_unc_sub = []
     slopes_cor_sub = []
     for w_idx_e, m_dict in enumerate(metrics):
-        if suffix:
-            n_mask = m_dict["subject_per_neuron"] == suffix.lstrip("_")
-        else:
-            n_mask = np.ones(len(m_dict["erate"]), dtype=bool)
+        n_mask = m_dict["subject_per_neuron"] == subj
         e_sub = m_dict["erate"][n_mask]
         ff_u_sub = m_dict["uncorr"][n_mask]
         ff_c_sub = m_dict["corr"][n_mask]
@@ -639,21 +626,22 @@ for suffix, mask in subject_iter(metrics[0]["subject_per_neuron"]):
         else:
             slopes_unc_sub.append(np.nan)
             slopes_cor_sub.append(np.nan)
-    fig_e, ax_e = plt.subplots(figsize=(4, 3))
-    ax_e.plot(WINDOWS_MS, slopes_unc_sub, "o-", color="tab:blue", label="Uncorrected")
-    ax_e.plot(WINDOWS_MS, slopes_cor_sub, "o-", color="tab:red", label="FEM-corrected")
-    ax_e.axhline(1.0, color="gray", linestyle=":", alpha=0.5, label="Poisson")
-    ax_e.set_xlabel("Counting window (ms)")
-    ax_e.set_ylabel("Population Fano factor")
-    tag = suffix.lstrip("_") if suffix else "All"
-    ax_e.set_title(f"Panel E: Pop. FF vs window ({tag})")
-    ax_e.legend(frameon=False, fontsize=8)
-    #ax_e.set_xscale("log")
-    ax_e.set_xticks(WINDOWS_MS)
-    ax_e.set_xticklabels([f"{w:.1f}" for w in WINDOWS_MS])
-    fig_e.tight_layout()
-    fig_e.savefig(FIG_DIR / f"panel_e_fano_vs_window{suffix}.pdf", bbox_inches="tight", dpi=300)
-    show_or_close(fig_e)
+    if not any(np.isfinite(slopes_unc_sub)):
+        continue
+    color = SUBJECT_COLORS[subj]
+    ax_e.plot(WINDOWS_MS, slopes_unc_sub, "o-", color=color,
+              label=f"{subj} Uncorrected")
+    ax_e.plot(WINDOWS_MS, slopes_cor_sub, "o--", color=color,
+              label=f"{subj} FEM-corrected")
+ax_e.axhline(1.0, color="gray", linestyle=":", alpha=0.5, label="Poisson")
+ax_e.set_xlabel("Counting window (ms)")
+ax_e.set_ylabel("Population Fano factor")
+ax_e.legend(frameon=False, fontsize=8)
+ax_e.set_xticks(WINDOWS_MS)
+ax_e.set_xticklabels([f"{w:.1f}" for w in WINDOWS_MS])
+fig_e.tight_layout()
+fig_e.savefig(FIG_DIR / "panel_e_fano_vs_window.pdf", bbox_inches="tight", dpi=300)
+show_or_close(fig_e)
 
 # %% Panel F-H: Noise correlations
 # F: scatter of corrected vs uncorrected noise correlations (single window)
@@ -691,8 +679,9 @@ for w_idx, m_dict in enumerate(metrics):
     else:
         p_wil = np.nan
 
-    # Shuffle null
+    # Shuffle null (pooled)
     shuff_dz = m_dict["shuff_rho_delta_meanz"]
+    shuff_subj = m_dict["shuff_rho_subject"]
     if len(shuff_dz) > 0:
         null_dz_ci = (float(np.percentile(shuff_dz, 2.5)),
                       float(np.percentile(shuff_dz, 97.5)))
@@ -701,12 +690,25 @@ for w_idx, m_dict in enumerate(metrics):
         null_dz_ci = (np.nan, np.nan)
         p_emp_dz = np.nan
 
+    # Shuffle null per subject
+    null_dz_ci_by_subject = {}
+    for subj in SUBJECTS:
+        s_mask = shuff_subj == subj
+        if s_mask.sum() > 0:
+            null_dz_ci_by_subject[subj] = (
+                float(np.percentile(shuff_dz[s_mask], 2.5)),
+                float(np.percentile(shuff_dz[s_mask], 97.5)),
+            )
+        else:
+            null_dz_ci_by_subject[subj] = (np.nan, np.nan)
+
     nc_stats[WINDOWS_MS[w_idx]] = {
         "n_pairs": n_pairs, "n_ds": n_ds,
         "z_u_mean": z_u_mean, "z_u_ci": z_u_ci,
         "z_c_mean": z_c_mean, "z_c_ci": z_c_ci,
         "dz_mean": dz_mean, "dz_ci": dz_ci,
         "p_wil": p_wil, "null_dz_ci": null_dz_ci, "p_emp_dz": p_emp_dz,
+        "null_dz_ci_by_subject": null_dz_ci_by_subject,
         "rho_u": rho_u, "rho_c": rho_c,
     }
 
@@ -716,44 +718,46 @@ for w_idx, m_dict in enumerate(metrics):
     print(f"  delta_z  = {dz_mean:.4f} [{dz_ci[0]:.4f}, {dz_ci[1]:.4f}]")
     print(f"  Wilcoxon p={p_wil:.3g}")
     print(f"  Shuffle null delta_z 95% CI: [{null_dz_ci[0]:.4f}, {null_dz_ci[1]:.4f}]")
+    for subj in SUBJECTS:
+        ci_s = null_dz_ci_by_subject[subj]
+        print(f"    {subj} shuffle 95% CI: [{ci_s[0]:.4f}, {ci_s[1]:.4f}]")
     print(f"  Empirical p={p_emp_dz:.4f}")
 
 # --- Plot Panel F: noise corr scatter (10 ms) ---
 s0 = nc_stats[WINDOWS_MS[0]]
 pair_labels = metrics[0]["subject_per_pair"]
 
-for suffix, mask in subject_iter(pair_labels):
-    rho_u_sub = s0["rho_u"][mask]
-    rho_c_sub = s0["rho_c"][mask]
-    if len(rho_u_sub) == 0:
+fig_f, ax_f = plt.subplots(figsize=(4, 4))
+for subj in SUBJECTS:
+    mask = pair_labels == subj
+    if not mask.any():
         continue
-    fig_f, ax_f = plt.subplots(figsize=(4, 4))
-    ax_f.hist2d(rho_u_sub, rho_c_sub, bins=60, cmap="Blues",
-                norm=mpl.colors.LogNorm(), range=[[-0.3, 0.3], [-0.3, 0.3]])
-    ax_f.plot([-0.3, 0.3], [-0.3, 0.3], "k--", alpha=0.3, linewidth=0.5)
-    ax_f.plot(np.mean(rho_u_sub), np.mean(rho_c_sub), "ro", markersize=6)
-    ax_f.set_xlabel("ρ uncorrected")
-    ax_f.set_ylabel("ρ FEM-corrected")
-    tag = suffix.lstrip("_") if suffix else "All"
-    ax_f.set_title(f"Panel F: Noise correlations ({WINDOWS_MS[0]:.1f} ms, {tag})")
-    fig_f.tight_layout()
-    fig_f.savefig(FIG_DIR / f"panel_f_noisecorr_scatter{suffix}.pdf", bbox_inches="tight", dpi=300)
-    show_or_close(fig_f)
+    color = SUBJECT_COLORS[subj]
+    ax_f.scatter(s0["rho_u"][mask], s0["rho_c"][mask],
+                 s=2, alpha=0.05, c=color, rasterized=True)
+    ax_f.plot(np.mean(s0["rho_u"][mask]), np.mean(s0["rho_c"][mask]),
+              "o", color=color, markersize=6, markeredgecolor="black",
+              markeredgewidth=0.5, label=subj)
+ax_f.plot([-0.3, 0.3], [-0.3, 0.3], "k--", alpha=0.3, linewidth=0.5)
+ax_f.set_xlim(-0.3, 0.3)
+ax_f.set_ylim(-0.3, 0.3)
+ax_f.set_xlabel("ρ uncorrected")
+ax_f.set_ylabel("ρ FEM-corrected")
+ax_f.legend(frameon=False, fontsize=8)
+fig_f.tight_layout()
+fig_f.savefig(FIG_DIR / "panel_f_noisecorr_scatter.pdf", bbox_inches="tight", dpi=300)
+show_or_close(fig_f)
 
 # --- Plot Panel G: mean Fisher z vs window ---
-for suffix, mask in subject_iter(np.array(metrics[0]["subject_by_ds"])):
-    fig_g, ax_g = plt.subplots(figsize=(4, 3))
-    for label, key, color in [("Uncorrected", "z_u", "tab:blue"),
-                               ("FEM-corrected", "z_c", "tab:red")]:
+fig_g, ax_g = plt.subplots(figsize=(4, 3))
+for subj in SUBJECTS:
+    for label, key, ls in [("Uncorr", "u", "-"), ("Corr", "c", "--")]:
         means = []
         ci_lo_list = []
         ci_hi_list = []
         for w_idx_g, m_dict in enumerate(metrics):
-            if suffix:
-                ds_mask = np.array([s == suffix.lstrip("_") for s in m_dict["subject_by_ds"]])
-            else:
-                ds_mask = np.ones(len(m_dict["subject_by_ds"]), dtype=bool)
-            vals = m_dict[f"rho_{key.split('_')[1]}_meanz_by_ds"][ds_mask]
+            ds_mask = np.array([s == subj for s in m_dict["subject_by_ds"]])
+            vals = m_dict[f"rho_{key}_meanz_by_ds"][ds_mask]
             if len(vals) > 0:
                 mn, ci = bootstrap_mean_ci(vals, nboot=5000, seed=0)
                 means.append(mn)
@@ -763,33 +767,31 @@ for suffix, mask in subject_iter(np.array(metrics[0]["subject_by_ds"])):
                 means.append(np.nan)
                 ci_lo_list.append(np.nan)
                 ci_hi_list.append(np.nan)
+        if not any(np.isfinite(means)):
+            continue
+        color = SUBJECT_COLORS[subj]
         ax_g.errorbar(WINDOWS_MS, means,
                       yerr=[np.array(means) - ci_lo_list, np.array(ci_hi_list) - means],
-                      fmt="o-", color=color, capsize=3, label=label)
-    ax_g.axhline(0, color="gray", linestyle=":", alpha=0.5)
-    ax_g.set_xlabel("Counting window (ms)")
-    ax_g.set_ylabel("Mean Fisher z")
-    tag = suffix.lstrip("_") if suffix else "All"
-    ax_g.set_title(f"Panel G: Noise corr vs window ({tag})")
-    ax_g.legend(frameon=False, fontsize=8)
-    #ax_g.set_xscale("log")
-    ax_g.set_xticks(WINDOWS_MS)
-    ax_g.set_xticklabels([f"{w:.1f}" for w in WINDOWS_MS])
-    fig_g.tight_layout()
-    fig_g.savefig(FIG_DIR / f"panel_g_noisecorr_vs_window{suffix}.pdf", bbox_inches="tight", dpi=300)
-    show_or_close(fig_g)
+                      fmt=f"o{ls}", color=color, capsize=3,
+                      label=f"{subj} {label}")
+ax_g.axhline(0, color="gray", linestyle=":", alpha=0.5)
+ax_g.set_xlabel("Counting window (ms)")
+ax_g.set_ylabel("Mean Fisher z")
+ax_g.legend(frameon=False, fontsize=8)
+ax_g.set_xticks(WINDOWS_MS)
+ax_g.set_xticklabels([f"{w:.1f}" for w in WINDOWS_MS])
+fig_g.tight_layout()
+fig_g.savefig(FIG_DIR / "panel_g_noisecorr_vs_window.pdf", bbox_inches="tight", dpi=300)
+show_or_close(fig_g)
 
 # --- Plot Panel H: delta z vs window with shuffle null ---
-for suffix, mask in subject_iter(np.array(metrics[0]["subject_by_ds"])):
-    fig_h, ax_h = plt.subplots(figsize=(4, 3))
+fig_h, ax_h = plt.subplots(figsize=(4, 3))
+for subj in SUBJECTS:
     dz_means_sub = []
     dz_lo_sub = []
     dz_hi_sub = []
     for w_idx_h, m_dict in enumerate(metrics):
-        if suffix:
-            ds_mask = np.array([s == suffix.lstrip("_") for s in m_dict["subject_by_ds"]])
-        else:
-            ds_mask = np.ones(len(m_dict["subject_by_ds"]), dtype=bool)
+        ds_mask = np.array([s == subj for s in m_dict["subject_by_ds"]])
         vals = m_dict["rho_delta_meanz_by_ds"][ds_mask]
         if len(vals) > 0:
             mn, ci = bootstrap_mean_ci(vals, nboot=5000, seed=0)
@@ -800,27 +802,26 @@ for suffix, mask in subject_iter(np.array(metrics[0]["subject_by_ds"])):
             dz_means_sub.append(np.nan)
             dz_lo_sub.append(np.nan)
             dz_hi_sub.append(np.nan)
+    if not any(np.isfinite(dz_means_sub)):
+        continue
+    color = SUBJECT_COLORS[subj]
     ax_h.errorbar(WINDOWS_MS, dz_means_sub,
                   yerr=[np.array(dz_means_sub) - dz_lo_sub,
                         np.array(dz_hi_sub) - dz_means_sub],
-                  fmt="o-", color="black", capsize=3, label="Observed Δz")
-    if suffix == "":
-        null_lo = [nc_stats[w]["null_dz_ci"][0] for w in WINDOWS_MS]
-        null_hi = [nc_stats[w]["null_dz_ci"][1] for w in WINDOWS_MS]
-        ax_h.fill_between(WINDOWS_MS, null_lo, null_hi, alpha=0.2, color="gray",
-                          label="Shuffle 95% CI")
-    ax_h.axhline(0, color="gray", linestyle=":", alpha=0.5)
-    ax_h.set_xlabel("Counting window (ms)")
-    ax_h.set_ylabel("Δz (corr - uncorr)")
-    tag = suffix.lstrip("_") if suffix else "All"
-    ax_h.set_title(f"Panel H: Effect size ({tag})")
-    ax_h.legend(frameon=False, fontsize=8)
-    #ax_h.set_xscale("log")
-    ax_h.set_xticks(WINDOWS_MS)
-    ax_h.set_xticklabels([f"{w:.1f}" for w in WINDOWS_MS])
-    fig_h.tight_layout()
-    fig_h.savefig(FIG_DIR / f"panel_h_effect_size{suffix}.pdf", bbox_inches="tight", dpi=300)
-    show_or_close(fig_h)
+                  fmt="o-", color=color, capsize=3, label=subj)
+    null_lo_sub = [nc_stats[w]["null_dz_ci_by_subject"][subj][0] for w in WINDOWS_MS]
+    null_hi_sub = [nc_stats[w]["null_dz_ci_by_subject"][subj][1] for w in WINDOWS_MS]
+    ax_h.fill_between(WINDOWS_MS, null_lo_sub, null_hi_sub, alpha=0.15, color=color,
+                      label=f"{subj} shuffle 95% CI")
+ax_h.axhline(0, color="gray", linestyle=":", alpha=0.5)
+ax_h.set_xlabel("Counting window (ms)")
+ax_h.set_ylabel("Δz (corr - uncorr)")
+ax_h.legend(frameon=False, fontsize=8)
+ax_h.set_xticks(WINDOWS_MS)
+ax_h.set_xticklabels([f"{w:.1f}" for w in WINDOWS_MS])
+fig_h.tight_layout()
+fig_h.savefig(FIG_DIR / "panel_h_effect_size.pdf", bbox_inches="tight", dpi=300)
+show_or_close(fig_h)
 
 # %% Panel I-K: Subspace alignment
 # I: eigenspectra of Cpsth and Cfem (log-log) with IQR bands
@@ -831,7 +832,6 @@ for suffix, mask in subject_iter(np.array(metrics[0]["subject_by_ds"])):
 # participation ratios, and subspace overlap / directional variance capture.
 
 w_idx = SUBSPACE_WINDOW_IDX  # 20 ms window
-SUBJECT_COLORS = {"Allen": "tab:blue", "Logan": "tab:orange", "Luke": "tab:green"}
 
 # Per-session storage
 sub_names = []
@@ -919,85 +919,70 @@ print(f"  X (PSTH var in FEM subspace): mean={np.mean(var_p_given_f):.3f} ± {np
 print(f"  Y (FEM var in PSTH subspace): mean={np.mean(var_f_given_p):.3f} ± {np.std(var_f_given_p)/np.sqrt(len(var_f_given_p)):.3f}")
 
 # --- Plot Panel I: eigenspectra ---
-for suffix, mask in subject_iter(np.array(sub_subjects)):
-    spec_psth_sub = [s for s, m in zip(spectra_psth, mask) if m]
-    spec_fem_sub = [s for s, m in zip(spectra_fem, mask) if m]
-    if len(spec_psth_sub) == 0:
+fig_i, ax_i = plt.subplots(figsize=(4, 3.5))
+max_dims = 12
+for subj in SUBJECTS:
+    s_mask = np.array(sub_subjects) == subj
+    if not s_mask.any():
         continue
-    fig_i, ax_i = plt.subplots(figsize=(4, 3.5))
-    max_dims = 50
-    for spec, color, label in [(spec_psth_sub, "tab:blue", "PSTH"),
-                                (spec_fem_sub, "tab:red", "FEM")]:
-        all_spec = np.full((len(spec), max_dims), np.nan)
-        for i, s in enumerate(spec):
+    color = SUBJECT_COLORS[subj]
+    for spec_list, ls, label_type in [(spectra_psth, "-", "PSTH"),
+                                       (spectra_fem, "--", "FEM")]:
+        spec_sub = [s for s, m in zip(spec_list, s_mask) if m]
+        if not spec_sub:
+            continue
+        all_spec = np.full((len(spec_sub), max_dims), np.nan)
+        for i, s in enumerate(spec_sub):
             L = min(len(s), max_dims)
             all_spec[i, :L] = s[:L]
         median = np.nanmedian(all_spec, axis=0)
         q25 = np.nanpercentile(all_spec, 25, axis=0)
         q75 = np.nanpercentile(all_spec, 75, axis=0)
         dims = np.arange(1, max_dims + 1)
-        ax_i.plot(dims, median, color=color, label=label)
-        ax_i.fill_between(dims, q25, q75, color=color, alpha=0.2)
-    #ax_i.set_xscale("log")
-    ax_i.set_yscale("log")
-    ax_i.set_xlabel("Eigenvalue rank")
-    ax_i.set_ylabel("Fraction of total variance")
-    tag = suffix.lstrip("_") if suffix else "All"
-    ax_i.set_title(f"Panel I: Eigenspectra ({WINDOWS_MS[w_idx]:.1f} ms, {tag})")
-    ax_i.legend(frameon=False, fontsize=8)
-    fig_i.tight_layout()
-    fig_i.savefig(FIG_DIR / f"panel_i_eigenspectra{suffix}.pdf", bbox_inches="tight", dpi=300)
-    show_or_close(fig_i)
+        ax_i.plot(dims, median, color=color, ls=ls, label=f"{subj} {label_type}")
+        ax_i.fill_between(dims, q25, q75, color=color, alpha=0.15)
+ax_i.set_xlim(1, max_dims)
+ax_i.set_xlabel("Eigenvalue rank")
+ax_i.set_ylabel("Fraction of total variance")
+ax_i.legend(frameon=False, fontsize=8)
+fig_i.tight_layout()
+fig_i.savefig(FIG_DIR / "panel_i_eigenspectra.pdf", bbox_inches="tight", dpi=300)
+show_or_close(fig_i)
 
-# --- Plot Panel J: participation ratio bars ---
-for suffix, mask in subject_iter(np.array(sub_subjects)):
-    pr_psth_sub = np.array(pr_psth_list)[mask]
-    pr_fem_sub = np.array(pr_fem_list)[mask]
-    sub_subjects_sub = np.array(sub_subjects)[mask]
-    if len(pr_psth_sub) == 0:
-        continue
-    fig_j, ax_j = plt.subplots(figsize=(5, 3))
-    order = np.argsort(pr_psth_sub)
-    x = np.arange(len(order))
-    bar_w = 0.35
-    edge_colors = [SUBJECT_COLORS.get(sub_subjects_sub[i], "gray") for i in order]
-    ax_j.bar(x - bar_w/2, pr_psth_sub[order], bar_w,
-             color="tab:blue", edgecolor=edge_colors, linewidth=1.5, label="PSTH")
-    ax_j.bar(x + bar_w/2, pr_fem_sub[order], bar_w,
-             color="tab:red", edgecolor=edge_colors, linewidth=1.5, label="FEM")
-    ax_j.set_xlabel("Session (sorted by PSTH PR)")
-    ax_j.set_ylabel("Participation ratio")
-    tag = suffix.lstrip("_") if suffix else "All"
-    ax_j.set_title(f"Panel J: Eff. dimensionality ({WINDOWS_MS[w_idx]:.1f} ms, {tag})")
-    ax_j.legend(frameon=False, fontsize=8)
-    fig_j.tight_layout()
-    fig_j.savefig(FIG_DIR / f"panel_j_participation_ratio{suffix}.pdf", bbox_inches="tight", dpi=300)
-    show_or_close(fig_j)
+# --- Plot Panel J: participation ratio scatter ---
+fig_j, ax_j = plt.subplots(figsize=(4, 4))
+for subj in sorted(set(sub_subjects)):
+    s_mask = np.array(sub_subjects) == subj
+    ax_j.scatter(np.array(pr_psth_list)[s_mask], np.array(pr_fem_list)[s_mask],
+                 c=SUBJECT_COLORS.get(subj, "gray"), s=40,
+                 edgecolors="black", linewidths=0.5, label=subj)
+pr_max = max(np.max(pr_psth_list), np.max(pr_fem_list)) * 1.1
+ax_j.plot([0, pr_max], [0, pr_max], "k--", alpha=0.3)
+ax_j.set_xlim(0, pr_max)
+ax_j.set_ylim(0, pr_max)
+ax_j.set_xlabel("PSTH participation ratio")
+ax_j.set_ylabel("FEM participation ratio")
+ax_j.legend(frameon=False, fontsize=8)
+fig_j.tight_layout()
+fig_j.savefig(FIG_DIR / "panel_j_participation_ratio.pdf", bbox_inches="tight", dpi=300)
+show_or_close(fig_j)
 
 # --- Plot Panel K: X vs Y scatter (color by subject) ---
-for suffix, mask in subject_iter(np.array(sub_subjects)):
-    vpf_sub = np.array(var_p_given_f)[mask]
-    vfp_sub = np.array(var_f_given_p)[mask]
-    sub_subj_sub = np.array(sub_subjects)[mask]
-    if len(vpf_sub) == 0:
-        continue
-    fig_k, ax_k = plt.subplots(figsize=(4, 4))
-    for subj in sorted(set(sub_subj_sub)):
-        s_mask = sub_subj_sub == subj
-        ax_k.scatter(vpf_sub[s_mask], vfp_sub[s_mask],
-                     c=SUBJECT_COLORS.get(subj, "gray"), s=40,
-                     edgecolors="black", linewidths=0.5, label=subj)
-    ax_k.plot([0, 1], [0, 1], "k--", alpha=0.3)
-    ax_k.set_xlabel("X: PSTH var captured by FEM subspace")
-    ax_k.set_ylabel("Y: FEM var captured by PSTH subspace")
-    tag = suffix.lstrip("_") if suffix else "All"
-    ax_k.set_title(f"Panel K: Subspace alignment ({WINDOWS_MS[w_idx]:.1f} ms, {tag})")
-    ax_k.set_xlim(0, 1)
-    ax_k.set_ylim(0, 1)
-    ax_k.legend(frameon=False, fontsize=8)
-    fig_k.tight_layout()
-    fig_k.savefig(FIG_DIR / f"panel_k_subspace_alignment{suffix}.pdf", bbox_inches="tight", dpi=300)
-    show_or_close(fig_k)
+fig_k, ax_k = plt.subplots(figsize=(4, 4))
+for subj in sorted(set(sub_subjects)):
+    s_mask = np.array(sub_subjects) == subj
+    ax_k.scatter(np.array(var_p_given_f)[s_mask], np.array(var_f_given_p)[s_mask],
+                 c=SUBJECT_COLORS.get(subj, "gray"), s=40,
+                 edgecolors="black", linewidths=0.5, label=subj)
+ax_k.plot([0, 1], [0, 1], "k--", alpha=0.3)
+ax_k.set_xlabel("X: PSTH var captured by FEM subspace")
+ax_k.set_ylabel("Y: FEM var captured by PSTH subspace")
+ax_k.set_xlim(0, 1)
+ax_k.set_ylim(0, 1)
+ax_k.legend(frameon=False, fontsize=8)
+fig_k.tight_layout()
+fig_k.savefig(FIG_DIR / "panel_k_subspace_alignment.pdf", bbox_inches="tight", dpi=300)
+show_or_close(fig_k)
 
 # %% Per-session covariance heatmaps (supplemental)
 cmap = plt.get_cmap("RdBu")
@@ -1117,142 +1102,262 @@ with open(stats_file, "w") as f:
 print(f"Stats saved to {stats_file}")
 
 
-# %% Composite figure (assemble panels C-K into 3x3 layout)
-fig_comp, axs = plt.subplots(3, 3, figsize=(14, 12))
+# %% Composite figure (assemble panels C-K using GridSpec)
+from matplotlib.gridspec import GridSpec
 
-# --- C: alpha histogram ---
-ax = axs[0, 0]
-m0 = m_by_window[0]
-s0_a = alpha_stats[WINDOWS_MS[0]]
-ax.hist(m0, bins=30, color="steelblue", edgecolor="white", alpha=0.8)
-ax.axvline(np.nanmedian(m0), color="red", linewidth=2, label=f"median={np.nanmedian(m0):.3f}")
-ax.axvspan(s0_a["null_ci"][0], s0_a["null_ci"][1], alpha=0.2, color="gray", label="shuffle 95% CI")
+fig_comp = plt.figure(figsize=(14, 12), constrained_layout=True)
+gs = GridSpec(3, 12, figure=fig_comp, hspace=0.1, wspace=0.1)
+
+# Top row: C (wide), D_allen (small square), D_logan (small square), E (wide)
+ax_C = fig_comp.add_subplot(gs[0, 0:4])
+#ax_Da = fig_comp.add_subplot(gs[0, 4:6])
+#ax_Db = fig_comp.add_subplot(gs[0, 6:8])
+ax_D = fig_comp.add_subplot(gs[0, 4:8])  # for shared x/y labels
+ax_E = fig_comp.add_subplot(gs[0, 8:12])
+
+# Middle row: F, G, H
+ax_F = fig_comp.add_subplot(gs[1, 0:4])
+ax_G = fig_comp.add_subplot(gs[1, 4:8])
+ax_H = fig_comp.add_subplot(gs[1, 8:12])
+
+# Bottom row: I, J, K
+ax_I = fig_comp.add_subplot(gs[2, 0:4])
+ax_J = fig_comp.add_subplot(gs[2, 4:8])
+ax_K = fig_comp.add_subplot(gs[2, 8:12])
+
+# --- C: alpha histogram (per-subject overlay) ---
+ax = ax_C
+m0_comp = m_by_window[0]
+labels_comp = metrics[0]["subject_per_neuron"]
+valid_m0_comp = m0_comp[np.isfinite(m0_comp)]
+bins_comp = np.linspace(np.nanmin(valid_m0_comp), np.nanmax(valid_m0_comp), 31)
+for subj in SUBJECTS:
+    mask = labels_comp == subj
+    if not mask.any():
+        continue
+    vals = m0_comp[mask]
+    color = SUBJECT_COLORS[subj]
+    ax.hist(vals, bins=bins_comp, color=color, edgecolor="white", alpha=0.5)
+    ax.axvline(np.nanmedian(vals), color=color, linewidth=2, ls=(0, (1, 1)),
+               label=f"Median={np.nanmedian(vals):.2f}")
 ax.set_xlabel("1 - α (FEM modulation fraction)")
 ax.set_ylabel("Neuron count")
 ax.set_title("C")
 ax.legend(frameon=False, fontsize=7)
 
-# --- D: mean-variance scatter ---
-ax = axs[0, 1]
+# --- D: mean-variance scatter (split Allen / Logan) ---
 s0_d = fano_stats[WINDOWS_MS[0]]
-ax.scatter(s0_d["erate"], s0_d["var_u"], s=6, alpha=0.3, c="tab:blue",
-           label=f"Uncorr={s0_d['slope_unc']:.2f}")
-ax.scatter(s0_d["erate"], s0_d["var_c"], s=6, alpha=0.3, c="tab:red",
-           label=f"Corr={s0_d['slope_cor']:.2f}")
-x_line = np.linspace(0, s0_d["erate"].max(), 100)
-ax.plot(x_line, s0_d["slope_unc"] * x_line, "b--", linewidth=1)
-ax.plot(x_line, s0_d["slope_cor"] * x_line, "r--", linewidth=1)
-ax.set_xlabel("Mean rate")
-ax.set_ylabel("Variance")
-ax.set_title("D")
-ax.legend(frameon=False, fontsize=7)
+labels_d_comp = s0_d["subject_per_neuron"]
+for ax_d_comp, subj in [(ax_D, "Allen"), (ax_D, "Logan")]:
+    mask = labels_d_comp == subj
+    if not mask.any():
+        continue
+    e_sub = s0_d["erate"][mask]
+    vu_sub = s0_d["var_u"][mask]
+    vc_sub = s0_d["var_c"][mask]
+    color = SUBJECT_COLORS[subj]
+    slope_u = float(np.sum(e_sub * vu_sub) / np.sum(e_sub ** 2))
+    slope_c = float(np.sum(e_sub * vc_sub) / np.sum(e_sub ** 2))
+    #ax_d_comp.scatter(e_sub, vu_sub, s=6, alpha=0.3, c=color)
+    #ax_d_comp.scatter(e_sub, vc_sub, s=6, alpha=0.3, c='red', marker="^")
+    #x_line = np.linspace(0, e_sub.max(), 100)
+    #ax_d_comp.plot(x_line, slope_u * x_line, color=color, ls="--", linewidth=1,
+    #               label=f"Uncorr={slope_u:.2f}")
+    #ax_d_comp.plot(x_line, slope_c * x_line, color=color, ls=":", linewidth=1,
+    #               label=f"Corr={slope_c:.2f}")
+    ax_d_comp.scatter(e_sub, vc_sub - vu_sub, s=6, alpha=0.3, c=color)
+    ax_d_comp.set_xlabel("Mean rate")
+    #ax_d_comp.set_xscale("log")
+    #ax_d_comp.set_yscale("log")
+    ax_d_comp.xaxis.set_minor_formatter(mticker.NullFormatter())
+    ax_d_comp.yaxis.set_minor_formatter(mticker.NullFormatter())
+    ax_d_comp.set_title('D')
+    ax_d_comp.legend(frameon=False, fontsize=6)
+    #ax_d_comp.set_box_aspect(1)
+ax_D.set_ylabel("$\\Delta$ Variance (Corr - Uncorr)")
+ax_D.set_xscale("log")
+ax_D.set_yscale("symlog", linthresh=10**-3)
+ax_D.spines["top"].set_visible(False)
+ax_D.spines["right"].set_visible(False)
+ax_D.grid(True, which="both", linestyle=":", alpha=0.5)
 
-# --- E: population FF vs window ---
-ax = axs[0, 2]
-slopes_unc_all = [fano_stats[w]["slope_unc"] for w in WINDOWS_MS]
-slopes_cor_all = [fano_stats[w]["slope_cor"] for w in WINDOWS_MS]
-ax.plot(WINDOWS_MS, slopes_unc_all, "o-", color="tab:blue", label="Uncorrected")
-ax.plot(WINDOWS_MS, slopes_cor_all, "o-", color="tab:red", label="FEM-corrected")
+# --- E: population FF vs window (per-subject) ---
+ax = ax_E
+for subj in SUBJECTS:
+    slopes_unc_sub = []
+    slopes_cor_sub = []
+    for w_idx_e, m_dict in enumerate(metrics):
+        n_mask = m_dict["subject_per_neuron"] == subj
+        e_sub = m_dict["erate"][n_mask]
+        ff_u_sub = m_dict["uncorr"][n_mask]
+        ff_c_sub = m_dict["corr"][n_mask]
+        ok = (np.isfinite(ff_u_sub) & np.isfinite(ff_c_sub)
+              & (ff_u_sub > 0) & (ff_c_sub > 0) & (e_sub > 0))
+        e_v = e_sub[ok]
+        vu = ff_u_sub[ok] * e_v
+        vc = ff_c_sub[ok] * e_v
+        if len(e_v) > 0:
+            slopes_unc_sub.append(float(np.sum(e_v * vu) / np.sum(e_v ** 2)))
+            slopes_cor_sub.append(float(np.sum(e_v * vc) / np.sum(e_v ** 2)))
+        else:
+            slopes_unc_sub.append(np.nan)
+            slopes_cor_sub.append(np.nan)
+    if not any(np.isfinite(slopes_unc_sub)):
+        continue
+    color = SUBJECT_COLORS[subj]
+    ax.plot(WINDOWS_MS, slopes_unc_sub, "o-", color=color,
+            label=f"{subj} Uncorr")
+    ax.plot(WINDOWS_MS, slopes_cor_sub, "o--", color=color,
+            label=f"{subj} Corr")
 ax.axhline(1.0, color="gray", linestyle=":", alpha=0.5, label="Poisson")
 ax.set_xlabel("Counting window (ms)")
 ax.set_ylabel("Population Fano factor")
 ax.set_title("E")
 ax.legend(frameon=False, fontsize=7)
-#ax.set_xscale("log")
 ax.set_xticks(WINDOWS_MS)
 ax.set_xticklabels([f"{w:.0f}" for w in WINDOWS_MS])
 
-# --- F: noise corr scatter ---
-ax = axs[1, 0]
+# --- F: noise corr scatter (per-subject) ---
+ax = ax_F
 s0_f = nc_stats[WINDOWS_MS[0]]
-ax.hist2d(s0_f["rho_u"], s0_f["rho_c"], bins=60, cmap="Blues",
-          norm=mpl.colors.LogNorm(), range=[[-0.3, 0.3], [-0.3, 0.3]])
+pair_labels_comp = metrics[0]["subject_per_pair"]
+for subj in SUBJECTS:
+    mask = pair_labels_comp == subj
+    if not mask.any():
+        continue
+    color = SUBJECT_COLORS[subj]
+    ax.scatter(s0_f["rho_u"][mask], s0_f["rho_c"][mask],
+               s=1, alpha=0.05, c=color, rasterized=True)
+    ax.plot(np.mean(s0_f["rho_u"][mask]), np.mean(s0_f["rho_c"][mask]),
+            "o", color=color, markersize=5, markeredgecolor="black",
+            markeredgewidth=0.5, label=subj)
 ax.plot([-0.3, 0.3], [-0.3, 0.3], "k--", alpha=0.3, linewidth=0.5)
-ax.plot(np.mean(s0_f["rho_u"]), np.mean(s0_f["rho_c"]), "ro", markersize=5)
+ax.set_xlim(-0.3, 0.3)
+ax.set_ylim(-0.3, 0.3)
 ax.set_xlabel("ρ uncorrected")
 ax.set_ylabel("ρ FEM-corrected")
 ax.set_title("F")
+ax.legend(frameon=False, fontsize=7)
 
-# --- G: mean Fisher z vs window ---
-ax = axs[1, 1]
-for label, key, color in [("Uncorrected", "z_u", "tab:blue"),
-                           ("FEM-corrected", "z_c", "tab:red")]:
-    means = [nc_stats[w][f"{key}_mean"] for w in WINDOWS_MS]
-    ci_lo = [nc_stats[w][f"{key}_ci"][0] for w in WINDOWS_MS]
-    ci_hi = [nc_stats[w][f"{key}_ci"][1] for w in WINDOWS_MS]
-    ax.errorbar(WINDOWS_MS, means,
-                yerr=[np.array(means) - ci_lo, np.array(ci_hi) - means],
-                fmt="o-", color=color, capsize=3, label=label)
+# --- G: mean Fisher z vs window (per-subject) ---
+ax = ax_G
+for subj in SUBJECTS:
+    for label, key, ls in [("Uncorr", "u", "-"), ("Corr", "c", "--")]:
+        means = []
+        ci_lo_list = []
+        ci_hi_list = []
+        for w_idx_g, m_dict in enumerate(metrics):
+            ds_mask = np.array([s == subj for s in m_dict["subject_by_ds"]])
+            vals = m_dict[f"rho_{key}_meanz_by_ds"][ds_mask]
+            if len(vals) > 0:
+                mn, ci = bootstrap_mean_ci(vals, nboot=5000, seed=0)
+                means.append(mn)
+                ci_lo_list.append(ci[0])
+                ci_hi_list.append(ci[1])
+            else:
+                means.append(np.nan)
+                ci_lo_list.append(np.nan)
+                ci_hi_list.append(np.nan)
+        if not any(np.isfinite(means)):
+            continue
+        color = SUBJECT_COLORS[subj]
+        ax.errorbar(WINDOWS_MS, means,
+                    yerr=[np.array(means) - ci_lo_list, np.array(ci_hi_list) - means],
+                    fmt=f"o{ls}", color=color, capsize=3,
+                    label=f"{subj} {label}")
 ax.axhline(0, color="gray", linestyle=":", alpha=0.5)
 ax.set_xlabel("Counting window (ms)")
 ax.set_ylabel("Mean Fisher z")
 ax.set_title("G")
 ax.legend(frameon=False, fontsize=7)
-#ax.set_xscale("log")
 ax.set_xticks(WINDOWS_MS)
 ax.set_xticklabels([f"{w:.0f}" for w in WINDOWS_MS])
 
-# --- H: delta z vs window ---
-ax = axs[1, 2]
-dz_means_all = [nc_stats[w]["dz_mean"] for w in WINDOWS_MS]
-dz_lo_all = [nc_stats[w]["dz_ci"][0] for w in WINDOWS_MS]
-dz_hi_all = [nc_stats[w]["dz_ci"][1] for w in WINDOWS_MS]
-ax.errorbar(WINDOWS_MS, dz_means_all,
-            yerr=[np.array(dz_means_all) - dz_lo_all,
-                  np.array(dz_hi_all) - dz_means_all],
-            fmt="o-", color="black", capsize=3, label="Observed Δz")
-null_lo_all = [nc_stats[w]["null_dz_ci"][0] for w in WINDOWS_MS]
-null_hi_all = [nc_stats[w]["null_dz_ci"][1] for w in WINDOWS_MS]
-ax.fill_between(WINDOWS_MS, null_lo_all, null_hi_all, alpha=0.2, color="gray",
-                label="Shuffle 95% CI")
+# --- H: delta z vs window (per-subject) ---
+ax = ax_H
+for subj in SUBJECTS:
+    dz_means_sub = []
+    dz_lo_sub = []
+    dz_hi_sub = []
+    for w_idx_h, m_dict in enumerate(metrics):
+        ds_mask = np.array([s == subj for s in m_dict["subject_by_ds"]])
+        vals = m_dict["rho_delta_meanz_by_ds"][ds_mask]
+        if len(vals) > 0:
+            mn, ci = bootstrap_mean_ci(vals, nboot=5000, seed=0)
+            dz_means_sub.append(mn)
+            dz_lo_sub.append(ci[0])
+            dz_hi_sub.append(ci[1])
+        else:
+            dz_means_sub.append(np.nan)
+            dz_lo_sub.append(np.nan)
+            dz_hi_sub.append(np.nan)
+    if not any(np.isfinite(dz_means_sub)):
+        continue
+    color = SUBJECT_COLORS[subj]
+    ax.errorbar(WINDOWS_MS, dz_means_sub,
+                yerr=[np.array(dz_means_sub) - dz_lo_sub,
+                      np.array(dz_hi_sub) - dz_means_sub],
+                fmt="o-", color=color, capsize=3, label=subj)
+    null_lo_sub = [nc_stats[w]["null_dz_ci_by_subject"][subj][0] for w in WINDOWS_MS]
+    null_hi_sub = [nc_stats[w]["null_dz_ci_by_subject"][subj][1] for w in WINDOWS_MS]
+    ax.fill_between(WINDOWS_MS, null_lo_sub, null_hi_sub, alpha=0.15, color=color,
+                    label=f"{subj} shuffle 95% CI")
 ax.axhline(0, color="gray", linestyle=":", alpha=0.5)
 ax.set_xlabel("Counting window (ms)")
 ax.set_ylabel("Δz (corr - uncorr)")
 ax.set_title("H")
 ax.legend(frameon=False, fontsize=7)
-#ax.set_xscale("log")
 ax.set_xticks(WINDOWS_MS)
 ax.set_xticklabels([f"{w:.0f}" for w in WINDOWS_MS])
 
-# --- I: eigenspectra ---
-ax = axs[2, 0]
-max_dims = 50
-for spec, color, label in [(spectra_psth, "tab:blue", "PSTH"),
-                            (spectra_fem, "tab:red", "FEM")]:
-    all_spec = np.full((len(spec), max_dims), np.nan)
-    for i, s in enumerate(spec):
-        L = min(len(s), max_dims)
-        all_spec[i, :L] = s[:L]
-    median = np.nanmedian(all_spec, axis=0)
-    q25 = np.nanpercentile(all_spec, 25, axis=0)
-    q75 = np.nanpercentile(all_spec, 75, axis=0)
-    dims = np.arange(1, max_dims + 1)
-    ax.plot(dims, median, color=color, label=label)
-    ax.fill_between(dims, q25, q75, color=color, alpha=0.2)
-#ax.set_xscale("log")
-ax.set_yscale("log")
+# --- I: eigenspectra (per-subject) ---
+ax = ax_I
+max_dims = 10
+for subj in SUBJECTS:
+    s_mask = np.array(sub_subjects) == subj
+    if not s_mask.any():
+        continue
+    color = SUBJECT_COLORS[subj]
+    for spec_list, ls, label_type in [(spectra_psth, "-", "PSTH"),
+                                       (spectra_fem, "--", "FEM")]:
+        spec_sub = [s for s, m in zip(spec_list, s_mask) if m]
+        if not spec_sub:
+            continue
+        all_spec = np.full((len(spec_sub), max_dims), np.nan)
+        for i, s in enumerate(spec_sub):
+            L = min(len(s), max_dims)
+            all_spec[i, :L] = s[:L]
+        median = np.nanmedian(all_spec, axis=0)
+        q25 = np.nanpercentile(all_spec, 25, axis=0)
+        q75 = np.nanpercentile(all_spec, 75, axis=0)
+        dims = np.arange(1, max_dims + 1)
+        ax.plot(dims, median, color=color, ls=ls, label=f"{subj} {label_type}", marker="o", markersize=4)
+        ax.fill_between(dims, q25, q75, color=color, alpha=0.15)
+ax.set_xlim(1, max_dims)
 ax.set_xlabel("Eigenvalue rank")
 ax.set_ylabel("Frac. total variance")
+ax.set_yscale("log")
+#ax.set_xscale("log")
 ax.set_title("I")
 ax.legend(frameon=False, fontsize=7)
 
-# --- J: participation ratio ---
-ax = axs[2, 1]
-order = np.argsort(pr_psth_list)
-x = np.arange(len(order))
-bar_w = 0.35
-edge_colors = [SUBJECT_COLORS.get(sub_subjects[i], "gray") for i in order]
-ax.bar(x - bar_w/2, np.array(pr_psth_list)[order], bar_w,
-       color="tab:blue", edgecolor=edge_colors, linewidth=1.5, label="PSTH")
-ax.bar(x + bar_w/2, np.array(pr_fem_list)[order], bar_w,
-       color="tab:red", edgecolor=edge_colors, linewidth=1.5, label="FEM")
-ax.set_xlabel("Session")
-ax.set_ylabel("Participation ratio")
+# --- J: participation ratio (scatter) ---
+ax = ax_J
+for subj in sorted(set(sub_subjects)):
+    s_mask = np.array(sub_subjects) == subj
+    ax.scatter(np.array(pr_fem_list)[s_mask], np.array(pr_psth_list)[s_mask],
+               c=SUBJECT_COLORS.get(subj, "gray"), s=40,
+               edgecolors="black", linewidths=0.5, label=subj)
+pr_max = max(np.max(pr_psth_list), np.max(pr_fem_list)) * 1.1
+ax.plot([0, pr_max], [0, pr_max], "k--", alpha=0.3)
+ax.set_xlim(0, pr_max)
+ax.set_ylim(0, pr_max)
+ax.set_xlabel("FEM PR")
+ax.set_ylabel("PSTH PR")
 ax.set_title("J")
-ax.legend(frameon=False, fontsize=7)
 
 # --- K: subspace alignment ---
-ax = axs[2, 2]
+ax = ax_K
 for subj in sorted(set(sub_subjects)):
     s_mask = [s == subj for s in sub_subjects]
     ax.scatter(np.array(var_p_given_f)[s_mask], np.array(var_f_given_p)[s_mask],
@@ -1266,7 +1371,12 @@ ax.set_xlim(0, 1)
 ax.set_ylim(0, 1)
 ax.legend(frameon=False, fontsize=7)
 
-fig_comp.tight_layout()
+# Apply right/top spines off and grid to all panels
+for ax in [ax_C, ax_D, ax_E, ax_F, ax_G, ax_H, ax_I, ax_J, ax_K]:
+    ax.spines["right"].set_visible(False)
+    ax.spines["top"].set_visible(False)
+    ax.grid(True, alpha=0.3)
+
 fig_comp.savefig(FIG_DIR / "fig2_composite.pdf", bbox_inches="tight", dpi=300)
 show_or_close(fig_comp)
 
