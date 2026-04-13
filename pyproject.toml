@@ -31,6 +31,7 @@ dependencies = [
     "schedulefree>=1.4.1",
     "statsmodels",
     "dill",
+    "cairosvg>=2.9.0",
 ]
 
 [project.optional-dependencies]

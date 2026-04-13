@@ -82,7 +82,7 @@ mpl.rcParams["font.sans-serif"] = ["Arial", "Helvetica", "DejaVu Sans"]
 # ---------------------------------------------------------------------------
 # Analysis parameters
 # ---------------------------------------------------------------------------
-RECOMPUTE = True # set True to rerun decomposition from raw data
+RECOMPUTE = False # set True to rerun decomposition from raw data
 DT = 1 / 120                # seconds per bin (native 240 Hz sampling)
 WINDOW_BINS = [1, 2, 4, 8] # counting windows in bins (powers of two)
 N_SHUFFLES = 100             # shuffle null iterations

@@ -20,13 +20,14 @@ set -euo pipefail
 #LR="3.3e-4"
 LR="1e-3" # Optimal
 #MODEL_CONFIG="experiments/model_configs/learned_resnet_wide3_none_convgru_gaussian.yaml"
-MODEL_CONFIG="experiments/model_configs/learned_resnet_concat_convgru_gaussian.yaml"
+#MODEL_CONFIG="experiments/model_configs/learned_resnet_concat_convgru_gaussian.yaml"
+MODEL_CONFIG="experiments/model_configs/learned_resnet_none_convgru_gaussian.yaml"
 WD="1e-5"
 CORE_LR_SCALE="1.0"
 LR_SCHEDULER="cosine_warmup"
 WARMUP_EPOCHS=2
 BATCH_SIZE=256
-ACCUMULATE_GRAD_BATCHES=1 # Previously 4, trying to reduce training time by using larger effective batch size and fewer gradient steps per epoch
+ACCUMULATE_GRAD_BATCHES=4 # Previously 4, trying to reduce training time by using larger effective batch size and fewer gradient steps per epoch
 STEPS_PER_EPOCH=512 # Really just determines how often to validate and log, not the actual epoch length
 MAX_EPOCHS=9999  # Time budget is the real stopping criterion
 #TIME_BUDGET="720" # In minutes. Set to empty string for no time limit.

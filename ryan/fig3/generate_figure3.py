@@ -629,5 +629,115 @@ for subj in SUBJECTS + ["All"]:
     print(f"Panel E — {subj} (N={ok.sum()}): "
           f"Spearman r={r_s:.3f}, p={p_s:.3g}")
 
+# %% Composite figure
+# Layout:
+#   Row 1: [A: schematic]  [B: example traces (2 subplots)]
+#   Row 2: [C: ccnorm hist] [D: r^2 scatter] [E: improvement vs FEM]
+
+import cairosvg
+from PIL import Image
+import io
+
+fig_comp = plt.figure(figsize=(10, 7))
+gs = fig_comp.add_gridspec(2, 3, height_ratios=[1, 1], hspace=0.35, wspace=0.35)
+
+# --- Panel A: schematic from SVG ---
+ax_a = fig_comp.add_subplot(gs[0, 0])
+svg_path = str(VISIONCORE_ROOT / "ryan" / "fig3" / "fig3-schematic.svg")
+png_data = cairosvg.svg2png(url=svg_path, output_width=800)
+img = Image.open(io.BytesIO(png_data))
+ax_a.imshow(img)
+ax_a.set_title("A", fontweight="bold", loc="left")
+ax_a.axis("off")
+
+# --- Panel B: example neuron PSTHs (2 subplots in columns 1-2 of row 0) ---
+gs_b = gs[0, 1:].subgridspec(1, 2, wspace=0.3)
+for idx, subj in enumerate(SUBJECTS):
+    ax = fig_comp.add_subplot(gs_b[0, idx])
+    mask = (subjects == subj) & good & np.isfinite(ccnorm)
+    if not mask.any():
+        ax.set_title(f"{subj}: no good neurons")
+        continue
+    candidates = np.where(mask)[0]
+    best_local = candidates[np.nanargmax(ccnorm[candidates])]
+    best_global = valid_indices[best_local]
+    si, ni = all_trace_neuron_session[best_global]
+    robs_trace = all_robs_mean[best_global] / DT
+    rhat_trace = all_rhat_mean[best_global] / DT
+    t_valid = np.isfinite(robs_trace) & np.isfinite(rhat_trace)
+    t = tbins[:len(robs_trace)]
+    ax.plot(t[t_valid], robs_trace[t_valid], 'k', linewidth=1, label="Observed")
+    ax.plot(t[t_valid], rhat_trace[t_valid], color=SUBJECT_COLORS[subj],
+            linewidth=1, label="Twin")
+    ax.set_xlabel("Time (s)")
+    if idx == 0:
+        ax.set_ylabel("Rate (sp/s)")
+    ax.set_title(f"{'B' if idx == 0 else ''}", fontweight="bold", loc="left")
+    ax.legend(frameon=False, fontsize=7)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+# --- Panel C: ccnorm histogram ---
+ax = fig_comp.add_subplot(gs[1, 0])
+bins_comp = np.linspace(0, 1, 21)
+for subj in SUBJECTS:
+    mask = (subjects == subj) & good & np.isfinite(ccnorm)
+    if not mask.any():
+        continue
+    vals = ccnorm[mask]
+    color = SUBJECT_COLORS[subj]
+    med = np.nanmedian(vals)
+    q25, q75 = np.nanpercentile(vals, [25, 75])
+    ax.hist(vals, bins=bins_comp, color=color, edgecolor="white", alpha=0.5)
+    ax.axvline(med, color=color, linewidth=2, ls=(0, (1, 1)),
+               label=f"{subj}: {med:.2f} [{q25:.2f}, {q75:.2f}]")
+ax.set_xlabel("Normalized correlation (ccnorm)")
+ax.set_ylabel("Count")
+ax.set_title("C", fontweight="bold", loc="left")
+ax.legend(frameon=False, fontsize=7)
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+
+# --- Panel D: single-trial r^2 scatter ---
+ax = fig_comp.add_subplot(gs[1, 1])
+for subj in SUBJECTS:
+    mask = (subjects == subj) & good
+    if not mask.any():
+        continue
+    ax.scatter(ve_psth[mask], ve_model[mask], s=5, alpha=0.5,
+               color=SUBJECT_COLORS[subj], label=subj)
+lims_d = [0, max(0.4, np.nanmax(ve_model[good]) * 1.1)]
+ax.plot(lims_d, lims_d, 'k--', linewidth=0.5, alpha=0.5)
+ax.set_xlim(lims_d)
+ax.set_ylim(lims_d)
+ax.set_xlabel("Single-trial $r^2$ (PSTH)")
+ax.set_ylabel("Single-trial $r^2$ (Model)")
+ax.set_title("D", fontweight="bold", loc="left")
+ax.legend(frameon=False, fontsize=7)
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+
+# --- Panel E: improvement vs FEM modulation ---
+ax = fig_comp.add_subplot(gs[1, 2])
+for subj in SUBJECTS:
+    mask = has_alpha & (subjects == subj)
+    if not mask.any():
+        continue
+    fem_mod = 1 - alpha[mask]
+    improvement = ve_model[mask] / ve_psth[mask]
+    ax.scatter(fem_mod, improvement, s=5, alpha=0.5,
+               color=SUBJECT_COLORS[subj], label=subj)
+ax.axhline(1, color='k', linestyle='--', linewidth=0.5, alpha=0.5)
+ax.set_xlabel("FEM modulation (1 - α)")
+ax.set_ylabel("$r^2$ improvement (Model / PSTH)")
+ax.set_ylim(0, 5)
+ax.set_title("E", fontweight="bold", loc="left")
+ax.legend(frameon=False, fontsize=7)
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+
+fig_comp.savefig(FIG_DIR / "fig3_composite.pdf", bbox_inches="tight", dpi=300)
+show_or_close(fig_comp)
+
 print(f"\nAll panel figures saved to: {FIG_DIR}")
 print("Done.")
