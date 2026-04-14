@@ -19,6 +19,9 @@ import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from scipy import stats as sp_stats
+from scipy.cluster.hierarchy import linkage, leaves_list, optimal_leaf_ordering
+from scipy.spatial.distance import pdist
+from scipy.ndimage import gaussian_filter1d
 import dill
 import torch
 from tqdm import tqdm
@@ -42,14 +45,21 @@ MIN_FIX_DUR = 20             # minimum fixation duration (bins)
 MIN_TOTAL_SPIKES = 200       # neuron inclusion threshold
 CCNORM_N_SPLITS = 500        # split-half iterations for ccnorm
 CCMAX_THRESHOLD = 0.80       # reliability threshold for "good" neurons
-PANEL_B_MIN_DUR_S = 0.5      # minimum trial length for PCA ordering + raster (sec).
+PANEL_B_MIN_DUR_S = 0.5      # minimum trial length for seriation + raster (sec).
                              # Bounded by the model's temporal warmup (~32 bins),
                              # which leaves ~88 bins (~0.73s) of valid data max.
+PANEL_B_SERIATION = "olo"    # "olo" (hierarchical clustering + optimal leaf
+                             # ordering on correlation distance of smoothed
+                             # rates) or "pc1" (sort by PC1 score).
+PANEL_B_SMOOTH_SIGMA_S = 0.015  # Gaussian sigma (sec) for smoothing trial rates
+                             # before computing distances. Only used for "olo".
 # Panel B example neuron. Set both to None to auto-pick the highest-ccnorm
 # reliable neuron across all sessions. Otherwise pin a specific example:
 # PANEL_B_NEURON_ID is the original neuron index (matches sr["neuron_mask"][ni]).
-PANEL_B_SESSION = "Allen_2022-04-08"
-PANEL_B_NEURON_ID = 62
+#PANEL_B_SESSION = "Allen_2022-04-08"
+#PANEL_B_NEURON_ID = 62
+PANEL_B_SESSION = "Logan_2019-12-26"
+PANEL_B_NEURON_ID = 20
 SUBJECTS = ["Allen", "Logan"]
 SUBJECT_COLORS = {"Allen": "tab:blue", "Logan": "tab:green"}
 
@@ -470,35 +480,64 @@ good = ccmax > CCMAX_THRESHOLD
 print(f"Good neurons (ccmax > {CCMAX_THRESHOLD}): {good.sum()}")
 
 
-# %% Helper: filter long trials and order by observed PC1
+# %% Helper: filter long trials and seriate by observed trial pattern
 # For the single-neuron raster plots, we restrict to trials with at least
-# PANEL_B_MIN_DUR_S seconds of valid data, truncate to that window, and sort
-# trials by their projection onto the first PC of the observed (trials × time)
-# matrix. Applying the same ordering to the model predictions lets the
-# raster reveal whether the twin captures the dominant trial-to-trial mode.
+# PANEL_B_MIN_DUR_S seconds of valid data, truncate to that window, and
+# seriate the trials so neighbors in the display are maximally similar.
+# Applying the same ordering to the model predictions lets the raster reveal
+# whether the twin captures the same trial-to-trial structure.
 
 PANEL_B_MIN_BINS = int(round(PANEL_B_MIN_DUR_S / DT))
 tbins = np.arange(VALID_TIME_BINS) * DT  # time axis in seconds (pre-shift)
 
 
-def order_single_neuron_by_pc1(robs_trials, rhat_trials, dfs_trials,
-                                min_bins=PANEL_B_MIN_BINS):
+def order_single_neuron_by_seriation(robs_trials, rhat_trials, dfs_trials,
+                                      method=PANEL_B_SERIATION,
+                                      min_bins=PANEL_B_MIN_BINS,
+                                      smooth_sigma_s=PANEL_B_SMOOTH_SIGMA_S):
     """Filter trials with ≥ min_bins valid bins (in the plotting window),
-    truncate, and order by PC1 of the observed (trials × time) matrix.
+    truncate to the window, and seriate the trials so adjacent rows in the
+    raster are as similar as possible.
 
-    Leading bins that are NaN across all trials (model temporal-context warmup)
-    are skipped first, so the returned window starts at the first bin with any
-    valid data. Missing bins within the window (brief fixation dropouts) are
-    per-timepoint-mean imputed for PCA only; display arrays keep NaN.
+    Background
+    ----------
+    "Seriation" is the problem of finding a 1-D ordering of n items that
+    minimizes total dissimilarity between neighbors — the same objective as
+    an open-path TSP on the pairwise distance matrix. It is NP-hard in
+    general, so practical methods either solve a tractable relaxation or
+    use a good heuristic. Two options are exposed here:
+
+      - "pc1": sort trials by their score on the first principal component
+        of the observed (trials × time) matrix. Equivalent to a 1-D PCA
+        embedding. Captures the dominant global mode but tends to blur out
+        finer structure that is orthogonal to PC1.
+
+      - "olo": hierarchical clustering with optimal leaf ordering
+        (Bar-Joseph et al. 2001) on correlation distance between
+        Gaussian-smoothed trial rates. The dendrogram is built with average
+        linkage, then subtrees are flipped to minimize the sum of distances
+        between adjacent leaves. This keeps local continuity while also
+        respecting cluster structure, and is the standard choice for
+        ordering heatmap rows in the genomics/neuroscience literature.
+
+    Leading bins that are NaN across all trials (model temporal-context
+    warmup) are skipped first, so the returned window starts at the first
+    bin with any valid data. Missing bins within the window (brief fixation
+    dropouts) are per-timepoint-mean imputed for the seriation step only;
+    display arrays keep NaN.
 
     Parameters
     ----------
     robs_trials, rhat_trials, dfs_trials : (n_trials, n_time) arrays
+    method : {"olo", "pc1"}
+    min_bins : int, required valid bins per trial in the plotting window
+    smooth_sigma_s : float, Gaussian smoothing sigma (sec) applied to rates
+        before computing pairwise correlation distance. Only used for "olo".
 
     Returns
     -------
     robs_sorted, rhat_sorted : (n_kept, min_bins) with NaN at invalid bins
-    order : indices into filtered set giving the PC1 sort
+    order : indices into filtered set giving the seriation
     first_bin : int, leading bin of the returned window in the full trial axis
     """
     # Drop leading bins with no valid data in any trial (model warmup).
@@ -528,16 +567,40 @@ def order_single_neuron_by_pc1(robs_trials, rhat_trials, dfs_trials,
         return robs_k, rhat_k, np.arange(robs_k.shape[0]), first_bin
 
     # Impute missing bins with per-timepoint mean across retained trials
-    # so PCA isn't distorted by zeros / NaNs at dropped fixation bins.
+    # so the seriation isn't distorted by zeros / NaNs at dropped fixation bins.
     obs_masked = np.where(valid_k, robs_k, np.nan)
     col_mean = np.nanmean(obs_masked, axis=0, keepdims=True)
     col_mean = np.where(np.isfinite(col_mean), col_mean, 0.0)
     obs_filled = np.where(valid_k, robs_k, np.broadcast_to(col_mean, robs_k.shape))
 
-    obs_centered = obs_filled - obs_filled.mean(axis=0, keepdims=True)
-    U, S, _ = np.linalg.svd(obs_centered, full_matrices=False)
-    pc1_scores = U[:, 0] * S[0]
-    order = np.argsort(pc1_scores)
+    if method == "pc1":
+        obs_centered = obs_filled - obs_filled.mean(axis=0, keepdims=True)
+        U, S, _ = np.linalg.svd(obs_centered, full_matrices=False)
+        pc1_scores = U[:, 0] * S[0]
+        order = np.argsort(pc1_scores)
+    elif method == "olo":
+        # Gaussian-smooth each trial's rate in time, then use correlation
+        # distance (1 - Pearson r) between trials. Correlation distance
+        # emphasizes pattern similarity over overall rate.
+        sigma_bins = max(smooth_sigma_s / DT, 1e-6)
+        obs_smooth = gaussian_filter1d(obs_filled, sigma=sigma_bins, axis=1,
+                                       mode="nearest")
+        # Guard against zero-variance rows (e.g., flat silent trials), which
+        # would produce NaN correlations. Add a tiny jitter to any such row.
+        row_std = obs_smooth.std(axis=1)
+        flat = row_std < 1e-12
+        if flat.any():
+            rng = np.random.default_rng(0)
+            obs_smooth = obs_smooth.copy()
+            obs_smooth[flat] += rng.normal(scale=1e-9, size=(flat.sum(),
+                                                              obs_smooth.shape[1]))
+        dists = pdist(obs_smooth, metric="correlation")
+        Z = linkage(dists, method="average")
+        Z = optimal_leaf_ordering(Z, dists)
+        order = np.asarray(leaves_list(Z), dtype=int)
+    else:
+        raise ValueError(f"Unknown seriation method: {method!r} "
+                         f"(expected 'olo' or 'pc1')")
 
     robs_k[~valid_k] = np.nan
     rhat_k[~valid_k] = np.nan
@@ -619,7 +682,7 @@ for rank in range(n_show):
     rhat_t_full = sr_c["rhat_used"][:, :, ni_c]
     dfs_t_full = sr_c["dfs_used"][:, :, ni_c]
 
-    robs_sorted, rhat_sorted, _, first_bin_c = order_single_neuron_by_pc1(
+    robs_sorted, rhat_sorted, _, first_bin_c = order_single_neuron_by_seriation(
         robs_t_full, rhat_t_full, dfs_t_full
     )
     if robs_sorted.shape[0] < 2:
@@ -719,12 +782,12 @@ print(f"Panel B — example neuron: {best_sr['session']}, "
       f"neuron {best_sr['neuron_mask'][ni]}, "
       f"ccnorm={ccnorm[best_local]:.2f}")
 
-# Extract per-trial data for this neuron and order by PC1 of observed
+# Extract per-trial data for this neuron and seriate by observed pattern
 robs_trials = best_sr["robs_used"][:, :, ni]   # (n_trials, n_time)
 rhat_trials = best_sr["rhat_used"][:, :, ni]
 dfs_trials = best_sr["dfs_used"][:, :, ni]
 
-robs_sorted_b, rhat_sorted_b, _, first_bin_b = order_single_neuron_by_pc1(
+robs_sorted_b, rhat_sorted_b, _, first_bin_b = order_single_neuron_by_seriation(
     robs_trials, rhat_trials, dfs_trials
 )
 # Truncate to the hard-coded display window so PSTH and rasters match length.
@@ -732,8 +795,9 @@ robs_trials_rate = (robs_sorted_b / DT)[:, :n_bins_b]
 rhat_trials_rate = (rhat_sorted_b / DT)[:, :n_bins_b]
 
 print(f"  Panel B raster: {robs_sorted_b.shape[0]} trials "
-      f"(≥ {PANEL_B_WINDOW_S:.1f}s) ordered by PC1 of observed, "
-      f"starting at bin {first_bin_b} ({tbins[first_bin_b]*1000:.0f} ms → t=0)")
+      f"(≥ {PANEL_B_WINDOW_S:.1f}s) ordered by '{PANEL_B_SERIATION}' seriation "
+      f"of observed, starting at bin {first_bin_b} "
+      f"({tbins[first_bin_b]*1000:.0f} ms → t=0)")
 
 # Trial-averaged traces (full window, shifted so first_bin_b → t=0)
 robs_trace = all_robs_mean[best_global] / DT
