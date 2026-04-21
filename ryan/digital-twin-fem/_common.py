@@ -365,7 +365,7 @@ def render_tumbling_e(
     base = np.array([
         [1, 1, 1, 1, 1],
         [1, 0, 0, 0, 0],
-        [1, 1, 1, 1, 0],
+        [1, 1, 1, 1, 1],
         [1, 0, 0, 0, 0],
         [1, 1, 1, 1, 1],
     ], dtype=np.float32)
@@ -577,6 +577,107 @@ def fit_eval_decoder(
     clf.fit(X_tr, labels_train)
     acc = float(clf.score(X_te, labels_test))
     return acc, clf, scaler
+
+
+def fit_eval_bayes_poisson(
+    y_train: np.ndarray, labels_train: np.ndarray,
+    y_test: np.ndarray, labels_test: np.ndarray,
+    t_window: int, n_classes: int | None = None, eps: float = 1e-6,
+) -> tuple[float, np.ndarray]:
+    """Plug-in Bayesian decoder assuming conditionally independent Poisson spikes.
+
+    Estimates class-mean expected counts mu_k(t, n) from training trials and
+    scores test trials by the marginal log-likelihood
+        sum_{t,n} y log(mu_k) - mu_k
+    (constant y! and flat class prior drop out of the argmax). This is the
+    ideal observer under a Poisson generative model with trial-invariant rates —
+    for the `none` FEM condition that matches the generative process exactly,
+    and for `real` FEM it is the plug-in marginal over eye-trace realizations.
+    """
+    if n_classes is None:
+        n_classes = int(max(labels_train.max(), labels_test.max())) + 1
+    y_tr = y_train[:, :t_window, :].astype(np.float32)
+    y_te = y_test[:, :t_window, :].astype(np.float32)
+    mu = np.stack(
+        [y_tr[labels_train == k].mean(axis=0) for k in range(n_classes)], axis=0
+    )  # (K, T, N)
+    log_mu = np.log(mu + eps)
+    term1 = np.einsum("itn,ktn->ik", y_te, log_mu)
+    term2 = mu.sum(axis=(1, 2))
+    log_post = term1 - term2[None, :]
+    preds = np.argmax(log_post, axis=1)
+    acc = float((preds == labels_test).mean())
+    return acc, mu
+
+
+class _GRUDecoder(nn.Module):
+    def __init__(self, n_input: int, n_classes: int, hidden: int = 64,
+                 n_layers: int = 1, dropout: float = 0.0):
+        super().__init__()
+        self.gru = nn.GRU(
+            n_input, hidden, num_layers=n_layers, batch_first=True,
+            dropout=dropout if n_layers > 1 else 0.0,
+        )
+        self.head = nn.Linear(hidden, n_classes)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        h_seq, _ = self.gru(x)
+        return self.head(h_seq[:, -1])
+
+
+def fit_eval_gru_decoder(
+    y_train: np.ndarray, labels_train: np.ndarray,
+    y_test: np.ndarray, labels_test: np.ndarray,
+    t_window: int,
+    hidden: int = 64, n_layers: int = 1,
+    epochs: int = 200, batch_size: int = 64,
+    lr: float = 1e-3, weight_decay: float = 1e-4,
+    device: str | torch.device | None = None, seed: int = 0,
+) -> float:
+    """Train a small GRU classifier on (T, N_pop) spike sequences; return test accuracy.
+
+    Inputs are normalized by the per-feature train mean/std. No validation-based
+    early stopping — trained for a fixed number of epochs with Adam + cross-entropy.
+    """
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    torch.manual_seed(seed)
+
+    Xtr = torch.from_numpy(y_train[:, :t_window, :].astype(np.float32))
+    Xte = torch.from_numpy(y_test[:, :t_window, :].astype(np.float32))
+    ytr = torch.from_numpy(labels_train.astype(np.int64))
+    yte = torch.from_numpy(labels_test.astype(np.int64))
+
+    mu = Xtr.mean(dim=(0, 1), keepdim=True)
+    sd = Xtr.std(dim=(0, 1), keepdim=True) + 1e-6
+    Xtr = (Xtr - mu) / sd
+    Xte = (Xte - mu) / sd
+
+    n_classes = int(max(labels_train.max(), labels_test.max())) + 1
+    net = _GRUDecoder(Xtr.shape[-1], n_classes, hidden=hidden, n_layers=n_layers).to(device)
+    opt = torch.optim.Adam(net.parameters(), lr=lr, weight_decay=weight_decay)
+    loss_fn = nn.CrossEntropyLoss()
+
+    Xtr_d, ytr_d = Xtr.to(device), ytr.to(device)
+    Xte_d, yte_d = Xte.to(device), yte.to(device)
+
+    n = Xtr.shape[0]
+    for _ep in range(epochs):
+        net.train()
+        perm = torch.randperm(n, device=device)
+        for b0 in range(0, n, batch_size):
+            b_idx = perm[b0:b0 + batch_size]
+            logits = net(Xtr_d[b_idx])
+            loss = loss_fn(logits, ytr_d[b_idx])
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+
+    net.eval()
+    with torch.no_grad():
+        preds = net(Xte_d).argmax(dim=-1)
+        acc = float((preds == yte_d).float().mean().item())
+    return acc
 
 
 # ---------------------------------------------------------------------------

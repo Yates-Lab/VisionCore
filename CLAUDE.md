@@ -81,6 +81,15 @@ dataset_cfgs = load_dataset_configs('experiments/dataset_configs/multi_basic_120
 model = build_model(model_cfg, dataset_configs=dataset_cfgs)
 ```
 
+### Paths & Outputs
+
+**Always anchor paths via `VisionCore.paths`** — never use `__file__` in scripts or notebooks. The repo root, cache dir, figures dir, and stats dir are exposed as `VISIONCORE_ROOT`, `CACHE_DIR`, `FIGURES_DIR`, `STATS_DIR`. This keeps paths correct under IPython, `uv run`, or any working directory, and ensures outputs land in the canonical `outputs/` tree.
+
+```python
+from VisionCore.paths import FIGURES_DIR
+fig.savefig(FIGURES_DIR / "my-analysis" / "fig1.pdf")
+```
+
 ### Multi-Dataset Architecture
 
 - Single shared "core" (frontend + convnet + recurrent) across all datasets

@@ -44,7 +44,7 @@ VALID_TIME_BINS = 120        # max within-trial time bins
 MIN_FIX_DUR = 20             # minimum fixation duration (bins)
 MIN_TOTAL_SPIKES = 200       # neuron inclusion threshold
 CCNORM_N_SPLITS = 500        # split-half iterations for ccnorm
-CCMAX_THRESHOLD = 0.80       # reliability threshold for "good" neurons
+CCMAX_THRESHOLD = 0.85       # reliability threshold for "good" neurons
 PANEL_B_MIN_DUR_S = 0.5      # minimum trial length for seriation + raster (sec).
                              # Bounded by the model's temporal warmup (~32 bins),
                              # which leaves ~88 bins (~0.73s) of valid data max.
@@ -56,18 +56,18 @@ PANEL_B_SMOOTH_SIGMA_S = 0.015  # Gaussian sigma (sec) for smoothing trial rates
 # Panel B example neuron. Set both to None to auto-pick the highest-ccnorm
 # reliable neuron across all sessions. Otherwise pin a specific example:
 # PANEL_B_NEURON_ID is the original neuron index (matches sr["neuron_mask"][ni]).
-#PANEL_B_SESSION = "Allen_2022-04-08"
-#PANEL_B_NEURON_ID = 62
-PANEL_B_SESSION = "Logan_2019-12-26"
-PANEL_B_NEURON_ID = 20
+PANEL_B_SESSION = "Allen_2022-04-08"
+PANEL_B_NEURON_ID = 62
+#PANEL_B_SESSION = "Logan_2019-12-26"
+#PANEL_B_NEURON_ID = 20
 SUBJECTS = ["Allen", "Logan"]
 SUBJECT_COLORS = {"Allen": "tab:blue", "Logan": "tab:green"}
 
 # Model checkpoint
 CHECKPOINT_DIR = "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/digital_twin_120"
-CHECKPOINT_SUBDIR = "2026-03-31_12-03-23_learned_resnet_concat_convgru_gaussian"
-EXPERIMENT_SUBDIR = "learned_resnet_concat_convgru_gaussian_lr1e-3_wd1e-5_cls1.0_bs256_ga1"
-BEST_CKPT = "epoch=193-val_bps_overall=0.6000.ckpt"
+CHECKPOINT_SUBDIR = "2026-03-31_11-33-32_learned_resnet_concat_convgru_gaussian"
+EXPERIMENT_SUBDIR = "learned_resnet_concat_convgru_gaussian_lr1e-3_wd1e-5_cls1.0_bs256_ga4"
+BEST_CKPT = "epoch=374-val_bps_overall=0.6395.ckpt"
 CHECKPOINT_PATH = f"{CHECKPOINT_DIR}/{CHECKPOINT_SUBDIR}/{EXPERIMENT_SUBDIR}/{BEST_CKPT}"
 
 # Dataset config (same sessions used for training)

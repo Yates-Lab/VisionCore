@@ -19,7 +19,6 @@ set -euo pipefail
 #LR="1e-2" 
 #LR="3.3e-4"
 LR="1e-3" # Optimal
-#MODEL_CONFIG="experiments/model_configs/learned_resnet_wide3_none_convgru_gaussian.yaml"
 #MODEL_CONFIG="experiments/model_configs/learned_resnet_concat_convgru_gaussian.yaml"
 MODEL_CONFIG="experiments/model_configs/learned_resnet_none_convgru_gaussian.yaml"
 WD="1e-5"
