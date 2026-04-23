@@ -119,30 +119,47 @@ subj_idx = split_subject_indices(dataset_names)
 print(f"Allen sessions: {len(subj_idx['Allen'])}, Logan sessions: {len(subj_idx['Logan'])}")
 
 
-# ---------------------------------------------------------------- Figure 1
+#%% ---------------------------------------------------------------- Figure 1
 
 fig1, axes = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
-bins = np.linspace(-0.5, 0.5, 61)
+bins = np.linspace(-0.2, 0.5, 31)
 colors = {"backimage": "#1f77b4", "gaborium": "#ff7f0e", "gratings": "#2ca02c"}
 
 for ax, subject in zip(axes, ["Allen", "Logan"]):
     idxs = subj_idx[subject]
+    medians = {}
+    max_count = 0
     for stim in STIM_TYPES:
         bps_b = concat_bps(beh_res, "behavior", stim, idxs)
         bps_v = concat_bps(vis_res, "vision", stim, idxs)
         diff = bps_b - bps_v
         diff = diff[np.isfinite(diff)]
-        ax.hist(
+        counts, _, _ = ax.hist(
             diff,
             bins=bins,
             alpha=0.5,
             color=colors[stim],
             label=f"{STIM_LABELS[stim]} (n={len(diff)})",
         )
+        medians[stim] = np.median(diff)
+        max_count = max(max_count, counts.max())
+    y_tri = max_count * 1.05
+    for stim in STIM_TYPES:
+        ax.plot(
+            medians[stim],
+            y_tri,
+            marker="v",
+            color=colors[stim],
+            markersize=10,
+            markeredgecolor="k",
+            markeredgewidth=0.5,
+            clip_on=False,
+        )
     ax.axvline(0, ls="--", color="k", lw=1)
+    ax.set_xlim(-0.2, 0.5)
     ax.set_xlabel(r"$\Delta$BPS (behavior − vision)")
     ax.set_title(subject)
-    ax.legend(loc="upper left", fontsize=9)
+    ax.legend(loc="upper right", fontsize=9)
 axes[0].set_ylabel("cell count")
 
 fig1.suptitle("Validation-set LLR: behavior vs. vision-only models", y=1.02)
@@ -152,7 +169,7 @@ fig1.savefig(FIG_DIR / "fig1_llr_histograms.png", dpi=150, bbox_inches="tight")
 print(f"Saved {FIG_DIR / 'fig1_llr_histograms.pdf'}")
 
 
-# ---------------------------------------------------------------- Figures 2–7
+#%% ---------------------------------------------------------------- Figures 2–7
 
 # All datasets share the same saccade window (set in eval_stack_multidataset.py)
 win_bins = beh_res["behavior"]["saccade"][STIM_TYPES[0]]["win"][0]
@@ -199,6 +216,7 @@ def make_perisaccadic_figure(subject, stim):
             extent=extent,
         )
         ax.axvline(0, ls="--", color="k", lw=1)
+        ax.set_xlim(-200, 400)
         ax.set_title(title)
         ax.set_xlabel("Time from saccade (ms)")
     axs[0].set_ylabel("Cell (sorted by peak time of data)")
