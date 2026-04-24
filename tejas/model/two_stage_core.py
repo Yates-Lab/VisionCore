@@ -329,7 +329,12 @@ class TwoStage(nn.Module):
             return pos_feats, neg_feats, pyr_out
 
     def forward(self, x):
-        pos_feats, neg_feats, _ = self.get_pyr_feats(x)
+        if "pos_feats" in x and "neg_feats" in x:
+            # Optional fast path: externally precomputed steerable pyramid features.
+            pos_feats = x["pos_feats"]
+            neg_feats = x["neg_feats"]
+        else:
+            pos_feats, neg_feats, _ = self.get_pyr_feats(x)
 
         z = F.linear(pos_feats, self._windowed_weight(self.w_pos.weight)) + F.linear(
             neg_feats, self._windowed_weight(self.w_neg.weight)
