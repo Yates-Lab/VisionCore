@@ -441,10 +441,11 @@ def build_rf_sta_figure(
     model,
     sta_rf,
     cell_id,
+    ste_rf=None,
     neuron_idx=0,
     lag_idx=0,
     suptitle=None,
-    figsize=(16, 4),
+    figsize=(20, 4),
 ):
     model_lin = (
         model.linear_receptive_field_at(neuron_idx=neuron_idx, lag_idx=lag_idx)[0, 0]
@@ -475,7 +476,8 @@ def build_rf_sta_figure(
         carrier_scale=carrier_scale,
     )
 
-    rf_fig, axes = plt.subplots(1, 4, figsize=figsize)
+    n_panels = 5 if ste_rf is not None else 4
+    rf_fig, axes = plt.subplots(1, n_panels, figsize=figsize)
     axes[0].imshow(model_lin, cmap="coolwarm_r")
     axes[0].set_title("Linear RF")
     axes[0].axis("off")
@@ -488,6 +490,10 @@ def build_rf_sta_figure(
     axes[3].imshow(sta_rf, cmap="coolwarm_r")
     axes[3].set_title(f"STA (cell {cell_id})")
     axes[3].axis("off")
+    if ste_rf is not None:
+        axes[4].imshow(ste_rf, cmap="magma")
+        axes[4].set_title(f"STE (cell {cell_id})")
+        axes[4].axis("off")
     if suptitle:
         rf_fig.suptitle(suptitle, y=0.98)
     plt.tight_layout()
@@ -518,6 +524,8 @@ def show_epoch_diagnostics(
     save_prefix=None,
     close_figs=False,
     show_plots=True,
+    linearity_metrics=None,
+    stes=None,
 ):
     bps_np = np.asarray(bps.detach().cpu().numpy() if torch.is_tensor(bps) else bps).reshape(-1)
     bps_val_np = np.asarray(bps_val.detach().cpu().numpy() if torch.is_tensor(bps_val) else bps_val).reshape(-1)
@@ -529,6 +537,11 @@ def show_epoch_diagnostics(
         bps_val_cell = float(bps_val_np.mean()) if bps_val_np.size else float("nan")
 
     aff_title = f"Cell {cell_id} | train_bps={bps_cell:.3f} val_bps={bps_val_cell:.3f}"
+    if linearity_metrics is not None:
+        li = float(linearity_metrics.get("linearity_index", float("nan")))
+        fl = float(linearity_metrics.get("frac_linear", float("nan")))
+        fe = float(linearity_metrics.get("frac_energy", float("nan")))
+        aff_title = f"{aff_title} | LI={li:.3f} (fL={fl:.3f}, fE={fe:.3f})"
     if phase is not None and epoch is not None:
         aff_title = f"{aff_title} | {phase} e{int(epoch):03d}"
     elif phase is not None:
@@ -545,13 +558,22 @@ def show_epoch_diagnostics(
     if show_plots:
         plt.show()
     sta_rf = np.asarray(stas[cell_id, peak_lags[cell_id]], dtype=np.float32)
+    ste_rf = None if stes is None else np.asarray(stes[cell_id, peak_lags[cell_id]], dtype=np.float32)
     rf_fig, _ = build_rf_sta_figure(
         model=model,
         sta_rf=sta_rf,
+        ste_rf=ste_rf,
         cell_id=cell_id,
         neuron_idx=neuron_idx,
         lag_idx=lag_idx,
-        suptitle=f"train_bps={bps_cell:.3f} | val_bps={bps_val_cell:.3f}",
+        suptitle=(
+            f"train_bps={bps_cell:.3f} | val_bps={bps_val_cell:.3f}"
+            if linearity_metrics is None
+            else (
+                f"train_bps={bps_cell:.3f} | val_bps={bps_val_cell:.3f} | "
+                f"LI={float(linearity_metrics.get('linearity_index', float('nan'))):.3f}"
+            )
+        ),
     )
     if save_dir is not None:
         prefix = save_prefix or f"cell_{cell_id}"
@@ -584,6 +606,16 @@ def show_epoch_diagnostics(
         print(f"phase={phase}, epoch={epoch}")
     elif phase is not None:
         print(f"phase={phase}")
+    if linearity_metrics is not None:
+        print(
+            "linearity: "
+            f"r2_full={float(linearity_metrics.get('r2_full', float('nan'))):.4f}, "
+            f"r2_linear={float(linearity_metrics.get('r2_linear', float('nan'))):.4f}, "
+            f"r2_energy={float(linearity_metrics.get('r2_energy', float('nan'))):.4f}, "
+            f"f_linear={float(linearity_metrics.get('frac_linear', float('nan'))):.4f}, "
+            f"f_energy={float(linearity_metrics.get('frac_energy', float('nan'))):.4f}, "
+            f"LI={float(linearity_metrics.get('linearity_index', float('nan'))):.4f}"
+        )
 
 
 def _resolve_output_indices(requested_ids, out_dict):

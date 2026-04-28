@@ -55,7 +55,7 @@ circular_dims = {1}
 locality_mode = "legacy_fft"
 # circular_dims = {}
 losses = []
-cell_ids = [66]
+cell_ids = [14]
 num_epochs = 1
 lbfgs_epochs = 1
 # LBFGS step mode:
@@ -66,8 +66,8 @@ lbfgs_step_mode = "full_dataset_accum"
 spike_loss = MaskedPoissonNLLLoss(pred_key='rhat', target_key='robs', mask_key='dfs')
 # Convex sparse per-cell prox strengths.
 # cell_lambda_prox = {14: 1.00e-04, 16: 1.00e-04, 66: 2.68e-05, 76: 1.93e-06}
-cell_lambda_prox = {14: 1.00e-04, 16: 1.00e-04, 66: 2.68e-05, 76: 1.93e-06}
-cell_lambda_local = {14: 1.00e-04, 16: 1.00e-04, 66: 1.00e-04, 76: 1.00e-04}
+cell_lambda_prox = {14: 1.00e-1, 15: 1.00e-1, 16: 1e-1, 66: 2.68e-1, 76: 1.93e-1}
+cell_lambda_local = {14: 0, 15: 0, 16: 0, 66: 0, 76: 0}
 if exp_mode == "convex_sparse":
     sparsity_mode = "prox_l1"
     lambda_prox = float(cell_lambda_prox.get(int(cell_ids[0]), 1e-2))

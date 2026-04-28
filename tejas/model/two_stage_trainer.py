@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+import time
 
 from two_stage_helpers import (
     convex_locality_weighted_l21_from_maps,
@@ -228,6 +229,9 @@ def train_step_lbfgs(
     locality_mode="legacy_fft",
     poisson_aggregation_mode="global_mask_mean",
     lambda_local_per_neuron=None,
+    precomputed_total_den=None,
+    precomputed_num_batches=None,
+    precomputed_num_samples=None,
 ):
     step_stats = {}
 
@@ -241,47 +245,59 @@ def train_step_lbfgs(
 
     if batch_loader is not None:
         device = next(model.parameters()).device
+        closure_calls = 0
 
         def closure():
+            nonlocal closure_calls
+            closure_calls += 1
             optimizer.zero_grad()
 
             # Pass 1: compute the global denominator across micro-batches so each
             # batch contributes with true full-dataset weighting.
-            if poisson_aggregation_mode == "sum_per_cell_means":
-                total_den = torch.zeros((len(cell_ids),), device=device)
+            if precomputed_total_den is not None:
+                total_den = precomputed_total_den.to(device=device)
+                total_samples = int(precomputed_num_samples or 0)
+                total_batches = int(precomputed_num_batches or 0)
+                pass1_s = 0.0
             else:
-                total_den = torch.zeros((), device=device)
-            total_samples = 0
-            total_batches = 0
-            with torch.no_grad():
-                for batch_raw in batch_loader:
-                    batch_local = prepare_batch_fn(batch_raw)
-                    if poisson_aggregation_mode == "sum_per_cell_means":
-                        if "dfs" in batch_local:
-                            den_local = batch_local["dfs"][:, cell_ids].sum(dim=0)
+                if poisson_aggregation_mode == "sum_per_cell_means":
+                    total_den = torch.zeros((len(cell_ids),), device=device)
+                else:
+                    total_den = torch.zeros((), device=device)
+                total_samples = 0
+                total_batches = 0
+                t_pass1 = time.perf_counter()
+                with torch.no_grad():
+                    for batch_raw in batch_loader:
+                        batch_local = prepare_batch_fn(batch_raw)
+                        if poisson_aggregation_mode == "sum_per_cell_means":
+                            if "dfs" in batch_local:
+                                den_local = batch_local["dfs"][:, cell_ids].sum(dim=0)
+                            else:
+                                den_local = torch.full(
+                                    (len(cell_ids),),
+                                    float(batch_local["robs"].shape[0]),
+                                    device=device,
+                                    dtype=batch_local["robs"].dtype,
+                                )
                         else:
-                            den_local = torch.full(
-                                (len(cell_ids),),
-                                float(batch_local["robs"].shape[0]),
-                                device=device,
-                                dtype=batch_local["robs"].dtype,
-                            )
-                    else:
-                        if "dfs" in batch_local:
-                            den_local = batch_local["dfs"][:, cell_ids].sum()
-                        else:
-                            den_local = torch.tensor(
-                                float(batch_local["robs"][:, cell_ids].numel()),
-                                device=device,
-                                dtype=batch_local["robs"].dtype,
-                            )
-                    total_den = total_den + den_local.to(device=device)
-                    total_samples += int(batch_local["robs"].shape[0])
-                    total_batches += 1
+                            if "dfs" in batch_local:
+                                den_local = batch_local["dfs"][:, cell_ids].sum()
+                            else:
+                                den_local = torch.tensor(
+                                    float(batch_local["robs"][:, cell_ids].numel()),
+                                    device=device,
+                                    dtype=batch_local["robs"].dtype,
+                                )
+                        total_den = total_den + den_local.to(device=device)
+                        total_samples += int(batch_local["robs"].shape[0])
+                        total_batches += 1
 
-            total_den = total_den.clamp_min(1.0)
+                total_den = total_den.clamp_min(1.0)
+                pass1_s = time.perf_counter() - t_pass1
 
             # Pass 2: accumulate gradients over micro-batches with global scaling.
+            t_pass2 = time.perf_counter()
             if poisson_aggregation_mode == "sum_per_cell_means":
                 poisson_num_total = torch.zeros((len(cell_ids),), device=device)
             else:
@@ -303,6 +319,8 @@ def train_step_lbfgs(
                 poisson_loss = (poisson_num_total / total_den.detach()).sum()
             else:
                 poisson_loss = poisson_num_total / total_den.detach()
+            pass2_s = time.perf_counter() - t_pass2
+            t_reg = time.perf_counter()
             l_sparse, l_local, reg_term, gamma_local = compute_regularization(
                 model=model,
                 sparsity_mode=sparsity_mode,
@@ -315,6 +333,7 @@ def train_step_lbfgs(
                 lambda_local_per_neuron=lambda_local_per_neuron,
             )
             reg_term.backward()
+            reg_s = time.perf_counter() - t_reg
 
             loss = poisson_loss + reg_term.detach()
             step_stats["loss"] = float(loss.detach().item())
@@ -329,6 +348,9 @@ def train_step_lbfgs(
                 step_stats["accum_denominator"] = float(total_den.detach().item())
             step_stats["accum_num_batches"] = int(total_batches)
             step_stats["accum_num_samples"] = int(total_samples)
+            step_stats["closure_pass1_s_last"] = float(pass1_s)
+            step_stats["closure_pass2_s_last"] = float(pass2_s)
+            step_stats["closure_reg_s_last"] = float(reg_s)
             return loss
 
         optimizer.step(closure)
@@ -344,6 +366,7 @@ def train_step_lbfgs(
             if torch.is_tensor(prox_tau_last)
             else float(prox_tau_last)
         )
+        step_stats["closure_calls"] = int(closure_calls)
         return step_stats, None
 
     def closure():
