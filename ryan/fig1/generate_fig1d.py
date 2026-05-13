@@ -1,21 +1,18 @@
 """
-Figure 1 panel D: single-cell raster structure driven by gaze location.
+Figure 1 panel D: single-cell tuning + gaze-driven raster structure.
 
-Trials are split into short time segments. Within each segment, the
-per-trial median gaze is projected onto the axis orthogonal to the cell's
-preferred grating orientation and trials are sorted by that projection.
-The raster stitches the segments along time, each with its own sort order;
-trials are placed by rank (evenly spaced) so spike ticks do not overlap.
+Layout (4 axes):
+    +----------------+----------------+
+    |   STA peak     |  Gaze segment  |   shared deg extent
+    +----------------+----------------+
+    |   PSTH all trials (full width)  |
+    +---------------------------------+
+    |   Gaze-sorted stitched raster   |   sharex with PSTH
+    +---------------------------------+
 
-Two side-by-side axes:
-    (left)  gaze trajectories inside a single example segment (the one
-            with the strongest mean response), colored by projection.
-    (right) gaze-sorted, segment-stitched spike-time raster, with PSTHs
-            split by projection-quantile overlaid.
-
-Reuses ``tejas.rsvp_util.get_fixrsvp_data`` for the heavy data loading
-(cached on disk by that module). The per-cell payload is itself cached
-to ``CACHE_DIR/fig1_single_cell`` so reruns do no data work at all.
+Reuses ``tejas.rsvp_util.get_fixrsvp_data`` and the STA/STE cache produced
+by ``rf_contours.py`` (CACHE_DIR/fig1_rf_contours). Per-cell payload is
+cached to CACHE_DIR/fig1_single_cell.
 
 Usage:
     uv run ryan/fig1/generate_fig1d.py
@@ -27,7 +24,6 @@ import warnings
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-import matplotlib.patheffects as pe
 
 from VisionCore.paths import VISIONCORE_ROOT, FIGURES_DIR, CACHE_DIR
 
@@ -39,27 +35,27 @@ mpl.rcParams['ps.fonttype'] = 42
 # ---------------------------------------------------------------------------
 SUBJECT = "Allen"
 DATE = "2022-03-04"
-DEFAULT_CELL = 149            # best example from fig1_fixrsvp_single_cell.py
+DEFAULT_CELL = 149
 DATASET_CONFIGS_PATH = str(
     VISIONCORE_ROOT / "experiments" / "dataset_configs" / "multi_basic_240_rsvp.yaml"
 )
 
-DT = 1.0 / 240.0              # bin size, seconds
-TOTAL_WINDOW_BINS = (0, 100)  # raster x-extent, bins
-SEGMENT_LEN_BINS = 25         # gaze sort + stitching segment length
-DISTANCE_FROM_LINE_THRESHOLD = 0.3   # degrees
-MICROSACCADE_THRESHOLD = 0.3         # degrees
-USE_UNIVERSAL_PEAK_LAG = True        # population-median peak lag for sort
+DT = 1.0 / 240.0
+TOTAL_WINDOW_BINS = (0, 100)
+SEGMENT_LEN_BINS = 25
+DISTANCE_FROM_LINE_THRESHOLD = 0.3
+MICROSACCADE_THRESHOLD = 0.3
+USE_UNIVERSAL_PEAK_LAG = True
 
 CACHE_FIG_DIR = CACHE_DIR / "fig1_single_cell"
-RF_CACHE_DIR = CACHE_DIR / "fig1_rf_contours"   # written by generate_fig1c.py
+RF_CACHE_DIR = CACHE_DIR / "fig1_rf_contours"
 FIG_DIR = FIGURES_DIR / "fig1"
 CACHE_FIG_DIR.mkdir(parents=True, exist_ok=True)
 FIG_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ---------------------------------------------------------------------------
-# Peak lag from cached STEs (fig1c artifact); orientation from gratings
+# STA / STE cache access
 # ---------------------------------------------------------------------------
 def _load_ste_for_session(session_name):
     path = RF_CACHE_DIR / f"{session_name}_sta_ste.npz"
@@ -77,10 +73,6 @@ def _gratings_cache_path(session_name):
 
 
 def _compute_gratings_for_session(subject, date):
-    """Run the standard gratings analysis on the session's gratings.dset
-    (loaded via YatesV1Session). Cache the orientation tuning + peak indices
-    per-session so this is paid at most once per session.
-    """
     session_name = f"{subject}_{date}"
     cache = _gratings_cache_path(session_name)
     if cache.exists():
@@ -129,8 +121,80 @@ def _compute_gratings_for_session(subject, date):
     return payload
 
 
+def _gaborium_geometry_cache_path(session_name):
+    return CACHE_FIG_DIR / f"{session_name}_gaborium_geom.npz"
+
+
+def _load_gaborium_geometry(session_name):
+    """ROI origin (row, col) in pixels, plus ppd. Cached per-session."""
+    path = _gaborium_geometry_cache_path(session_name)
+    if path.exists():
+        z = np.load(path)
+        return float(z["ppd"]), np.asarray(z["roi_origin"], dtype=np.float64)
+    from DataYatesV1.utils.io import YatesV1Session
+    sess = YatesV1Session(session_name)
+    dset = sess.get_dataset("gaborium")
+    if dset is None:
+        raise RuntimeError(f"No gaborium dataset for {session_name}")
+    roi_origin = np.asarray(dset.metadata["roi_src"][:, 0], dtype=np.float64)
+    ppd = float(dset.metadata["ppd"])
+    np.savez(path, ppd=ppd, roi_origin=roi_origin)
+    return ppd, roi_origin
+
+
+def _gaborium_row_for_cluster(session_name, cluster_id):
+    """Map an absolute cluster id (as used by fixrsvp cids) to its row in
+    the gaborium STA/STE cache. Gaborium rows are indexed positionally by
+    ``YatesV1Session.get_cluster_ids()``."""
+    from DataYatesV1.utils.io import YatesV1Session
+    sess = YatesV1Session(session_name)
+    cluster_ids = np.asarray(sess.get_cluster_ids())
+    matches = np.where(cluster_ids == cluster_id)[0]
+    if matches.size == 0:
+        raise ValueError(
+            f"cluster {cluster_id} not in gaborium cluster_ids for {session_name}"
+        )
+    return int(matches[0])
+
+
+def _sta_centered_in_degrees(session_name, cluster_id, lag=None):
+    """Return (image, extent_in_deg, peak_lag) for the STA at ``lag`` (or
+    STE-peak lag if None), centered on the (weighted) RF centroid with
+    elevation positive-up. ``cluster_id`` is the absolute cluster id (e.g.
+    ``payload["cell"]``), not the rsvp data column.
+    """
+    z = _load_ste_for_session(session_name)
+    if z is None:
+        return None
+    stas = z["stas"]
+    stes = z["stes"]
+    row = _gaborium_row_for_cluster(session_name, cluster_id)
+    peak_lag = _peak_lag_from_ste(stes[row]) if lag is None else int(lag)
+    img = np.asarray(stas[row, peak_lag], dtype=np.float64)
+
+    ppd, roi_origin = _load_gaborium_geometry(session_name)
+    h, w = img.shape
+
+    centered = img - np.median(img)
+    weights = np.abs(centered)
+    rows_grid, cols_grid = np.indices(img.shape)
+    if weights.sum() > 0:
+        cr = (rows_grid * weights).sum() / weights.sum()
+        cc = (cols_grid * weights).sum() / weights.sum()
+    else:
+        cr = (h - 1) / 2.0
+        cc = (w - 1) / 2.0
+
+    az_min = (-0.5 - cc) / ppd
+    az_max = (w - 0.5 - cc) / ppd
+    el_top = (cr + 0.5) / ppd
+    el_bot = (cr - h + 0.5) / ppd
+    extent = (az_min, az_max, el_bot, el_top)
+    return {"image": centered, "extent": extent, "peak_lag": int(peak_lag)}
+
+
 # ---------------------------------------------------------------------------
-# Gaze sort: project trial-median eye position onto axis orthogonal to ori
+# Gaze sort
 # ---------------------------------------------------------------------------
 def _microsaccade_present(trial_eyepos, threshold=MICROSACCADE_THRESHOLD):
     med = np.nanmedian(trial_eyepos, axis=0)
@@ -140,13 +204,6 @@ def _microsaccade_present(trial_eyepos, threshold=MICROSACCADE_THRESHOLD):
 
 def _project_onto_orthogonal_line(eyepos, sort_window, max_orientation, peak_lag,
                                   distance_threshold=DISTANCE_FROM_LINE_THRESHOLD):
-    """For each trial, take median gaze inside the (peak-lag-shifted) sort
-    window, drop trials with a microsaccade, drop trials too far from the
-    line, and project the rest onto the line orthogonal to ``max_orientation``
-    passing through the across-trial centroid.
-
-    Returns (valid_indices, distances_along_line) sorted by projection.
-    """
     s, e = sort_window
     win_len = e - s
     s_shift = max(s - peak_lag, 0)
@@ -185,18 +242,8 @@ def _project_onto_orthogonal_line(eyepos, sort_window, max_orientation, peak_lag
     return iix, distances
 
 
-# ---------------------------------------------------------------------------
-# Cached per-cell payload
-# ---------------------------------------------------------------------------
-def _cell_cache_path(subject, date, cell):
-    return CACHE_FIG_DIR / f"{subject}_{date}_cell{cell}.pkl"
-
-
 def _compute_segments(eyepos, max_orientation, peak_lag,
                      total_window=TOTAL_WINDOW_BINS, seg_len=SEGMENT_LEN_BINS):
-    """For each contiguous time segment inside ``total_window``, sort trials
-    by gaze projection. Returns list of dicts with start/end bins, iix,
-    distances."""
     s0, e0 = total_window
     segments = []
     for start in range(s0, e0, seg_len):
@@ -209,13 +256,14 @@ def _compute_segments(eyepos, max_orientation, peak_lag,
     return segments
 
 
-def _compute_cell_payload(subject, date, cell, max_orientation=None):
-    """Load fixrsvp data, derive orientation + peak lag from the cached STE,
-    compute the gaze sort, and slice per-trial spike times.
+# ---------------------------------------------------------------------------
+# Cached per-cell payload
+# ---------------------------------------------------------------------------
+def _cell_cache_path(subject, date, cell):
+    return CACHE_FIG_DIR / f"{subject}_{date}_cell{cell}.pkl"
 
-    ``max_orientation`` (degrees) may be supplied to override the
-    STE-derived preferred orientation.
-    """
+
+def _compute_cell_payload(subject, date, cell, max_orientation=None):
     from tejas.rsvp_util import get_fixrsvp_data
 
     data = get_fixrsvp_data(
@@ -239,18 +287,16 @@ def _compute_cell_payload(subject, date, cell, max_orientation=None):
 
     session_name = f"{subject}_{date}"
 
-    # --- preferred orientation from real gratings analysis (cached) -------
     if max_orientation is None:
         gratings = _compute_gratings_for_session(subject, date)
         gratings_cids = list(gratings["cids"])
         if cell in gratings_cids:
             row = gratings_cids.index(cell)
         else:
-            row = cell_col  # assume positional alignment
+            row = cell_col
         max_orientation = float(gratings["peak_ori"][row])
     max_orientation = float(max_orientation)
 
-    # --- peak lag from cached STEs (fig1c artifact) -----------------------
     ste_npz = _load_ste_for_session(session_name)
     if ste_npz is None:
         psth = np.nanmean(robs_cell, axis=0)
@@ -258,7 +304,8 @@ def _compute_cell_payload(subject, date, cell, max_orientation=None):
         peak_lag = peak_lag_cell
     else:
         stes_all = ste_npz["stes"]
-        peak_lag_cell = _peak_lag_from_ste(stes_all[cell_col])
+        sta_row = _gaborium_row_for_cluster(session_name, cell)
+        peak_lag_cell = _peak_lag_from_ste(stes_all[sta_row])
         if USE_UNIVERSAL_PEAK_LAG:
             lags = [int(stes_all[u].std((1, 2)).argmax())
                     for u in range(stes_all.shape[0])]
@@ -267,9 +314,6 @@ def _compute_cell_payload(subject, date, cell, max_orientation=None):
             peak_lag = peak_lag_cell
 
     segments = _compute_segments(eyepos, max_orientation, peak_lag)
-
-    # Example segment for the left (gaze) axis = segment with strongest
-    # mean response across all trials.
     seg_means = [
         np.nanmean(robs_cell[:, s["start"]:s["end"]]) for s in segments
     ]
@@ -277,7 +321,8 @@ def _compute_cell_payload(subject, date, cell, max_orientation=None):
 
     return {
         "cell": int(cell),
-        "session": f"{subject}_{date}",
+        "cell_col": int(cell_col),
+        "session": session_name,
         "max_orientation": float(max_orientation),
         "peak_lag": int(peak_lag),
         "total_window": np.asarray(TOTAL_WINDOW_BINS, dtype=int),
@@ -295,7 +340,20 @@ def load_cell_payload(subject=SUBJECT, date=DATE, cell=DEFAULT_CELL, refresh=Fal
     path = _cell_cache_path(subject, date, cell)
     if path.exists() and not refresh:
         with open(path, "rb") as f:
-            return pickle.load(f)
+            payload = pickle.load(f)
+        if "cell_col" not in payload:
+            # Legacy cache: recompute on the fly so the STA loader can index.
+            from tejas.rsvp_util import get_fixrsvp_data
+            data = get_fixrsvp_data(
+                subject, date, DATASET_CONFIGS_PATH,
+                use_cached_data=True,
+                salvageable_mismatch_time_threshold=25,
+                verbose=False,
+            )
+            payload["cell_col"] = int(list(data["cids"]).index(cell))
+            with open(path, "wb") as f:
+                pickle.dump(payload, f)
+        return payload
     payload = _compute_cell_payload(subject, date, cell)
     with open(path, "wb") as f:
         pickle.dump(payload, f)
@@ -305,9 +363,9 @@ def load_cell_payload(subject=SUBJECT, date=DATE, cell=DEFAULT_CELL, refresh=Fal
 # ---------------------------------------------------------------------------
 # Plotting
 # ---------------------------------------------------------------------------
-def plot_eyepos_axis(ax, payload, segment_idx=None):
-    """Left axis: gaze traces inside one example segment, colored by the
-    sort projection used for that segment's raster column."""
+def _eyepos_window_geometry(payload, segment_idx=None):
+    """Return (eye_iix_ordered, s_shift, e_shift, cx, cy, slope) for the
+    example segment used by the gaze axis."""
     seg_i = payload["example_segment_idx"] if segment_idx is None else segment_idx
     seg = payload["segments"][seg_i]
     iix = seg["iix"]
@@ -318,54 +376,104 @@ def plot_eyepos_axis(ax, payload, segment_idx=None):
     win_len = seg["end"] - seg["start"]
     s_shift = max(seg["start"] - peak_lag, 0)
     e_shift = s_shift + win_len
-    eye = eye_all[iix]                                # iix-ordered (low→high proj)
+    eye = eye_all[iix]
 
     win = eye[:, s_shift:e_shift, :]
-    cx = np.nanmedian(win[..., 0])
-    cy = np.nanmedian(win[..., 1])
-    ortho = max_orientation + 90.0
-    slope = np.tan(np.deg2rad(ortho))
-    length = 1.0
+    cx = float(np.nanmedian(win[..., 0]))
+    cy = float(np.nanmedian(win[..., 1]))
+    slope = float(np.tan(np.deg2rad(max_orientation + 90.0)))
+    return seg, eye, s_shift, e_shift, cx, cy, slope
 
+
+def _scale_bar(ax, length_deg=0.2, label=None):
+    """Draw a small horizontal scale bar in axes-fraction space at lower-right."""
+    x0, x1 = ax.get_xlim()
+    y0, y1 = ax.get_ylim()
+    span_x = x1 - x0
+    span_y = y1 - y0
+    x_end = x0 + 0.95 * span_x
+    x_start = x_end - length_deg
+    y = y0 + 0.07 * span_y
+    ax.plot([x_start, x_end], [y, y], "k", lw=1.5, solid_capstyle="butt")
+    if label is None:
+        label = f"{length_deg:g}°"
+    ax.text((x_start + x_end) / 2, y + 0.02 * span_y, label,
+            ha="center", va="bottom", fontsize=7)
+
+
+def plot_sta_axis(ax, payload):
+    """Top-left: STA at peak lag, centered on RF centroid, in degrees."""
+    sta = _sta_centered_in_degrees(payload["session"], payload["cell"])
+    if sta is None:
+        ax.text(0.5, 0.5, "STA cache missing", ha="center", va="center",
+                transform=ax.transAxes)
+        ax.set_xticks([]); ax.set_yticks([])
+        return ax
+    img = sta["image"]
+    vmax = float(np.nanmax(np.abs(img)))
+    if vmax == 0:
+        vmax = 1.0
+    ax.imshow(img, extent=sta["extent"], origin="upper",
+              cmap="RdBu_r", vmin=-vmax, vmax=vmax, interpolation="nearest")
+    ax.set_aspect("equal")
+    return ax
+
+
+def plot_eyepos_axis(ax, payload, segment_idx=None):
+    """Top-right: gaze traces in the example segment, colored by sort rank."""
+    seg, eye, s_shift, e_shift, cx, cy, slope = _eyepos_window_geometry(
+        payload, segment_idx=segment_idx,
+    )
+    length = 0.6
     ax.plot(
         [cx - length / 2, cx + length / 2],
         [cy - length / 2 * slope, cy + length / 2 * slope],
-        "k", lw=1.0,
+        color="0.4", lw=1.0, zorder=2,
     )
 
-    colors = plt.cm.coolwarm(np.linspace(0, 1, len(iix)))
-    for idx in range(len(iix)):
+    colors = plt.cm.coolwarm(np.linspace(0, 1, len(seg["iix"])))
+    for idx in range(len(seg["iix"])):
         trace = eye[idx, s_shift:e_shift, :]
         med = np.nanmedian(trace, axis=0)
-        ax.plot(trace[:, 0], trace[:, 1], color=colors[idx], lw=0.4, alpha=0.7)
+        ax.plot(trace[:, 0], trace[:, 1],
+                color=colors[idx], lw=0.4, alpha=0.6)
         ax.scatter(med[0], med[1], s=6, color=colors[idx],
-                   edgecolor="k", linewidth=0.3, zorder=3)
-        if idx % 10 == 0:
-            ax.text(med[0], med[1], str(idx), color="k", fontsize=6,
-                    ha="center", va="bottom",
-                    path_effects=[pe.withStroke(linewidth=2, foreground="white")],
-                    zorder=10)
-
-    # Axes
-    xy_max = np.nanmax(np.abs(eye[:, s_shift:e_shift, :]))
-    pad = 0.05
-    ax.set_xlim(-xy_max - pad, xy_max + pad)
-    ax.set_ylim(-xy_max - pad, xy_max + pad)
+                   edgecolor="k", linewidth=0.25, zorder=3)
     ax.set_aspect("equal")
-    ax.set_xlabel("Azimuth (deg)")
-    ax.set_ylabel("Elevation (deg)")
-    ax.axhline(0, color="k", lw=0.5, ls=":", alpha=0.5)
-    ax.axvline(0, color="k", lw=0.5, ls=":", alpha=0.5)
     return ax
+
+
+def _set_shared_top_limits(ax_sta, ax_eye, payload, segment_idx=None, pad=0.05):
+    """Set identical x/y limits on the STA and eyepos axes."""
+    # STA half-extent
+    sta = _sta_centered_in_degrees(payload["session"], payload["cell"])
+    if sta is not None:
+        x0, x1, y0, y1 = sta["extent"]
+        sta_half = max(abs(x0), abs(x1), abs(y0), abs(y1))
+    else:
+        sta_half = 0.0
+
+    # Eyepos half-extent (around its own median, centered locally)
+    seg, eye, s_shift, e_shift, cx, cy, _slope = _eyepos_window_geometry(
+        payload, segment_idx=segment_idx,
+    )
+    eye_win = eye[:, s_shift:e_shift, :]
+    eye_half = float(np.nanmax([
+        np.nanmax(np.abs(eye_win[..., 0] - cx)) if eye_win.size else 0.0,
+        np.nanmax(np.abs(eye_win[..., 1] - cy)) if eye_win.size else 0.0,
+    ]))
+
+    half = max(sta_half, eye_half) + pad
+
+    ax_sta.set_xlim(-half, half)
+    ax_sta.set_ylim(-half, half)
+    ax_eye.set_xlim(cx - half, cx + half)
+    ax_eye.set_ylim(cy - half, cy + half)
 
 
 def _segment_raster_lines(spike_times_list, trial_t_bins_list, trial_indices,
                          seg_start_bin, seg_end_bin, y_positions,
                          dt=DT, height=0.7):
-    """Spike ticks for one stitched segment. ``spike_times_list`` /
-    ``trial_t_bins_list`` are indexed by GLOBAL trial id; ``trial_indices``
-    selects which trials (in iix sort order) to draw; ``y_positions[k]``
-    gives the row for ``trial_indices[k]``."""
     seg_start_s = seg_start_bin * dt
     seg_end_s = seg_end_bin * dt
     xs, ys = [], []
@@ -377,8 +485,8 @@ def _segment_raster_lines(spike_times_list, trial_t_bins_list, trial_indices,
         t_bins = t_bins[~np.isnan(t_bins)]
         if t_bins.size == 0:
             continue
-        t0 = t_bins[0] - dt / 2          # fixation-onset time, absolute
-        rel = spikes - t0                 # seconds since fixation onset
+        t0 = t_bins[0] - dt / 2
+        rel = spikes - t0
         mask = (rel >= seg_start_s) & (rel < seg_end_s)
         if not np.any(mask):
             continue
@@ -390,15 +498,27 @@ def _segment_raster_lines(spike_times_list, trial_t_bins_list, trial_indices,
     return np.asarray(xs), np.asarray(ys)
 
 
-def plot_raster_axis(ax, payload, n_psth=2, tick_height=0.7, tick_lw=0.8,
-                    show_segment_dividers=True):
-    """Right axis: gaze-sorted, segment-stitched raster.
+def plot_psth_axis(ax, payload):
+    """Full-width PSTH across all trials within the analysis window."""
+    s0, e0 = payload["total_window"]
+    robs = payload["robs_cell_all"][:, s0:e0]
+    n = robs.shape[0]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        mean = np.nanmean(robs, axis=0) / DT
+        sem = np.nanstd(robs, axis=0) / np.sqrt(max(n, 1)) / DT
+    t_ms = (np.arange(s0, e0) + 0.5) * DT * 1000.0
+    ax.fill_between(t_ms, mean - sem, mean + sem,
+                    color="0.6", alpha=0.4, linewidth=0)
+    ax.plot(t_ms, mean, color="k", lw=1.0)
+    ax.set_xlim(s0 * DT * 1000.0, e0 * DT * 1000.0)
+    ax.set_ylim(bottom=0)
+    ax.set_ylabel("Spikes/s")
+    return ax
 
-    Each segment is sorted independently by trial-median gaze projection.
-    Y axis is *rank*, not distance — trials are evenly spaced so spike ticks
-    don't superimpose. A secondary right axis shows the projection-distance
-    range for the example segment.
-    """
+
+def plot_raster_axis(ax, payload, tick_height=0.7, tick_lw=0.6,
+                    show_segment_dividers=True):
     segments = payload["segments"]
     spike_times = payload["spike_times_all"]
     t_bins = payload["trial_t_bins_all"]
@@ -411,15 +531,12 @@ def plot_raster_axis(ax, payload, n_psth=2, tick_height=0.7, tick_lw=0.8,
         ax.set_title("no valid trials")
         return ax
 
-    cmap = plt.cm.coolwarm
     all_xs, all_ys = [], []
     for seg in segments:
         iix = seg["iix"]
         n = len(iix)
         if n == 0:
             continue
-        # Rank-based y in [0, n_rows-1] — evenly spaced, regardless of how
-        # many trials this segment retained.
         if n == 1:
             y_pos = np.array([0.5 * (n_rows - 1)])
         else:
@@ -438,106 +555,71 @@ def plot_raster_axis(ax, payload, n_psth=2, tick_height=0.7, tick_lw=0.8,
     if show_segment_dividers:
         for seg in segments[1:]:
             x_ms = seg["start"] * dt * 1000.0
-            ax.axvline(x_ms, color="0.7", lw=0.5, ls="--", zorder=0)
+            ax.axvline(x_ms, color="0.7", lw=0.4, ls="-", alpha=0.6, zorder=0)
 
     ax.set_ylim(n_rows, 0)
     ax.set_xlim(0, total_dur_ms)
     ax.set_xlabel("Time from fixation onset (ms)")
-    ax.set_ylabel("Trial (sorted by gaze, per-segment)")
+    ax.set_yticks([])
 
-    # PSTH overlay per segment: split iix into n_psth quantile groups, plot
-    # the within-group mean response over the segment's time slice.
-    if n_psth and n_psth >= 2:
-        robs_all = payload["robs_cell_all"]
-        # Common psth_max across segments for consistent scaling.
-        all_psths_for_scale = []
-        for seg in segments:
-            iix = seg["iix"]
-            if len(iix) == 0:
-                continue
-            group_size = max(1, int(np.ceil(len(iix) / n_psth)))
-            for g in range(n_psth):
-                grp = iix[g * group_size:(g + 1) * group_size]
-                if len(grp) == 0:
-                    continue
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore", RuntimeWarning)
-                    p = np.nanmean(robs_all[grp, seg["start"]:seg["end"]], axis=0)
-                if p.size:
-                    all_psths_for_scale.append(np.nanmax(p))
-        psth_max = max(all_psths_for_scale) if all_psths_for_scale else 1.0
-        psth_max = psth_max if psth_max > 0 else 1.0
-
-        for seg in segments:
-            iix = seg["iix"]
-            n = len(iix)
-            if n == 0:
-                continue
-            group_size = max(1, int(np.ceil(n / n_psth)))
-            seg_t_ms = (np.arange(seg["start"], seg["end"]) * dt * 1000.0)
-            for g in range(n_psth):
-                grp = iix[g * group_size:(g + 1) * group_size]
-                if len(grp) == 0:
-                    continue
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore", RuntimeWarning)
-                    p = np.nanmean(robs_all[grp, seg["start"]:seg["end"]], axis=0)
-                center = (g + 0.5) / n_psth * (n_rows - 1)
-                half_band = (n_rows / n_psth) * 0.4
-                y = center - p / psth_max * half_band
-                color = cmap(g / max(n_psth - 1, 1))
-                ax.plot(seg_t_ms, y, color=color, lw=1.2, alpha=0.9)
-
-    # Right-side axis: distance range for the example segment (since the
-    # rank-Y axis has no inherent distance scale, and per-segment ranges
-    # differ; we show the example to give the reader a feel for the units).
+    # Right-side: gaze-projection range for the example segment
     ex = payload["segments"][payload["example_segment_idx"]]
-    if len(ex["distances"]):
+    if len(ex["distances"]) > 1:
         ax_r = ax.twinx()
         ax_r.set_ylim(ax.get_ylim())
-        ax_r.set_ylabel(f"Gaze projection in [{ex['start']}, {ex['end']}) bins (deg)",
-                        fontsize=8)
-        n_ticks = 5
-        n_ex = len(ex["iix"])
-        if n_ex > 1:
-            tick_y = np.linspace(0, n_rows - 1, n_ticks)
-            tick_d = np.linspace(ex["distances"].min(),
-                                 ex["distances"].max(), n_ticks)
-            ax_r.set_yticks(tick_y)
-            ax_r.set_yticklabels([f"{v:.2f}" for v in tick_d])
-
+        dmin = float(ex["distances"].min())
+        dmax = float(ex["distances"].max())
+        ax_r.set_yticks([0, n_rows - 1])
+        ax_r.set_yticklabels([f"{dmin:.2f}", f"{dmax:.2f}"])
+        ax_r.set_ylabel("Gaze proj. (deg)", fontsize=8)
+        ax_r.tick_params(axis="y", labelsize=7)
     return ax
 
 
 def plot_panel_d(fig=None, subject=SUBJECT, date=DATE, cell=DEFAULT_CELL,
                 refresh=False):
-    """Compose both axes onto ``fig`` (or a new figure). Returns (fig, axes)."""
     payload = load_cell_payload(subject, date, cell, refresh=refresh)
 
     if fig is None:
-        fig, axes = plt.subplots(1, 2, figsize=(7, 3),
-                                 gridspec_kw={"width_ratios": [1.0, 1.6]})
-    else:
-        axes = fig.subplots(1, 2, gridspec_kw={"width_ratios": [1.0, 1.6]})
+        fig = plt.figure(figsize=(4, 6.0), constrained_layout=True)
 
-    plot_eyepos_axis(axes[0], payload)
-    plot_raster_axis(axes[1], payload)
-    ex = payload["segments"][payload["example_segment_idx"]]
-    axes[0].set_title(
-        f"Gaze in segment [{ex['start']},{ex['end']}) bins "
-        f"({payload['session']} cell {int(payload['cell'])})",
-        fontsize=9,
+    gs = fig.add_gridspec(
+        3, 2,
+        height_ratios=[1.0, 0.55, 1.5],
+        width_ratios=[1.0, 1.0],
     )
-    axes[1].set_title(
-        f"Gaze-sorted raster (stitched, {payload['segment_len']}-bin segments)",
-        fontsize=9,
-    )
-    return fig, axes
+    ax_sta = fig.add_subplot(gs[0, 0])
+    ax_eye = fig.add_subplot(gs[0, 1])
+    ax_psth = fig.add_subplot(gs[1, :])
+    ax_raster = fig.add_subplot(gs[2, :], sharex=ax_psth)
+
+    plot_sta_axis(ax_sta, payload)
+    plot_eyepos_axis(ax_eye, payload)
+    _set_shared_top_limits(ax_sta, ax_eye, payload)
+
+    # Strip top-panel tick clutter; show a small scale bar instead.
+    for a in (ax_sta, ax_eye):
+        a.set_xticks([]); a.set_yticks([])
+        for s in a.spines.values():
+            s.set_visible(False)
+    _scale_bar(ax_sta, length_deg=0.2)
+    _scale_bar(ax_eye, length_deg=0.2)
+
+    plot_psth_axis(ax_psth, payload)
+    plot_raster_axis(ax_raster, payload)
+
+    # PSTH shares x with raster; hide its tick labels (raster carries them).
+    ax_psth.tick_params(labelbottom=False)
+    ax_psth.spines["top"].set_visible(False)
+    ax_psth.spines["right"].set_visible(False)
+    ax_raster.spines["top"].set_visible(False)
+
+    return fig, {"sta": ax_sta, "eyepos": ax_eye,
+                 "psth": ax_psth, "raster": ax_raster}
 
 
 if __name__ == "__main__":
     fig, axes = plot_panel_d()
-    fig.tight_layout()
     out = FIG_DIR / "fig1d_single_cell.svg"
     fig.savefig(out)
     fig.savefig(out.with_suffix(".pdf"))
