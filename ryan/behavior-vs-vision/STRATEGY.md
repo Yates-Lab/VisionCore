@@ -3,7 +3,7 @@
 **Owner:** Ryan Ressmeyer
 **Project:** V1 fovea fixational eye movement (FEM) manuscript
 **Manuscript:** `fem-v1-fovea/main.tex`
-**Last updated:** 2026-04-28
+**Last updated:** 2026-04-28 (v2 — within-Model-B perturbation pivot)
 
 This document is the canonical strategy memo for the "behavior vs vision-only digital twin" thread of the manuscript. It is the context to load at the start of any future session that will run analyses for this thread.
 
@@ -22,9 +22,9 @@ The question this document is built around:
 
 > **What is the additional variance captured by the behavior model telling us about the visual code in the fixRSVP task?**
 
-The first analysis we tried — Σ_Δ subspace alignment (`subspace_residual.py`) — produced a structurally suggestive result (low-rank, non-Int-aligned residual; FEM-leaning leading direction in Allen) but was not compelling in isolation: the effect at k=5 is modest, the trial-shuffle null I built tested the wrong thing (subspace alignment is invariant to trial-pattern), and the analysis is descriptive rather than mechanistic.
+The first analysis we tried — Σ_Δ subspace alignment (`subspace_residual.py`) — produced a structurally suggestive result (low-rank, non-Int-aligned residual; FEM-leaning leading direction in Allen) but was not compelling in isolation. **The lesson:** comparing $\Sigma_\Delta$ between two independently-trained models confounds "what the behavior input adds" with "what each model's local minimum captured," and the trial-shuffle null tested the wrong null hypothesis.
 
-This memo reframes the question, lays out a layered breakdown, and prescribes a ranked set of analyses that — if they work as predicted — turn this into a Fig 4 that bridges the existing Fig 2 (empirical FEM dominance) and Fig 5 (FEM sharpens info) into a single image-computable account.
+**The pivot (v2):** the primary design is a **within-Model-B perturbation suite**. Same network weights; only the behavior input changes (intact / permuted-across-trials / zeroed / channel-ablated). Differences are then mathematically clean — same convnet, same readout, same forward pass. The empirical $\Sigma_{\mathrm{FEM}}$ from Fig 2 is the fixed external target. Vision-only is one external reference point, not the primary contrast. The shifter-residual control is promoted from Tier 4 to Tier 1 (this is the manuscript-defending control). Companion script: `within_model_perturbation.py` (replaces `subspace_residual.py`).
 
 ---
 
@@ -76,12 +76,13 @@ Results across 24 sessions (cache: `outputs/cache/behavior_vs_vision_residual_su
 - Σ_Δ **avoids the internal-noise subspace**: pooled k=5 capture is 0.73 in Σ_PSTH, 0.70 in Σ_FEM, 0.48 in Σ_int (Wilcoxon PSTH > Int p = 3 × 10⁻⁷).
 - In Allen sessions (n=11), the **leading direction of Σ_Δ aligns ~0.91 with the leading FEM direction but only ~0.54 with the leading PSTH direction** (Wilcoxon p = 5 × 10⁻⁴ for the asymmetry). Logan (n=13) does not show this asymmetry — its PSTH and FEM directions are themselves entangled in small populations.
 
-**Why this is not a compelling result on its own:**
+**Why this is not a compelling result on its own — and the lessons that drive the v2 design:**
 
-1. The k=5 capture difference between PSTH/FEM (0.7) and Int (0.48) is real but quantitatively modest, and at k=5 PSTH and FEM are nearly indistinguishable (Σ_FEM is itself PSTH-aligned per Fig 2).
-2. The leading-mode asymmetry exists only in Allen and only at k=1, where eigenvector estimates are sensitive to noise.
-3. The trial-shuffle null is the *wrong control*: subspace overlap is invariant to the trial-by-trial pattern within a subspace, so shuffling behavior across trials still yields the same overlap. The pilot shuffle null tested whether the *trial-specific* behavior pattern matters; the subspace claim concerns where in population space the behavior model adds capacity, regardless of trial pattern.
-4. Most fundamentally: the analysis describes *where* the residual lives; it does not address *what the residual represents*.
+1. **Cross-model artifact risk.** $\Sigma_\Delta = \mathrm{Cov}(\hat r_{\text{beh}} - \hat r_{\text{vis}})$ subtracts predictions from two independently-trained networks at different local minima. For nonlinear $h(\text{stim}, \text{behavior})$, this difference is not a clean isolate of "what behavior contributes." Any difference in convnet filters, readout fits, or convergence trajectory shows up as a residual whether or not behavior is doing anything mechanistic. → **Pivot: do all difference-of-prediction analyses *within* Model B, varying only the behavior input (Tier 1, P1).**
+2. **Wrong null.** Subspace overlap is invariant to the trial-by-trial pattern within a subspace, so shuffling behavior across trials still yields the same overlap. The pilot's shuffle null answered the wrong question. → **Pivot: replace with a behavior-permutation null inside the same model (Tier 1, P1) and add a random-Stiefel structural null in supplementary (D2).**
+3. **The shifter-residual confound is unaddressed.** If the shifter does not perfectly cancel retinal motion, behavior may simply correct residual retinal slip. Tier 1 in v1 did not test for this. → **Pivot: promote the shifter-residual control to Tier 1 (P3).**
+4. **The k=5 capture difference (0.7 vs 0.48) is quantitatively modest** and at k=5 PSTH and FEM are nearly indistinguishable (Σ_FEM is itself PSTH-aligned per Fig 2); the Allen-only k=1 asymmetry is fragile.
+5. **Descriptive, not mechanistic.** The analysis describes *where* the residual lives; it does not address *what the residual represents* in the visual code. → **Pivot: add per-cell FEM-r² and BPS attribution under each perturbation, which give an interpretable scalar per cell (Tier 1, P1).**
 
 ---
 
@@ -187,15 +188,142 @@ If $\hat\Sigma_{\mathrm{FEM}}^{\text{beh}} \approx \Sigma_{\mathrm{FEM}}^{\text{
 
 This is a tight three-figure chain that spans empirical claim → mechanistic model → functional consequence. None of the existing manuscript figures do this on their own; together they would.
 
+### 3.4 Why the test must be within Model B
+
+The recovery framing in §3.1–3.3 is the right *interpretive frame*, but the original A1 design tried to evaluate it via $\hat\Sigma_{\mathrm{FEM}}^{\text{beh}}$ vs $\hat\Sigma_{\mathrm{FEM}}^{\text{vis}}$ — two independently trained networks. That comparison conflates three sources of difference:
+
+1. **The behavior input** (the thing we want to test).
+2. **Different local minima** of two independent training runs.
+3. **Different convnet capacity allocation**: the vision-only convnet may have learned different filters to compensate for the missing behavior input.
+
+The mathematically clean version of the test fixes Model B and varies *only* the input:
+
+- **intact**: full behavior input.
+- **permuted**: behavior trace permuted across trials (preserves marginal statistics, breaks trial-specific timing). This is the right null for "trial-specific behavior matters."
+- **zeroed**: behavior tensor zeroed.
+- **eye_pos_only / eye_vel_only**: zero one channel block, keep the other.
+
+Differences across conditions involve the same network weights, the same convnet, the same readout — only the input changes. Whatever the network does differently must be attributable to the input change.
+
+The vision-only model becomes a **single external reference point** (helpful for sanity, not load-bearing). The empirical $\Sigma_{\mathrm{FEM}}$ from Fig 2 is the fixed **external target** the perturbation suite is evaluated against.
+
+This pivot also fixes the broken null: instead of trial-shuffling behavior across trials in a way that subspace overlap is invariant to, the behavior-permutation condition above is now an *active comparison*, not a null on the same statistic.
+
+The cross-model claim ("vision-only fails to recover Σ_FEM") can still be made, but it requires multiple random seeds to rule out local-minimum artifacts and is not the headline.
+
 ---
 
 ## 4. Analyses
 
-Ranked by my read of how much each contributes to the chain in §3.3. Run in order; A1 is the gating test for the rest.
+Ranked by my read of how much each contributes to the chain in §3.3. Run in order; **P1 is the gating analysis** and replaces v1's A1.
 
-### Tier 1 — Image-computable recovery of empirical Σ_FEM
+### Tier 1 — Within-Model-B perturbation, with empirical Σ_FEM as the fixed target
 
-#### A1. Σ_FEM recovery test
+#### P1. Within-Model-B perturbation suite (replaces v1 A1 + folds in B1)
+
+**Implementation:** `within_model_perturbation.py`.
+
+**Question addressed:** Within a single trained Behavior model, what fraction of its predictive advantage requires *trial-specific* behavior — and which behavior subchannel drives it? Where in population space does that contribution live?
+
+**Conditions** (all use the same Behavior model weights; vision-only is a single external reference):
+
+| Condition | Behavior input |
+|---|---|
+| `vis` | (vision-only model, full inputs) |
+| `beh_intact` | full behavior |
+| `beh_permuted` | behavior trace permuted across trials, preserving per-trial duration and marginal statistics |
+| `beh_zeroed` | behavior tensor zeroed |
+| `beh_pos_only` | eye_vel channels zeroed; eye_pos preserved |
+| `beh_vel_only` | eye_pos channels zeroed; eye_vel preserved |
+
+**Per condition, per session, compute:**
+
+1. **Per-cell BPS** on affine-rescaled rates (same protocol as `compare_models_fixrsvp.py`).
+2. **Model-implied $\hat\Sigma_{\mathrm{FEM}}^{\text{cond}} = \mathbb{E}_t \, \mathrm{Cov}_i \hat r(t, i)$** — across-trial covariance at each fixed stim time, weighted by valid trial count, then averaged across $t$. Note: a deterministic model has no $\Sigma_{\mathrm{int}}$ term, and $\Sigma_{\mathrm{PSTH}}$ vanishes at fixed $t$, so this estimator is exactly the model's analog of $\Sigma_{\mathrm{FEM}}$.
+3. **Magnitude / trace ratio**: $\|\hat\Sigma^{\text{cond}}\|_F / \|\Sigma_{\mathrm{FEM}}^{\text{emp}}\|_F$ and $\mathrm{tr}\hat\Sigma^{\text{cond}} / \mathrm{tr}\Sigma_{\mathrm{FEM}}^{\text{emp}}$.
+4. **Top-k eigenvector overlap** (k=1, k=5) with empirical Σ_FEM (from `outputs/cache/fig2_decomposition.pkl`, w_idx=0).
+5. **Per-cell FEM-r²**: Pearson $r$ between $\hat r(t,i) - \overline{\hat r}(t)$ and $y(t,i) - \bar y(t)$, pooled across (i, t). The interpretable scalar version of "how well does the model's trial-to-trial variation match the data's, *after removing the PSTH*."
+6. **Pairwise noise correlation distribution** (off-diagonal of correlation matrix) for empirical Σ_FEM, $\hat\Sigma^{\text{intact}}$, and $\hat\Sigma^{\text{permuted}}$.
+
+**Decision tree on intact vs permuted (the headline test):**
+
+| Outcome | Interpretation |
+|---|---|
+| intact >> permuted on BPS, FEM-r², and Σ_FEM recovery | Trial-specific behavior carries non-redundant info → behavior model is image-computable Σ_FEM recovery (the headline). |
+| intact ≈ permuted | Behavior input contributes only via marginal statistics (gain offset). Headline collapses; debug. |
+| permuted ≈ zeroed | Permutation does what zeroing does. Strong supplementary control. |
+
+**Decision tree on eye_pos_only vs eye_vel_only:**
+
+| Outcome | Interpretation | Manuscript hook |
+|---|---|---|
+| eye_pos_only ≈ intact, eye_vel_only ≈ zeroed | eye_pos drives the recovery | Gain-field story (Trotter, Galletti) |
+| eye_vel_only ≈ intact, eye_pos_only ≈ zeroed | eye_vel drives it | Motor / peri-saccadic |
+| Both retain ~50% | Mixed contribution | Report both |
+
+**Implementation notes:**
+
+- Pool covariance *only after* per-time covariance is computed; do not concatenate across times for a single covariance.
+- Weight per-time covariances by the number of valid trials, not equally.
+- Restrict to cells in the intersection of fig2's `neuron_mask` and the per-session fixrsvp mask.
+- Use `FIG2_WINDOW_IDX = 0` (8.33 ms, matches the model's 1/120 s timestep).
+- For the permutation, swap the source trial's behavior tensor in (truncate or mean-pad to match destination duration); use multiple permutation draws and average their metrics.
+
+**Estimated cost:** ~5 minutes per session × 24 sessions ≈ 2 hours total once written. The script does 6 inference passes per session (one per condition); fewer than the v1 pilot's 12.
+
+---
+
+#### P2. Linear residual probe
+
+**Question addressed:** Of the variance in $y - \hat r_{\text{vis}}$ that the vision-only model fails to capture, how much is *linearly* recoverable from raw eye position and eye velocity? Gives a model-free, interpretable lower bound on what behavior contributes.
+
+**Algorithm:**
+
+```
+For each cell c:
+    r(c, i, t) = y(c, i, t) − rhat_vis_rescaled(c, i, t)
+    X(i, t)   = [eye_pos(i, t), eye_vel(i, t)]   # 22-dim raw behavior tensor
+    fit ridge: r(c) ~ X
+    return cross-validated R²
+```
+
+**Why it matters:**
+- If P2's R² ≈ ΔBPS gain → most of behavior's contribution is linearly recoverable (simple gain account).
+- If P2's R² << ΔBPS gain → nonlinear interactions matter; the deep network is using behavior for something the linear probe cannot capture.
+- Either way it's interpretable, falsifiable, and bypasses the cross-model comparison problem.
+
+**Estimated cost:** Minutes per session — closed-form ridge.
+
+---
+
+#### P3. Shifter-residual control (promoted from v1 D1)
+
+**Question addressed:** Is the behavior advantage explained by the shifter not perfectly cancelling retinal motion? This is the manuscript-defending control. Without it, "extraretinal" cannot be claimed.
+
+**Two operationalizations**, in increasing strength:
+
+1. **Scaling test.** Estimate per-fixation residual eye-position error magnitude (e.g., low-frequency drift in the eye trace not absorbed by the shifter; or RMS deviation between online and post-hoc eye estimates). Test whether per-session ΔBPS scales with this residual. Strong scaling → behavior is largely correctional. No scaling → genuine extraretinal contribution.
+2. **Jittered-vision null.** Push a Gaussian-jittered shift-corrected stim through the *vision-only* model, with jitter calibrated to estimated residual magnitude. If $\hat\Sigma^{\text{vis-jittered}}$ matches $\hat\Sigma^{\text{intact}}$ in magnitude and direction, the behavior advantage is shifter cleanup.
+
+**Decision tree:**
+| Outcome | Manuscript implication |
+|---|---|
+| ΔBPS does not scale with residual; jittered-vis null does not match intact | Defensible extraretinal claim |
+| Strong scaling and/or jittered-vis null matches | Honest reframe to "behavior input cleans up imperfect retinal alignment"; still interesting but less strong |
+
+**Implementation note:** the residual eye-position error estimator is the hard part. One simple proxy: Yates 2023 shifter is fit on calibration data; refit per session with reduced regularization or using a held-out subset to estimate the shifter's noise floor.
+
+**Estimated cost:** Day or two; mostly the residual estimation.
+
+---
+
+### Legacy v1 material — A1 framing (kept for reference)
+
+#### A1. Σ_FEM recovery test (deprecated as primary; subsumed by P1)
+
+This was the original primary analysis. P1 supersedes it: P1's `vis` and `beh_intact` conditions reproduce the A1 cross-model comparison as a *single contrast within the perturbation suite*, but the headline contrast in P1 is `intact` vs `permuted`, not `beh` vs `vis`.
+
+The text below is preserved for reference on the math and metrics, all of which are reused inside P1.
 
 **Question addressed:** Does the behavior model reproduce the empirical Σ_FEM from Fig 2 in magnitude, direction, and pairwise correlation structure? Does the vision-only model fail to?
 
@@ -526,42 +654,47 @@ If the simulated imperfect-vision model recovers most of empirical Σ_FEM → be
 ## 5. Order of operations & decision tree
 
 ```
-                             ┌─────────────────────────────┐
-                             │  A1: Σ_FEM recovery test    │
-                             │  (gating analysis)          │
-                             └──────────────┬──────────────┘
-                                            │
-                  ┌─────────────────────────┴─────────────────────────┐
-                  │                                                     │
-        beh ≈ empirical >> vis                            beh ≈ vis  OR  no recovery
-                  │                                                     │
-                  ▼                                                     ▼
-   Tier 1 continues:                                  STOP — debug pipeline.
-   A2 (single-cell sharpening recovery)               Possible: rescaling broken,
-   A3 (information geometry / decoding)               cache misalignment, or
-                                                      finding doesn't actually
-                  ▼                                   reflect a structured residual.
-   Tier 2 (mechanism):
-   B1 (channel ablations)
-   B2 (stim/behavior-only baselines)
+                          ┌────────────────────────────────────────┐
+                          │  P1: Within-Model-B perturbation suite │
+                          │  (gating analysis — replaces A1)       │
+                          └──────────────────┬─────────────────────┘
+                                             │
+                  ┌──────────────────────────┴──────────────────────────┐
+                  │                                                       │
+        intact >> permuted on BPS, FEM-r²,                    intact ≈ permuted
+        Σ_FEM recovery                                                  │
+                  │                                                     ▼
+                  ▼                                       STOP — debug pipeline.
+   In parallel:                                            Affine rescaling, caching,
+   • P2 linear residual probe                              or genuine null result.
+   • P3 shifter-residual control  ← MANUSCRIPT-DEFENDING
+                                                           
+                  ▼
+   Tier 2 (mechanism, conditioned on P1 landing):
+   A2 (single-cell sharpening recovery)
    B3 (per-cell dependency maps)
+   B2 (stim-only / behavior-only baselines, in-model)
 
                   ▼
    Tier 3 (temporal):
-   C1 (time-resolved ΔBPS)
+   C1 (time-resolved ΔBPS, computed on P1 conditions)
    C2 (saccade-triggered residual)
 
                   ▼
-   Tier 4 (controls):
-   D1 (shifter-residual control)   — go in supplementary
-   D2 (random-subspace null)
+   Tier 4 (information geometry):
+   A3 (f_parallel(k) vs PSTH eigenspace; Jacobian-based stim-tuning direction)
+   D2 (random-subspace structural null)
 ```
 
-**Critical path to Fig 4:** A1 → B1 → A2/A3.
+**Critical path to Fig 4:** P1 → P3 → A2 → B3.
 
-If A1 lands, A1 alone is a strong main panel. B1 gives the mechanism subpanel ("eye_pos drives this" or "eye_vel drives this"). A2/A3 give the link to Fig 5 (function).
+- **P1 alone** is a strong main panel: "behavior input contributes non-redundant trial-specific information that the vision-only model cannot extract from the shifted retinal stimulus."
+- **P3 is non-negotiable for the extraretinal claim.** Without it, a reviewer collapses the whole story to "shifter cleanup."
+- **P2** is cheap, interpretable, complementary — it tells the reader how much of the gap is captured by a simple linear gain.
+- **A2 and B3** translate population recovery into single-cell mechanism (sharpening + dependency maps).
+- **A3** (rebuilt around Jacobians, not decoding-rhat-vs-robs) bridges to Fig 5.
 
-If A1 doesn't land, return to the Layer 1 question: what is the behavior input actually delivering? B1 and B2 become diagnostic rather than mechanistic.
+If P1 doesn't land (intact ≈ permuted), the entire thread is in question: the cached ΔBPS difference would be coming from something other than trial-specific behavior — most likely the marginal eye-position bias being absorbed as a static gain. Investigate before further analysis.
 
 ---
 
@@ -611,13 +744,12 @@ The `find_best_ckpt` helper (in all three scripts) selects the highest val_bps_o
 
 ### 6.6 Where to put new scripts
 
-- `VisionCore/ryan/behavior-vs-vision/image_computable_fem.py` — A1 implementation.
-- `VisionCore/ryan/behavior-vs-vision/conditional_psth_sharpening.py` — A2.
-- `VisionCore/ryan/behavior-vs-vision/info_geometry.py` — A3.
-- `VisionCore/ryan/behavior-vs-vision/channel_ablations.py` — B1, B2.
-- `VisionCore/ryan/behavior-vs-vision/per_cell_dependency.py` — B3.
-- `VisionCore/ryan/behavior-vs-vision/temporal_dynamics.py` — C1, C2.
-- `VisionCore/ryan/behavior-vs-vision/controls.py` — D1, D2.
+- `VisionCore/ryan/behavior-vs-vision/within_model_perturbation.py` — **P1 + P2** (primary; replaces `subspace_residual.py`).
+- `VisionCore/ryan/behavior-vs-vision/shifter_residual_control.py` — P3 (TODO, manuscript-defending).
+- `VisionCore/ryan/behavior-vs-vision/conditional_psth_sharpening.py` — A2 (TODO).
+- `VisionCore/ryan/behavior-vs-vision/info_geometry.py` — A3 rebuilt around Jacobians (TODO).
+- `VisionCore/ryan/behavior-vs-vision/per_cell_dependency.py` — B3 (TODO).
+- `VisionCore/ryan/behavior-vs-vision/temporal_dynamics.py` — C1, C2 (TODO).
 
 Figures land in `outputs/figures/behavior-vs-vision/`. Caches in `outputs/cache/behavior_vs_vision_*.pkl`.
 
@@ -646,14 +778,19 @@ The image-computable Σ_FEM analog (A1) should be presented as a direct model-ba
 
 ## 8. What would convince a skeptical reviewer
 
-For the manuscript, the strongest version of the Fig 4 result would include:
+The Fig 4 panels that would close the chain Fig 2 → Fig 4 → Fig 5:
 
-- **A1**: cross-session magnitude / eigenvector / pairwise-correlation comparison showing $\hat\Sigma_{\mathrm{FEM}}^{\text{beh}} \approx \Sigma_{\mathrm{FEM}}^{\text{empirical}}$ and $\hat\Sigma_{\mathrm{FEM}}^{\text{vis}}$ substantially smaller. This is the headline panel.
-- **B1**: ablation showing the recovery is driven primarily by one or both of eye_pos / eye_vel, with a clean ΔBPS attribution.
-- **D1**: shifter-residual control showing that simulated imperfect vision-only does NOT reproduce the recovery — i.e., the behavior advantage is not explained by shifter cleanup alone.
-- **A3**: information-geometry panel showing that the recovered modulation is along stimulus-tuned directions (consistent with Fig 2) but does not collapse stimulus decoding (the decoding test).
+- **P1 (headline)**: within-Model-B perturbation — `intact` recovers empirical Σ_FEM in magnitude, top-k eigenstructure, and per-cell FEM-r²; `permuted` collapses to roughly the `vis` baseline. ΔBPS attributed across (intact, permuted, zeroed, pos_only, vel_only) gives the clean within-model decomposition.
+- **P3 (control, mandatory)**: shifter-residual control — the behavior advantage does not scale with estimated shifter residual, AND a jittered-vision-only null fails to reproduce it. This is the panel that lets us say "extraretinal" rather than "shifter cleanup."
+- **P2 (interpretability anchor)**: linear residual probe — shows what fraction of the residual is linearly recoverable from raw eye state. Sets the bar Model B has to beat to claim nonlinear structure.
+- **B1 (mechanism)**: subsumed inside P1 via the `pos_only` / `vel_only` conditions — clean attribution to one or both behavior subchannels.
+- **A3 rebuilt (function bridge)**: $f_{\parallel}(k)$ analysis showing the recovered modulation lives in stim-tuned directions; Jacobian $\partial \hat r / \partial e$ saccade-aligned showing *when* the model uses behavior. (Decoding-rhat-vs-robs in v1 was biased and is dropped.)
 
-If those four pieces line up, Fig 4 is strong, and the chain Fig 2 → Fig 4 → Fig 5 closes.
+A reviewer who reads P1 + P3 should be unable to argue:
+- "Different local minima drove the apparent behavior advantage" — P1 fixes that with within-model perturbation.
+- "Trial-specific behavior was never tested" — P1's `intact` vs `permuted` is exactly that test.
+- "Shifter residual could explain it" — P3 rules that out.
+- "Neither subchannel is implicated" — P1's `pos_only` / `vel_only` settles which one.
 
 ---
 

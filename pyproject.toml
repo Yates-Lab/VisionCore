@@ -32,6 +32,7 @@ dependencies = [
     "statsmodels",
     "dill",
     "cairosvg>=2.9.0",
+    "svgutils>=0.3.4",
 ]
 
 [project.optional-dependencies]

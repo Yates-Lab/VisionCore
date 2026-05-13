@@ -314,7 +314,6 @@ for w_idx in range(n_windows):
         diag_psth = np.diag(Cpsth)[valid]
         diag_rate = np.diag(Crate)[valid]
         alpha = diag_psth / diag_rate
-        alpha = np.clip(alpha, 0, 1)
         all_alpha.append(alpha)
         subject_per_neuron.extend([sr["subject"]] * valid.sum())
 
@@ -362,7 +361,6 @@ for w_idx in range(n_windows):
                 # Alpha under shuffle
                 diag_rate_shuf = np.diag(Crate_shuf)[valid]
                 alpha_shuf = diag_psth / diag_rate_shuf
-                alpha_shuf = np.clip(alpha_shuf, 0, 1)
                 shuff_alphas.append(1 - alpha_shuf)
 
                 # Noise corr under shuffle
@@ -420,20 +418,33 @@ for w_idx in range(n_windows):
 # Higher m means more variance from FEMs.
 
 m_by_window = []
+subject_per_neuron_by_window = []  # parallel to m_by_window, filtered to m in [0,1]
 alpha_stats = {}
 
 for w_idx, m_dict in enumerate(metrics):
     alpha = m_dict["alpha"]
-    m = 1 - alpha  # FEM modulation fraction
+    m_raw = 1 - alpha  # FEM modulation fraction (unclipped)
+    subj_raw = m_dict["subject_per_neuron"]
+
+    # Drop numerically unstable units: 1-α outside [0, 1] (estimation artifacts
+    # from Cpsth/Crate finite-sample noise). Report the count.
+    in_range = np.isfinite(m_raw) & (m_raw >= 0.0) & (m_raw <= 1.0)
+    n_total = int(np.isfinite(m_raw).sum())
+    n_dropped = int(n_total - in_range.sum())
+    frac_dropped = n_dropped / n_total if n_total > 0 else 0.0
+    m = m_raw[in_range]
     m_by_window.append(m)
+    subject_per_neuron_by_window.append(subj_raw[in_range])
 
     # Descriptive stats
     mean_m, (ci_lo, ci_hi) = bootstrap_mean_ci(m, nboot=5000, seed=0)
     med_m = float(np.nanmedian(m))
     q25, q75 = iqr_25_75(m)
 
-    # Shuffle null
-    shuff_m = m_dict["shuff_alphas"]  # list of 1D arrays, already 1-alpha
+    # Shuffle null (also filter to [0,1] for consistency)
+    shuff_m = [s[np.isfinite(s) & (s >= 0.0) & (s <= 1.0)]
+               for s in m_dict["shuff_alphas"]]
+    shuff_m = [s for s in shuff_m if s.size > 0]
     if len(shuff_m) > 0:
         null_means = np.array([np.nanmean(s) for s in shuff_m])
         null_mean_ci = (float(np.percentile(null_means, 2.5)),
@@ -450,6 +461,8 @@ for w_idx, m_dict in enumerate(metrics):
     }
 
     print(f"\nWindow {WINDOWS_MS[w_idx]:.1f} ms (N={len(m)}):")
+    print(f"  Dropped {n_dropped}/{n_total} units ({100*frac_dropped:.1f}%) "
+          f"with 1-α outside [0,1] (numerically unstable Cpsth/Crate estimates)")
     print(f"  1-alpha: mean={mean_m:.3f} [{ci_lo:.3f}, {ci_hi:.3f}]")
     print(f"  median={med_m:.3f} IQR=[{q25:.3f}, {q75:.3f}]")
     print(f"  Shuffle null mean 95% CI: [{null_mean_ci[0]:.3f}, {null_mean_ci[1]:.3f}]")
@@ -458,7 +471,7 @@ for w_idx, m_dict in enumerate(metrics):
 # Plot: histogram for primary window — per-animal overlay
 m0_full = m_by_window[0]
 s0 = alpha_stats[WINDOWS_MS[0]]
-labels = metrics[0]["subject_per_neuron"]
+labels = subject_per_neuron_by_window[0]
 
 fig_c, ax_c = plt.subplots(figsize=(4, 3.5))
 
@@ -1128,7 +1141,7 @@ ax_K = fig_comp.add_subplot(gs[2, 8:12])
 # --- C: alpha histogram (per-subject overlay) ---
 ax = ax_C
 m0_comp = m_by_window[0]
-labels_comp = metrics[0]["subject_per_neuron"]
+labels_comp = subject_per_neuron_by_window[0]
 valid_m0_comp = m0_comp[np.isfinite(m0_comp)]
 bins_comp = np.linspace(np.nanmin(valid_m0_comp), np.nanmax(valid_m0_comp), 31)
 for subj in SUBJECTS:
