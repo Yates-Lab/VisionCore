@@ -662,8 +662,17 @@ def plot_raster_axis(ax, payload, tick_height=0.7, tick_lw=0.6,
 
     return ax
 
+def _add_block_label(ax, letter, dx=-22, dy=6):
+    ax.annotate(
+        letter, xy=(0, 1), xycoords="axes fraction",
+        xytext=(dx, dy), textcoords="offset points",
+        fontsize=16, fontweight="bold",
+        va="bottom", ha="left", annotation_clip=False,
+    )
+
+
 def plot_panel_d(fig=None, subject=SUBJECT, date=DATE, cell=DEFAULT_CELL,
-                refresh=False):
+                refresh=False, panel_letters=("D", "E", "F")):
     payload = load_cell_payload(subject, date, cell, refresh=refresh)
 
     if fig is None:
@@ -699,6 +708,11 @@ def plot_panel_d(fig=None, subject=SUBJECT, date=DATE, cell=DEFAULT_CELL,
     ax_psth.spines["top"].set_visible(False)
     ax_psth.spines["right"].set_visible(False)
     ax_raster.spines["top"].set_visible(False)
+
+    if panel_letters is not None:
+        _add_block_label(ax_sta, panel_letters[0])
+        _add_block_label(ax_psth, panel_letters[1])
+        _add_block_label(ax_raster, panel_letters[2])
 
     return fig, {"sta": ax_sta, "eyepos": ax_eye,
                  "psth": ax_psth, "raster": ax_raster}

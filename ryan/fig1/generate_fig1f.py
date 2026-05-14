@@ -60,11 +60,15 @@ SEGMENT_END_BIN = 78
 RASTER_PAD_BINS = 30
 
 # Display windows (ms from fixation onset).
-RASTER_WINDOW_MS = (220.0, 370.0)
-GAZE_PAD_MS = 150.0
+RASTER_WINDOW_MS = (0.0, 400.0)
+# Gray pad on either side of the highlighted (cluster-colored) region in the
+# gaze axes. Set to 0 to show only the highlighted window.
+GAZE_PAD_MS = 0.0
+# Symmetric y-limit for both gaze axes, in degrees.
+GAZE_YLIM_HALF = 0.5
 GAZE_WINDOW_MS = (
-    SEGMENT_START_BIN * DT * 1000.0 - GAZE_PAD_MS,
-    SEGMENT_END_BIN * DT * 1000.0 + GAZE_PAD_MS,
+    RASTER_WINDOW_MS[0] - GAZE_PAD_MS,
+    RASTER_WINDOW_MS[1] + GAZE_PAD_MS,
 )
 
 # Display rows (1-indexed in the combined cluster-0-then-cluster-1 ordering)
@@ -442,7 +446,7 @@ def plot_gaze_axis(ax, payload, c0_trials, c1_trials, dim,
                         color=color, lw=1.0, alpha=0.95)
 
     ax.set_xlim(window_ms[0], window_ms[1])
-    label = "Azimuth" if dim == 0 else "Elevation"
+    label = "Az." if dim == 0 else "El."
     ax.set_ylabel(f"{label} (°)", fontsize=8)
     ax.tick_params(direction="in", length=3, width=0.8, labelsize=7)
     for s in ("top", "right"):
@@ -618,7 +622,17 @@ def plot_raster_axis(ax, payload, c0_trials=None, c1_trials=None,
     return ax
 
 
-def plot_panel_f(fig=None, subject=SUBJECT, date=DATE, refresh=False):
+def _add_block_label(ax, letter, dx=-22, dy=6):
+    ax.annotate(
+        letter, xy=(0, 1), xycoords="axes fraction",
+        xytext=(dx, dy), textcoords="offset points",
+        fontsize=16, fontweight="bold",
+        va="bottom", ha="left", annotation_clip=False,
+    )
+
+
+def plot_panel_f(fig=None, subject=SUBJECT, date=DATE, refresh=False,
+                 panel_letters=("G", "H", "I")):
     payload = load_panel_payload(subject, date, refresh=refresh)
 
     c0_all, c1_all = _ordered_cluster_trials(payload["iix"], payload["clusters"])
@@ -626,8 +640,9 @@ def plot_panel_f(fig=None, subject=SUBJECT, date=DATE, refresh=False):
 
     if fig is None:
         fig = plt.figure(figsize=(4, 6), constrained_layout=True)
+        fig.set_constrained_layout_pads(h_pad=0.02, hspace=0.0)
 
-    outer = fig.add_gridspec(3, 1, height_ratios=[1.3, 0.6, 2.1], hspace=0.18)
+    outer = fig.add_gridspec(3, 1, height_ratios=[1.3, 0.55, 2.6], hspace=0.0)
     gaze_gs = outer[0].subgridspec(2, 1, hspace=0.0)
     ax_h = fig.add_subplot(gaze_gs[0])
     ax_v = fig.add_subplot(gaze_gs[1], sharex=ax_h)
@@ -636,7 +651,7 @@ def plot_panel_f(fig=None, subject=SUBJECT, date=DATE, refresh=False):
 
     plot_gaze_axis(ax_h, payload, c0_trials, c1_trials, dim=0)
     plot_gaze_axis(ax_v, payload, c0_trials, c1_trials, dim=1)
-    gaze_ylim = compute_shared_gaze_ylim(payload, c0_trials, c1_trials)
+    gaze_ylim = (-GAZE_YLIM_HALF, GAZE_YLIM_HALF)
     ax_h.set_ylim(gaze_ylim)
     ax_v.set_ylim(gaze_ylim)
     plot_psth_axis(ax_psth, payload, c0_trials, c1_trials)
@@ -653,6 +668,11 @@ def plot_panel_f(fig=None, subject=SUBJECT, date=DATE, refresh=False):
     # PSTH shares x with raster; keep its tick labels so the reader sees the
     # time axis on the way down.
     ax_psth.tick_params(labelbottom=True)
+
+    if panel_letters is not None:
+        _add_block_label(ax_h, panel_letters[0])
+        _add_block_label(ax_psth, panel_letters[1])
+        _add_block_label(ax_raster, panel_letters[2])
 
     return fig, {"gaze_h": ax_h, "gaze_v": ax_v,
                  "psth": ax_psth, "raster": ax_raster}

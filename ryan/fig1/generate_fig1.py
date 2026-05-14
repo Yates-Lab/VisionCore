@@ -1,10 +1,13 @@
 """
-Compose figure 1 (panels A, B, C on the top row; D, F on the second row)
-into a single SVG, then export PDF and PNG via cairosvg.
+Compose figure 1 into a single SVG, then export PDF and PNG via cairosvg.
 
 Layout:
-    Row 1:  A | B | C   (A is 1.5x C's width)
-    Row 2:  D | F       (each half the total width)
+    Row 1 (3 in tall):  A | B | C
+    Rows 2-4:           D-E-F block  |  G-H-I block
+
+Only panel A is an external SVG (Illustrator schematic); the remaining panels
+(B, C, D-F, G-I) are rendered together inside one matplotlib figure with
+nested subfigures so spacing and labels stay coherent.
 
 Usage:
     uv run ryan/fig1/generate_fig1.py
@@ -18,88 +21,88 @@ import cairosvg
 from VisionCore.paths import FIGURES_DIR
 from generate_fig1b import plot_panel_b
 from generate_fig1c import plot_panel_c
-from generate_fig1d import plot_panel_d
+from generate_fig1d import plot_panel_d, _add_block_label
 from generate_fig1f import plot_panel_f
 
 HERE = Path(__file__).resolve().parent
 FIG_DIR = FIGURES_DIR / "fig1"
 FIG_DIR.mkdir(parents=True, exist_ok=True)
 
-# Layout in inches. A is 2x B's width.
+# Layout in inches.
 ROW_HEIGHT_IN = 3.0
 PANEL_C_W_IN = 2.0
-# Panel B needs extra horizontal room so its square data box matches panel C
-# after the colorbar is added on the right.
 PANEL_B_W_IN = 2.5
 PANEL_A_W_IN = 1.5 * PANEL_C_W_IN
 PAD_IN = 0.25
-LABEL_OFFSET_IN = 0.05
 
-# Row 2: D and F each take half the total figure width.
-ROW2_HEIGHT_IN = 6.0
+# Second + third row block (D-F and G-I, each rendered as its own subfigure).
+BLOCK_HEIGHT_IN = 6.0
 
-# 1 inch = 96 SVG user units (matplotlib's default for SVG).
+# Total figure size.
+TOTAL_W_IN = PANEL_A_W_IN + PANEL_B_W_IN + PANEL_C_W_IN + 2 * PAD_IN
+TOTAL_H_IN = ROW_HEIGHT_IN + BLOCK_HEIGHT_IN
+
+# Matplotlib region spans the full width; the top-left cell is left empty
+# so panel A (SVG schematic) can be composited over it.
+A_RESERVE_W_IN = PANEL_A_W_IN + PAD_IN
+
+# 1 inch = 96 SVG user units.
 PPI = 96.0
 
-
-def _render_panel_svg(plot_fn, out_path, width_in, height_in):
-    fig, ax = plt.subplots(figsize=(width_in, height_in))
-    plot_fn(ax=ax)
-    fig.tight_layout(pad=0.5)
-    fig.savefig(out_path)
-    plt.close(fig)
+PANEL_LABEL_FONTSIZE_PT = 16
+# svgutils sizes in SVG user units (px). matplotlib renders 16pt @ 96 DPI as
+# 16 * 96/72 ≈ 21.33 px, so match that for the A label.
+PANEL_LABEL_FONTSIZE_PX = PANEL_LABEL_FONTSIZE_PT * 96.0 / 72.0
 
 
-def _render_multiaxis_panel_svg(plot_fn, out_path, width_in, height_in):
-    """For panels that build their own multi-axis figure (D, F).
-    dpi controls the resolution of rasterized artists (e.g. spike rasters)
-    embedded inside the otherwise-vector SVG."""
-    fig = plt.figure(figsize=(width_in, height_in), constrained_layout=True)
-    plot_fn(fig=fig)
+def _render_main_svg(out_path):
+    """Render B, C, D-F, G-I together as a single full-width matplotlib
+    figure. The top-left cell is left empty for panel A (composited later)."""
+    fig = plt.figure(
+        figsize=(TOTAL_W_IN, TOTAL_H_IN),
+        layout="constrained",
+    )
+    fig.get_layout_engine().set(
+        w_pad=0.02, h_pad=0.02, wspace=0.0, hspace=0.0,
+    )
+
+    top, bottom = fig.subfigures(
+        2, 1, height_ratios=[ROW_HEIGHT_IN, BLOCK_HEIGHT_IN], hspace=0.0,
+    )
+    _sub_a_blank, sub_b, sub_c = top.subfigures(
+        1, 3,
+        width_ratios=[A_RESERVE_W_IN, PANEL_B_W_IN, PANEL_C_W_IN],
+        wspace=0.0,
+    )
+    sub_d, sub_g = bottom.subfigures(1, 2, wspace=0.0)
+
+    ax_b = sub_b.add_subplot(1, 1, 1)
+    plot_panel_b(ax=ax_b)
+    _add_block_label(ax_b, "B")
+
+    ax_c = sub_c.add_subplot(1, 1, 1)
+    plot_panel_c(ax=ax_c)
+    _add_block_label(ax_c, "C")
+
+    plot_panel_d(fig=sub_d, panel_letters=("D", "E", "F"))
+    plot_panel_f(fig=sub_g, panel_letters=("G", "H", "I"))
+
     fig.savefig(out_path, dpi=400)
     plt.close(fig)
 
 
-def _panel_label(text, x_in, y_in):
-    return sg.TextElement(
-        x_in * PPI, y_in * PPI, text,
-        size=14, weight="bold", font="Arial",
-    )
-
-
 def compose():
-    panel_b_svg = FIG_DIR / "_fig1b_panel.svg"
-    panel_c_svg = FIG_DIR / "_fig1c_panel.svg"
-    panel_d_svg = FIG_DIR / "_fig1d_panel.svg"
-    panel_f_svg = FIG_DIR / "_fig1f_panel.svg"
-
-    _render_panel_svg(plot_panel_b, panel_b_svg, PANEL_B_W_IN, ROW_HEIGHT_IN)
-    _render_panel_svg(plot_panel_c, panel_c_svg, PANEL_C_W_IN, ROW_HEIGHT_IN)
+    main_svg = FIG_DIR / "_fig1_main.svg"
+    _render_main_svg(main_svg)
 
     panel_a_path = HERE / "fig1a.svg"
 
-    total_w_in = PANEL_A_W_IN + PANEL_B_W_IN + PANEL_C_W_IN + 2 * PAD_IN
-    # Row 2: D and F split the total width with a single pad between them.
-    panel_df_w_in = (total_w_in - PAD_IN) / 2.0
-    _render_multiaxis_panel_svg(plot_panel_d, panel_d_svg,
-                                panel_df_w_in, ROW2_HEIGHT_IN)
-    _render_multiaxis_panel_svg(plot_panel_f, panel_f_svg,
-                                panel_df_w_in, ROW2_HEIGHT_IN)
-
-    total_h_in = ROW_HEIGHT_IN + PAD_IN + ROW2_HEIGHT_IN
-
-    fig = sg.SVGFigure(f"{total_w_in}in", f"{total_h_in}in")
-    fig.root.set("viewBox", f"0 0 {total_w_in * PPI} {total_h_in * PPI}")
+    fig = sg.SVGFigure(f"{TOTAL_W_IN}in", f"{TOTAL_H_IN}in")
+    fig.root.set("viewBox", f"0 0 {TOTAL_W_IN * PPI} {TOTAL_H_IN * PPI}")
 
     def _load_and_place(path, x_in, y_in, target_w_in, target_h_in):
         f = sg.fromfile(str(path))
         root = f.getroot()
-        # svgutils' moveto scaling acts in the *parent's* user-unit space,
-        # but the child SVG's content is laid out in its own viewBox units.
-        # We want the rendered size of the child to match target_*_in.
-        # rendered_size = (parent_units / child_viewBox_units) * scale
-        # parent units are at PPI (96/in); child viewBox units come from the
-        # source SVG's viewBox attribute.
         vb_w, vb_h = _viewbox_size(f.root)
         sx = (target_w_in * PPI) / vb_w
         sy = (target_h_in * PPI) / vb_h
@@ -107,28 +110,16 @@ def compose():
         root.moveto(x_in * PPI, y_in * PPI, scale_x=scale)
         return root
 
-    x = 0.0
-    panel_a = _load_and_place(panel_a_path, x, 0.0, PANEL_A_W_IN, ROW_HEIGHT_IN)
-    x += PANEL_A_W_IN + PAD_IN
-    panel_b = _load_and_place(panel_b_svg, x, 0.0, PANEL_B_W_IN, ROW_HEIGHT_IN)
-    x += PANEL_B_W_IN + PAD_IN
-    panel_c = _load_and_place(panel_c_svg, x, 0.0, PANEL_C_W_IN, ROW_HEIGHT_IN)
+    main = _load_and_place(main_svg, 0.0, 0.0, TOTAL_W_IN, TOTAL_H_IN)
+    panel_a = _load_and_place(panel_a_path, 0.0, 0.0,
+                              PANEL_A_W_IN, ROW_HEIGHT_IN)
 
-    row2_y = ROW_HEIGHT_IN + PAD_IN
-    panel_d = _load_and_place(panel_d_svg, 0.0, row2_y,
-                              panel_df_w_in, ROW2_HEIGHT_IN)
-    panel_f = _load_and_place(panel_f_svg, panel_df_w_in + PAD_IN, row2_y,
-                              panel_df_w_in, ROW2_HEIGHT_IN)
+    label_a = sg.TextElement(
+        0.05 * PPI, 0.25 * PPI, "A",
+        size=PANEL_LABEL_FONTSIZE_PX, weight="bold", font="Arial",
+    )
 
-    labels = [
-        _panel_label("A", LABEL_OFFSET_IN, 0.2),
-        _panel_label("B", PANEL_A_W_IN + PAD_IN + LABEL_OFFSET_IN, 0.2),
-        _panel_label("C", PANEL_A_W_IN + 2 * PAD_IN + PANEL_B_W_IN + LABEL_OFFSET_IN, 0.2),
-        _panel_label("D", LABEL_OFFSET_IN, row2_y + 0.2),
-        _panel_label("F", panel_df_w_in + PAD_IN + LABEL_OFFSET_IN, row2_y + 0.2),
-    ]
-
-    fig.append([panel_a, panel_b, panel_c, panel_d, panel_f, *labels])
+    fig.append([main, panel_a, label_a])
 
     out_svg = FIG_DIR / "fig1.svg"
     fig.save(str(out_svg))
@@ -144,8 +135,6 @@ def compose():
 
 
 def _viewbox_size(root_element):
-    """Return (width, height) of an SVG root's viewBox in its own user units.
-    Falls back to the width/height attributes if no viewBox is set."""
     vb = root_element.get("viewBox") or root_element.get("viewbox")
     if vb:
         parts = vb.replace(",", " ").split()
@@ -156,8 +145,6 @@ def _viewbox_size(root_element):
 
 
 def _to_user_units(value):
-    """Parse svgutils width/height string ('4in', '300', '76.2mm') into
-    SVG user units (1 in == 96 units)."""
     if value is None:
         return 1.0
     s = str(value).strip()
