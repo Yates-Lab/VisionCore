@@ -3,19 +3,16 @@ Figure 1 panel D: single-cell tuning + gaze-driven raster structure.
 
 Layout (4 axes):
     +----------------+----------------+
-    |   STA peak     |  Gaze segment  |   shared deg extent
+    |   STA peak     |  Gaze segment  |   shared deg extent, centered at 0
     +----------------+----------------+
     |   PSTH all trials (full width)  |
     +---------------------------------+
     |   Gaze-sorted stitched raster   |   sharex with PSTH
     +---------------------------------+
 
-Reuses ``tejas.rsvp_util.get_fixrsvp_data`` and the STA/STE cache produced
-by ``rf_contours.py`` (CACHE_DIR/fig1_rf_contours). Per-cell payload is
-cached to CACHE_DIR/fig1_single_cell.
-
-Usage:
-    uv run ryan/fig1/generate_fig1d.py
+Segments: a single ~20 ms onset bin followed by 6 × 50 ms pulse bins, each
+sorted independently by gaze projection onto the axis orthogonal to the
+cell's preferred orientation.
 """
 
 from pathlib import Path
@@ -24,6 +21,7 @@ import warnings
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
 
 from VisionCore.paths import VISIONCORE_ROOT, FIGURES_DIR, CACHE_DIR
 
@@ -41,8 +39,10 @@ DATASET_CONFIGS_PATH = str(
 )
 
 DT = 1.0 / 240.0
-TOTAL_WINDOW_BINS = (0, 100)
-SEGMENT_LEN_BINS = 25
+ONSET_LEN_BINS = 5             # ~20 ms initial response delay
+PULSE_LEN_BINS = 12            # 50 ms at 240 Hz (20 Hz pulse rate)
+N_PULSES = 6                   # 6 pulses × 50 ms = 300 ms
+TOTAL_WINDOW_BINS = (0, ONSET_LEN_BINS + N_PULSES * PULSE_LEN_BINS)  # (0, 77)
 DISTANCE_FROM_LINE_THRESHOLD = 0.3
 MICROSACCADE_THRESHOLD = 0.3
 USE_UNIVERSAL_PEAK_LAG = True
@@ -126,7 +126,6 @@ def _gaborium_geometry_cache_path(session_name):
 
 
 def _load_gaborium_geometry(session_name):
-    """ROI origin (row, col) in pixels, plus ppd. Cached per-session."""
     path = _gaborium_geometry_cache_path(session_name)
     if path.exists():
         z = np.load(path)
@@ -143,9 +142,6 @@ def _load_gaborium_geometry(session_name):
 
 
 def _gaborium_row_for_cluster(session_name, cluster_id):
-    """Map an absolute cluster id (as used by fixrsvp cids) to its row in
-    the gaborium STA/STE cache. Gaborium rows are indexed positionally by
-    ``YatesV1Session.get_cluster_ids()``."""
     from DataYatesV1.utils.io import YatesV1Session
     sess = YatesV1Session(session_name)
     cluster_ids = np.asarray(sess.get_cluster_ids())
@@ -158,11 +154,6 @@ def _gaborium_row_for_cluster(session_name, cluster_id):
 
 
 def _sta_centered_in_degrees(session_name, cluster_id, lag=None):
-    """Return (image, extent_in_deg, peak_lag) for the STA at ``lag`` (or
-    STE-peak lag if None), centered on the (weighted) RF centroid with
-    elevation positive-up. ``cluster_id`` is the absolute cluster id (e.g.
-    ``payload["cell"]``), not the rsvp data column.
-    """
     z = _load_ste_for_session(session_name)
     if z is None:
         return None
@@ -172,7 +163,7 @@ def _sta_centered_in_degrees(session_name, cluster_id, lag=None):
     peak_lag = _peak_lag_from_ste(stes[row]) if lag is None else int(lag)
     img = np.asarray(stas[row, peak_lag], dtype=np.float64)
 
-    ppd, roi_origin = _load_gaborium_geometry(session_name)
+    ppd, _roi_origin = _load_gaborium_geometry(session_name)
     h, w = img.shape
 
     centered = img - np.median(img)
@@ -234,25 +225,52 @@ def _project_onto_orthogonal_line(eyepos, sort_window, max_orientation, peak_lag
         projections.append(x_proj)
 
     if not valid:
-        return np.array([], dtype=int), np.array([])
-    order = np.argsort(projections)
+        return {
+            "iix": np.array([], dtype=int),
+            "distances": np.array([]),
+            "signed_proj": np.array([]),
+            "cx": float(cx), "cy": float(cy), "slope": float(slope),
+        }
+    proj_arr = np.array(projections)
+    order = np.argsort(proj_arr)
     iix = np.array(valid)[order]
-    proj_sorted = np.array(projections)[order]
+    proj_sorted = proj_arr[order]
     distances = (proj_sorted - proj_sorted[0]) * norm
-    return iix, distances
+    med_proj = np.median(proj_sorted)
+    signed = (proj_sorted - med_proj) * norm
+    return {
+        "iix": iix, "distances": distances, "signed_proj": signed,
+        "cx": float(cx), "cy": float(cy), "slope": float(slope),
+    }
+
+
+def _segment_bounds(total_window=TOTAL_WINDOW_BINS):
+    s0, e0 = total_window
+    bounds = [(s0, min(s0 + ONSET_LEN_BINS, e0))]
+    cur = bounds[0][1]
+    for _ in range(N_PULSES):
+        if cur >= e0:
+            break
+        nxt = min(cur + PULSE_LEN_BINS, e0)
+        bounds.append((cur, nxt))
+        cur = nxt
+    return bounds
 
 
 def _compute_segments(eyepos, max_orientation, peak_lag,
-                     total_window=TOTAL_WINDOW_BINS, seg_len=SEGMENT_LEN_BINS):
-    s0, e0 = total_window
+                     total_window=TOTAL_WINDOW_BINS):
     segments = []
-    for start in range(s0, e0, seg_len):
-        end = min(start + seg_len, e0)
-        iix, dist = _project_onto_orthogonal_line(
+    for (start, end) in _segment_bounds(total_window):
+        res = _project_onto_orthogonal_line(
             eyepos, (start, end), max_orientation, peak_lag,
         )
-        segments.append({"start": int(start), "end": int(end),
-                         "iix": iix, "distances": dist})
+        segments.append({
+            "start": int(start), "end": int(end),
+            "iix": res["iix"],
+            "distances": res["distances"],
+            "signed_proj": res["signed_proj"],
+            "cx": res["cx"], "cy": res["cy"], "slope": res["slope"],
+        })
     return segments
 
 
@@ -260,7 +278,7 @@ def _compute_segments(eyepos, max_orientation, peak_lag,
 # Cached per-cell payload
 # ---------------------------------------------------------------------------
 def _cell_cache_path(subject, date, cell):
-    return CACHE_FIG_DIR / f"{subject}_{date}_cell{cell}.pkl"
+    return CACHE_FIG_DIR / f"{subject}_{date}_cell{cell}_v2.pkl"
 
 
 def _compute_cell_payload(subject, date, cell, max_orientation=None):
@@ -314,9 +332,13 @@ def _compute_cell_payload(subject, date, cell, max_orientation=None):
             peak_lag = peak_lag_cell
 
     segments = _compute_segments(eyepos, max_orientation, peak_lag)
-    seg_means = [
-        np.nanmean(robs_cell[:, s["start"]:s["end"]]) for s in segments
-    ]
+    # Prefer a pulse segment (skip the short onset segment) as the example.
+    seg_means = []
+    for i, s in enumerate(segments):
+        if i == 0:
+            seg_means.append(-np.inf)
+        else:
+            seg_means.append(np.nanmean(robs_cell[:, s["start"]:s["end"]]))
     example_idx = int(np.nanargmax(seg_means)) if seg_means else 0
 
     return {
@@ -326,7 +348,6 @@ def _compute_cell_payload(subject, date, cell, max_orientation=None):
         "max_orientation": float(max_orientation),
         "peak_lag": int(peak_lag),
         "total_window": np.asarray(TOTAL_WINDOW_BINS, dtype=int),
-        "segment_len": int(SEGMENT_LEN_BINS),
         "segments": segments,
         "example_segment_idx": example_idx,
         "eyepos_all": eyepos,
@@ -340,20 +361,7 @@ def load_cell_payload(subject=SUBJECT, date=DATE, cell=DEFAULT_CELL, refresh=Fal
     path = _cell_cache_path(subject, date, cell)
     if path.exists() and not refresh:
         with open(path, "rb") as f:
-            payload = pickle.load(f)
-        if "cell_col" not in payload:
-            # Legacy cache: recompute on the fly so the STA loader can index.
-            from tejas.rsvp_util import get_fixrsvp_data
-            data = get_fixrsvp_data(
-                subject, date, DATASET_CONFIGS_PATH,
-                use_cached_data=True,
-                salvageable_mismatch_time_threshold=25,
-                verbose=False,
-            )
-            payload["cell_col"] = int(list(data["cids"]).index(cell))
-            with open(path, "wb") as f:
-                pickle.dump(payload, f)
-        return payload
+            return pickle.load(f)
     payload = _compute_cell_payload(subject, date, cell)
     with open(path, "wb") as f:
         pickle.dump(payload, f)
@@ -361,48 +369,66 @@ def load_cell_payload(subject=SUBJECT, date=DATE, cell=DEFAULT_CELL, refresh=Fal
 
 
 # ---------------------------------------------------------------------------
-# Plotting
+# Plotting helpers
 # ---------------------------------------------------------------------------
+def _global_proj_vmax(payload):
+    vals = []
+    for seg in payload["segments"]:
+        sp = seg.get("signed_proj", np.array([]))
+        if len(sp):
+            vals.append(np.max(np.abs(sp)))
+    return float(max(vals)) if vals else 1.0
+
+
 def _eyepos_window_geometry(payload, segment_idx=None):
-    """Return (eye_iix_ordered, s_shift, e_shift, cx, cy, slope) for the
-    example segment used by the gaze axis."""
     seg_i = payload["example_segment_idx"] if segment_idx is None else segment_idx
     seg = payload["segments"][seg_i]
     iix = seg["iix"]
     peak_lag = int(payload["peak_lag"])
     eye_all = payload["eyepos_all"]
-    max_orientation = float(payload["max_orientation"])
 
     win_len = seg["end"] - seg["start"]
     s_shift = max(seg["start"] - peak_lag, 0)
     e_shift = s_shift + win_len
     eye = eye_all[iix]
 
-    win = eye[:, s_shift:e_shift, :]
-    cx = float(np.nanmedian(win[..., 0]))
-    cy = float(np.nanmedian(win[..., 1]))
-    slope = float(np.tan(np.deg2rad(max_orientation + 90.0)))
+    cx = float(seg["cx"]); cy = float(seg["cy"])
+    slope = float(seg["slope"])
     return seg, eye, s_shift, e_shift, cx, cy, slope
 
 
-def _scale_bar(ax, length_deg=0.2, label=None):
-    """Draw a small horizontal scale bar in axes-fraction space at lower-right."""
+def _draw_projection_line(ax, slope, lw=1.0, color="0.3"):
+    """Draw a line through (0, 0) along the projection direction, sized to fill
+    the current axis limits."""
     x0, x1 = ax.get_xlim()
     y0, y1 = ax.get_ylim()
-    span_x = x1 - x0
-    span_y = y1 - y0
-    x_end = x0 + 0.95 * span_x
-    x_start = x_end - length_deg
-    y = y0 + 0.07 * span_y
-    ax.plot([x_start, x_end], [y, y], "k", lw=1.5, solid_capstyle="butt")
-    if label is None:
-        label = f"{length_deg:g}°"
-    ax.text((x_start + x_end) / 2, y + 0.02 * span_y, label,
-            ha="center", va="bottom", fontsize=7)
+    L = np.hypot(max(abs(x0), abs(x1)), max(abs(y0), abs(y1)))
+    theta = np.arctan(slope)
+    dx = L * np.cos(theta); dy = L * np.sin(theta)
+    ax.plot([-dx, dx], [-dy, dy], color=color, lw=lw, zorder=2)
 
 
+def _fmt_deg(v):
+    s = f"{v:.2f}".rstrip("0").rstrip(".")
+    return s if s not in ("", "-") else "0"
+
+
+def _style_top_axis(ax, half, tick=0.5):
+    ticks = [-tick, 0.0, tick]
+    lbl = [_fmt_deg(-tick), "0", _fmt_deg(tick)]
+    ax.set_xticks(ticks); ax.set_xticklabels(lbl)
+    ax.set_yticks(ticks); ax.set_yticklabels(lbl)
+    ax.tick_params(direction="in", length=3, width=0.8, labelsize=7,
+                   top=True, right=True)
+    for s in ax.spines.values():
+        s.set_visible(True)
+        s.set_linewidth(0.8)
+
+
+# ---------------------------------------------------------------------------
+# Plots
+# ---------------------------------------------------------------------------
 def plot_sta_axis(ax, payload):
-    """Top-left: STA at peak lag, centered on RF centroid, in degrees."""
     sta = _sta_centered_in_degrees(payload["session"], payload["cell"])
     if sta is None:
         ax.text(0.5, 0.5, "STA cache missing", ha="center", va="center",
@@ -410,42 +436,38 @@ def plot_sta_axis(ax, payload):
         ax.set_xticks([]); ax.set_yticks([])
         return ax
     img = sta["image"]
-    vmax = float(np.nanmax(np.abs(img)))
-    if vmax == 0:
-        vmax = 1.0
+    vmax = float(np.nanmax(np.abs(img))) or 1.0
     ax.imshow(img, extent=sta["extent"], origin="upper",
               cmap="RdBu_r", vmin=-vmax, vmax=vmax, interpolation="nearest")
     ax.set_aspect("equal")
     return ax
 
 
-def plot_eyepos_axis(ax, payload, segment_idx=None):
-    """Top-right: gaze traces in the example segment, colored by sort rank."""
+def plot_eyepos_axis(ax, payload, segment_idx=None, proj_vmax=None):
+    """Gaze traces in the example segment, centered at 0 (median),
+    colored by signed projection on a shared coolwarm scale."""
     seg, eye, s_shift, e_shift, cx, cy, slope = _eyepos_window_geometry(
         payload, segment_idx=segment_idx,
     )
-    length = 0.6
-    ax.plot(
-        [cx - length / 2, cx + length / 2],
-        [cy - length / 2 * slope, cy + length / 2 * slope],
-        color="0.4", lw=1.0, zorder=2,
-    )
+    if proj_vmax is None:
+        proj_vmax = _global_proj_vmax(payload)
+    cmap = plt.cm.coolwarm
+    norm = mpl.colors.Normalize(vmin=-proj_vmax, vmax=proj_vmax)
 
-    colors = plt.cm.coolwarm(np.linspace(0, 1, len(seg["iix"])))
+    sp = seg["signed_proj"]
     for idx in range(len(seg["iix"])):
-        trace = eye[idx, s_shift:e_shift, :]
+        trace = eye[idx, s_shift:e_shift, :].copy()
+        trace[:, 0] -= cx; trace[:, 1] -= cy
         med = np.nanmedian(trace, axis=0)
-        ax.plot(trace[:, 0], trace[:, 1],
-                color=colors[idx], lw=0.4, alpha=0.6)
-        ax.scatter(med[0], med[1], s=6, color=colors[idx],
-                   edgecolor="k", linewidth=0.25, zorder=3)
+        c = cmap(norm(sp[idx]))
+        ax.plot(trace[:, 0], trace[:, 1], color=c, lw=0.5, alpha=0.65)
+        ax.scatter(med[0], med[1], s=12, color=c,
+                   edgecolor="k", linewidth=0.3, zorder=3)
     ax.set_aspect("equal")
     return ax
 
 
 def _set_shared_top_limits(ax_sta, ax_eye, payload, segment_idx=None, pad=0.05):
-    """Set identical x/y limits on the STA and eyepos axes."""
-    # STA half-extent
     sta = _sta_centered_in_degrees(payload["session"], payload["cell"])
     if sta is not None:
         x0, x1, y0, y1 = sta["extent"]
@@ -453,7 +475,6 @@ def _set_shared_top_limits(ax_sta, ax_eye, payload, segment_idx=None, pad=0.05):
     else:
         sta_half = 0.0
 
-    # Eyepos half-extent (around its own median, centered locally)
     seg, eye, s_shift, e_shift, cx, cy, _slope = _eyepos_window_geometry(
         payload, segment_idx=segment_idx,
     )
@@ -464,11 +485,10 @@ def _set_shared_top_limits(ax_sta, ax_eye, payload, segment_idx=None, pad=0.05):
     ]))
 
     half = max(sta_half, eye_half) + pad
-
-    ax_sta.set_xlim(-half, half)
-    ax_sta.set_ylim(-half, half)
-    ax_eye.set_xlim(cx - half, cx + half)
-    ax_eye.set_ylim(cy - half, cy + half)
+    half = min(half, 0.6)  # crop both top axes to central ±0.6 deg
+    ax_sta.set_xlim(-half, half); ax_sta.set_ylim(-half, half)
+    ax_eye.set_xlim(-half, half); ax_eye.set_ylim(-half, half)
+    return half
 
 
 def _segment_raster_lines(spike_times_list, trial_t_bins_list, trial_indices,
@@ -499,21 +519,46 @@ def _segment_raster_lines(spike_times_list, trial_t_bins_list, trial_indices,
 
 
 def plot_psth_axis(ax, payload):
-    """Full-width PSTH across all trials within the analysis window."""
     s0, e0 = payload["total_window"]
-    robs = payload["robs_cell_all"][:, s0:e0]
+    full = payload["robs_cell_all"]
+    robs = full[:, s0:e0]
     n = robs.shape[0]
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
         mean = np.nanmean(robs, axis=0) / DT
         sem = np.nanstd(robs, axis=0) / np.sqrt(max(n, 1)) / DT
     t_ms = (np.arange(s0, e0) + 0.5) * DT * 1000.0
+
+    # Conditional PSTHs by sign of projection in each segment
+    mean_neg = np.full(e0 - s0, np.nan)
+    mean_pos = np.full(e0 - s0, np.nan)
+    for seg in payload["segments"]:
+        sst, sen = seg["start"], seg["end"]
+        if sen <= s0 or sst >= e0:
+            continue
+        a = max(sst, s0); b = min(sen, e0)
+        iix = seg["iix"]; sp = seg["signed_proj"]
+        if len(iix) == 0:
+            continue
+        neg = iix[sp < 0]; pos = iix[sp > 0]
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            if len(neg):
+                mean_neg[a - s0:b - s0] = np.nanmean(full[neg, a:b], axis=0) / DT
+            if len(pos):
+                mean_pos[a - s0:b - s0] = np.nanmean(full[pos, a:b], axis=0) / DT
+
+    ax.plot(t_ms, mean_neg, color="#3b6db7", lw=0.9, alpha=0.85, zorder=1,
+            label="proj < 0")
+    ax.plot(t_ms, mean_pos, color="#c43c3c", lw=0.9, alpha=0.85, zorder=1,
+            label="proj > 0")
     ax.fill_between(t_ms, mean - sem, mean + sem,
-                    color="0.6", alpha=0.4, linewidth=0)
-    ax.plot(t_ms, mean, color="k", lw=1.0)
+                    color="0.6", alpha=0.4, linewidth=0, zorder=2)
+    ax.plot(t_ms, mean, color="k", lw=1.0, zorder=3, label="all")
     ax.set_xlim(s0 * DT * 1000.0, e0 * DT * 1000.0)
     ax.set_ylim(bottom=0)
     ax.set_ylabel("Spikes/s")
+    ax.tick_params(direction="in", length=3, labelsize=7)
     return ax
 
 
@@ -530,6 +575,10 @@ def plot_raster_axis(ax, payload, tick_height=0.7, tick_lw=0.6,
     if n_rows == 0:
         ax.set_title("no valid trials")
         return ax
+
+    proj_vmax = _global_proj_vmax(payload)
+    cmap = plt.cm.coolwarm
+    norm_proj = mpl.colors.Normalize(vmin=-proj_vmax, vmax=proj_vmax)
 
     all_xs, all_ys = [], []
     for seg in segments:
@@ -550,31 +599,68 @@ def plot_raster_axis(ax, payload, tick_height=0.7, tick_lw=0.6,
 
     if all_xs:
         ax.plot(np.concatenate(all_xs), np.concatenate(all_ys),
-                color="k", lw=tick_lw, rasterized=True)
+                color="k", lw=tick_lw, rasterized=True, zorder=3)
 
     if show_segment_dividers:
         for seg in segments[1:]:
             x_ms = seg["start"] * dt * 1000.0
-            ax.axvline(x_ms, color="0.7", lw=0.4, ls="-", alpha=0.6, zorder=0)
+            ax.axvline(x_ms, color="0.7", lw=0.4, ls="-", alpha=0.7, zorder=0)
 
     ax.set_ylim(n_rows, 0)
     ax.set_xlim(0, total_dur_ms)
     ax.set_xlabel("Time from fixation onset (ms)")
-    ax.set_yticks([])
 
-    # Right-side: gaze-projection range for the example segment
-    ex = payload["segments"][payload["example_segment_idx"]]
-    if len(ex["distances"]) > 1:
+    # Left axis: 0 / N_trials with terse title.
+    ax.set_yticks([0, n_rows])
+    ax.set_yticklabels(["0", str(n_rows)])
+    ax.set_ylabel("Trials, gaze ordered", fontsize=8)
+    ax.tick_params(axis="y", labelsize=7, direction="in", length=3, left=True)
+
+    # Single color strip to the right of the raster, for the last segment.
+    last_seg = next((s for s in reversed(segments) if len(s["iix"])), None)
+    if last_seg is not None:
+        sp = last_seg["signed_proj"]
+        n_last = len(sp)
+        if n_last == 1:
+            y_pos_last = np.array([0.5 * (n_rows - 1)])
+        else:
+            y_pos_last = np.linspace(0, n_rows - 1, n_last)
+
+        gap_ms = 0.012 * total_dur_ms
+        strip_w_ms = 0.025 * total_dur_ms
+        x_left = total_dur_ms + gap_ms
+        row_h = n_rows / max(n_last, 1)
+        for k in range(n_last):
+            c = cmap(norm_proj(sp[k]))
+            ax.add_patch(Rectangle(
+                (x_left, y_pos_last[k] - row_h / 2),
+                strip_w_ms, row_h,
+                facecolor=c, edgecolor="none", zorder=4, clip_on=False,
+            ))
+
+        # Right axis: top / 0 / bottom labels for last-segment projection.
         ax_r = ax.twinx()
         ax_r.set_ylim(ax.get_ylim())
-        dmin = float(ex["distances"].min())
-        dmax = float(ex["distances"].max())
-        ax_r.set_yticks([0, n_rows - 1])
-        ax_r.set_yticklabels([f"{dmin:.2f}", f"{dmax:.2f}"])
-        ax_r.set_ylabel("Gaze proj. (deg)", fontsize=8)
-        ax_r.tick_params(axis="y", labelsize=7)
-    return ax
+        if np.any(sp < 0) and np.any(sp > 0):
+            j = int(np.argmax(sp >= 0))
+            if j == 0:
+                y_zero = y_pos_last[0]
+            else:
+                sp_lo, sp_hi = sp[j - 1], sp[j]
+                t = (0.0 - sp_lo) / (sp_hi - sp_lo)
+                y_zero = y_pos_last[j - 1] + t * (y_pos_last[j] - y_pos_last[j - 1])
+        else:
+            y_zero = 0.5 * (y_pos_last[0] + y_pos_last[-1])
+        ax_r.set_yticks([y_pos_last[0], y_zero, y_pos_last[-1]])
+        ax_r.set_yticklabels([f"{sp[0]:+.2f}", "0", f"{sp[-1]:+.2f}"])
+        ax_r.set_ylabel("Gaze proj. (°)", fontsize=8)
+        # Pad past the color strip so labels don't overlap it.
+        ax_r.tick_params(axis="y", labelsize=7, direction="in", length=3,
+                         pad=12)
+        for s in ax_r.spines.values():
+            s.set_visible(False)
 
+    return ax
 
 def plot_panel_d(fig=None, subject=SUBJECT, date=DATE, cell=DEFAULT_CELL,
                 refresh=False):
@@ -595,20 +681,20 @@ def plot_panel_d(fig=None, subject=SUBJECT, date=DATE, cell=DEFAULT_CELL,
 
     plot_sta_axis(ax_sta, payload)
     plot_eyepos_axis(ax_eye, payload)
-    _set_shared_top_limits(ax_sta, ax_eye, payload)
+    half = _set_shared_top_limits(ax_sta, ax_eye, payload)
 
-    # Strip top-panel tick clutter; show a small scale bar instead.
-    for a in (ax_sta, ax_eye):
-        a.set_xticks([]); a.set_yticks([])
-        for s in a.spines.values():
-            s.set_visible(False)
-    _scale_bar(ax_sta, length_deg=0.2)
-    _scale_bar(ax_eye, length_deg=0.2)
+    # Projection line on both top axes (drawn after limits so it spans them).
+    seg = payload["segments"][payload["example_segment_idx"]]
+    slope = float(seg["slope"])
+    _draw_projection_line(ax_sta, slope, lw=1.0, color="0.25")
+    _draw_projection_line(ax_eye, slope, lw=2.0, color="0.25")
+
+    _style_top_axis(ax_sta, half)
+    _style_top_axis(ax_eye, half)
 
     plot_psth_axis(ax_psth, payload)
     plot_raster_axis(ax_raster, payload)
 
-    # PSTH shares x with raster; hide its tick labels (raster carries them).
     ax_psth.tick_params(labelbottom=False)
     ax_psth.spines["top"].set_visible(False)
     ax_psth.spines["right"].set_visible(False)

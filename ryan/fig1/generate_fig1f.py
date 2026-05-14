@@ -24,7 +24,6 @@ Usage:
 
 from pathlib import Path
 import pickle
-import warnings
 from itertools import combinations
 from math import comb
 
@@ -60,6 +59,18 @@ SEGMENT_END_BIN = 78
 # visible against pre- and post-segment activity.
 RASTER_PAD_BINS = 30
 
+# Display windows (ms from fixation onset).
+RASTER_WINDOW_MS = (220.0, 370.0)
+GAZE_PAD_MS = 150.0
+GAZE_WINDOW_MS = (
+    SEGMENT_START_BIN * DT * 1000.0 - GAZE_PAD_MS,
+    SEGMENT_END_BIN * DT * 1000.0 + GAZE_PAD_MS,
+)
+
+# Display rows (1-indexed in the combined cluster-0-then-cluster-1 ordering)
+# to drop from the figure.
+DROP_DISPLAY_ROWS = (2, 7)
+
 # Gaze-clustering parameters (mirrors the call site at line ~969 of the
 # exploratory script).
 NUM_CLUSTERS = 2
@@ -72,8 +83,8 @@ RETURN_TOP_K_COMBOS = 10
 COMBO_IDX = 1               # script selected the second-best combo (j=1)
 
 # Raster rendering.
-PSTH_BIN_SIZE = 0.001       # 1 ms PSTH binning from spike times
-RASTER_GAP_BINS = 50
+PSTH_BIN_MS = 5.0           # ms binning for line PSTHs
+RASTER_GAP_BINS = 10
 
 CACHE_FIG_DIR = CACHE_DIR / "fig1_population"
 RF_CACHE_DIR = CACHE_DIR / "fig1_rf_contours"
@@ -356,52 +367,86 @@ def load_panel_payload(subject=SUBJECT, date=DATE, refresh=False):
 # ---------------------------------------------------------------------------
 # Plotting
 # ---------------------------------------------------------------------------
-def _cluster_colors(clusters):
-    n = len(set(int(c) for c in clusters if c >= 0))
-    base = plt.cm.coolwarm(np.linspace(0, 1, max(n, 1)))
-    return [base[c] if c >= 0 else (0.5, 0.5, 0.5, 0.3) for c in clusters]
+def _ordered_cluster_trials(iix, clusters):
+    """Return (c0_trials, c1_trials) in the display order used by the raster."""
+    c0 = [iix[i] for i in range(len(iix)) if clusters[i] == 0]
+    c1 = [iix[i] for i in range(len(iix)) if clusters[i] == 1]
+    return c0, c1
 
 
-def plot_eyepos_axis(ax, payload, show_unclustered=False):
-    """Left axis: 2D scatter of per-trial median gaze inside the (peak-lag
-    shifted) segment, colored by cluster."""
+def _apply_drop_rows(c0_trials, c1_trials, drop_rows=DROP_DISPLAY_ROWS):
+    """Drop trials at the given 1-indexed display positions in the combined
+    cluster-0-then-cluster-1 ordering."""
+    combined = list(c0_trials) + list(c1_trials)
+    drop = {r - 1 for r in drop_rows}
+    n0 = len(c0_trials)
+    c0_kept = [t for i, t in enumerate(combined[:n0]) if i not in drop]
+    c1_kept = [t for i, t in enumerate(combined[n0:], start=n0) if i not in drop]
+    return c0_kept, c1_kept
+
+
+def _gaze_segment_values(payload, c0_trials, c1_trials,
+                         highlight_ms=RASTER_WINDOW_MS):
+    """Concatenated highlighted gaze values for each dim, across all selected
+    trials. Highlight is the raster display window. Returns (vals_dim0, vals_dim1)."""
     eye = payload["eyepos"]
-    iix = payload["iix"]
-    clusters = payload["clusters"]
-    s = max(payload["segment_start"] - payload["peak_lag"], 0)
-    win_len = payload["segment_end"] - payload["segment_start"]
-    e = s + win_len
+    seg_s = int(round(highlight_ms[0] / 1000.0 / DT))
+    seg_e = int(round(highlight_ms[1] / 1000.0 / DT))
+    out = []
+    for dim in (0, 1):
+        chunks = []
+        for trials in (c0_trials, c1_trials):
+            for tid in trials:
+                t = eye[tid, seg_s:seg_e, dim]
+                chunks.append(t[~np.isnan(t)])
+        out.append(np.concatenate(chunks) if chunks else np.array([]))
+    return out[0], out[1]
 
-    colors = _cluster_colors(clusters)
-    for idx in range(len(iix)):
-        c = clusters[idx]
-        if c < 0 and not show_unclustered:
-            continue
-        trace = eye[iix[idx], s:e, :]
-        med = np.nanmedian(trace, axis=0)
-        ax.plot(trace[:, 0], trace[:, 1], color=colors[idx], lw=0.7, alpha=0.9)
-        ax.scatter(med[0], med[1], color=colors[idx], s=20,
-                   edgecolor="k", linewidth=0.7, zorder=3)
 
-    drawn = [iix[i] for i in range(len(iix))
-             if clusters[i] >= 0 or show_unclustered]
-    if drawn:
-        x = eye[drawn, s:e, 0]
-        y = eye[drawn, s:e, 1]
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", RuntimeWarning)
-            xmin, xmax = np.nanmin(x), np.nanmax(x)
-            ymin, ymax = np.nanmin(y), np.nanmax(y)
-        rng = max(xmax - xmin, ymax - ymin)
-        cx, cy = 0.5 * (xmin + xmax), 0.5 * (ymin + ymax)
-        ax.set_xlim(cx - rng / 2 - 0.02, cx + rng / 2 + 0.02)
-        ax.set_ylim(cy - rng / 2 - 0.02, cy + rng / 2 + 0.02)
+def compute_shared_gaze_ylim(payload, c0_trials, c1_trials, pad_factor=2.0,
+                             min_half=0.25, highlight_ms=RASTER_WINDOW_MS):
+    """Symmetric matched y-limits for both gaze axes, centered on the joint
+    highlighted-segment midpoint."""
+    v0, v1 = _gaze_segment_values(payload, c0_trials, c1_trials,
+                                   highlight_ms=highlight_ms)
+    both = np.concatenate([v0, v1]) if (v0.size or v1.size) else np.array([0.0])
+    lo, hi = float(np.min(both)), float(np.max(both))
+    center = 0.5 * (lo + hi)
+    half = max(0.5 * (hi - lo) * pad_factor, min_half)
+    return center - half, center + half
 
-    ax.set_aspect("equal")
-    ax.set_xlabel("Azimuth (deg)")
-    ax.set_ylabel("Elevation (deg)")
-    ax.axhline(0, color="k", lw=0.5, ls=":", alpha=0.5)
-    ax.axvline(0, color="k", lw=0.5, ls=":", alpha=0.5)
+
+def plot_gaze_axis(ax, payload, c0_trials, c1_trials, dim,
+                   window_ms=GAZE_WINDOW_MS,
+                   highlight_ms=RASTER_WINDOW_MS):
+    """Plot one gaze dimension over time for the selected trials.
+    Full window in gray; portion inside ``highlight_ms`` in cluster colors."""
+    eye = payload["eyepos"]
+
+    win_start_bin = int(round(window_ms[0] / 1000.0 / DT))
+    win_end_bin = int(round(window_ms[1] / 1000.0 / DT))
+    n_bins = win_end_bin - win_start_bin
+    t_ms = (win_start_bin + np.arange(n_bins)) * DT * 1000.0
+
+    seg_s = int(round(highlight_ms[0] / 1000.0 / DT))
+    seg_e = int(round(highlight_ms[1] / 1000.0 / DT))
+    s_idx = max(seg_s - win_start_bin, 0)
+    e_idx = min(seg_e - win_start_bin, n_bins)
+
+    for trials, color in [(c0_trials, "blue"), (c1_trials, "red")]:
+        for tid in trials:
+            trace = eye[tid, win_start_bin:win_end_bin, dim]
+            ax.plot(t_ms, trace, color="0.6", lw=0.6, alpha=0.7)
+            if e_idx > s_idx:
+                ax.plot(t_ms[s_idx:e_idx], trace[s_idx:e_idx],
+                        color=color, lw=1.0, alpha=0.95)
+
+    ax.set_xlim(window_ms[0], window_ms[1])
+    label = "Azimuth" if dim == 0 else "Elevation"
+    ax.set_ylabel(f"{label} (°)", fontsize=8)
+    ax.tick_params(direction="in", length=3, width=0.8, labelsize=7)
+    for s in ("top", "right"):
+        ax.spines[s].set_visible(False)
     return ax
 
 
@@ -432,34 +477,74 @@ def _trial_spike_times_in_window(spike_times_trial, t_bins_trial, t0_bin, t1_bin
     return np.concatenate(all_t), np.concatenate(all_c)
 
 
-def plot_raster_axis(ax, payload, gap=RASTER_GAP_BINS, show_psth=True,
-                    psth_height_factor=1.0):
-    """Right axis: cluster-grouped population raster from spike times, with
-    cluster-mean PSTHs (1 ms binning) overlaid."""
-    iix = payload["iix"]
-    clusters = payload["clusters"]
+def _cluster_psth(payload, trials, window_ms, bin_ms=PSTH_BIN_MS):
+    """Mean population spike rate (spikes/s/cell) across trials, binned."""
+    spike_times = payload["spike_times_trials"]
+    t_bins = payload["trial_t_bins"]
+    n_cells = payload["robs"].shape[2]
+    t0_bin = int(round(window_ms[0] / 1000.0 / DT))
+    t1_bin = int(round(window_ms[1] / 1000.0 / DT))
+    win_start_s = t0_bin * DT
+    win_end_s = t1_bin * DT
+    bin_s = bin_ms / 1000.0
+    edges = np.arange(win_start_s, win_end_s + bin_s / 2, bin_s)
+    centers_ms = 0.5 * (edges[:-1] + edges[1:]) * 1000.0
+    if not trials:
+        return centers_ms, np.zeros(len(edges) - 1)
+    rows = []
+    for tid in trials:
+        ts, _ = _trial_spike_times_in_window(
+            spike_times[tid], t_bins[tid], t0_bin, t1_bin,
+        )
+        counts, _ = np.histogram(ts, bins=edges)
+        rows.append(counts)
+    rate = np.mean(rows, axis=0) / bin_s / n_cells
+    return centers_ms, rate
+
+
+def plot_psth_axis(ax, payload, c0_trials, c1_trials,
+                   window_ms=RASTER_WINDOW_MS, bin_ms=PSTH_BIN_MS):
+    """Line-plot PSTHs for the two cluster groups."""
+    x0, p0 = _cluster_psth(payload, c0_trials, window_ms, bin_ms=bin_ms)
+    x1, p1 = _cluster_psth(payload, c1_trials, window_ms, bin_ms=bin_ms)
+    ax.plot(x0, p0, color="blue", lw=1.0, alpha=0.9)
+    ax.plot(x1, p1, color="red", lw=1.0, alpha=0.9)
+
+    ax.set_xlim(window_ms[0], window_ms[1])
+    ax.set_ylim(bottom=0)
+    ax.set_ylabel("Spikes/s", fontsize=8)
+    ax.tick_params(direction="in", length=3, width=0.8, labelsize=7)
+    for s in ("top", "right"):
+        ax.spines[s].set_visible(False)
+    return ax
+
+
+def plot_raster_axis(ax, payload, c0_trials=None, c1_trials=None,
+                    window_ms=RASTER_WINDOW_MS,
+                    gap=RASTER_GAP_BINS):
+    """Cluster-grouped population raster with dashed trial dividers."""
     robs = payload["robs"]
     spike_times = payload["spike_times_trials"]
     t_bins = payload["trial_t_bins"]
-    t0_bin = payload["raster_start"]
-    t1_bin = payload["raster_end"]
+    t0_bin = int(round(window_ms[0] / 1000.0 / DT))
+    t1_bin = int(round(window_ms[1] / 1000.0 / DT))
     n_cells = robs.shape[2]
 
-    # Split iix by cluster.
-    c0_trials = [iix[i] for i in range(len(iix)) if clusters[i] == 0]
-    c1_trials = [iix[i] for i in range(len(iix)) if clusters[i] == 1]
+    if c0_trials is None or c1_trials is None:
+        c0_default, c1_default = _ordered_cluster_trials(
+            payload["iix"], payload["clusters"]
+        )
+        if c0_trials is None:
+            c0_trials = c0_default
+        if c1_trials is None:
+            c1_trials = c1_default
     n0, n1 = len(c0_trials), len(c1_trials)
 
-    psth_height = n_cells * psth_height_factor
-    psth_block = (2 * (psth_height + gap)) if show_psth else 0
     block_h = n_cells + gap
     row_c0_start = 0
-    row_psth_start = n0 * block_h
-    row_c1_start = row_psth_start + psth_block
+    row_c1_start = n0 * block_h
     total_rows = row_c1_start + n1 * block_h - gap
 
-    win_dur_s = (t1_bin - t0_bin) * DT
-    win_dur_ms = win_dur_s * 1000.0
     t0_ms = t0_bin * DT * 1000.0
     t1_ms = t1_bin * DT * 1000.0
 
@@ -471,7 +556,7 @@ def plot_raster_axis(ax, payload, gap=RASTER_GAP_BINS, show_psth=True,
             spike_times[trial_id], t_bins[trial_id], t0_bin, t1_bin,
         )
         if times_s.size:
-            x_ms = times_s * 1000.0 + t0_ms
+            x_ms = times_s * 1000.0
             for xt, cell in zip(x_ms, cells):
                 spike_xs.append(xt)
                 spike_ys.append(row_top + cell)
@@ -505,77 +590,76 @@ def plot_raster_axis(ax, payload, gap=RASTER_GAP_BINS, show_psth=True,
         seg_y[0::3] = ys
         seg_y[1::3] = y2s
         seg_y[2::3] = nan
-        ax.plot(seg_x, seg_y, color="k", lw=0.5, rasterized=True)
+        ax.plot(seg_x, seg_y, color="k", lw=1.2, rasterized=True)
 
-    if show_psth and (n0 > 0 or n1 > 0):
-        psth_edges = np.arange(0, win_dur_s + PSTH_BIN_SIZE / 2, PSTH_BIN_SIZE)
-
-        def _mean_psth(trial_ids):
-            if not trial_ids:
-                return np.zeros(len(psth_edges) - 1)
-            rows = []
-            for tid in trial_ids:
-                times_s, _ = _trial_spike_times_in_window(
-                    spike_times[tid], t_bins[tid], t0_bin, t1_bin,
-                )
-                counts, _ = np.histogram(times_s, bins=psth_edges)
-                rows.append(counts)
-            return np.mean(rows, axis=0)
-
-        psth0 = _mean_psth(c0_trials)
-        psth1 = _mean_psth(c1_trials)
-        max_psth = max(psth0.max(), psth1.max(), 1e-10)
-
-        edges_ms = psth_edges * 1000.0 + t0_ms
-        x_psth = 0.5 * (edges_ms[:-1] + edges_ms[1:])
-
-        off0 = row_psth_start
-        off1 = row_psth_start + (psth_height + gap)
-        p0_y = off0 + psth_height - (psth0 / max_psth) * psth_height
-        p1_y = off1 + psth_height - (psth1 / max_psth) * psth_height
-        ax.fill_between(x_psth, off0 + psth_height, p0_y, color="blue", alpha=0.4)
-        ax.fill_between(x_psth, off1 + psth_height, p1_y, color="red", alpha=0.4)
-
-    # Segment-of-cluster boundary lines.
-    seg_s_ms = payload["segment_start"] * DT * 1000.0
-    seg_e_ms = payload["segment_end"] * DT * 1000.0
-    ax.axvline(seg_s_ms, color="0.7", lw=0.5, ls="--", zorder=0)
-    ax.axvline(seg_e_ms, color="0.7", lw=0.5, ls="--", zorder=0)
+    # Dashed trial dividers (between trial blocks within each cluster).
+    for i in range(1, n0):
+        ax.axhline(i * block_h - gap / 2, color="0.6",
+                   lw=0.4, ls="--", zorder=0)
+    for i in range(1, n1):
+        ax.axhline(row_c1_start + i * block_h - gap / 2, color="0.6",
+                   lw=0.4, ls="--", zorder=0)
+    # Solid divider between the two clusters.
+    if n0 > 0 and n1 > 0:
+        ax.axhline(row_c1_start - gap / 2, color="k",
+                   lw=0.6, ls="-", zorder=0)
 
     ax.set_xlim(t0_ms, t1_ms)
     ax.set_ylim(total_rows, 0)
-    ax.set_xlabel("Time from fixation onset (ms)")
-    ax.set_ylabel("Trial")
+    ax.set_xlabel("Time from fixation onset (ms)", fontsize=8)
+    ax.set_ylabel("Trial", fontsize=8)
     ax.set_yticks(tick_positions)
     ax.set_yticklabels(tick_labels)
     for lbl, col in zip(ax.get_yticklabels(), tick_colors):
         lbl.set_color(col)
+    ax.tick_params(direction="in", length=3, width=0.8, labelsize=7)
+    for s in ("top", "right"):
+        ax.spines[s].set_visible(False)
     return ax
 
 
 def plot_panel_f(fig=None, subject=SUBJECT, date=DATE, refresh=False):
     payload = load_panel_payload(subject, date, refresh=refresh)
 
-    if fig is None:
-        fig, axes = plt.subplots(1, 2, figsize=(7.5, 3.5),
-                                 gridspec_kw={"width_ratios": [1.0, 1.6]})
-    else:
-        axes = fig.subplots(1, 2, gridspec_kw={"width_ratios": [1.0, 1.6]})
+    c0_all, c1_all = _ordered_cluster_trials(payload["iix"], payload["clusters"])
+    c0_trials, c1_trials = _apply_drop_rows(c0_all, c1_all)
 
-    plot_eyepos_axis(axes[0], payload)
-    plot_raster_axis(axes[1], payload)
-    axes[0].set_title(
-        f"Gaze in segment [{payload['segment_start']},{payload['segment_end']}) bins "
-        f"({payload['session']}, N={len(payload['cids'])} cells)",
-        fontsize=9,
-    )
-    axes[1].set_title("Gaze-cluster population raster", fontsize=9)
-    return fig, axes
+    if fig is None:
+        fig = plt.figure(figsize=(4, 6), constrained_layout=True)
+
+    outer = fig.add_gridspec(3, 1, height_ratios=[1.3, 0.6, 2.1], hspace=0.18)
+    gaze_gs = outer[0].subgridspec(2, 1, hspace=0.0)
+    ax_h = fig.add_subplot(gaze_gs[0])
+    ax_v = fig.add_subplot(gaze_gs[1], sharex=ax_h)
+    ax_psth = fig.add_subplot(outer[1])
+    ax_raster = fig.add_subplot(outer[2], sharex=ax_psth)
+
+    plot_gaze_axis(ax_h, payload, c0_trials, c1_trials, dim=0)
+    plot_gaze_axis(ax_v, payload, c0_trials, c1_trials, dim=1)
+    gaze_ylim = compute_shared_gaze_ylim(payload, c0_trials, c1_trials)
+    ax_h.set_ylim(gaze_ylim)
+    ax_v.set_ylim(gaze_ylim)
+    plot_psth_axis(ax_psth, payload, c0_trials, c1_trials)
+    plot_raster_axis(ax_raster, payload,
+                     c0_trials=c0_trials, c1_trials=c1_trials,
+                     window_ms=RASTER_WINDOW_MS)
+
+    # Gaze pair: top plot has no bottom spine or x ticks; bottom plot keeps
+    # only left + bottom spines.
+    ax_h.spines["bottom"].set_visible(False)
+    ax_h.tick_params(bottom=False, labelbottom=False)
+    ax_v.tick_params(top=False, labeltop=False)
+
+    # PSTH shares x with raster; keep its tick labels so the reader sees the
+    # time axis on the way down.
+    ax_psth.tick_params(labelbottom=True)
+
+    return fig, {"gaze_h": ax_h, "gaze_v": ax_v,
+                 "psth": ax_psth, "raster": ax_raster}
 
 
 if __name__ == "__main__":
     fig, axes = plot_panel_f()
-    fig.tight_layout()
     out = FIG_DIR / "fig1f_population.svg"
     fig.savefig(out)
     fig.savefig(out.with_suffix(".pdf"))

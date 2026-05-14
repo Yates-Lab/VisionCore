@@ -1,8 +1,10 @@
 """
-Compose figure 1 (panels A, B, C on the top row) into a single SVG, then
-export PDF and PNG via cairosvg.
+Compose figure 1 (panels A, B, C on the top row; D, F on the second row)
+into a single SVG, then export PDF and PNG via cairosvg.
 
-Layout: A | B | C on row 1, where A is 2x the width of B and C.
+Layout:
+    Row 1:  A | B | C   (A is 1.5x C's width)
+    Row 2:  D | F       (each half the total width)
 
 Usage:
     uv run ryan/fig1/generate_fig1.py
@@ -16,6 +18,8 @@ import cairosvg
 from VisionCore.paths import FIGURES_DIR
 from generate_fig1b import plot_panel_b
 from generate_fig1c import plot_panel_c
+from generate_fig1d import plot_panel_d
+from generate_fig1f import plot_panel_f
 
 HERE = Path(__file__).resolve().parent
 FIG_DIR = FIGURES_DIR / "fig1"
@@ -31,6 +35,9 @@ PANEL_A_W_IN = 1.5 * PANEL_C_W_IN
 PAD_IN = 0.25
 LABEL_OFFSET_IN = 0.05
 
+# Row 2: D and F each take half the total figure width.
+ROW2_HEIGHT_IN = 6.0
+
 # 1 inch = 96 SVG user units (matplotlib's default for SVG).
 PPI = 96.0
 
@@ -40,6 +47,16 @@ def _render_panel_svg(plot_fn, out_path, width_in, height_in):
     plot_fn(ax=ax)
     fig.tight_layout(pad=0.5)
     fig.savefig(out_path)
+    plt.close(fig)
+
+
+def _render_multiaxis_panel_svg(plot_fn, out_path, width_in, height_in):
+    """For panels that build their own multi-axis figure (D, F).
+    dpi controls the resolution of rasterized artists (e.g. spike rasters)
+    embedded inside the otherwise-vector SVG."""
+    fig = plt.figure(figsize=(width_in, height_in), constrained_layout=True)
+    plot_fn(fig=fig)
+    fig.savefig(out_path, dpi=400)
     plt.close(fig)
 
 
@@ -53,6 +70,8 @@ def _panel_label(text, x_in, y_in):
 def compose():
     panel_b_svg = FIG_DIR / "_fig1b_panel.svg"
     panel_c_svg = FIG_DIR / "_fig1c_panel.svg"
+    panel_d_svg = FIG_DIR / "_fig1d_panel.svg"
+    panel_f_svg = FIG_DIR / "_fig1f_panel.svg"
 
     _render_panel_svg(plot_panel_b, panel_b_svg, PANEL_B_W_IN, ROW_HEIGHT_IN)
     _render_panel_svg(plot_panel_c, panel_c_svg, PANEL_C_W_IN, ROW_HEIGHT_IN)
@@ -60,7 +79,14 @@ def compose():
     panel_a_path = HERE / "fig1a.svg"
 
     total_w_in = PANEL_A_W_IN + PANEL_B_W_IN + PANEL_C_W_IN + 2 * PAD_IN
-    total_h_in = ROW_HEIGHT_IN
+    # Row 2: D and F split the total width with a single pad between them.
+    panel_df_w_in = (total_w_in - PAD_IN) / 2.0
+    _render_multiaxis_panel_svg(plot_panel_d, panel_d_svg,
+                                panel_df_w_in, ROW2_HEIGHT_IN)
+    _render_multiaxis_panel_svg(plot_panel_f, panel_f_svg,
+                                panel_df_w_in, ROW2_HEIGHT_IN)
+
+    total_h_in = ROW_HEIGHT_IN + PAD_IN + ROW2_HEIGHT_IN
 
     fig = sg.SVGFigure(f"{total_w_in}in", f"{total_h_in}in")
     fig.root.set("viewBox", f"0 0 {total_w_in * PPI} {total_h_in * PPI}")
@@ -88,13 +114,21 @@ def compose():
     x += PANEL_B_W_IN + PAD_IN
     panel_c = _load_and_place(panel_c_svg, x, 0.0, PANEL_C_W_IN, ROW_HEIGHT_IN)
 
+    row2_y = ROW_HEIGHT_IN + PAD_IN
+    panel_d = _load_and_place(panel_d_svg, 0.0, row2_y,
+                              panel_df_w_in, ROW2_HEIGHT_IN)
+    panel_f = _load_and_place(panel_f_svg, panel_df_w_in + PAD_IN, row2_y,
+                              panel_df_w_in, ROW2_HEIGHT_IN)
+
     labels = [
         _panel_label("A", LABEL_OFFSET_IN, 0.2),
         _panel_label("B", PANEL_A_W_IN + PAD_IN + LABEL_OFFSET_IN, 0.2),
         _panel_label("C", PANEL_A_W_IN + 2 * PAD_IN + PANEL_B_W_IN + LABEL_OFFSET_IN, 0.2),
+        _panel_label("D", LABEL_OFFSET_IN, row2_y + 0.2),
+        _panel_label("F", panel_df_w_in + PAD_IN + LABEL_OFFSET_IN, row2_y + 0.2),
     ]
 
-    fig.append([panel_a, panel_b, panel_c, *labels])
+    fig.append([panel_a, panel_b, panel_c, panel_d, panel_f, *labels])
 
     out_svg = FIG_DIR / "fig1.svg"
     fig.save(str(out_svg))
