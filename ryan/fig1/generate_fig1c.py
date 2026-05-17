@@ -1,10 +1,12 @@
 """
 Figure 1 panel C: foveal RF contour map.
 
-Streamlined version of the final plot from ``rf_contours.py``. Reads cached
-STAs/STEs produced by ``rf_contours.py`` (CACHE_DIR/fig1_rf_contours/) and
-re-extracts convex-hull contours with the same inclusion thresholds; does
-NOT recompute STAs.
+Computes (or loads cached) STAs/STEs via the shared
+``eval.sta_ste.compute_sta_ste`` module, then extracts convex-hull
+contours that pass SNR / spike-count / circularity thresholds.
+
+Set ``RECALC = True`` at the top of the file to force STA/STE
+recomputation from raw data.
 
 Usage:
     uv run ryan/fig1/generate_fig1c.py
@@ -13,15 +15,18 @@ Usage:
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
-from scipy.ndimage import gaussian_filter
 from scipy.spatial import ConvexHull
 from scipy.spatial.distance import pdist
 
-from VisionCore.paths import VISIONCORE_ROOT, CACHE_DIR, FIGURES_DIR
-from models.config_loader import load_dataset_configs
+from VisionCore.paths import VISIONCORE_ROOT, FIGURES_DIR
 from DataYatesV1.utils.io import YatesV1Session
 from DataYatesV1.utils.rf import get_contour
 
+from eval.sta_ste import compute_sta_ste, compute_snr, sessions_from_yaml
+
+
+# Force STA/STE recomputation from raw data (otherwise cached arrays used).
+RECALC = False
 
 DATASET_CONFIGS_PATH = str(
     VISIONCORE_ROOT / "experiments" / "dataset_configs" / "multi_basic_120_long.yaml"
@@ -31,17 +36,8 @@ SNR_THRESH = 9
 SPIKE_THRESH = 200
 CIRC_THRESH = 0.9
 
-CACHE_FIG_DIR = CACHE_DIR / "fig1_rf_contours"
 FIG_DIR = FIGURES_DIR / "fig1"
 FIG_DIR.mkdir(parents=True, exist_ok=True)
-
-
-def _compute_snr(stes):
-    signal = np.abs(stes - np.median(stes, axis=(2, 3), keepdims=True))
-    signal = gaussian_filter(signal, [0, 1, 1, 1])
-    noise = np.median(signal[:, 0], axis=(1, 2))
-    snr_per_lag = np.max(signal, axis=(2, 3)) / noise[:, None]
-    return snr_per_lag.max(axis=1), snr_per_lag.argmax(axis=1)
 
 
 def _hull(contour_pts):
@@ -54,15 +50,14 @@ def _hull(contour_pts):
     return pts, circ
 
 
-def _extract_contours_for_session(session_name):
+def _extract_contours_for_session(session_name, recalc=False):
     """Return list of hull contours (in degrees) for a session that pass
     SNR / spike-count / circularity thresholds."""
-    cache_path = CACHE_FIG_DIR / f"{session_name}_sta_ste.npz"
-    if not cache_path.exists():
+    res = compute_sta_ste(session_name, recalc=recalc)
+    if res is None:
         return []
-    z = np.load(cache_path)
-    stes = z["stes"]
-    spikes = z["num_spikes"]
+    stes = res["stes"]
+    spikes = res["num_spikes"]
 
     sess = YatesV1Session(session_name)
     dset = sess.get_dataset("gaborium")
@@ -72,7 +67,7 @@ def _extract_contours_for_session(session_name):
     ppd = dset.metadata["ppd"]
     del dset
 
-    snr, peak_lag = _compute_snr(stes)
+    snr, peak_lag, _ = compute_snr(stes)
     hulls = []
     for uid in range(stes.shape[0]):
         if snr[uid] <= SNR_THRESH or spikes[uid] <= SPIKE_THRESH:
@@ -104,27 +99,24 @@ def _extract_contours_for_session(session_name):
     return hulls
 
 
-def _load_all_contours():
-    configs = load_dataset_configs(DATASET_CONFIGS_PATH)
+def _load_all_contours(recalc=False):
     by_subject = {s: [] for s in SUBJECTS}
-    for cfg in configs:
-        name = cfg["session"]
-        subject = name.split("_")[0]
-        if subject not in SUBJECTS:
-            continue
-        hulls = _extract_contours_for_session(name)
+    for name, subject in sessions_from_yaml(DATASET_CONFIGS_PATH, subjects=SUBJECTS):
+        hulls = _extract_contours_for_session(name, recalc=recalc)
         if hulls:
             by_subject[subject].append((name, hulls))
     return by_subject
 
 
-def plot_panel_c(ax=None):
+def plot_panel_c(ax=None, refresh=None):
+    if refresh is None:
+        refresh = RECALC
     if ax is None:
         fig, ax = plt.subplots(figsize=(3, 3))
     else:
         fig = ax.figure
 
-    by_subject = _load_all_contours()
+    by_subject = _load_all_contours(recalc=refresh)
 
     cmaps = {"Allen": plt.cm.Blues, "Logan": plt.cm.Greens}
     legend_handles = []

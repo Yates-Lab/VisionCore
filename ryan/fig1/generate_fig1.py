@@ -10,9 +10,10 @@ Only panel A is an external SVG (Illustrator schematic); the remaining panels
 nested subfigures so spacing and labels stay coherent.
 
 Usage:
-    uv run ryan/fig1/generate_fig1.py
+    uv run ryan/fig1/generate_fig1.py [-r] [--recalc-c] [--recalc-d] [--recalc-f]
 """
 
+import argparse
 from pathlib import Path
 import matplotlib.pyplot as plt
 import svgutils.transform as sg
@@ -55,7 +56,7 @@ PANEL_LABEL_FONTSIZE_PT = 16
 PANEL_LABEL_FONTSIZE_PX = PANEL_LABEL_FONTSIZE_PT * 96.0 / 72.0
 
 
-def _render_main_svg(out_path):
+def _render_main_svg(out_path, recalc_c=False, recalc_d=False, recalc_f=False):
     """Render B, C, D-F, G-I together as a single full-width matplotlib
     figure. The top-left cell is left empty for panel A (composited later)."""
     fig = plt.figure(
@@ -81,19 +82,19 @@ def _render_main_svg(out_path):
     _add_block_label(ax_b, "B")
 
     ax_c = sub_c.add_subplot(1, 1, 1)
-    plot_panel_c(ax=ax_c)
+    plot_panel_c(ax=ax_c, refresh=recalc_c)
     _add_block_label(ax_c, "C")
 
-    plot_panel_d(fig=sub_d, panel_letters=("D", "E", "F"))
-    plot_panel_f(fig=sub_g, panel_letters=("G", "H", "I"))
+    plot_panel_d(fig=sub_d, refresh=recalc_d, panel_letters=("D", "E", "F"))
+    plot_panel_f(fig=sub_g, refresh=recalc_f, panel_letters=("G", "H", "I"))
 
     fig.savefig(out_path, dpi=400)
     plt.close(fig)
 
 
-def compose():
+def compose(recalc_c=False, recalc_d=False, recalc_f=False):
     main_svg = FIG_DIR / "_fig1_main.svg"
-    _render_main_svg(main_svg)
+    _render_main_svg(main_svg, recalc_c=recalc_c, recalc_d=recalc_d, recalc_f=recalc_f)
 
     panel_a_path = HERE / "fig1a.svg"
 
@@ -156,5 +157,20 @@ def _to_user_units(value):
     return float(s)
 
 
+def _parse_args():
+    p = argparse.ArgumentParser(description="Compose figure 1.")
+    p.add_argument("-r", "--recalc", action="store_true",
+                   help="Force recalc of all cached panels (C, D, F).")
+    p.add_argument("--recalc-c", action="store_true", help="Force recalc of panel C.")
+    p.add_argument("--recalc-d", action="store_true", help="Force recalc of panels D-F.")
+    p.add_argument("--recalc-f", action="store_true", help="Force recalc of panels G-I.")
+    return p.parse_args()
+
+
 if __name__ == "__main__":
-    compose()
+    args = _parse_args()
+    compose(
+        recalc_c=args.recalc or args.recalc_c,
+        recalc_d=args.recalc or args.recalc_d,
+        recalc_f=args.recalc or args.recalc_f,
+    )

@@ -24,6 +24,11 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 
 from VisionCore.paths import VISIONCORE_ROOT, FIGURES_DIR, CACHE_DIR
+from eval.sta_ste import (
+    compute_sta_ste,
+    peak_lag_from_ste,
+    population_peak_lag,
+)
 
 mpl.rcParams['pdf.fonttype'] = 42
 mpl.rcParams['ps.fonttype'] = 42
@@ -31,6 +36,9 @@ mpl.rcParams['ps.fonttype'] = 42
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
+# Flip to True to force STA/STE recomputation and per-cell payload refresh.
+RECALC = False
+
 SUBJECT = "Allen"
 DATE = "2022-03-04"
 DEFAULT_CELL = 149
@@ -48,34 +56,25 @@ MICROSACCADE_THRESHOLD = 0.3
 USE_UNIVERSAL_PEAK_LAG = True
 
 CACHE_FIG_DIR = CACHE_DIR / "fig1_single_cell"
-RF_CACHE_DIR = CACHE_DIR / "fig1_rf_contours"
 FIG_DIR = FIGURES_DIR / "fig1"
 CACHE_FIG_DIR.mkdir(parents=True, exist_ok=True)
 FIG_DIR.mkdir(parents=True, exist_ok=True)
 
 
-# ---------------------------------------------------------------------------
-# STA / STE cache access
-# ---------------------------------------------------------------------------
 def _load_ste_for_session(session_name):
-    path = RF_CACHE_DIR / f"{session_name}_sta_ste.npz"
-    if not path.exists():
-        return None
-    return np.load(path)
-
-
-def _peak_lag_from_ste(ste_cell):
-    return int(ste_cell.std(axis=(1, 2)).argmax())
+    """Cached STA/STE arrays for a session, or None if the gaborium dataset
+    is missing. Honors the module-level RECALC flag."""
+    return compute_sta_ste(session_name, recalc=RECALC)
 
 
 def _gratings_cache_path(session_name):
     return CACHE_FIG_DIR / f"{session_name}_gratings.npz"
 
 
-def _compute_gratings_for_session(subject, date):
+def _compute_gratings_for_session(subject, date, recalc=False):
     session_name = f"{subject}_{date}"
     cache = _gratings_cache_path(session_name)
-    if cache.exists():
+    if cache.exists() and not recalc:
         z = np.load(cache)
         return {k: z[k] for k in z.files}
 
@@ -125,9 +124,9 @@ def _gaborium_geometry_cache_path(session_name):
     return CACHE_FIG_DIR / f"{session_name}_gaborium_geom.npz"
 
 
-def _load_gaborium_geometry(session_name):
+def _load_gaborium_geometry(session_name, recalc=False):
     path = _gaborium_geometry_cache_path(session_name)
-    if path.exists():
+    if path.exists() and not recalc:
         z = np.load(path)
         return float(z["ppd"]), np.asarray(z["roi_origin"], dtype=np.float64)
     from DataYatesV1.utils.io import YatesV1Session
@@ -160,7 +159,7 @@ def _sta_centered_in_degrees(session_name, cluster_id, lag=None):
     stas = z["stas"]
     stes = z["stes"]
     row = _gaborium_row_for_cluster(session_name, cluster_id)
-    peak_lag = _peak_lag_from_ste(stes[row]) if lag is None else int(lag)
+    peak_lag = peak_lag_from_ste(stes[row]) if lag is None else int(lag)
     img = np.asarray(stas[row, peak_lag], dtype=np.float64)
 
     ppd, _roi_origin = _load_gaborium_geometry(session_name)
@@ -282,7 +281,7 @@ def _cell_cache_path(subject, date, cell):
 
 
 def _compute_cell_payload(subject, date, cell, max_orientation=None):
-    from tejas.rsvp_util import get_fixrsvp_data
+    from eval.fixrsvp import get_fixrsvp_data
 
     data = get_fixrsvp_data(
         subject, date, DATASET_CONFIGS_PATH,
@@ -306,7 +305,7 @@ def _compute_cell_payload(subject, date, cell, max_orientation=None):
     session_name = f"{subject}_{date}"
 
     if max_orientation is None:
-        gratings = _compute_gratings_for_session(subject, date)
+        gratings = _compute_gratings_for_session(subject, date, recalc=RECALC)
         gratings_cids = list(gratings["cids"])
         if cell in gratings_cids:
             row = gratings_cids.index(cell)
@@ -315,19 +314,17 @@ def _compute_cell_payload(subject, date, cell, max_orientation=None):
         max_orientation = float(gratings["peak_ori"][row])
     max_orientation = float(max_orientation)
 
-    ste_npz = _load_ste_for_session(session_name)
-    if ste_npz is None:
+    ste_arrs = _load_ste_for_session(session_name)
+    if ste_arrs is None:
         psth = np.nanmean(robs_cell, axis=0)
         peak_lag_cell = int(np.nanargmax(psth))
         peak_lag = peak_lag_cell
     else:
-        stes_all = ste_npz["stes"]
+        stes_all = ste_arrs["stes"]
         sta_row = _gaborium_row_for_cluster(session_name, cell)
-        peak_lag_cell = _peak_lag_from_ste(stes_all[sta_row])
+        peak_lag_cell = peak_lag_from_ste(stes_all[sta_row])
         if USE_UNIVERSAL_PEAK_LAG:
-            lags = [int(stes_all[u].std((1, 2)).argmax())
-                    for u in range(stes_all.shape[0])]
-            peak_lag = int(np.median(lags))
+            peak_lag = population_peak_lag(stes_all)
         else:
             peak_lag = peak_lag_cell
 
@@ -357,7 +354,9 @@ def _compute_cell_payload(subject, date, cell, max_orientation=None):
     }
 
 
-def load_cell_payload(subject=SUBJECT, date=DATE, cell=DEFAULT_CELL, refresh=False):
+def load_cell_payload(subject=SUBJECT, date=DATE, cell=DEFAULT_CELL, refresh=None):
+    if refresh is None:
+        refresh = RECALC
     path = _cell_cache_path(subject, date, cell)
     if path.exists() and not refresh:
         with open(path, "rb") as f:

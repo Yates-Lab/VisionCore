@@ -13,10 +13,11 @@ Two side-by-side axes:
             on bottom, with cluster-mean PSTHs overlaid.
 
 Data flow follows ``generate_fig1d.py``:
-    - One-time per-session load via ``tejas.rsvp_util.get_fixrsvp_data``,
-      pickled to ``CACHE_DIR/fig1_population/`` so reruns are tejas-free.
-    - Population peak lag from the cached STEs written by ``generate_fig1c.py``
-      (no dependency on ``tejas.metrics.gaborium``).
+    - One-time per-session load via ``eval.fixrsvp.get_fixrsvp_data``,
+      pickled to ``CACHE_DIR/fig1_population/`` so reruns avoid the heavy
+      fixrsvp extraction.
+    - Population peak lag from the shared STE cache produced by
+      ``eval.sta_ste.compute_sta_ste``.
 
 Usage:
     uv run ryan/fig1/generate_fig1f.py
@@ -34,6 +35,7 @@ from scipy.spatial.distance import cdist
 from tqdm import tqdm
 
 from VisionCore.paths import VISIONCORE_ROOT, FIGURES_DIR, CACHE_DIR
+from eval.sta_ste import compute_sta_ste, population_peak_lag
 
 mpl.rcParams["pdf.fonttype"] = 42
 mpl.rcParams["ps.fonttype"] = 42
@@ -41,6 +43,9 @@ mpl.rcParams["ps.fonttype"] = 42
 # ---------------------------------------------------------------------------
 # Configuration  (defaults from fig1_fixrsvp_population.py)
 # ---------------------------------------------------------------------------
+# Flip to True to force fixrsvp/STA-STE/payload caches to be regenerated.
+RECALC = False
+
 SUBJECT = "Allen"
 DATE = "2022-03-02"
 DATASET_CONFIGS_PATH = str(
@@ -91,7 +96,6 @@ PSTH_BIN_MS = 5.0           # ms binning for line PSTHs
 RASTER_GAP_BINS = 10
 
 CACHE_FIG_DIR = CACHE_DIR / "fig1_population"
-RF_CACHE_DIR = CACHE_DIR / "fig1_rf_contours"
 FIG_DIR = FIGURES_DIR / "fig1"
 CACHE_FIG_DIR.mkdir(parents=True, exist_ok=True)
 FIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -105,14 +109,14 @@ def _fixrsvp_cache_path(subject, date):
 
 
 def _load_fixrsvp_data(subject, date, refresh=False):
-    """Load the fixrsvp payload for a session. First call goes through
-    ``tejas.rsvp_util.get_fixrsvp_data``; subsequent calls are tejas-free."""
+    """Load the fixrsvp payload for a session. First call routes through
+    ``eval.fixrsvp.get_fixrsvp_data``; subsequent calls hit the local pickle."""
     cache = _fixrsvp_cache_path(subject, date)
     if cache.exists() and not refresh:
         with open(cache, "rb") as f:
             return pickle.load(f)
 
-    from tejas.rsvp_util import get_fixrsvp_data
+    from eval.fixrsvp import get_fixrsvp_data
     data = get_fixrsvp_data(
         subject, date, DATASET_CONFIGS_PATH,
         use_cached_data=True,
@@ -133,25 +137,16 @@ def _load_fixrsvp_data(subject, date, refresh=False):
 
 
 # ---------------------------------------------------------------------------
-# Peak lag from fig1c STE artifacts (population median)
+# Peak lag from the shared STE cache (population median)
 # ---------------------------------------------------------------------------
-def _load_ste_for_session(session_name):
-    path = RF_CACHE_DIR / f"{session_name}_sta_ste.npz"
-    if not path.exists():
-        return None
-    return np.load(path)
-
-
-def _population_peak_lag(session_name, robs=None):
-    ste_npz = _load_ste_for_session(session_name)
-    if ste_npz is not None:
-        stes = ste_npz["stes"]
-        lags = [int(stes[u].std(axis=(1, 2)).argmax()) for u in range(stes.shape[0])]
-        return int(np.median(lags))
+def _population_peak_lag(session_name, robs=None, recalc=False):
+    arrs = compute_sta_ste(session_name, recalc=recalc)
+    if arrs is not None:
+        return population_peak_lag(arrs["stes"])
     if robs is not None:
         psth = np.nanmean(robs, axis=(0, 2))
         return int(np.nanargmax(psth))
-    raise RuntimeError(f"No STE cache for {session_name} and no robs to fall back on")
+    raise RuntimeError(f"No STA/STE for {session_name} and no robs to fall back on")
 
 
 # ---------------------------------------------------------------------------
@@ -319,12 +314,12 @@ def _payload_cache_path(subject, date):
     return CACHE_FIG_DIR / f"{subject}_{date}_panel_f.pkl"
 
 
-def _compute_panel_payload(subject, date, combo_idx=COMBO_IDX):
-    data = _load_fixrsvp_data(subject, date)
+def _compute_panel_payload(subject, date, combo_idx=COMBO_IDX, recalc=False):
+    data = _load_fixrsvp_data(subject, date, refresh=recalc)
     robs = data["robs"]
     eyepos = data["eyepos"]
     session = f"{subject}_{date}"
-    peak_lag = _population_peak_lag(session, robs=robs)
+    peak_lag = _population_peak_lag(session, robs=robs, recalc=recalc)
 
     iix_list, clusters_list = _get_eyepos_clusters(
         eyepos, robs, SEGMENT_START_BIN, SEGMENT_END_BIN, peak_lag,
@@ -357,12 +352,14 @@ def _compute_panel_payload(subject, date, combo_idx=COMBO_IDX):
     }
 
 
-def load_panel_payload(subject=SUBJECT, date=DATE, refresh=False):
+def load_panel_payload(subject=SUBJECT, date=DATE, refresh=None):
+    if refresh is None:
+        refresh = RECALC
     path = _payload_cache_path(subject, date)
     if path.exists() and not refresh:
         with open(path, "rb") as f:
             return pickle.load(f)
-    payload = _compute_panel_payload(subject, date)
+    payload = _compute_panel_payload(subject, date, recalc=refresh)
     with open(path, "wb") as f:
         pickle.dump(payload, f)
     return payload

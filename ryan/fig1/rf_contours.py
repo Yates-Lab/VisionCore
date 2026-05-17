@@ -12,37 +12,41 @@ Usage:
 
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.lines import Line2D
-from scipy.ndimage import gaussian_filter
 from scipy.spatial import ConvexHull
 
 from VisionCore.paths import VISIONCORE_ROOT, CACHE_DIR, FIGURES_DIR, STATS_DIR
-from models.config_loader import load_dataset_configs
-from DataYatesV1 import calc_sta
 from DataYatesV1.utils.io import YatesV1Session
 from DataYatesV1.utils.rf import get_contour
+
+from eval.sta_ste import (
+    compute_sta_ste,
+    compute_snr,
+    sessions_from_yaml,
+    CACHE_SUBDIR as CACHE_FIG_DIR,
+)
 
 #%% ============================================================================
 # Configuration
 # ==============================================================================
+
+# Flip RECALC to True to force STA/STE recomputation from raw data; otherwise
+# cached arrays under CACHE_DIR/fig1_rf_contours/ are reused if present.
+RECALC = False
 
 N_LAGS = 20
 DT = 1 / 240
 SNR_THRESH = 9
 SPIKE_THRESH = 200
 CIRC_THRESH = 0.9  # min circularity (perimeter / pi / diameter); 1.0 = perfect circle, lower = more elongated
-RECALC = False
 
 DATASET_CONFIGS_PATH = VISIONCORE_ROOT / "experiments" / "dataset_configs" / "multi_basic_120_long.yaml"
 SUBJECTS = ["Allen", "Logan"]
 
 FIG_DIR = FIGURES_DIR / "fig1"
 STAT_DIR = STATS_DIR / "fig1"
-CACHE_FIG_DIR = CACHE_DIR / "fig1_rf_contours"
 FIG_DIR.mkdir(parents=True, exist_ok=True)
 STAT_DIR.mkdir(parents=True, exist_ok=True)
-CACHE_FIG_DIR.mkdir(parents=True, exist_ok=True)
 
 # Detect interactive IPython session
 try:
@@ -60,99 +64,29 @@ def show_or_close(fig):
 
 
 #%% ============================================================================
-# Load session list from YAML config
+# Phase 1: Compute (or load cached) STAs/STEs per session
 # ==============================================================================
 
-dataset_configs = load_dataset_configs(str(DATASET_CONFIGS_PATH))
-session_names = []
-session_subjects = []
-for cfg in dataset_configs:
-    name = cfg["session"]
-    subject = name.split("_")[0]
-    if subject in SUBJECTS:
-        session_names.append(name)
-        session_subjects.append(subject)
-
+sessions = sessions_from_yaml(DATASET_CONFIGS_PATH, subjects=SUBJECTS)
+session_names = [name for name, _ in sessions]
+session_subjects = [subject for _, subject in sessions]
 print(f"Found {len(session_names)} sessions from YAML config")
 
-#%% ============================================================================
-# Phase 1: Compute and cache STAs/STEs per session
-# ==============================================================================
-
-all_stas = []
-all_stes = []
-all_num_spikes = []
-
-for session_name, subject in zip(session_names, session_subjects):
-    cache_path = CACHE_FIG_DIR / f"{session_name}_sta_ste.npz"
-
-    if cache_path.exists() and not RECALC:
-        print(f"{session_name}: loading from cache")
-        cached = np.load(cache_path)
-        all_stas.append(cached["stas"])
-        all_stes.append(cached["stes"])
-        all_num_spikes.append(cached["num_spikes"])
-        continue
-
-    print(f'\n{"="*80}')
-    print(f"SESSION: {session_name}")
-    print(f'{"="*80}')
-
-    sess = YatesV1Session(session_name)
-    dset = sess.get_dataset("gaborium")
-    if dset is None:
-        print("  No gaborium dataset found, skipping.")
+all_stas, all_stes, all_num_spikes = [], [], []
+for session_name in session_names:
+    print(f"{session_name}: {'recomputing' if RECALC else 'loading'} STA/STE")
+    res = compute_sta_ste(session_name, n_lags=N_LAGS, recalc=RECALC)
+    if res is None:
+        print("  No gaborium dataset, skipping.")
         all_stas.append(None)
         all_stes.append(None)
         all_num_spikes.append(None)
         continue
-
-    dset["stim"] = dset["stim"].float()
-    dset["stim"] = (dset["stim"] - dset["stim"].mean()) / dset["stim"].std()
-
-    robs = dset["robs"].numpy() if hasattr(dset["robs"], "numpy") else dset["robs"]
-    dpi = dset["dpi_valid"].numpy() if hasattr(dset["dpi_valid"], "numpy") else dset["dpi_valid"]
-    if dpi.ndim == 1:
-        dpi = dpi[:, None]
-    num_spikes = (robs * dpi).sum(axis=0)
-
-    print(f"  Computing STAs ({N_LAGS} lags)...")
-    stas = calc_sta(
-        dset["stim"], dset["robs"], N_LAGS, dset["dpi_valid"],
-        device="cuda", batch_size=10000, progress=True,
-    ).cpu().numpy()
-
-    print(f"  Computing STEs ({N_LAGS} lags)...")
-    stes = calc_sta(
-        dset["stim"], dset["robs"], N_LAGS, dset["dpi_valid"],
-        device="cuda", batch_size=10000,
-        stim_modifier=lambda x: x**2, progress=True,
-    ).cpu().numpy()
-
-    np.savez(cache_path, stas=stas, stes=stes, num_spikes=num_spikes)
-    print(f"  Cached to {cache_path}")
-
-    all_stas.append(stas)
-    all_stes.append(stes)
-    all_num_spikes.append(num_spikes)
-    del dset
+    all_stas.append(res["stas"])
+    all_stes.append(res["stes"])
+    all_num_spikes.append(res["num_spikes"])
 
 print(f"\nLoaded {len(all_stas)} sessions")
-
-#%% ============================================================================
-# Helper: compute SNR per unit
-# ==============================================================================
-
-
-def compute_snr(stes_arr):
-    """Return (cluster_snr, cluster_lag, snr_per_lag) for an array of STEs."""
-    signal = np.abs(stes_arr - np.median(stes_arr, axis=(2, 3), keepdims=True))
-    signal = gaussian_filter(signal, [0, 1, 1, 1])
-    noise = np.median(signal[:, 0], axis=(1, 2))
-    snr_per_lag = np.max(signal, axis=(2, 3)) / noise[:, None]
-    cluster_snr = snr_per_lag.max(axis=1)
-    cluster_lag = snr_per_lag.argmax(axis=1)
-    return cluster_snr, cluster_lag, snr_per_lag
 
 
 #%% ============================================================================

@@ -16,16 +16,14 @@ FIG1_DIR = Path("/home/ryanress/v1-fovea/VisionCore/ryan/fig1")
 if str(FIG1_DIR) not in sys.path:
     sys.path.insert(0, str(FIG1_DIR))
 
-from tejas.rsvp_util import get_fixrsvp_data
+from eval.fixrsvp import get_fixrsvp_data
+from eval.sta_ste import compute_sta_ste, peak_lag_from_ste, population_peak_lag
 from generate_fig1d import (
     DATASET_CONFIGS_PATH,
-    SEGMENT_LEN_BINS,
     TOTAL_WINDOW_BINS,
     USE_UNIVERSAL_PEAK_LAG,
     _compute_gratings_for_session,
     _compute_segments,
-    _load_ste_for_session,
-    _peak_lag_from_ste,
     plot_raster_axis,
 )
 
@@ -89,18 +87,13 @@ for session_idx, session in enumerate(SESSIONS):
     trial_t_bins = data["trial_t_bins"]
 
     # Session-wide peak lag from cached STEs (matches generate_fig1d)
-    ste_npz = _load_ste_for_session(session)
-    if ste_npz is None:
+    arrs = compute_sta_ste(session)
+    if arrs is None:
         session_peak_lag = None  # fall back per-cell below
         stes_all = None
     else:
-        stes_all = ste_npz["stes"]
-        if USE_UNIVERSAL_PEAK_LAG:
-            lags = [int(stes_all[u].std((1, 2)).argmax())
-                    for u in range(stes_all.shape[0])]
-            session_peak_lag = int(np.median(lags))
-        else:
-            session_peak_lag = None  # per-cell
+        stes_all = arrs["stes"]
+        session_peak_lag = population_peak_lag(stes_all) if USE_UNIVERSAL_PEAK_LAG else None
 
     # Plot 4x4 grids
     for fig_i in range(int(np.ceil(len(cells) / PER_FIG))):
@@ -129,7 +122,7 @@ for session_idx, session in enumerate(SESSIONS):
                 if session_peak_lag is not None:
                     peak_lag = session_peak_lag
                 elif stes_all is not None:
-                    peak_lag = _peak_lag_from_ste(stes_all[cell_col])
+                    peak_lag = peak_lag_from_ste(stes_all[cell_col])
                 else:
                     peak_lag = int(np.nanargmax(np.nanmean(robs_cell, axis=0)))
 
@@ -144,7 +137,6 @@ for session_idx, session in enumerate(SESSIONS):
                     "max_orientation": float(p),
                     "peak_lag": int(peak_lag),
                     "total_window": np.asarray(TOTAL_WINDOW_BINS, dtype=int),
-                    "segment_len": int(SEGMENT_LEN_BINS),
                     "segments": segments,
                     "example_segment_idx": example_idx,
                     "eyepos_all": eyepos,
