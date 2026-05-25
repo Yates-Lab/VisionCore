@@ -751,7 +751,8 @@ def bagged_split_half_psth_covariance(S, T_idx, n_boot=20, min_trials_per_time=1
 # ---------------------------------------------------------------------------
 
 def estimate_rate_covariance(SpikeCounts, EyeTraj, T_idx, n_bins=25,
-                             Ctotal=None, intercept_mode='linear'):
+                             Ctotal=None, intercept_mode='linear',
+                             intercept_kwargs=None):
     """
     Estimate eye-conditioned rate covariance matrix (Crate).
 
@@ -817,13 +818,15 @@ def estimate_rate_covariance(SpikeCounts, EyeTraj, T_idx, n_bins=25,
 
     Ceye = MM - Erate[:, None] * Erate[None, :]
 
+    ikw = dict(intercept_kwargs) if intercept_kwargs else {}
     if intercept_mode == 'linear':
-        Crate = fit_intercept_linear(Ceye, bin_centers, count_e, eval_at_first_bin=True)
+        ikw.setdefault('eval_at_first_bin', True)
+        Crate = fit_intercept_linear(Ceye, bin_centers, count_e, **ikw)
     elif intercept_mode == 'isotonic':
         Crate = fit_intercept_pava(Ceye, count_e)
     elif intercept_mode == 'log_euclidean':
-        Crate = fit_intercept_log_euclidean(Ceye, bin_centers, count_e,
-                                            eval_at_first_bin=True)
+        ikw.setdefault('eval_at_first_bin', True)
+        Crate = fit_intercept_log_euclidean(Ceye, bin_centers, count_e, **ikw)
     elif intercept_mode == 'lowest_bin':
         Crate = Ceye[0].copy()
     else:
@@ -954,7 +957,8 @@ def run_covariance_decomposition(robs, eyepos, valid_mask,
                                  t_hist_ms=None, t_hist_bins=None,
                                  n_bins=15, n_shuffles=0,
                                  seed=42, dt=1 / 240, min_seg_len=36,
-                                 intercept_mode='linear', device="cuda"):
+                                 intercept_mode='linear', intercept_kwargs=None,
+                                 device="cuda"):
     """
     Full LOTC decomposition sweep across counting windows.
 
@@ -1052,7 +1056,8 @@ def run_covariance_decomposition(robs, eyepos, valid_mask,
         # Rate covariance
         Crate, Erate, Ceye, bin_centers, count_e, bin_edges = estimate_rate_covariance(
             SpikeCounts, EyeTraj, T_idx, n_bins=n_bins,
-            Ctotal=Ctotal, intercept_mode=intercept_mode
+            Ctotal=Ctotal, intercept_mode=intercept_mode,
+            intercept_kwargs=intercept_kwargs,
         )
 
         # PSTH covariance
@@ -1069,7 +1074,8 @@ def run_covariance_decomposition(robs, eyepos, valid_mask,
                 EyeTraj_shuff = EyeTraj[perm]
                 Crate_shuff, _, _, _, _, _ = estimate_rate_covariance(
                     SpikeCounts, EyeTraj_shuff, T_idx, n_bins=bin_edges,
-                    Ctotal=Ctotal, intercept_mode=intercept_mode
+                    Ctotal=Ctotal, intercept_mode=intercept_mode,
+                    intercept_kwargs=intercept_kwargs,
                 )
                 shuffled_intercepts.append(Crate_shuff)
 

@@ -83,11 +83,16 @@ mpl.rcParams["font.sans-serif"] = ["Arial", "Helvetica", "DejaVu Sans"]
 # ---------------------------------------------------------------------------
 # Analysis parameters
 # ---------------------------------------------------------------------------
-RECOMPUTE = False # set True to rerun decomposition from raw data
+RECOMPUTE = True # set True to rerun decomposition from raw data
 DT = 1 / 120                # seconds per bin (native 240 Hz sampling)
 WINDOW_BINS = [1, 2, 4, 8] # counting windows in bins (powers of two)
 N_SHUFFLES = 100             # shuffle null iterations
-MIN_TOTAL_SPIKES = 200       # neuron inclusion threshold (in align step)
+MIN_RATE_HZ = 2.0            # firing-rate inclusion threshold
+MIN_PSTH_R2 = 0.05           # split-half PSTH R² inclusion threshold
+N_PSTH_SPLITS = 100          # random halvings for split-half PSTH reliability
+INTERCEPT_MODE = "linear"
+INTERCEPT_D_MAX = 0.2
+INTERCEPT_KWARGS = {"d_max": INTERCEPT_D_MAX, "eval_at_first_bin": False}
 MIN_VAR = 0                  # minimum variance for correlation computation
 EPS_RHO = 1e-3               # floor for correlation denominators
 SUBJECTS = ["Allen", "Logan", "Luke"]
@@ -170,12 +175,13 @@ else:
             continue
         fixrsvp_dset = train_data.dsets[dset_idx]
 
-        # Trial-align
+        # Trial-align — keep every RF-pass unit; inclusion is applied later
+        # via firing rate and split-half PSTH R^2.
         robs, eyepos, valid_mask, neuron_mask, meta = align_fixrsvp_trials(
             fixrsvp_dset,
             valid_time_bins=120,
             min_fix_dur=20,
-            min_total_spikes=MIN_TOTAL_SPIKES,
+            min_total_spikes=0,
         )
         if robs is None or robs.shape[0] < 10:
             print(f"  Skipping: insufficient data ({meta})")
@@ -183,14 +189,45 @@ else:
         print(f"  Trials: {meta['n_trials_good']}/{meta['n_trials_total']}, "
               f"Neurons: {meta['n_neurons_used']}/{meta['n_neurons_total']}")
 
+        # Per-unit firing rate (Hz) from valid (fixation) bins.
+        n_units = robs.shape[2]
+        n_spikes_per_unit = np.nansum(robs, axis=(0, 1))
+        n_valid_bins_per_unit = np.sum(np.isfinite(robs), axis=(0, 1))
+        rate_hz = np.where(
+            n_valid_bins_per_unit > 0,
+            n_spikes_per_unit / np.maximum(n_valid_bins_per_unit, 1) / DT,
+            np.nan,
+        )
+
+        # Per-unit split-half PSTH R^2 over N_PSTH_SPLITS random trial halvings.
+        rng_r2 = np.random.default_rng(42)
+        r2_sum = np.zeros(n_units)
+        r2_cnt = np.zeros(n_units, dtype=int)
+        n_trials_r2 = robs.shape[0]
+        for _ in range(N_PSTH_SPLITS):
+            perm = rng_r2.permutation(n_trials_r2)
+            h = n_trials_r2 // 2
+            psth_a = np.nanmean(robs[perm[:h]], axis=0)
+            psth_b = np.nanmean(robs[perm[h:2 * h]], axis=0)
+            for j in range(n_units):
+                a, b = psth_a[:, j], psth_b[:, j]
+                ok_t = np.isfinite(a) & np.isfinite(b)
+                if ok_t.sum() < 3 or np.std(a[ok_t]) == 0 or np.std(b[ok_t]) == 0:
+                    continue
+                r = np.corrcoef(a[ok_t], b[ok_t])[0, 1]
+                if np.isfinite(r):
+                    r2_sum[j] += r * r
+                    r2_cnt[j] += 1
+        psth_r2 = np.where(r2_cnt > 0, r2_sum / np.maximum(r2_cnt, 1), np.nan)
+
         # Run LOTC decomposition
         results, mats = run_covariance_decomposition(
             robs, eyepos, valid_mask,
             window_sizes_bins=WINDOW_BINS,
             dt=DT,
             n_shuffles=N_SHUFFLES,
-            intercept_mode="lowest_bin",
-
+            intercept_mode=INTERCEPT_MODE,
+            intercept_kwargs=INTERCEPT_KWARGS,
             seed=42,
             device=str(DEVICE),
         )
@@ -215,6 +252,8 @@ else:
             "neuron_mask": neuron_mask,
             "meta": meta,
             "psth": psth,
+            "rate_hz": rate_hz,
+            "psth_r2": psth_r2,
             "qc": {"contam_rate": contam_rate},
         })
 
@@ -241,7 +280,8 @@ print(f"Windows (bins): {WINDOWS_BINS} -> (ms): {[f'{w:.1f}' for w in WINDOWS_MS
 # - Per-neuron: alpha, Fano factors (uncorr/corr), firing rates
 # - Per-pair: noise correlations (uncorr/corr)
 # - Per-session: covariance matrices, shuffle null distributions
-# - Neuron inclusion: min_total_spikes, min_var, eps_rho
+# - Neuron inclusion: rate > MIN_RATE_HZ, split-half PSTH R^2 > MIN_PSTH_R2,
+#   diag(Ctotal) > MIN_VAR, finite Crate/Cpsth diagonals
 # - Subject identity tracked per session
 
 n_windows = len(WINDOWS_MS)
@@ -294,13 +334,15 @@ for w_idx in range(n_windows):
         erate = res["Erates"]
         n_cells = len(erate)
 
-        # Total spike count per neuron (rate * n_samples * dt)
-        total_spikes = erate * res["n_samples"]
-
-        # Neuron inclusion mask
+        # Neuron inclusion mask: firing rate (Hz) and split-half PSTH R^2.
+        rate_hz_ds = sr["rate_hz"]
+        psth_r2_ds = sr["psth_r2"]
         valid = (
             np.isfinite(erate)
-            & (total_spikes >= MIN_TOTAL_SPIKES)
+            & np.isfinite(rate_hz_ds)
+            & (rate_hz_ds > MIN_RATE_HZ)
+            & np.isfinite(psth_r2_ds)
+            & (psth_r2_ds > MIN_PSTH_R2)
             & (np.diag(Ctotal) > MIN_VAR)
             & np.isfinite(np.diag(Crate))
             & np.isfinite(np.diag(Cpsth))
@@ -869,10 +911,14 @@ for ds_idx, sr in enumerate(session_results):
 
     # Apply neuron inclusion (same as metrics extraction)
     erate = sr["results"][w_idx]["Erates"]
-    total_spikes = erate * sr["results"][w_idx]["n_samples"]
+    rate_hz_ds = sr["rate_hz"]
+    psth_r2_ds = sr["psth_r2"]
     valid = (
         np.isfinite(erate)
-        & (total_spikes >= MIN_TOTAL_SPIKES)
+        & np.isfinite(rate_hz_ds)
+        & (rate_hz_ds > MIN_RATE_HZ)
+        & np.isfinite(psth_r2_ds)
+        & (psth_r2_ds > MIN_PSTH_R2)
         & (np.diag(Ctotal) > MIN_VAR)
         & np.isfinite(np.diag(Crate))
         & np.isfinite(np.diag(Cpsth))
