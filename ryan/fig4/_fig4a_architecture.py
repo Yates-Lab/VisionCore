@@ -13,8 +13,9 @@ ARCH_CENTER_Y so inter-stage flow arrows are perfectly horizontal:
     Stem       — 8 channels, 1×7×7 kernels, 2×4 grid.
     ResBlock 1 — 64 channels, 3×9×9 kernels, 8×8 grid. ⊔-staple residual
                  beneath; ↓2× downsample badge on the outgoing arrow.
-    ResBlock 2 — 128 channels, 3×5×5 kernels, 8×16 grid. ⊔-staple residual.
-    ConvGRU    — 128 hidden channels, 3×3 kernels, 8×16 grid; tall closed
+    ResBlock 2 — 128 channels, 3×5×5 kernels, 16×8 grid (taller than wide).
+                 ⊔-staple residual.
+    ConvGRU    — 128 hidden channels, 3×3 kernels, 16×8 grid; tall closed
                  recurrent loop on top. A small Behavior placeholder sits
                  above the incoming arrow, with a concatenation arrow to
                  the ConvGRU input.
@@ -30,7 +31,7 @@ import numpy as np
 from matplotlib.patches import FancyArrowPatch, Rectangle
 
 from _fig4a_glyphs import (
-    TEXT_COLOR, cab_project,
+    TEXT_COLOR,
     draw_channel_grid, draw_skip_staple,
     draw_recurrent_loop, draw_gaussian_readout, draw_pool_glyph,
 )
@@ -50,9 +51,16 @@ S_FE_SPATIAL = 0.20     # frontend "unit" spatial face (taps=1 but drawn big)
 GRID_GAP = 0.04         # gap between cells in a grid
 FE_GAP   = 0.06         # vertical gap between stacked frontend channels
 
-# Inter-stage horizontal gap (front-face right of N → front-face left of N+1).
-STAGE_GAP = 1.10
-STAGE_GAP_FE = 0.85     # gap after frontend (frontend has tiny depth)
+# Inter-stage horizontal gaps (front-face right of N → front-face left of N+1).
+# Keyed by the transition name so the Flask tuner can override per-edge.
+DEFAULT_GAPS = {
+    "fe_to_stem":      0.55,   # frontend → stem (frontend has tiny depth)
+    "stem_to_blk1":    1.00,
+    "blk1_to_blk2":    0.65,
+    "blk2_to_gru":     0.50,
+    "gru_to_readout":  0.30,   # readouts sit close to ConvGRU
+}
+DEFAULT_X_START = 0.0           # world x of the front-lower-left of the frontend
 
 # Shared front-face vertical CENTER for every stage. Choosing a center
 # (rather than a baseline) means stages with different y-extents all line
@@ -100,16 +108,22 @@ _CAB_DEPTH_VEC = np.array([
 ])
 
 
-def _proj(x, y, z):
-    return np.array([x, y]) + z * _CAB_DEPTH_VEC
+def plot_panel_a_architecture(ax, assets, *, gaps=None, x_start=None):
+    """Render the model-architecture half of panel A into `ax`.
 
-
-def plot_panel_a_architecture(ax, assets):
-    """Render the model-architecture half of panel A into `ax`."""
+    `gaps` overrides individual entries of `DEFAULT_GAPS` (front-face right of
+    one stage → front-face left of the next). `x_start` overrides the
+    world x of the frontend's front-lower-left corner. Both are wired up so
+    the Flask tuner (`tune_fig4a_arch.py`) can sweep placement live.
+    """
     ax.set_xlim(0, CANVAS_W)
     ax.set_ylim(0, CANVAS_H)
     ax.set_aspect("equal")
     ax.axis("off")
+
+    g = dict(DEFAULT_GAPS)
+    if gaps:
+        g.update(gaps)
 
     arch = assets.arch
     arch_kernels = arch["convnet_kernels"]   # [(3,9,9), (3,5,5)]
@@ -121,7 +135,7 @@ def plot_panel_a_architecture(ax, assets):
     # Track inter-stage flow arrow endpoints in projected 2D.
     stage_records = []
     label_tops = []   # collected y of each stage's title baseline
-    x_cursor = 0.6   # world x of the front-lower-left corner of next stage
+    x_cursor = float(DEFAULT_X_START if x_start is None else x_start)
 
     # ── Frontend ────────────────────────────────────────────────────────
     # Vertical stack (rows=fe_n, cols=1): each channel is its own beam,
@@ -168,7 +182,7 @@ def plot_panel_a_architecture(ax, assets):
         sub=f"{fe_n} ch · k={arch['frontend_k']}"))
 
     stage_records.append({"name": "frontend", "grid": fe_grid})
-    x_cursor = _next_x(fe_grid, STAGE_GAP_FE)
+    x_cursor = _next_x(fe_grid, g["fe_to_stem"])
 
     # ── Stem ────────────────────────────────────────────────────────────
     stem_y0 = _y0_for_center(rows=2, kh=stem_kh * S_PIX, gap=GRID_GAP,
@@ -184,7 +198,7 @@ def plot_panel_a_architecture(ax, assets):
         ax, stem_grid, name="Stem",
         sub=f"{stem_kt}×{stem_kh}×{stem_kw} · 8 ch"))
     stage_records.append({"name": "stem", "grid": stem_grid})
-    x_cursor = _next_x(stem_grid, STAGE_GAP)
+    x_cursor = _next_x(stem_grid, g["stem_to_blk1"])
 
     # ── ResBlock 1 ──────────────────────────────────────────────────────
     blk1_y0 = _y0_for_center(rows=8, kh=blk1_kh * S_PIX, gap=GRID_GAP,
@@ -201,14 +215,15 @@ def plot_panel_a_architecture(ax, assets):
         ax, blk1_grid, name="ResBlock 1",
         sub=f"{blk1_kt}×{blk1_kh}×{blk1_kw} · 64 ch"))
     stage_records.append({"name": "block1", "grid": blk1_grid})
-    x_cursor = _next_x(blk1_grid, STAGE_GAP)
+    x_cursor = _next_x(blk1_grid, g["blk1_to_blk2"])
 
     # ── ResBlock 2 ──────────────────────────────────────────────────────
-    blk2_y0 = _y0_for_center(rows=8, kh=blk2_kh * S_PIX, gap=GRID_GAP,
-                             cols=16, kw=blk2_kw * S_PIX)
+    # Tall layout (rows=16, cols=8): taller than wide for a tighter footprint.
+    blk2_y0 = _y0_for_center(rows=16, kh=blk2_kh * S_PIX, gap=GRID_GAP,
+                             cols=8, kw=blk2_kw * S_PIX)
     blk2_grid = draw_channel_grid(
         ax, x_left=x_cursor, y0=blk2_y0, z0=0.0,
-        n_channels=128, rows=8, cols=16,
+        n_channels=128, rows=16, cols=8,
         kt=blk2_kt * S_T, kh=blk2_kh * S_PIX, kw=blk2_kw * S_PIX,
         gap=GRID_GAP, palette=PAL_BLOCK2, base_zorder=2.0, edge_width=0.18,
         hue_jitter=0.10,
@@ -218,14 +233,15 @@ def plot_panel_a_architecture(ax, assets):
         ax, blk2_grid, name="ResBlock 2",
         sub=f"{blk2_kt}×{blk2_kh}×{blk2_kw} · 128 ch"))
     stage_records.append({"name": "block2", "grid": blk2_grid})
-    x_cursor = _next_x(blk2_grid, STAGE_GAP)
+    x_cursor = _next_x(blk2_grid, g["blk2_to_gru"])
 
     # ── ConvGRU ─────────────────────────────────────────────────────────
-    gru_y0 = _y0_for_center(rows=8, kh=gru_kh * S_PIX, gap=GRID_GAP,
-                            cols=16, kw=gru_kw * S_PIX)
+    # Tall layout to match ResBlock 2.
+    gru_y0 = _y0_for_center(rows=16, kh=gru_kh * S_PIX, gap=GRID_GAP,
+                            cols=8, kw=gru_kw * S_PIX)
     gru_grid = draw_channel_grid(
         ax, x_left=x_cursor, y0=gru_y0, z0=0.0,
-        n_channels=128, rows=8, cols=16,
+        n_channels=128, rows=16, cols=8,
         kt=gru_kt * S_T, kh=gru_kh * S_PIX, kw=gru_kw * S_PIX,
         gap=GRID_GAP, palette=PAL_GRU, base_zorder=2.0, edge_width=0.18,
         hue_jitter=0.10,
@@ -246,7 +262,7 @@ def plot_panel_a_architecture(ax, assets):
         sub=f"{arch['gru_hidden']} ch · k={arch['gru_kernel']}",
         y_top_override=gru_loop_top))
     stage_records.append({"name": "gru", "grid": gru_grid})
-    x_cursor = _next_x(gru_grid, STAGE_GAP)
+    x_cursor = _next_x(gru_grid, g["gru_to_readout"])
 
     # ── Readouts (three example neurons stacked) ────────────────────────
     # Three vertically stacked Gaussian readouts illustrate the per-neuron
@@ -290,30 +306,15 @@ def plot_panel_a_architecture(ax, assets):
 
     # ── Inter-stage flow arrows ─────────────────────────────────────────
     arrow_mids = _connect_stages(ax, stage_records[:-1])
-    # Custom GRU → readout fan-out: from the GRU right anchor to each
-    # readout's left edge.
+    # Single short GRU → readout arrow: from the GRU right anchor to the
+    # left edge of the readout column at the GRU center height.
     gru_anchor = _stage_right_anchor(stage_records[-2])
-    for rec in readout_records:
-        ro_l = rec["ro"]["x_left"]
-        ro_y = (rec["ro"]["y_bottom"] + rec["ro"]["y_top"]) / 2
-        ax.annotate("",
-                    xy=(ro_l - 0.04, ro_y),
-                    xytext=(gru_anchor[0] + 0.04, gru_anchor[1]),
-                    arrowprops=dict(arrowstyle="->", lw=0.9,
-                                    color="#555",
-                                    connectionstyle="arc3,rad=0.05"),
-                    zorder=4.8)
-
-    # ── Input arrow into the frontend ───────────────────────────────────
-    fe_front_left_2d = _proj(stage_records[0]["grid"]["x_left"],
-                             ARCH_CENTER_Y, 0.0)
+    col_x_left = min(r["ro"]["x_left"] for r in readout_records)
     ax.annotate("",
-                xy=(fe_front_left_2d[0] - 0.05, fe_front_left_2d[1]),
-                xytext=(fe_front_left_2d[0] - 0.95, fe_front_left_2d[1]),
-                arrowprops=dict(arrowstyle="->", lw=1.0, color="#333"))
-    ax.text(fe_front_left_2d[0] - 0.95, fe_front_left_2d[1] + 0.18,
-            "stim", ha="left", va="bottom",
-            fontsize=7.5, color="#555", style="italic")
+                xy=(col_x_left - 0.04, gru_anchor[1]),
+                xytext=(gru_anchor[0] + 0.04, gru_anchor[1]),
+                arrowprops=dict(arrowstyle="->", lw=1.0, color="#333"),
+                zorder=4.8)
 
     # ── ↓2× downsample badge on block1→block2 arrow ─────────────────────
     if "block1→block2" in arrow_mids:

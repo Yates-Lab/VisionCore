@@ -44,6 +44,14 @@ DEPTH_VEC = np.array([
 
 SCREEN_YAW_DEG = -22.0
 
+# Lag-cube has its own rotation triple (yaw / pitch / roll about world Y / X / Z
+# applied in that order) so its visual cabinet layout can be tuned independently
+# of the screens. Defaults match the screen yaw → original look. The Flask
+# tuner (cube_tuner_app.py) monkey-patches these at runtime.
+CUBE_YAW_DEG   = -40.0
+CUBE_PITCH_DEG =   5.0
+CUBE_ROLL_DEG  =  -5.0
+
 
 def cabinet_project(p3):
     """Project (N×3) (or shape-(3,)) world points to 2D screen coords."""
@@ -59,6 +67,32 @@ def _R_y(angle_deg):
                      [-s, 0, c]])
 
 
+def _R_x(angle_deg):
+    a = np.deg2rad(angle_deg)
+    c, s = np.cos(a), np.sin(a)
+    return np.array([[1, 0, 0],
+                     [0, c, -s],
+                     [0, s,  c]])
+
+
+def _R_z(angle_deg):
+    a = np.deg2rad(angle_deg)
+    c, s = np.cos(a), np.sin(a)
+    return np.array([[c, -s, 0],
+                     [s,  c, 0],
+                     [0,  0, 1]])
+
+
+def _euler_rotation(yaw_deg, pitch_deg=0.0, roll_deg=0.0):
+    """Composed rotation: world_pt = R_y(yaw) @ R_x(pitch) @ R_z(roll) @ local_pt.
+
+    Roll about local depth → pitch tilts forward/back → yaw spins about
+    world-vertical. Picked so yaw matches the prior single-axis behavior
+    when pitch=roll=0.
+    """
+    return _R_y(yaw_deg) @ _R_x(pitch_deg) @ _R_z(roll_deg)
+
+
 def screen_corners_3d(center, width, height, *, yaw_deg=SCREEN_YAW_DEG):
     """World corners (LL, LR, UR, UL) of an upright, yawed rectangle."""
     cx, cy, cz = center
@@ -72,10 +106,14 @@ def screen_corners_3d(center, width, height, *, yaw_deg=SCREEN_YAW_DEG):
     return local @ _R_y(yaw_deg).T + np.array([cx, cy, cz])
 
 
-def box_corners_3d(front_center, size, *, yaw_deg=SCREEN_YAW_DEG):
-    """World corners of a yawed axis-aligned box.
+def box_corners_3d(front_center, size, *, yaw_deg=SCREEN_YAW_DEG,
+                   pitch_deg=0.0, roll_deg=0.0):
+    """World corners of a rotated axis-aligned box.
 
     `front_center` is the centre of the front face; `size=(w,h,d)`.
+    Rotation: R_y(yaw) @ R_x(pitch) @ R_z(roll) applied to local coords
+    (see `_euler_rotation`). When pitch=roll=0 this reduces to the prior
+    yaw-only behavior.
 
     Returns 8×3 ordered::
 
@@ -89,16 +127,18 @@ def box_corners_3d(front_center, size, *, yaw_deg=SCREEN_YAW_DEG):
         [-w2, -h2, 0.0], [+w2, -h2, 0.0], [+w2, +h2, 0.0], [-w2, +h2, 0.0],
         [-w2, -h2, d],   [+w2, -h2, d],   [+w2, +h2, d],   [-w2, +h2, d],
     ])
-    return local @ _R_y(yaw_deg).T + np.array([cx, cy, cz])
+    R = _euler_rotation(yaw_deg, pitch_deg, roll_deg)
+    return local @ R.T + np.array([cx, cy, cz])
 
 
 # Pre-computed projection of the "back-face centre" offset relative to the
 # front-face centre, for the shared yaw. Used to invert: given a desired
 # projected position of the back-face centre, solve for the cube's
 # front-face centre.
-def _back_face_center_offset_2d(depth):
+def _back_face_center_offset_2d(depth, yaw_deg=SCREEN_YAW_DEG,
+                                pitch_deg=0.0, roll_deg=0.0):
     local = np.array([0.0, 0.0, depth])
-    world = _R_y(SCREEN_YAW_DEG) @ local
+    world = _euler_rotation(yaw_deg, pitch_deg, roll_deg) @ local
     return cabinet_project(world)
 
 
@@ -389,9 +429,9 @@ TEST_ZOOM_DEG = 5.0        # extent of the zoomed test view (degrees)
 
 # Lag cube. Kept compact so cabinet projection of the depth axis doesn't
 # blow the model-input zone across the test screen.
-CUBE_W = 2.0
-CUBE_H = 2.0
-CUBE_D = 2.2
+CUBE_W = 2.35
+CUBE_H = 1.80
+CUBE_D = 2.45
 
 # Scale bars (deg)
 TRAIN_SCALEBAR_DEG = 10.0
@@ -520,7 +560,8 @@ def plot_panel_a_stimulus(ax, assets):
     test_right_x = test_dst[:, 0].max()
     # Pick a front-face position so the back face sits just to the right
     # of the test screen with a small gap.
-    back_off_2d = _back_face_center_offset_2d(CUBE_D)   # (Δx, Δy), Δx < 0
+    back_off_2d = _back_face_center_offset_2d(
+        CUBE_D, CUBE_YAW_DEG, CUBE_PITCH_DEG, CUBE_ROLL_DEG)
     gap = 2.0
     cube_front_cx = test_right_x + gap - back_off_2d[0]   # back face at test_right_x + gap
     cube_front_cy = roi_center_2d[1] - back_off_2d[1]     # back face vertically at ROI
@@ -529,6 +570,9 @@ def plot_panel_a_stimulus(ax, assets):
     cube_corners = box_corners_3d(
         (cube_front_cx, cube_front_cy, 0.0),
         (CUBE_W, CUBE_H, CUBE_D),
+        yaw_deg=CUBE_YAW_DEG,
+        pitch_deg=CUBE_PITCH_DEG,
+        roll_deg=CUBE_ROLL_DEG,
     )
     cube_p2 = _draw_lag_cube(ax, cube, cube_corners,
                              outline=CYAN, edge_width=1.4, zorder=5)
