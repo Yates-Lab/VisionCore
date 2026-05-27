@@ -25,7 +25,7 @@ from _fig4a_architecture import plot_panel_a_architecture
 
 
 # Width ratio of stimulus : architecture halves.
-WIDTH_RATIOS = (1.3, 1.0)
+WIDTH_RATIOS = (1.0, 1.25)
 
 
 def plot_panel_a(*, ax=None, subplotspec=None, fig=None,
@@ -50,7 +50,7 @@ def plot_panel_a(*, ax=None, subplotspec=None, fig=None,
         subplotspec = ax.get_subplotspec()
         ax.set_visible(False)
     elif subplotspec is None:
-        fig = plt.figure(figsize=(15.5, 4.4))
+        fig = plt.figure(figsize=(14.0, 6.0))
         subplotspec = fig.add_gridspec(1, 1)[0, 0]
 
     gs = subplotspec.subgridspec(1, 2, width_ratios=WIDTH_RATIOS, wspace=0.02)

@@ -25,6 +25,73 @@ TEXT_COLOR = "#222222"
 
 
 # ──────────────────────────────────────────────────────────────────────────
+# Cabinet projection (shared with stimulus half)
+# +x right, +y up, +z INTO the page → projects to (Δx, Δy) per unit z.
+# Same constants as _fig4a_stimulus.py so both halves render in one frame.
+# ──────────────────────────────────────────────────────────────────────────
+CAB_ALPHA = np.deg2rad(30.0)
+CAB_DEPTH = 0.5
+CAB_DEPTH_VEC = np.array([
+    -np.cos(CAB_ALPHA) * CAB_DEPTH,
+    +np.sin(CAB_ALPHA) * CAB_DEPTH,
+])
+
+
+def cab_project(p3):
+    """Project (..., 3) world points to (..., 2) display coords."""
+    p3 = np.asarray(p3, dtype=float)
+    return p3[..., :2] + p3[..., 2:3] * CAB_DEPTH_VEC
+
+
+def axis_aligned_box_corners(center, size):
+    """8 corners of an axis-aligned box centered at `center=(cx,cy,cz)`
+    with extents `size=(sx,sy,sz)`. Ordering::
+
+        0 front-LL  1 front-LR  2 front-UR  3 front-UL    (z = cz - sz/2)
+        4 back-LL   5 back-LR   6 back-UR   7 back-UL     (z = cz + sz/2)
+
+    "front" = nearer to viewer (smaller z, since +z is into the page).
+    """
+    cx, cy, cz = center
+    sx, sy, sz = size
+    hx, hy, hz = sx / 2.0, sy / 2.0, sz / 2.0
+    return np.array([
+        [cx - hx, cy - hy, cz - hz], [cx + hx, cy - hy, cz - hz],
+        [cx + hx, cy + hy, cz - hz], [cx - hx, cy + hy, cz - hz],
+        [cx - hx, cy - hy, cz + hz], [cx + hx, cy - hy, cz + hz],
+        [cx + hx, cy + hy, cz + hz], [cx - hx, cy + hy, cz + hz],
+    ], dtype=float)
+
+
+def draw_axis_aligned_prism(ax, center, size, *,
+                            front_color="#cfe2f3", side_color="#7fa4c4",
+                            top_color="#4d7396", edge_color="#1b3a5b",
+                            edge_width=0.4, zorder=2, alpha=1.0):
+    """Draw an axis-aligned rectangular prism in cabinet projection.
+
+    Visible faces: front (z=cz-sz/2), top (y=cy+sy/2), and LEFT
+    (x=cx-sx/2). With +z going into the page (up-and-left), the left and
+    top faces face the viewer; the right and bottom faces are hidden.
+    """
+    c = axis_aligned_box_corners(center, size)
+    # corner indices: 0..3 front (LL,LR,UR,UL); 4..7 back
+    front = cab_project(c[[0, 1, 2, 3]])
+    top   = cab_project(c[[3, 2, 6, 7]])    # front-UL, front-UR, back-UR, back-UL
+    left  = cab_project(c[[0, 3, 7, 4]])    # front-LL, front-UL, back-UL, back-LL
+
+    ax.add_patch(Polygon(top, closed=True, facecolor=top_color,
+                         edgecolor=edge_color, linewidth=edge_width,
+                         zorder=zorder + 0.1, alpha=alpha))
+    ax.add_patch(Polygon(left, closed=True, facecolor=side_color,
+                         edgecolor=edge_color, linewidth=edge_width,
+                         zorder=zorder + 0.2, alpha=alpha))
+    ax.add_patch(Polygon(front, closed=True, facecolor=front_color,
+                         edgecolor=edge_color, linewidth=edge_width,
+                         zorder=zorder + 0.3, alpha=alpha))
+    return front, top, left
+
+
+# ──────────────────────────────────────────────────────────────────────────
 # Perspective warp utilities
 # ──────────────────────────────────────────────────────────────────────────
 def _perspective_coeffs(src_corners, dst_corners):
@@ -465,3 +532,377 @@ def slash_separator(ax, x, y_center, height, color="#666", lw=1.2,
     ax.plot([x - slant * half, x + slant * half],
             [y_center - half, y_center + half],
             color=color, linewidth=lw, zorder=2.5)
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Kernel-prism primitives (shared visual language with stimulus cube)
+#   Convention for every conv kernel in the architecture half:
+#     +x (right)  ← time taps (kt)
+#     +y (up)     ← spatial-vertical taps (kh)
+#     +z (into)   ← spatial-horizontal taps (kw)
+#   So a (kt, kh, kw) kernel becomes an axis-aligned cabinet-projected box
+#   with size (kt*S_T, kh*S_PIX, kw*S_PIX). Front face (z=0) shows the
+#   newest-time slab; depth goes back-into-page (up-and-LEFT in projection).
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def draw_kernel_prism(ax, front_lower_left_3d, size_3d, *,
+                      front_color, side_color, top_color,
+                      edge_color="#1b3a5b", edge_width=0.35,
+                      zorder=2.0, alpha=1.0):
+    """Draw a kernel prism whose front-lower-left corner sits at the given
+    3D world point, with extents (sx, sy, sz). Cabinet projection.
+
+    Returns the three projected quads (front, top, left) for use by callers
+    that want to attach decorations.
+    """
+    fx, fy, fz = front_lower_left_3d
+    sx, sy, sz = size_3d
+    center = (fx + sx / 2.0, fy + sy / 2.0, fz + sz / 2.0)
+    return draw_axis_aligned_prism(
+        ax, center, (sx, sy, sz),
+        front_color=front_color, side_color=side_color, top_color=top_color,
+        edge_color=edge_color, edge_width=edge_width, zorder=zorder,
+        alpha=alpha,
+    )
+
+
+def draw_channel_grid(ax, x_left, y0, z0, *, n_channels, rows, cols,
+                      kt, kh, kw, gap=0.04,
+                      palette=("#cfe2f3", "#7fa4c4", "#4d7396", "#1b3a5b"),
+                      base_zorder=2.0, edge_width=0.3,
+                      hue_jitter=0.0):
+    """Tile `n_channels` kernel prisms in a (rows × cols) grid in the
+    (y, z) plane at fixed x stripe `x_left`.
+
+    rows index → y (up); cols index → z (into page).
+    Cells are drawn BACK-TO-FRONT (largest z first) so front-most kernels
+    correctly occlude rear ones.
+
+    Returns a dict with:
+        front_xs : (x_left + kt, ) right face x in front plane
+        x_left   : passed back through
+        x_right  : x_left + kt (front face right x)
+        y_bottom : y0 (front-bottom of grid)
+        y_top    : y0 + rows*pitch_y - gap (front-top of grid)
+        z_back   : z0 + cols*pitch_z - gap (back face z)
+        bbox2d   : (xmin, xmax, ymin, ymax) of the projected grid
+        front_center_2d : projected (x, y) center of the front face of the grid
+        back_center_2d  : projected (x, y) center of the back-most layer
+    """
+    pitch_y = kh + gap
+    pitch_z = kw + gap
+
+    # collect projected extremes
+    xs, ys = [], []
+
+    # back-to-front in z, then any order in y
+    drawn = 0
+    n_z_layers = cols
+    for iz in range(n_z_layers - 1, -1, -1):
+        z_layer = z0 + iz * pitch_z
+        for iy in range(rows):
+            if drawn >= n_channels:
+                break
+            y_cell = y0 + iy * pitch_y
+            front_ll = (x_left, y_cell, z_layer)
+            # zorder: rear layers low, front layers high. Within a layer
+            # bump slightly by row so adjacency edges resolve cleanly.
+            z_local = base_zorder + (n_z_layers - 1 - iz) * 0.5 + iy * 0.01
+            fc, sc, tc, ec = _maybe_jitter_palette(palette, hue_jitter,
+                                                   iy * cols + iz, drawn)
+            front, top, left = draw_kernel_prism(
+                ax, front_ll, (kt, kh, kw),
+                front_color=fc, side_color=sc, top_color=tc,
+                edge_color=ec, edge_width=edge_width,
+                zorder=z_local,
+            )
+            for quad in (front, top, left):
+                xs.extend(quad[:, 0])
+                ys.extend(quad[:, 1])
+            drawn += 1
+
+    # Front-most layer z=z0; back-most layer z=z0 + (cols-1)*pitch_z
+    z_front = z0
+    z_back = z0 + (n_z_layers - 1) * pitch_z + kw
+    y_bot = y0
+    y_top = y0 + (rows - 1) * pitch_y + kh
+
+    front_center_3d = np.array([x_left + kt / 2, (y_bot + y_top) / 2, z_front])
+    back_center_3d  = np.array([x_left + kt / 2, (y_bot + y_top) / 2, z_back])
+    f2 = cab_project(front_center_3d)
+    b2 = cab_project(back_center_3d)
+
+    return {
+        "x_left": x_left,
+        "x_right": x_left + kt,
+        "y_bottom": y_bot,
+        "y_top": y_top,
+        "z_front": z_front,
+        "z_back": z_back,
+        "bbox2d": (min(xs), max(xs), min(ys), max(ys)),
+        "front_center_2d": f2,
+        "back_center_2d": b2,
+    }
+
+
+def _maybe_jitter_palette(palette, jitter, seed, drawn):
+    """Optional small hue jitter on cell color so a grid of channels reads
+    as a sea of slightly-different units rather than one solid block. With
+    jitter=0 (default) returns the palette unchanged."""
+    if jitter <= 0:
+        return palette
+    rng = np.random.default_rng(seed * 7 + drawn)
+    delta = (rng.random(3) - 0.5) * 2.0 * jitter
+    fc = _shift_hex(palette[0], delta[0])
+    sc = _shift_hex(palette[1], delta[1])
+    tc = _shift_hex(palette[2], delta[2])
+    return (fc, sc, tc, palette[3])
+
+
+def _shift_hex(hexcol, delta):
+    """Shift hex color value by `delta` ∈ [-1, 1] (clipped)."""
+    hexcol = hexcol.lstrip("#")
+    r, g, b = (int(hexcol[i:i+2], 16) for i in (0, 2, 4))
+    scale = 1.0 + delta * 0.25
+    r = int(np.clip(r * scale, 0, 255))
+    g = int(np.clip(g * scale, 0, 255))
+    b = int(np.clip(b * scale, 0, 255))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def draw_temporal_weight_traces(ax, weights, x0, y0, w, h, *,
+                                gap=0.10, color="#b8860b", lw=0.9,
+                                baseline_color="#bbb"):
+    """Plot `weights` (C, K) as C small line plots in panels of width `w/C`
+    above a row of frontend kernels. Each panel spans `panel_w × h` and
+    centers on the corresponding kernel's x-stripe.
+
+    All traces share a common y-scale so amplitudes are directly comparable.
+    A faint horizontal baseline marks zero.
+    """
+    weights = np.asarray(weights, dtype=float)
+    C, K = weights.shape
+    panel_w = (w - gap * (C - 1)) / C
+    ymin = float(weights.min())
+    ymax = float(weights.max())
+    if ymax == ymin:
+        ymax = ymin + 1.0
+    pad = 0.08 * (ymax - ymin)
+    ymin -= pad
+    ymax += pad
+
+    ts = np.linspace(0, 1, K)
+    for c in range(C):
+        px = x0 + c * (panel_w + gap)
+        # baseline at y=0
+        if ymin < 0 < ymax:
+            y_zero = y0 + (0 - ymin) / (ymax - ymin) * h
+            ax.plot([px, px + panel_w], [y_zero, y_zero],
+                    color=baseline_color, lw=0.5, zorder=3)
+        xs = px + ts * panel_w
+        ys = y0 + (weights[c] - ymin) / (ymax - ymin) * h
+        ax.plot(xs, ys, color=color, lw=lw, zorder=3.5,
+                solid_capstyle="round")
+
+
+def draw_skip_U(ax, x0, x1, y_top, *, depth=0.6, color=CYAN, lw=1.2,
+                zorder=1.6, label=None, label_fontsize=6.5):
+    """Cyan U-shaped connector from (x0, y_top) down by `depth` and back up
+    to (x1, y_top). Implements the residual path of a ResBlock."""
+    from matplotlib.path import Path
+    from matplotlib.patches import PathPatch
+    y_bot = y_top - depth
+    # Smooth Bezier U: down with curve at top, across, up with curve.
+    cx_pad = min(0.25 * (x1 - x0), depth * 0.8)
+    verts = [
+        (x0, y_top),                          # start
+        (x0, y_top - depth * 0.6),            # ctrl down
+        (x0 + cx_pad, y_bot),                 # to bottom-left
+        (x1 - cx_pad, y_bot),                 # line across
+        (x1, y_top - depth * 0.6),            # ctrl up
+        (x1, y_top),                          # end
+    ]
+    codes = [Path.MOVETO, Path.CURVE3, Path.CURVE3,
+             Path.LINETO, Path.CURVE3, Path.CURVE3]
+    path = Path(verts, codes)
+    ax.add_patch(PathPatch(path, edgecolor=color, facecolor="none",
+                           lw=lw, zorder=zorder, capstyle="round"))
+    if label is not None:
+        # Place label OUTSIDE the U (just under its lowest point), small
+        # and unobtrusive — most of the meaning is carried by the cyan
+        # arc itself, matching the stimulus-cube color.
+        ax.text((x0 + x1) / 2, y_bot - 0.05, label,
+                ha="center", va="top", fontsize=label_fontsize,
+                color=color, style="italic", zorder=zorder + 0.1)
+
+
+def draw_recurrent_loop(ax, x0, x1, y_top, *, arc_height=0.9, color="#7e3f8a",
+                        lw=1.2, zorder=4.5, label="h$_{t-1}$",
+                        label_fontsize=7.0):
+    """Curved arrow arching from (x1, y_top) up and over to (x0, y_top),
+    suggesting that the layer's output feeds back as its next-step input."""
+    from matplotlib.patches import FancyArrowPatch
+    ax.add_patch(FancyArrowPatch(
+        (x1, y_top + 0.02), (x0, y_top + 0.02),
+        arrowstyle="->", lw=lw, color=color,
+        connectionstyle=f"arc3,rad={-arc_height / max(x1 - x0, 1e-3) * 0.9}",
+        zorder=zorder,
+        mutation_scale=10,
+    ))
+    if label is not None:
+        ax.text((x0 + x1) / 2, y_top + arc_height + 0.10, label,
+                ha="center", va="bottom", fontsize=label_fontsize,
+                color=color, style="italic", zorder=zorder + 0.1)
+
+
+def draw_gaussian_readout(ax, mean, std, features, x0, y0, *,
+                          size=0.85, feat_width=0.18, gap=0.12,
+                          zorder=4.0, label_color=TEXT_COLOR):
+    """Draw the Gaussian readout glyph: a small 2D Gaussian face showing
+    the sampling location (mean) and extent (std) in normalized feature-map
+    coords, followed by a thin heatmap strip of the depthwise feature
+    weights.
+
+    `mean`, `std` are 2-vectors in [-1, 1] feature-map coords. `features`
+    is a 1D array of per-feature readout weights.
+    """
+    res = 96
+    grid = np.linspace(-1, 1, res)
+    X, Y = np.meshgrid(grid, grid)
+    sx = max(float(std[0]), 0.05)
+    sy = max(float(std[1]), 0.05)
+    G = np.exp(-(((X - float(mean[0])) ** 2) / (2 * sx * sx)
+                 + ((Y - float(mean[1])) ** 2) / (2 * sy * sy)))
+    G = (G / G.max() * 255).astype(np.uint8)
+
+    # Gaussian face — use a light→saturated green colormap to match readout.
+    from matplotlib.colors import LinearSegmentedColormap
+    cmap = LinearSegmentedColormap.from_list(
+        "readout_gauss", ["#f4faf2", "#8cc28c", "#1f5e1f"], N=256,
+    )
+    ax.imshow(G, extent=(x0, x0 + size, y0, y0 + size),
+              origin="lower", cmap=cmap, zorder=zorder,
+              interpolation="bilinear")
+    # Crisp outline so it reads as a "face" matching nearby prisms.
+    ax.add_patch(Rectangle((x0, y0), size, size, fill=False,
+                           edgecolor="#1b3a5b", linewidth=0.5,
+                           zorder=zorder + 0.2))
+    # Mean dot + std ellipse
+    cx = x0 + (float(mean[0]) + 1) / 2 * size
+    cy = y0 + (float(mean[1]) + 1) / 2 * size
+    rx = sx / 2 * size
+    ry = sy / 2 * size
+    ax.add_patch(Circle((cx, cy), 0.012 * size + 0.02,
+                        facecolor="#222", edgecolor="white", linewidth=0.4,
+                        zorder=zorder + 0.4))
+    from matplotlib.patches import Ellipse
+    ax.add_patch(Ellipse((cx, cy), 2 * rx, 2 * ry, fill=False,
+                         edgecolor="#222", linewidth=0.7, linestyle=(0, (3, 2)),
+                         zorder=zorder + 0.3))
+
+    # Feature-weight strip to the right
+    fw_x0 = x0 + size + gap
+    feats = np.asarray(features, dtype=float)
+    fw_img = feats[::-1, None]   # (n_feat, 1), top = first feature
+    vmax = float(np.abs(feats).max()) or 1.0
+    ax.imshow(fw_img, extent=(fw_x0, fw_x0 + feat_width, y0, y0 + size),
+              origin="upper", cmap="RdBu_r", vmin=-vmax, vmax=vmax,
+              aspect="auto", zorder=zorder, interpolation="nearest")
+    ax.add_patch(Rectangle((fw_x0, y0), feat_width, size, fill=False,
+                           edgecolor="#1b3a5b", linewidth=0.5,
+                           zorder=zorder + 0.2))
+    ax.text(fw_x0 + feat_width / 2, y0 - 0.08,
+            f"{len(feats)}", ha="center", va="top",
+            fontsize=6.0, color=label_color, style="italic")
+    ax.text(fw_x0 + feat_width / 2, y0 + size + 0.08,
+            "ch wts", ha="center", va="bottom",
+            fontsize=6.0, color=label_color, style="italic")
+
+    return {
+        "x_left": x0,
+        "x_right": fw_x0 + feat_width,
+        "y_bottom": y0,
+        "y_top": y0 + size,
+        "feat_strip_x": fw_x0,
+    }
+
+
+def draw_neuron_trace_panel(ax, t, robs_rate, rhat_rate, x0, y0, w, h, *,
+                            obs_color="#777", pred_color="#1f5e1f",
+                            obs_lw=0.9, pred_lw=1.3, zorder=4.0,
+                            label=None, baseline_label=None,
+                            show_scale=False, scale_ms=100,
+                            scale_sp_s=None, frame_color="#bbb"):
+    """Draw a tiny line plot of observed and predicted spike-rate traces.
+
+    `robs_rate` and `rhat_rate` are 1D arrays in sp/s sampled at `t` seconds.
+    The panel occupies the data-coord rectangle (x0, y0, w, h). Observed is
+    drawn first (in `obs_color`) and predicted is overlaid (in `pred_color`).
+
+    A faint frame is drawn around the panel; optional inline labels and
+    scale bars can be enabled for the bottom-most panel.
+    """
+    t = np.asarray(t, dtype=float)
+    r = np.asarray(robs_rate, dtype=float)
+    p = np.asarray(rhat_rate, dtype=float)
+    if t.size == 0:
+        return
+    t0, t1 = float(t[0]), float(t[-1])
+    if t1 == t0:
+        t1 = t0 + 1.0
+    ymin = 0.0
+    ymax = float(np.nanmax(np.concatenate([r, p])))
+    if not np.isfinite(ymax) or ymax <= 0:
+        ymax = 1.0
+    ymax *= 1.10  # headroom
+
+    ax.add_patch(Rectangle((x0, y0), w, h, fill=False,
+                           edgecolor=frame_color, linewidth=0.4,
+                           zorder=zorder - 0.1))
+
+    xs = x0 + (t - t0) / (t1 - t0) * w
+    ys_obs = y0 + (r - ymin) / (ymax - ymin) * h
+    ys_pred = y0 + (p - ymin) / (ymax - ymin) * h
+    ax.plot(xs, ys_obs, color=obs_color, lw=obs_lw, zorder=zorder,
+            solid_capstyle="round")
+    ax.plot(xs, ys_pred, color=pred_color, lw=pred_lw, zorder=zorder + 0.1,
+            solid_capstyle="round")
+
+    if label is not None:
+        ax.text(x0 + w - 0.04, y0 + h - 0.04, label,
+                ha="right", va="top", fontsize=6.0, color="#333",
+                zorder=zorder + 0.5)
+    if baseline_label is not None:
+        ax.text(x0 + 0.04, y0 + h - 0.04, baseline_label,
+                ha="left", va="top", fontsize=6.0, color="#555",
+                style="italic", zorder=zorder + 0.5)
+
+    if show_scale:
+        scale_s = scale_ms / 1000.0
+        bar_frac = min(scale_s / (t1 - t0), 0.5)
+        bar_x1 = x0 + w
+        bar_x0 = bar_x1 - bar_frac * w
+        bar_y = y0 - 0.08
+        ax.plot([bar_x0, bar_x1], [bar_y, bar_y], color="#222", lw=1.3,
+                clip_on=False, zorder=zorder + 0.5)
+        ax.text((bar_x0 + bar_x1) / 2, bar_y - 0.04,
+                f"{scale_ms} ms", ha="center", va="top",
+                fontsize=6.0, color="#222", clip_on=False)
+        if scale_sp_s is not None:
+            sb_x = x0 - 0.06
+            sb_h_frac = min(scale_sp_s / (ymax - ymin), 0.9)
+            sb_y0 = y0
+            sb_y1 = y0 + sb_h_frac * h
+            ax.plot([sb_x, sb_x], [sb_y0, sb_y1], color="#222", lw=1.3,
+                    clip_on=False, zorder=zorder + 0.5)
+            ax.text(sb_x - 0.04, (sb_y0 + sb_y1) / 2,
+                    f"{int(scale_sp_s)}\nsp/s",
+                    ha="right", va="center", fontsize=6.0, color="#222",
+                    linespacing=1.0, clip_on=False)
+
+
+def draw_pool_glyph(ax, x, y, *, color="#444", fontsize=7.5):
+    """Tiny '↓2' annotation marking a 2× spatial downsample."""
+    ax.text(x, y, "↓2", ha="center", va="center",
+            fontsize=fontsize, color=color, fontweight="bold")

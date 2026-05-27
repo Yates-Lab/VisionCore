@@ -44,12 +44,17 @@ class PanelAAssets:
     lag_cube: np.ndarray                # (n_lags, h, w) float
     lag_indices: list                   # which lag indices were sampled
     arch: dict                          # introspected architecture summary
+    frontend_weights: np.ndarray        # (num_channels, kernel_size) learned temporal kernels
+    readout_mean: np.ndarray            # (2,) Gaussian center in normalized [-1,1]
+    readout_std: np.ndarray             # (2,) Gaussian std
+    readout_features: np.ndarray        # (n_feat,) per-feature weight vector
     behavior_t: np.ndarray              # (T,) seconds (fixrsvp FEM trace)
     behavior_eyepos: np.ndarray         # (T, 2) deg
     behavior_speed: np.ndarray          # (T,) deg/s
     behavior_roi_seq_px: np.ndarray     # (T, 2, 2) fixrsvp dset rois aligned to trace
     freeview_trace_px: np.ndarray       # (N, 2) pixel coords on backimage screen
     freeview_roi_seq_px: np.ndarray     # (N, 2, 2) backimage dset rois for pinned window
+    example_neurons: list = None        # list of 3 dicts: per-neuron readout + trace snippet
 
 
 # ----------------------------------------------------------------------------
@@ -81,6 +86,231 @@ def _load_arch_info():
         "gru_hidden": cfg["recurrent"]["params"]["hidden_dim"],
         "gru_kernel": cfg["recurrent"]["params"]["kernel_size"],
     }
+
+
+# ----------------------------------------------------------------------------
+# Frontend weight extraction (from trained checkpoint)
+# ----------------------------------------------------------------------------
+def _load_frontend_weights():
+    """Pull learned (num_channels, kernel_size) temporal kernels from the
+    pinned digital-twin checkpoint.
+
+    The frontend is a depthwise temporal conv with weight shape
+    (num_channels, 1, kernel_size, 1, 1). We squeeze to (num_channels,
+    kernel_size). Loaded from the parametrization's `.original` tensor;
+    weight-norm scales differ per channel but the *shape* of each kernel
+    is what we want to plot, and downstream rendering normalises each
+    trace independently.
+    """
+    import torch
+    from _fig4_data import CHECKPOINT_PATH
+    ckpt = torch.load(CHECKPOINT_PATH, map_location="cpu", weights_only=False)
+    sd = ckpt["state_dict"] if "state_dict" in ckpt else ckpt
+    key = "model.frontend.temporal_conv.conv.parametrizations.weight.original"
+    w = sd[key].detach().cpu().numpy()
+    return np.ascontiguousarray(w.squeeze(axis=(1, 3, 4)))   # (C, K)
+
+
+def _load_example_neurons(n=3, window_s=0.5, min_rho=0.85):
+    """Pick `n` neurons that are well fit by the model and span the baseline
+    firing-rate distribution, then return per-neuron assets needed by the
+    panel-A schematic.
+
+    Selection strategy:
+      * pool every neuron across all cached sessions whose PSTH correlation
+        (`rho`) between observed and predicted is >= min_rho (loosens if
+        too few qualify);
+      * partition by baseline firing rate (terciles low/mid/high);
+      * in each tercile, keep the highest-rho neuron.
+
+    For each chosen neuron we additionally extract:
+      * Gaussian readout (mean, std) and depthwise feature weights from the
+        trained checkpoint;
+      * trial-averaged observed and predicted PSTHs (0.5 s, 120 Hz), so the
+        schematic shows cross-condition generalisation rather than the noise
+        floor of a single trial.
+    """
+    import torch
+    from _fig4_data import (
+        CHECKPOINT_PATH, CACHE_PATH, DT, DATASET_CONFIGS_PATH,
+    )
+
+    if not CACHE_PATH.exists():
+        raise FileNotFoundError(
+            f"fig4 inference cache missing at {CACHE_PATH} — "
+            "run load_fig4_data() first so example neurons can be picked."
+        )
+    print(f"  loading fig4 inference cache from {CACHE_PATH}")
+    with open(CACHE_PATH, "rb") as f:
+        session_results = dill.load(f)
+
+    # Map session name → dataset_idx via the dataset-configs YAML.
+    from models.config_loader import load_dataset_configs
+    cfgs = load_dataset_configs(str(DATASET_CONFIGS_PATH))
+    name2idx = {c["session"]: i for i, c in enumerate(cfgs)}
+
+    print(f"  loading checkpoint state_dict from {CHECKPOINT_PATH}")
+    ckpt = torch.load(CHECKPOINT_PATH, map_location="cpu", weights_only=False)
+    sd = ckpt["state_dict"] if "state_dict" in ckpt else ckpt
+
+    n_bins = int(round(window_s / DT))
+
+    # Flatten candidates across all sessions.
+    cand = []
+    for si, sr in enumerate(session_results):
+        rhos = np.asarray(sr["rhos"])           # observed/predicted PSTH corr
+        ccn = np.asarray(sr["ccnorm"])
+        rmean = np.asarray(sr["robs_mean"])     # (T, n_neurons), spikes/bin
+        with np.errstate(invalid="ignore"):
+            baseline = np.nanmean(rmean, axis=0) / DT
+        for ni in range(sr["n_neurons"]):
+            if not np.isfinite(rhos[ni]):
+                continue
+            cand.append({
+                "si": si,
+                "ni": ni,
+                "rho": float(rhos[ni]),
+                "ccnorm": float(ccn[ni]) if np.isfinite(ccn[ni]) else float("nan"),
+                "baseline": float(baseline[ni]),
+                "session": sr["session"],
+            })
+
+    if not cand:
+        raise RuntimeError("No valid neurons found in fig4 inference cache.")
+
+    # Loosen threshold until we have at least 4*n eligible neurons so the
+    # tercile partition has room to pick well-spaced baselines.
+    thr = min_rho
+    while True:
+        elig = [c for c in cand if c["rho"] >= thr]
+        if len(elig) >= 4 * n or thr <= 0.0:
+            break
+        thr -= 0.02
+    print(f"  example-neuron pool: {len(elig)} neurons with PSTH-rho ≥ {thr:.2f}")
+
+    # Partition eligible neurons into `n` baseline-rate terciles; pick the
+    # highest-rho neuron in each.
+    baselines = np.array([c["baseline"] for c in elig])
+    quantiles = np.linspace(0, 1, n + 1)
+    edges = np.quantile(baselines, quantiles)
+    edges[0] -= 1e-9
+    edges[-1] += 1e-9
+    chosen = []
+    for k in range(n):
+        lo, hi = edges[k], edges[k + 1]
+        bucket = [c for c in elig if lo <= c["baseline"] <= hi
+                  and not any(c["si"] == cc["si"] and c["ni"] == cc["ni"]
+                              for cc in chosen)]
+        if not bucket:
+            bucket = [c for c in elig
+                      if not any(c["si"] == cc["si"] and c["ni"] == cc["ni"]
+                                 for cc in chosen)]
+        bucket.sort(key=lambda c: c["rho"], reverse=True)
+        chosen.append(bucket[0])
+
+    # Sort low → high baseline so the visual stack reads bottom-up.
+    chosen.sort(key=lambda c: c["baseline"])
+
+    # Light Gaussian smoothing (σ = 15 ms) applied to the PSTH for display
+    # so the lines read as continuous tuning curves rather than jagged bins.
+    from scipy.ndimage import gaussian_filter1d
+    sigma_bins = max(0.015 / DT, 1e-6)
+
+    out = []
+    for c in chosen:
+        si, ni = c["si"], c["ni"]
+        sr = session_results[si]
+        di = name2idx[sr["session"]]
+        nmask = np.asarray(sr["neuron_mask"])
+        neuron_id = int(nmask[ni])
+
+        mean = sd[f"model.readouts.{di}.mean"][neuron_id].detach().cpu().numpy().astype(np.float32)
+        std  = sd[f"model.readouts.{di}.std"][neuron_id].detach().cpu().numpy().astype(np.float32)
+        feats = (sd[f"model.readouts.{di}.features.weight"][neuron_id]
+                 .detach().cpu().numpy().squeeze().astype(np.float32))
+
+        # Trial-averaged PSTH (already computed during inference); spikes/bin.
+        robs_psth = np.asarray(sr["robs_mean"][:, ni], dtype=float)
+        rhat_psth = np.asarray(sr["rhat_mean"][:, ni], dtype=float)
+        dfs = np.asarray(sr["dfs_used"][:, :, ni], dtype=float)
+
+        # Restrict to bins with substantial trial coverage so the PSTH
+        # average isn't dominated by 1–2 short trials at the tails.
+        n_per_bin = (dfs > 0).sum(axis=0)
+        min_trials = max(5, int(0.25 * dfs.shape[0]))
+        valid = n_per_bin >= min_trials
+        if not valid.any():
+            continue
+        first_bin = int(np.argmax(valid))
+        end_bin = first_bin + n_bins
+        if end_bin > robs_psth.shape[0]:
+            end_bin = robs_psth.shape[0]
+            first_bin = end_bin - n_bins
+            if first_bin < 0:
+                continue
+
+        robs_snip = robs_psth[first_bin:end_bin] / DT
+        rhat_snip = rhat_psth[first_bin:end_bin] / DT
+        # Drop residual nans (no valid trials at this bin) by carrying the
+        # last finite value forward — keeps the line connected.
+        for arr in (robs_snip, rhat_snip):
+            nan_mask = ~np.isfinite(arr)
+            if nan_mask.any():
+                last = 0.0
+                for i in range(len(arr)):
+                    if nan_mask[i]:
+                        arr[i] = last
+                    else:
+                        last = arr[i]
+        robs_snip = gaussian_filter1d(robs_snip, sigma=sigma_bins, mode="nearest")
+        rhat_snip = gaussian_filter1d(rhat_snip, sigma=sigma_bins, mode="nearest")
+
+        t_axis = np.arange(n_bins) * DT
+        psth_corr = float(np.corrcoef(robs_snip, rhat_snip)[0, 1])
+
+        print(f"    neuron {neuron_id} @ {sr['session']}: "
+              f"baseline={c['baseline']:.1f} sp/s, rho={c['rho']:.2f}, "
+              f"ccnorm={c['ccnorm']:.2f}, window PSTH corr={psth_corr:.2f}")
+
+        out.append({
+            "session": sr["session"],
+            "neuron_id": neuron_id,
+            "rho": float(c["rho"]),
+            "ccnorm": float(c["ccnorm"]),
+            "baseline_rate": float(c["baseline"]),
+            "mean": mean,
+            "std": std,
+            "features": feats,
+            "t": t_axis.astype(np.float32),
+            "robs_rate": robs_snip.astype(np.float32),
+            "rhat_rate": rhat_snip.astype(np.float32),
+        })
+
+    if not out:
+        raise RuntimeError("Failed to extract any example-neuron snippets.")
+    return out
+
+
+def _load_readout_example():
+    """Pick a representative neuron from readout 0 and return its
+    (mean, std, features) weights. Selection prefers a neuron with
+    well-localised feature-weight energy (so the heat-strip reads as
+    structured, not flat noise).
+    """
+    import torch
+    from _fig4_data import CHECKPOINT_PATH
+    ckpt = torch.load(CHECKPOINT_PATH, map_location="cpu", weights_only=False)
+    sd = ckpt["state_dict"] if "state_dict" in ckpt else ckpt
+    means = sd["model.readouts.0.mean"].detach().cpu().numpy()
+    stds  = sd["model.readouts.0.std"].detach().cpu().numpy()
+    feats = sd["model.readouts.0.features.weight"].detach().cpu().numpy()
+    feats = feats.squeeze(axis=(2, 3))   # (N_neurons, n_feat)
+    # Score by L4/L2 ratio (high → energy concentrated in few features)
+    norm2 = np.sqrt((feats ** 2).sum(axis=1) + 1e-12)
+    norm4 = np.power((feats ** 4).sum(axis=1) + 1e-12, 0.25)
+    score = norm4 / norm2
+    idx = int(np.argmax(score))
+    return means[idx].astype(np.float32), stds[idx].astype(np.float32), feats[idx].astype(np.float32)
 
 
 # ----------------------------------------------------------------------------
@@ -615,6 +845,13 @@ def load_panel_a_assets(recompute: bool = False) -> PanelAAssets:
 
     arch = _load_arch_info()
 
+    print("  loading frontend weights from checkpoint...")
+    frontend_weights = _load_frontend_weights()
+    print("  loading readout example neuron...")
+    rd_mean, rd_std, rd_feats = _load_readout_example()
+    print("  loading example neurons (readouts + trace snippets)...")
+    example_neurons = _load_example_neurons(n=3)
+
     assets = PanelAAssets(
         session=PANEL_B_SESSION,
         screen_shape=screen_shape,
@@ -624,12 +861,17 @@ def load_panel_a_assets(recompute: bool = False) -> PanelAAssets:
         lag_cube=cube,
         lag_indices=lag_idx,
         arch=arch,
+        frontend_weights=frontend_weights,
+        readout_mean=rd_mean,
+        readout_std=rd_std,
+        readout_features=rd_feats,
         behavior_t=beh_t,
         behavior_eyepos=beh_eye,
         behavior_speed=beh_speed,
         behavior_roi_seq_px=beh_roi_seq,
         freeview_trace_px=freeview_trace_px,
         freeview_roi_seq_px=freeview_roi_seq,
+        example_neurons=example_neurons,
     )
 
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
