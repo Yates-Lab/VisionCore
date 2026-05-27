@@ -1,64 +1,85 @@
-"""Panel A — right half: encoding-model architecture (detailed).
+"""Panel A — right half: digital-twin architecture (detailed).
 
 Every output channel of every learned stage is rendered as a 3D kernel
 prism in shared cabinet projection (same visual language as the stimulus
 half's lag cube): time → +x (right), H → +y (up), W → +z (INTO page).
 
-Stages, left → right:
-    Frontend   — 4 depthwise temporal kernels (kt=16), with actual learned
-                 weights drawn as small line plots above each kernel.
-    Stem       — 8 output channels, 1×7×7 kernels, 2×4 tile grid.
-    ResBlock 1 — 64 output channels, 3×9×9 kernels, 8×8 tile grid. Per-block
-                 residual U-connector beneath. 2× max-pool annotation after.
-    ResBlock 2 — 128 output channels, 3×5×5 kernels, 8×16 tile grid. Per-block
-                 residual U-connector beneath.
-    ConvGRU    — 128 hidden channels, 3×3 kernels, 8×16 tile grid. Curved
-                 recurrent self-loop overhead. Behavior trace → GRU arrow.
-    Readout    — Gaussian spatial sampler (mean/std of an example neuron)
-                 followed by a depthwise feature-weight strip.
+Stages, left → right — front-face centers are all anchored at the shared
+ARCH_CENTER_Y so inter-stage flow arrows are perfectly horizontal:
 
-The adapter stage is intentionally omitted (likely to be removed from the
-model). Output channels are tiled in (y, z); within each tile-grid we draw
+    Frontend   — 4 depthwise temporal kernels (kt=16) stacked vertically;
+                 each kernel's learned temporal weight curve is drawn on
+                 its own front face.
+    Stem       — 8 channels, 1×7×7 kernels, 2×4 grid.
+    ResBlock 1 — 64 channels, 3×9×9 kernels, 8×8 grid. ⊔-staple residual
+                 beneath; ↓2× downsample badge on the outgoing arrow.
+    ResBlock 2 — 128 channels, 3×5×5 kernels, 8×16 grid. ⊔-staple residual.
+    ConvGRU    — 128 hidden channels, 3×3 kernels, 8×16 grid; tall closed
+                 recurrent loop on top. A small Behavior placeholder sits
+                 above the incoming arrow, with a concatenation arrow to
+                 the ConvGRU input.
+    Readout    — Gaussian spatial sampler (mean/std per example neuron),
+                 depthwise feature-weight strip, observed/predicted traces.
+
+Output channels are tiled in (y, z); within each tile-grid we draw
 back-to-front in z so front kernels correctly occlude rear kernels.
 """
 from __future__ import annotations
 
 import numpy as np
-from matplotlib.patches import FancyArrowPatch
+from matplotlib.patches import FancyArrowPatch, Rectangle
 
 from _fig4a_glyphs import (
-    CYAN, TEXT_COLOR, cab_project,
-    draw_channel_grid, draw_temporal_weight_traces, draw_skip_U,
+    TEXT_COLOR, cab_project,
+    draw_channel_grid, draw_skip_staple,
     draw_recurrent_loop, draw_gaussian_readout, draw_pool_glyph,
-    draw_behavior_traces, draw_kernel_prism, draw_neuron_trace_panel,
 )
 
 
 # ──────────────────────────────────────────────────────────────────────────
 # World-unit scales — every kernel everywhere uses the SAME mapping
-# (taps → world units) so a 9×9 reads visibly larger than a 5×5 etc.
-# Frontend gets a separate, larger pair of scales so the 16-tap temporal
-# beams + their weight line-plots are readable.
+# (taps → world units) so a 9×9 reads visibly larger than a 5×5. The
+# frontend uses the same temporal scale as the rest so its 16-tap kernels
+# don't dominate; it gets a slightly larger spatial face only because each
+# channel is 1×1 in space and needs *some* visible footprint.
 # ──────────────────────────────────────────────────────────────────────────
 S_PIX = 0.030           # world units per spatial tap (convnet & GRU)
-S_T   = 0.13            # world units per time tap   (convnet & GRU)
-S_T_FE = 0.16           # frontend time scale (kt=16 → 2.56 wide)
-S_FE_SPATIAL = 0.55     # frontend "unit" spatial face (taps=1 but drawn big)
+S_T   = S_PIX           # world units per time tap (isotropic: 1×1×1 is a cube)
+S_T_FE = S_T            # frontend time scale: identical to rest
+S_FE_SPATIAL = 0.20     # frontend "unit" spatial face (taps=1 but drawn big)
 GRID_GAP = 0.04         # gap between cells in a grid
+FE_GAP   = 0.06         # vertical gap between stacked frontend channels
 
-# Inter-stage horizontal gap (after cabinet z-shift accounted for).
+# Inter-stage horizontal gap (front-face right of N → front-face left of N+1).
 STAGE_GAP = 1.10
+STAGE_GAP_FE = 0.85     # gap after frontend (frontend has tiny depth)
 
-# Vertical anchor for the front-bottom edge of every stage's grid.
-ARCH_BASE_Y = 6.5
+# Shared front-face vertical CENTER for every stage. Choosing a center
+# (rather than a baseline) means stages with different y-extents all line
+# up — the inter-stage flow arrows run perfectly horizontal at this y.
+ARCH_CENTER_Y = 7.0
 
-# Vertical zones below the baseline.
-SKIP_DEPTH = 1.05         # how deep the residual U dips
-LABEL_Y_OFFSET = -1.65    # stage labels go BELOW the skip-U bottom
+# Per-stage label spacing (labels attach to each stage's front-face top,
+# so they ride the architectural "skyline" instead of floating in a fixed
+# band far above the shorter stages).
+LABEL_GAP     = 0.18    # title sits this far above the stage front-top
+SUB_GAP       = 0.32    # sub-label sits this far ABOVE the title
+HEADER_GAP    = 0.55    # header sits this far above the highest sub-label
+
+# Residual staple (⊔) beneath each block.
+SKIP_DEPTH = 0.55
+SKIP_COLOR = "#222"     # same colour as flow arrows (was cyan)
+SKIP_LW    = 1.0
+SKIP_CORNER_R = 0.10
+
+# Behavior placeholder.
+BEH_HEIGHT = 0.40
+BEH_WIDTH  = 1.00
+BEH_Y_GAP  = 0.55       # gap above the inter-stage arrow midpoint
 
 # Canvas (will be tightened in plot)
 CANVAS_W = 22.0
-CANVAS_H = 13.5
+CANVAS_H = 11.0
 
 
 # Per-stage color palettes (front, side/left, top, edge).
@@ -71,7 +92,7 @@ PAL_READOUT  = ("#d9ecd9", "#8cc28c", "#3f8a3f", "#1f5e1f")
 
 
 # Cabinet depth vector (mirror of _fig4a_glyphs.CAB_DEPTH_VEC).
-_CAB_ALPHA = np.deg2rad(30.0)
+_CAB_ALPHA = np.deg2rad(45.0)
 _CAB_DEPTH = 0.5
 _CAB_DEPTH_VEC = np.array([
     -np.cos(_CAB_ALPHA) * _CAB_DEPTH,
@@ -99,146 +120,143 @@ def plot_panel_a_architecture(ax, assets):
 
     # Track inter-stage flow arrow endpoints in projected 2D.
     stage_records = []
-    arrow_mids = {}
+    label_tops = []   # collected y of each stage's title baseline
     x_cursor = 0.6   # world x of the front-lower-left corner of next stage
 
     # ── Frontend ────────────────────────────────────────────────────────
+    # Vertical stack (rows=fe_n, cols=1): each channel is its own beam,
+    # visually distinct. Front face = oscilloscope showing the learned
+    # temporal weight curve for that channel.
     fe_kt = arch["frontend_k"] * S_T_FE
     fe_kh = S_FE_SPATIAL
     fe_kw = S_FE_SPATIAL
-    fe_n = arch["frontend_channels"]
-    fe_z_gap = 0.30   # extra depth gap between frontend channels
+    fe_n  = arch["frontend_channels"]
+    fe_y0 = _y0_for_center(rows=fe_n, kh=fe_kh, gap=FE_GAP,
+                           cols=1, kw=fe_kw)
     fe_grid = draw_channel_grid(
-        ax, x_left=x_cursor, y0=ARCH_BASE_Y, z0=0.0,
-        n_channels=fe_n, rows=1, cols=fe_n,
+        ax, x_left=x_cursor, y0=fe_y0, z0=0.0,
+        n_channels=fe_n, rows=fe_n, cols=1,
         kt=fe_kt, kh=fe_kh, kw=fe_kw,
-        gap=fe_z_gap, palette=PAL_FRONTEND, base_zorder=2.0, edge_width=0.4,
+        gap=FE_GAP, palette=PAL_FRONTEND, base_zorder=2.0, edge_width=0.45,
     )
 
-    # Temporal weights — 4 mini line plots in a HORIZONTAL row above the
-    # frontend block, fixed y (not projected through cabinet depth so they
-    # don't overlap), each connected to its kernel by a thin hairline.
+    # Overlay the learned temporal weight curve on each kernel's front
+    # face. All channels share one y-scale so amplitudes are comparable.
     fe_weights = np.asarray(assets.frontend_weights)
-    fe_xmin, fe_xmax, fe_ymin, fe_ymax = fe_grid["bbox2d"]
-    panel_h = 0.85
-    panel_gap = 0.18
-    panel_w = (fe_xmax - fe_xmin - panel_gap * (fe_n - 1)) / fe_n
-    panel_y = fe_ymax + 0.50
-    ymin = float(fe_weights.min()); ymax = float(fe_weights.max())
-    if ymax == ymin:
-        ymax = ymin + 1.0
-    pad = 0.10 * (ymax - ymin)
-    ymin -= pad; ymax += pad
-    ts = np.linspace(0, 1, fe_weights.shape[1])
+    w_min = float(fe_weights.min())
+    w_max = float(fe_weights.max())
+    if w_max == w_min:
+        w_max = w_min + 1.0
+    pad = 0.10 * (w_max - w_min)
+    w_min -= pad; w_max += pad
+    K = fe_weights.shape[1]
+    ts = np.linspace(0, 1, K)
     for c in range(fe_n):
-        px = fe_xmin + c * (panel_w + panel_gap)
-        # zero baseline
-        if ymin < 0 < ymax:
-            y_zero = panel_y + (0 - ymin) / (ymax - ymin) * panel_h
-            ax.plot([px, px + panel_w], [y_zero, y_zero],
-                    color="#ccc", lw=0.4, zorder=3)
-        # framing rectangle (very faint)
-        from matplotlib.patches import Rectangle
-        ax.add_patch(Rectangle((px, panel_y), panel_w, panel_h,
-                               fill=False, edgecolor="#bbb", lw=0.4,
-                               zorder=2.9))
-        xs = px + ts * panel_w
-        ys = panel_y + (fe_weights[c] - ymin) / (ymax - ymin) * panel_h
-        ax.plot(xs, ys, color="#b8860b", lw=1.2, zorder=4,
+        y_cell = fe_y0 + c * (fe_kh + FE_GAP)
+        xs = x_cursor + ts * fe_kt
+        ys = y_cell + (fe_weights[c] - w_min) / (w_max - w_min) * fe_kh
+        # Faint zero baseline if range crosses zero.
+        if w_min < 0 < w_max:
+            y_zero = y_cell + (0 - w_min) / (w_max - w_min) * fe_kh
+            ax.plot([x_cursor, x_cursor + fe_kt], [y_zero, y_zero],
+                    color="#bbb", lw=0.4, zorder=3.6)
+        ax.plot(xs, ys, color="#3a2406", lw=1.0, zorder=3.8,
                 solid_capstyle="round")
-        # Hairline from the bottom-middle of the panel down to the
-        # corresponding kernel's projected top-center.
-        z_c = c * (fe_kw + fe_z_gap)
-        kernel_top_center_2d = _proj(x_cursor + fe_kt / 2,
-                                     ARCH_BASE_Y + fe_kh, z_c)
-        ax.plot([px + panel_w / 2, kernel_top_center_2d[0]],
-                [panel_y, kernel_top_center_2d[1]],
-                color="#c9a945", lw=0.5, alpha=0.55, zorder=2.85,
-                linestyle=(0, (2, 1.5)))
-    # "learned temporal kernels" label above the row of plots
-    ax.text((fe_xmin + fe_xmax) / 2, panel_y + panel_h + 0.12,
-            "learned temporal kernels",
-            ha="center", va="bottom",
-            fontsize=6.8, color="#555", style="italic")
 
-    _stage_label(ax, fe_grid, name="Frontend",
-                 sub=f"depthwise temporal\n{fe_n} ch · k={arch['frontend_k']}")
+    label_tops.append(_stage_label_top(
+        ax, fe_grid, name="Frontend",
+        sub=f"{fe_n} ch · k={arch['frontend_k']}"))
 
     stage_records.append({"name": "frontend", "grid": fe_grid})
-    x_cursor = _next_x(fe_grid, STAGE_GAP)
+    x_cursor = _next_x(fe_grid, STAGE_GAP_FE)
 
     # ── Stem ────────────────────────────────────────────────────────────
+    stem_y0 = _y0_for_center(rows=2, kh=stem_kh * S_PIX, gap=GRID_GAP,
+                             cols=4, kw=stem_kw * S_PIX)
     stem_grid = draw_channel_grid(
-        ax, x_left=x_cursor, y0=ARCH_BASE_Y, z0=0.0,
+        ax, x_left=x_cursor, y0=stem_y0, z0=0.0,
         n_channels=8, rows=2, cols=4,
         kt=stem_kt * S_T, kh=stem_kh * S_PIX, kw=stem_kw * S_PIX,
         gap=GRID_GAP, palette=PAL_STEM, base_zorder=2.0, edge_width=0.25,
         hue_jitter=0.08,
     )
-    _stage_label(ax, stem_grid, name="Stem",
-                 sub=f"{stem_kt}×{stem_kh}×{stem_kw} · 8 ch")
+    label_tops.append(_stage_label_top(
+        ax, stem_grid, name="Stem",
+        sub=f"{stem_kt}×{stem_kh}×{stem_kw} · 8 ch"))
     stage_records.append({"name": "stem", "grid": stem_grid})
     x_cursor = _next_x(stem_grid, STAGE_GAP)
 
     # ── ResBlock 1 ──────────────────────────────────────────────────────
+    blk1_y0 = _y0_for_center(rows=8, kh=blk1_kh * S_PIX, gap=GRID_GAP,
+                             cols=8, kw=blk1_kw * S_PIX)
     blk1_grid = draw_channel_grid(
-        ax, x_left=x_cursor, y0=ARCH_BASE_Y, z0=0.0,
+        ax, x_left=x_cursor, y0=blk1_y0, z0=0.0,
         n_channels=64, rows=8, cols=8,
         kt=blk1_kt * S_T, kh=blk1_kh * S_PIX, kw=blk1_kw * S_PIX,
         gap=GRID_GAP, palette=PAL_BLOCK1, base_zorder=2.0, edge_width=0.20,
         hue_jitter=0.10,
     )
-    # Skip-U beneath block1
-    _draw_block_skip(ax, blk1_grid, depth=SKIP_DEPTH, label=None)
-    _stage_label(ax, blk1_grid, name="ResBlock 1",
-                 sub=f"{blk1_kt}×{blk1_kh}×{blk1_kw} · 64 ch")
+    _draw_block_skip(ax, blk1_grid, depth=SKIP_DEPTH)
+    label_tops.append(_stage_label_top(
+        ax, blk1_grid, name="ResBlock 1",
+        sub=f"{blk1_kt}×{blk1_kh}×{blk1_kw} · 64 ch"))
     stage_records.append({"name": "block1", "grid": blk1_grid})
     x_cursor = _next_x(blk1_grid, STAGE_GAP)
 
     # ── ResBlock 2 ──────────────────────────────────────────────────────
+    blk2_y0 = _y0_for_center(rows=8, kh=blk2_kh * S_PIX, gap=GRID_GAP,
+                             cols=16, kw=blk2_kw * S_PIX)
     blk2_grid = draw_channel_grid(
-        ax, x_left=x_cursor, y0=ARCH_BASE_Y, z0=0.0,
+        ax, x_left=x_cursor, y0=blk2_y0, z0=0.0,
         n_channels=128, rows=8, cols=16,
         kt=blk2_kt * S_T, kh=blk2_kh * S_PIX, kw=blk2_kw * S_PIX,
         gap=GRID_GAP, palette=PAL_BLOCK2, base_zorder=2.0, edge_width=0.18,
         hue_jitter=0.10,
     )
-    _draw_block_skip(ax, blk2_grid, depth=SKIP_DEPTH, label=None)
-    _stage_label(ax, blk2_grid, name="ResBlock 2",
-                 sub=f"{blk2_kt}×{blk2_kh}×{blk2_kw} · 128 ch")
+    _draw_block_skip(ax, blk2_grid, depth=SKIP_DEPTH)
+    label_tops.append(_stage_label_top(
+        ax, blk2_grid, name="ResBlock 2",
+        sub=f"{blk2_kt}×{blk2_kh}×{blk2_kw} · 128 ch"))
     stage_records.append({"name": "block2", "grid": blk2_grid})
     x_cursor = _next_x(blk2_grid, STAGE_GAP)
 
     # ── ConvGRU ─────────────────────────────────────────────────────────
+    gru_y0 = _y0_for_center(rows=8, kh=gru_kh * S_PIX, gap=GRID_GAP,
+                            cols=16, kw=gru_kw * S_PIX)
     gru_grid = draw_channel_grid(
-        ax, x_left=x_cursor, y0=ARCH_BASE_Y, z0=0.0,
+        ax, x_left=x_cursor, y0=gru_y0, z0=0.0,
         n_channels=128, rows=8, cols=16,
         kt=gru_kt * S_T, kh=gru_kh * S_PIX, kw=gru_kw * S_PIX,
         gap=GRID_GAP, palette=PAL_GRU, base_zorder=2.0, edge_width=0.18,
         hue_jitter=0.10,
     )
-    # Recurrent loop arching over the GRU grid.
+    # Tall closed recurrent loop on top of the GRU.
     g_xmin, g_xmax, g_ymin, g_ymax = gru_grid["bbox2d"]
-    draw_recurrent_loop(ax, x0=g_xmin + 0.1, x1=g_xmax - 0.1,
-                        y_top=g_ymax + 0.05, arc_height=0.75,
-                        color="#7e3f8a", lw=1.2)
-    _stage_label(ax, gru_grid, name="ConvGRU",
-                 sub=f"hidden={arch['gru_hidden']}, k={arch['gru_kernel']}")
+    gru_loop_base = g_ymax + 0.04
+    gru_loop_height = 0.55
+    draw_recurrent_loop(ax, x0=g_xmin, x1=g_xmax,
+                        y_top=gru_loop_base,
+                        arc_height=gru_loop_height,
+                        color="#7e3f8a", lw=1.4, inset=0.18,
+                        label=None)
+    # Label above the loop (loop_top + tiny pad)
+    gru_loop_top = gru_loop_base + gru_loop_height
+    label_tops.append(_stage_label_top(
+        ax, gru_grid, name="ConvGRU",
+        sub=f"{arch['gru_hidden']} ch · k={arch['gru_kernel']}",
+        y_top_override=gru_loop_top))
     stage_records.append({"name": "gru", "grid": gru_grid})
     x_cursor = _next_x(gru_grid, STAGE_GAP)
 
     # ── Readouts (three example neurons stacked) ────────────────────────
-    # The single illustrative readout is replaced by three vertically
-    # stacked readouts, each followed by a small observed/predicted trace
-    # panel. Stacking ordering: lowest-baseline neuron at the bottom, so
-    # the column reads low → high upward (already sorted in assets).
+    # Three vertically stacked Gaussian readouts illustrate the per-neuron
+    # spatial sampler + depthwise feature weights. Stacking ordering:
+    # lowest-baseline neuron at the bottom (already sorted in assets).
     examples = assets.example_neurons
     n_examples = len(examples)
-    readout_size = 0.55
-    feat_width = 0.14
-    trace_gap = 0.14
-    trace_w = 1.45
-    row_pitch = readout_size + 0.22
+    readout_size = 0.75
+    feat_width = 0.18
+    row_pitch = readout_size + 0.25
     col_height = readout_size + row_pitch * (n_examples - 1)
     # Center the stack on the kernel baseline so the fan-out arrows from
     # the GRU exit horizontally and the column sits visually inline with
@@ -247,7 +265,6 @@ def plot_panel_a_architecture(ax, assets):
     gru_center_y = 0.5 * (g_ymin + g_ymax)
     col_y0 = gru_center_y - col_height / 2
 
-    pred_colors = ["#1f5e1f", "#1a508a", "#7a3a1e"]
     readout_records = []
     for k, neuron in enumerate(examples):
         # Bottom-up positions so examples[0] (lowest baseline) sits at bottom.
@@ -257,61 +274,17 @@ def plot_panel_a_architecture(ax, assets):
             x0=x_cursor, y0=y_k, size=readout_size, feat_width=feat_width,
             zorder=4.0,
         )
-        # Trace panel directly to the right of the feature strip.
-        trace_x0 = ro_k["x_right"] + trace_gap
-        trace_y0 = y_k + 0.02
-        trace_h = readout_size - 0.04
-        pred_color = pred_colors[k % len(pred_colors)]
-        baseline_label = f"{neuron['baseline_rate']:.1f} sp/s"
-        is_bottom = (k == 0)
-        draw_neuron_trace_panel(
-            ax, neuron["t"], neuron["robs_rate"], neuron["rhat_rate"],
-            trace_x0, trace_y0, trace_w, trace_h,
-            obs_color="#888", pred_color=pred_color,
-            zorder=4.2,
-            baseline_label=baseline_label,
-            show_scale=is_bottom, scale_ms=100,
-            scale_sp_s=None,
-        )
-        # Short arrow connecting readout → trace panel.
-        arrow_y = y_k + readout_size / 2
-        ax.annotate("",
-                    xy=(trace_x0 - 0.02, arrow_y),
-                    xytext=(ro_k["x_right"] + 0.02, arrow_y),
-                    arrowprops=dict(arrowstyle="->", lw=0.8, color="#444"),
-                    zorder=4.1)
-        readout_records.append({
-            "ro": ro_k,
-            "trace_xR": trace_x0 + trace_w,
-            "trace_y": arrow_y,
-            "pred_color": pred_color,
-        })
+        readout_records.append({"ro": ro_k})
 
     # Header label above the stack.
-    col_x_lo = examples and readout_records[0]["ro"]["x_left"] or x_cursor
-    col_x_hi = max(r["trace_xR"] for r in readout_records)
+    col_x_lo = readout_records[0]["ro"]["x_left"]
+    col_x_hi = max(r["ro"]["x_right"] for r in readout_records)
     col_top_y = col_y0 + col_height
-    ax.text(0.5 * (col_x_lo + col_x_hi), col_top_y + 0.22,
+    ax.text(0.5 * (col_x_lo + col_x_hi), col_top_y + 0.12,
             "Readouts", ha="center", va="bottom",
-            fontsize=8.5, color=TEXT_COLOR, fontweight="bold")
-    ax.text(0.5 * (col_x_lo + col_x_hi), col_top_y + 0.04,
-            "Gaussian × depthwise   →   observed / predicted rate",
-            ha="center", va="bottom",
-            fontsize=6.5, color="#555", style="italic")
+            fontsize=8.5, color=TEXT_COLOR)
 
-    # Mini legend for trace colors (placed under the bottom panel).
-    leg_y = col_y0 - 0.32
-    leg_x = readout_records[0]["ro"]["x_right"] + trace_gap
-    ax.plot([leg_x, leg_x + 0.18], [leg_y, leg_y], color="#888", lw=0.9,
-            clip_on=False)
-    ax.text(leg_x + 0.22, leg_y, "observed", ha="left", va="center",
-            fontsize=6.2, color="#444", clip_on=False)
-    ax.plot([leg_x + 0.82, leg_x + 1.00], [leg_y, leg_y],
-            color="#1f5e1f", lw=1.3, clip_on=False)
-    ax.text(leg_x + 1.04, leg_y, "twin", ha="left", va="center",
-            fontsize=6.2, color="#1f5e1f", clip_on=False)
-
-    # Use the bottom readout as the "stage anchor" for inter-stage arrows.
+    # Use the middle readout as the "stage anchor" for inter-stage arrows.
     stage_records.append({"name": "readout",
                           "ro": readout_records[len(readout_records) // 2]["ro"]})
 
@@ -333,50 +306,51 @@ def plot_panel_a_architecture(ax, assets):
 
     # ── Input arrow into the frontend ───────────────────────────────────
     fe_front_left_2d = _proj(stage_records[0]["grid"]["x_left"],
-                             ARCH_BASE_Y + fe_kh / 2, 0.0)
+                             ARCH_CENTER_Y, 0.0)
     ax.annotate("",
                 xy=(fe_front_left_2d[0] - 0.05, fe_front_left_2d[1]),
                 xytext=(fe_front_left_2d[0] - 0.95, fe_front_left_2d[1]),
                 arrowprops=dict(arrowstyle="->", lw=1.0, color="#333"))
     ax.text(fe_front_left_2d[0] - 0.95, fe_front_left_2d[1] + 0.18,
             "stim", ha="left", va="bottom",
-            fontsize=7, color="#555", style="italic")
+            fontsize=7.5, color="#555", style="italic")
 
-    # ── ↓2 pool annotation on block1→block2 arrow ───────────────────────
+    # ── ↓2× downsample badge on block1→block2 arrow ─────────────────────
     if "block1→block2" in arrow_mids:
         mx, my = arrow_mids["block1→block2"]
-        draw_pool_glyph(ax, mx, my + 0.22)
+        draw_pool_glyph(ax, mx, my)
 
-    # ── Behavior block + behavior → GRU arrow ───────────────────────────
-    beh_h = 1.5
-    beh_w = 3.6
-    gru_xmin = gru_grid["bbox2d"][0]
-    gru_xmax = gru_grid["bbox2d"][1]
-    beh_x = (gru_xmin + gru_xmax) / 2 - beh_w / 2
-    beh_y = 0.75
-    draw_behavior_traces(
-        ax,
-        assets.behavior_t,
-        assets.behavior_eyepos,
-        assets.behavior_speed,
-        beh_x, beh_y, beh_w, beh_h,
-    )
-    ax.text(beh_x + beh_w / 2, beh_y + beh_h + 0.10,
-            f"Behavior  (d = {arch['behavior_dim']})",
-            ha="center", va="bottom",
-            fontsize=8.0, color=TEXT_COLOR, fontweight="bold")
-    # Arrow from behavior block UP to the GRU stack bottom.
-    gru_bot_y = ARCH_BASE_Y + LABEL_Y_OFFSET - 0.45
-    ax.add_patch(FancyArrowPatch(
-        (beh_x + beh_w / 2, beh_y + beh_h + 0.40),
-        (gru_xmin + (gru_xmax - gru_xmin) * 0.45, gru_bot_y),
-        arrowstyle="->", linewidth=1.0, color="#7e3f8a",
-        connectionstyle="arc3,rad=0.10",
-        zorder=4.0,
-    ))
-    # Track behavior block extents for the axis-tightening pass.
-    _BEH_EXTENTS = (beh_x, beh_x + beh_w, beh_y - 0.40,
-                    beh_y + beh_h + 0.30)
+    # ── Behavior placeholder above block2→gru arrow ─────────────────────
+    if "block2→gru" in arrow_mids:
+        ax_mid_x, ax_mid_y = arrow_mids["block2→gru"]
+        beh_x = ax_mid_x - BEH_WIDTH / 2
+        beh_y = ax_mid_y + BEH_Y_GAP
+        ax.add_patch(Rectangle((beh_x, beh_y), BEH_WIDTH, BEH_HEIGHT,
+                               facecolor="#ead6f5", edgecolor="#7e3f8a",
+                               linewidth=0.9, zorder=12.0))
+        ax.text(beh_x + BEH_WIDTH / 2, beh_y + BEH_HEIGHT / 2,
+                "Behavior", ha="center", va="center",
+                fontsize=8.0, color="#3e1a48", fontweight="bold",
+                zorder=12.1)
+        # Concatenation arrow from box bottom down to the inter-stage
+        # arrow midpoint (symbolises ⊕ into the recurrent input).
+        ax.add_patch(FancyArrowPatch(
+            (ax_mid_x, beh_y - 0.02),
+            (ax_mid_x, ax_mid_y + 0.05),
+            arrowstyle="-|>", lw=1.0, color="#7e3f8a",
+            mutation_scale=10, zorder=12.0,
+        ))
+
+    # ── Header ──────────────────────────────────────────────────────────
+    # Centered over the pipeline body (Stem → ConvGRU), sitting above the
+    # highest stage label.
+    body_x_lo = stage_records[1]["grid"]["bbox2d"][0]   # Stem left
+    body_x_hi = stage_records[4]["grid"]["bbox2d"][1]   # ConvGRU right
+    header_y = max(label_tops) + HEADER_GAP
+    ax.text(0.5 * (body_x_lo + body_x_hi), header_y,
+            "Digital twin",
+            ha="center", va="baseline",
+            fontsize=11, color=TEXT_COLOR, fontweight="bold")
 
     # ── Tighten axes ────────────────────────────────────────────────────
     all_xs = [0]
@@ -389,59 +363,79 @@ def plot_panel_a_architecture(ax, assets):
         elif "ro" in s:
             all_xs.extend([s["ro"]["x_left"], s["ro"]["x_right"]])
             all_ys.extend([s["ro"]["y_bottom"], s["ro"]["y_top"]])
-    # Trace panels extend further right than the readout strip itself.
-    all_xs.extend([r["trace_xR"] for r in readout_records])
     all_ys.extend([col_y0, col_y0 + col_height + 0.35])
-    bxmin, bxmax, bymin, bymax = _BEH_EXTENTS
-    all_xs.extend([bxmin, bxmax])
-    all_ys.extend([bymin, bymax])
-    # Top headroom for "Encoding model" header
-    all_ys.append(max(all_ys) + 0.5)
-    pad_x, pad_y = 0.3, 0.6
+    # Header sits above all labels.
+    all_ys.append(header_y + 0.35)
+    # Skip staples dip below each block.
+    blk_y_bot = min(stage_records[i]["grid"]["y_bottom"] for i in (2, 3))
+    all_ys.append(blk_y_bot - SKIP_DEPTH - 0.20)
+    pad_x, pad_y = 0.3, 0.1
     x_lo, x_hi = min(all_xs) - pad_x, max(all_xs) + pad_x
     y_lo, y_hi = min(all_ys) - pad_y, max(all_ys) + pad_y
     ax.set_xlim(x_lo, x_hi)
     ax.set_ylim(y_lo, y_hi)
 
-    # Header — placed inside the final (tightened) bbox.
-    ax.text(0.5 * (x_lo + x_hi), y_hi - 0.10, "Encoding model",
-            ha="center", va="top",
-            fontsize=11, color=TEXT_COLOR, fontweight="bold")
-
 
 # ──────────────────────────────────────────────────────────────────────────
 # Layout helpers
 # ──────────────────────────────────────────────────────────────────────────
+def _y0_for_center(*, rows, kh, gap, cols=1, kw=None, center_y=ARCH_CENTER_Y):
+    """Front-face bottom y such that the PROJECTED grid (front + depth lift)
+    is vertically centered on `center_y`. With the new vertical-heavy
+    cabinet projection, the depth stack lifts the visual bbox well above
+    the front face; we offset y0 down by half that lift so every stage's
+    visual center sits on the same horizontal flow line."""
+    if kw is None:
+        kw = kh
+    front_h = (rows - 1) * (kh + gap) + kh
+    z_extent = (cols - 1) * (kw + gap) + kw
+    depth_y = abs(_CAB_DEPTH_VEC[1]) * z_extent
+    total_h = front_h + depth_y
+    return center_y - total_h / 2
+
+
 def _next_x(grid, gap):
-    """Next x-cursor = right edge of grid's projected bbox + gap."""
-    xmin, xmax, ymin, ymax = grid["bbox2d"]
-    return xmax + gap
+    """Next x-cursor = front-face right of grid + gap. (We measure from the
+    front face, not bbox, so cabinet depth doesn't push the next stage
+    visually downstream — adjacent backs are allowed to overlap in z.)"""
+    return grid["x_right"] + gap
 
 
-def _stage_label(ax, grid, *, name, sub=None, name_fs=8.6, sub_fs=6.6):
-    """Place stage name and sublabel below a grid, centered on the grid's
-    projected bbox. Labels sit BELOW any skip-U dip (at LABEL_Y_OFFSET)."""
-    xmin, xmax, ymin, ymax = grid["bbox2d"]
-    cx = (xmin + xmax) / 2
-    ax.text(cx, ARCH_BASE_Y + LABEL_Y_OFFSET, name,
-            ha="center", va="top",
-            fontsize=name_fs, color=TEXT_COLOR, fontweight="bold")
+def _stage_label_top(ax, grid, *, name, sub=None, name_fs=8.5, sub_fs=7.0,
+                     y_top_override=None):
+    """Place stage name + (optional) sub-label ABOVE the grid, centered on
+    the grid's projected bbox so labels clear the back-most kernel layer.
+    `y_top_override` lets callers push the label above an overlay
+    (e.g. the recurrent loop on top of GRU). Returns the y of the topmost
+    text baseline so the caller can position a header above all labels."""
+    xmin, xmax, _, ymax = grid["bbox2d"]
+    front_xmid = (xmin + xmax) / 2
+    front_top = y_top_override if y_top_override is not None else ymax
     if sub:
-        ax.text(cx, ARCH_BASE_Y + LABEL_Y_OFFSET - 0.28, sub,
-                ha="center", va="top",
+        y_sub = front_top + LABEL_GAP
+        y_title = y_sub + SUB_GAP
+        ax.text(front_xmid, y_sub, sub,
+                ha="center", va="baseline",
                 fontsize=sub_fs, color="#555", style="italic",
-                linespacing=1.1)
+                linespacing=1.05)
+    else:
+        y_title = front_top + LABEL_GAP
+    ax.text(front_xmid, y_title, name,
+            ha="center", va="baseline",
+            fontsize=name_fs, color=TEXT_COLOR, fontweight="bold")
+    return y_title
 
 
-def _draw_block_skip(ax, grid, *, depth=0.7, label=None):
-    """Per-block residual U beneath a kernel grid. Goes from just below the
-    block's front-bottom-left corner across to its front-bottom-right
-    corner."""
+def _draw_block_skip(ax, grid, *, depth=SKIP_DEPTH):
+    """Per-block residual ⊔-staple beneath a kernel grid. Drops from just
+    below the block's front-bottom-left corner, runs across, climbs back
+    up to the front-bottom-right corner. Rendered in flow-arrow black."""
     x0 = grid["x_left"] - 0.05
     x1 = grid["x_right"] + 0.05
-    y_top = ARCH_BASE_Y - 0.05
-    draw_skip_U(ax, x0, x1, y_top, depth=depth, color=CYAN,
-                lw=1.3, label=label, label_fontsize=7.5)
+    y_top = grid["y_bottom"] - 0.05
+    draw_skip_staple(ax, x0, x1, y_top,
+                     depth=depth, corner_r=SKIP_CORNER_R,
+                     color=SKIP_COLOR, lw=SKIP_LW)
 
 
 def _connect_stages(ax, stage_records):
@@ -464,23 +458,23 @@ def _connect_stages(ax, stage_records):
 
 
 def _stage_right_anchor(rec):
-    """2D anchor on the right side of a stage for flow-arrow start."""
+    """2D anchor on the right side of a stage for flow-arrow start. Y sits
+    at the visual bbox center (= ARCH_CENTER_Y after the depth-aware shift)
+    so arrows trace a single horizontal line through every stage."""
     if "grid" in rec:
         g = rec["grid"]
-        # Use the front-face right-mid (z=0, x=x_right, y=center).
-        return _proj(g["x_right"],
-                     (g["y_bottom"] + g["y_top"]) / 2,
-                     0.0)
+        _, _, ymin, ymax = g["bbox2d"]
+        return np.array([g["x_right"], 0.5 * (ymin + ymax)])
     ro = rec["ro"]
     return np.array([ro["x_right"], (ro["y_bottom"] + ro["y_top"]) / 2])
 
 
 def _stage_left_anchor(rec):
-    """2D anchor on the left side of a stage for flow-arrow end."""
+    """2D anchor on the left side of a stage for flow-arrow end. Y sits at
+    the visual bbox center, mirroring `_stage_right_anchor`."""
     if "grid" in rec:
         g = rec["grid"]
-        return _proj(g["x_left"],
-                     (g["y_bottom"] + g["y_top"]) / 2,
-                     0.0)
+        _, _, ymin, ymax = g["bbox2d"]
+        return np.array([g["x_left"], 0.5 * (ymin + ymax)])
     ro = rec["ro"]
     return np.array([ro["x_left"], (ro["y_bottom"] + ro["y_top"]) / 2])

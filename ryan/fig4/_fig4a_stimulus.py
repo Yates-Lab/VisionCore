@@ -35,7 +35,7 @@ from _fig4a_glyphs import (
 # ──────────────────────────────────────────────────────────────────────────
 # Shared cabinet projection
 # ──────────────────────────────────────────────────────────────────────────
-CABINET_ALPHA = np.deg2rad(30.0)
+CABINET_ALPHA = np.deg2rad(45.0)
 CABINET_DEPTH = 0.5
 DEPTH_VEC = np.array([
     -np.cos(CABINET_ALPHA) * CABINET_DEPTH,

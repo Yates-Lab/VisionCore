@@ -25,11 +25,15 @@ TEXT_COLOR = "#222222"
 
 
 # ──────────────────────────────────────────────────────────────────────────
-# Cabinet projection (shared with stimulus half)
+# Cabinet projection (architecture half)
 # +x right, +y up, +z INTO the page → projects to (Δx, Δy) per unit z.
-# Same constants as _fig4a_stimulus.py so both halves render in one frame.
+# The stimulus half (_fig4a_stimulus.py) keeps its own CABINET_ALPHA /
+# CABINET_DEPTH so the two halves can be tuned independently. Classical
+# cabinet projection: depth is foreshortened to half so cube-shaped kernels
+# read as square-fronted blocks (slant edge ≈ ½ vertical edge) instead of
+# slanted rhombi. α=45° is the standard cabinet angle.
 # ──────────────────────────────────────────────────────────────────────────
-CAB_ALPHA = np.deg2rad(30.0)
+CAB_ALPHA = np.deg2rad(45.0)
 CAB_DEPTH = 0.5
 CAB_DEPTH_VEC = np.array([
     -np.cos(CAB_ALPHA) * CAB_DEPTH,
@@ -737,21 +741,86 @@ def draw_skip_U(ax, x0, x1, y_top, *, depth=0.6, color=CYAN, lw=1.2,
                 color=color, style="italic", zorder=zorder + 0.1)
 
 
+def draw_skip_staple(ax, x0, x1, y_top, *, depth=0.6, corner_r=0.12,
+                     color="#222", lw=1.1, zorder=1.6):
+    """Inverted-U (⊔) residual connector: drops from (x0, y_top), runs
+    horizontally across the bottom, climbs back up to (x1, y_top). Square
+    routing with rounded corners — reads as a hardware-trace style bypass
+    rather than a smooth arc."""
+    from matplotlib.path import Path
+    from matplotlib.patches import PathPatch
+    r = min(corner_r, depth * 0.5, (x1 - x0) * 0.45)
+    y_bot = y_top - depth
+    verts = [
+        (x0, y_top),               # start at top-left
+        (x0, y_bot + r),           # straight down to start of corner
+        (x0, y_bot),               # quadratic ctrl: bottom-left corner
+        (x0 + r, y_bot),           # corner end
+        (x1 - r, y_bot),           # across the bottom
+        (x1, y_bot),               # quadratic ctrl: bottom-right corner
+        (x1, y_bot + r),           # corner end
+        (x1, y_top),               # straight up to end
+    ]
+    codes = [Path.MOVETO,
+             Path.LINETO,
+             Path.CURVE3, Path.CURVE3,
+             Path.LINETO,
+             Path.CURVE3, Path.CURVE3,
+             Path.LINETO]
+    ax.add_patch(PathPatch(Path(verts, codes),
+                           edgecolor=color, facecolor="none",
+                           lw=lw, zorder=zorder,
+                           capstyle="round", joinstyle="round"))
+
+
 def draw_recurrent_loop(ax, x0, x1, y_top, *, arc_height=0.9, color="#7e3f8a",
-                        lw=1.2, zorder=4.5, label="h$_{t-1}$",
-                        label_fontsize=7.0):
-    """Curved arrow arching from (x1, y_top) up and over to (x0, y_top),
-    suggesting that the layer's output feeds back as its next-step input."""
+                        lw=1.4, zorder=4.5, label="h$_{t-1}$",
+                        label_fontsize=7.0, inset=0.18):
+    """Tall closed loop perched on top of a block, indicating recurrence.
+    Two near-vertical legs (input on the left, output on the right) connected
+    by a flat top, drawn as a single rounded rectangular path with an
+    arrowhead on the descending (left) leg.
+
+    `x0` (left) and `x1` (right) are the block's left/right x; `y_top` is the
+    block's projected top. `inset` shrinks the loop horizontally so it stays
+    visually planted on the block."""
+    from matplotlib.path import Path
     from matplotlib.patches import FancyArrowPatch
+    span = x1 - x0
+    lx = x0 + inset * span
+    rx = x1 - inset * span
+    base_y = y_top + 0.04
+    top_y = y_top + arc_height
+    corner_r = min(0.18, (rx - lx) * 0.35, arc_height * 0.45)
+
+    # Use a FancyArrowPatch along a custom path to get an arrowhead on the
+    # descending leg. Construct an explicit rounded-rectangle path: up the
+    # right leg → across the top → down the left leg into the block top.
+    verts = [
+        (rx, base_y),                       # start: rises from right edge
+        (rx, top_y - corner_r),             # straight up
+        (rx, top_y),                        # ctrl: top-right round
+        (rx - corner_r, top_y),             # corner end
+        (lx + corner_r, top_y),             # across the top
+        (lx, top_y),                        # ctrl: top-left round
+        (lx, top_y - corner_r),             # corner end
+        (lx, base_y),                       # straight down (arrow target)
+    ]
+    codes = [Path.MOVETO,
+             Path.LINETO,
+             Path.CURVE3, Path.CURVE3,
+             Path.LINETO,
+             Path.CURVE3, Path.CURVE3,
+             Path.LINETO]
+    path = Path(verts, codes)
     ax.add_patch(FancyArrowPatch(
-        (x1, y_top + 0.02), (x0, y_top + 0.02),
-        arrowstyle="->", lw=lw, color=color,
-        connectionstyle=f"arc3,rad={-arc_height / max(x1 - x0, 1e-3) * 0.9}",
-        zorder=zorder,
-        mutation_scale=10,
+        path=path,
+        arrowstyle="-|>", lw=lw, color=color,
+        zorder=zorder, mutation_scale=12,
+        joinstyle="round", capstyle="round",
     ))
     if label is not None:
-        ax.text((x0 + x1) / 2, y_top + arc_height + 0.10, label,
+        ax.text((lx + rx) / 2, top_y + 0.08, label,
                 ha="center", va="bottom", fontsize=label_fontsize,
                 color=color, style="italic", zorder=zorder + 0.1)
 
@@ -902,7 +971,12 @@ def draw_neuron_trace_panel(ax, t, robs_rate, rhat_rate, x0, y0, w, h, *,
                     linespacing=1.0, clip_on=False)
 
 
-def draw_pool_glyph(ax, x, y, *, color="#444", fontsize=7.5):
-    """Tiny '↓2' annotation marking a 2× spatial downsample."""
-    ax.text(x, y, "↓2", ha="center", va="center",
-            fontsize=fontsize, color=color, fontweight="bold")
+def draw_pool_glyph(ax, x, y, *, color="#222", fontsize=7.5, zorder=12.0):
+    """Small '↓2×' badge marking a 2× spatial downsample on a flow arrow.
+    Default zorder sits above kernel back-layers so the white bbox cleanly
+    obscures any kernels behind the badge."""
+    ax.text(x, y, "↓2×", ha="center", va="center",
+            fontsize=fontsize, color=color, fontweight="bold",
+            zorder=zorder,
+            bbox=dict(boxstyle="round,pad=0.18",
+                      facecolor="white", edgecolor=color, linewidth=0.7))

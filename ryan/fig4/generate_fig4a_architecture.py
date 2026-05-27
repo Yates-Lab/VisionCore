@@ -20,9 +20,11 @@ def main(recompute=False):
     configure_matplotlib()
     assets = load_panel_a_assets(recompute=recompute)
 
-    fig, ax = plt.subplots(figsize=(12, 6.2))
+    # Figure size is sacrificial — bbox_inches="tight" crops to the axes box,
+    # which set_aspect("equal") inside plot_panel_a_architecture sizes to the
+    # true data aspect (no horizontal stretch from tight_layout).
+    fig, ax = plt.subplots(figsize=(12, 6.0))
     plot_panel_a_architecture(ax, assets)
-    fig.tight_layout(pad=0.1)
 
     out_pdf = FIG_DIR / "panel_a_architecture.pdf"
     out_png = FIG_DIR / "panel_a_architecture.png"
