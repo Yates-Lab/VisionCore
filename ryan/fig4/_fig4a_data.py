@@ -47,7 +47,9 @@ class PanelAAssets:
     behavior_t: np.ndarray              # (T,) seconds (fixrsvp FEM trace)
     behavior_eyepos: np.ndarray         # (T, 2) deg
     behavior_speed: np.ndarray          # (T,) deg/s
+    behavior_roi_seq_px: np.ndarray     # (T, 2, 2) fixrsvp dset rois aligned to trace
     freeview_trace_px: np.ndarray       # (N, 2) pixel coords on backimage screen
+    freeview_roi_seq_px: np.ndarray     # (N, 2, 2) backimage dset rois for pinned window
 
 
 # ----------------------------------------------------------------------------
@@ -339,6 +341,7 @@ def _real_freeview_trace(session_dir, pix_per_deg, screen_shape, *,
         return None
     dset = DictDataset.load(str(dset_path))
     eyepos = np.asarray(dset["eyepos"])
+    roi_seq_full = np.asarray(dset["roi"])      # (N, 2, 2)
     trial_inds = np.asarray(dset.covariates["trial_inds"]).ravel().astype(int)
     if "dpi_valid" in dset.covariates:
         valid = np.asarray(dset.covariates["dpi_valid"]).ravel().astype(bool)
@@ -348,6 +351,12 @@ def _real_freeview_trace(session_dir, pix_per_deg, screen_shape, *,
     target_n = int(target_s * fs)
     H, W = screen_shape
     cx_pix, cy_pix = W / 2.0, H / 2.0
+
+    def _to_px(ep_seg):
+        return np.column_stack([
+            ep_seg[:, 0] * pix_per_deg + cx_pix,
+            -ep_seg[:, 1] * pix_per_deg + cy_pix,
+        ]).astype(np.float32)
 
     if PINNED_FREEVIEW is not None:
         pin_trial, pin_start = PINNED_FREEVIEW
@@ -362,12 +371,10 @@ def _real_freeview_trace(session_dir, pix_per_deg, screen_shape, *,
                 f"PINNED_FREEVIEW trial mismatch: pin says trial={pin_trial} "
                 f"but samples {pin_start}:{end} cover trials {seg_trials}")
         ep_seg = eyepos[pin_start:end]
+        roi_seg = roi_seq_full[pin_start:end].astype(np.int32)
         print(f"    real trace: pinned trial={pin_trial} start={pin_start} "
               f"({target_n} samples, {target_n/fs:.1f} s)")
-        return np.column_stack([
-            ep_seg[:, 0] * pix_per_deg + cx_pix,
-            -ep_seg[:, 1] * pix_per_deg + cy_pix,
-        ]).astype(np.float32)
+        return _to_px(ep_seg), roi_seg
 
     # Velocity threshold separating fixation from saccade (deg/s).
     fixation_vel_thresh = 20.0  # samples below this count as fixations
@@ -401,18 +408,15 @@ def _real_freeview_trace(session_dir, pix_per_deg, screen_shape, *,
             # Prefer high fixation fraction (clean look) with moderate spread.
             score = fix_frac * 10.0 + spread * 0.3
             if best is None or score > best[0]:
-                best = (score, window.copy())
+                best = (score, window.copy(),
+                        roi_seq_full[idxs[sl]].copy())
 
     if best is None:
         return None
-    score, ep_seg = best
+    score, ep_seg, roi_seg = best
     print(f"    real trace: {len(ep_seg)} samples ({len(ep_seg)/fs:.1f} s), "
           f"score={score:.2f}")
-    px = np.column_stack([
-        ep_seg[:, 0] * pix_per_deg + cx_pix,
-        -ep_seg[:, 1] * pix_per_deg + cy_pix,
-    ]).astype(np.float32)
-    return px
+    return _to_px(ep_seg), roi_seg.astype(np.int32)
 
 
 def _synth_freeview_trace(screen_shape, pix_per_deg, *, fs=120.0,
@@ -472,6 +476,7 @@ def _behavior_segment(session_dir: Path, fs: float = 120.0,
     from models.data.datasets import DictDataset
     dset = DictDataset.load(str(session_dir / "datasets" / "fixrsvp.dset"))
     eyepos = np.asarray(dset["eyepos"])
+    roi_seq_full = np.asarray(dset["roi"])      # (N, 2, 2)
     trial_inds = np.asarray(dset.covariates["trial_inds"]).ravel().astype(int)
 
     # Pick a long, well-fixated trial: small eye-position range, ≥ window_s of data.
@@ -498,12 +503,14 @@ def _behavior_segment(session_dir: Path, fs: float = 120.0,
     if best is None:
         best = unique[0]
     mask = trial_inds == int(best)
-    ep = eyepos[mask][:target_n]
+    sample_idxs = np.where(mask)[0][:target_n]
+    ep = eyepos[sample_idxs]
+    roi_seg = roi_seq_full[sample_idxs].astype(np.int32)
     t = np.arange(len(ep)) / fs
     # Speed (deg/s) — finite difference
     dxy = np.diff(ep, axis=0, prepend=ep[:1])
     speed = np.linalg.norm(dxy, axis=1) * fs
-    return t, ep.astype(np.float32), speed.astype(np.float32)
+    return t, ep.astype(np.float32), speed.astype(np.float32), roi_seg
 
 
 # ----------------------------------------------------------------------------
@@ -595,13 +602,16 @@ def load_panel_a_assets(recompute: bool = False) -> PanelAAssets:
             print(f"    cube[-1] replaced with test-screen ROI ({th}×{tw})")
 
     print("  extracting behavior segment...")
-    beh_t, beh_eye, beh_speed = _behavior_segment(sess_dir)
+    beh_t, beh_eye, beh_speed, beh_roi_seq = _behavior_segment(sess_dir)
 
     print("  extracting free-viewing eye trace...")
-    freeview_trace_px = _real_freeview_trace(sess_dir, pix_per_deg, screen_shape)
-    if freeview_trace_px is None:
+    freeview_result = _real_freeview_trace(sess_dir, pix_per_deg, screen_shape)
+    if freeview_result is None:
         print("    (real trace unavailable — falling back to synthesis)")
         freeview_trace_px = _synth_freeview_trace(screen_shape, pix_per_deg)
+        freeview_roi_seq = np.zeros((len(freeview_trace_px), 2, 2), dtype=np.int32)
+    else:
+        freeview_trace_px, freeview_roi_seq = freeview_result
 
     arch = _load_arch_info()
 
@@ -617,7 +627,9 @@ def load_panel_a_assets(recompute: bool = False) -> PanelAAssets:
         behavior_t=beh_t,
         behavior_eyepos=beh_eye,
         behavior_speed=beh_speed,
+        behavior_roi_seq_px=beh_roi_seq,
         freeview_trace_px=freeview_trace_px,
+        freeview_roi_seq_px=freeview_roi_seq,
     )
 
     CACHE_DIR.mkdir(parents=True, exist_ok=True)

@@ -21,13 +21,13 @@ def main(recompute=False):
     configure_matplotlib()
     assets = load_panel_a_assets(recompute=recompute)
 
-    # Width chosen so the data-coords aspect matches the figure aspect at
-    # this height. CANVAS_W : CANVAS_H is the data extent of the axes.
-    fig_h = 3.6
-    fig_w = fig_h * (CANVAS_W / CANVAS_H)
-    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+    # Draw at a generous figure size; plot_panel_a_stimulus tightens the
+    # axes to its drawn content, and bbox_inches="tight" below crops the
+    # figure to that. The width:height ratio doesn't need to match the
+    # data extent because the axes auto-sizes within the figure.
+    fig, ax = plt.subplots(figsize=(10, 4))
     plot_panel_a_stimulus(ax, assets)
-    fig.tight_layout(pad=0.15)
+    fig.tight_layout(pad=0.1)
 
     out_pdf = FIG_DIR / "panel_a_stimulus.pdf"
     out_png = FIG_DIR / "panel_a_stimulus.png"

@@ -170,10 +170,63 @@ def _apply_h(c, pts):
                             (d * x + f * y + g) / denom])
 
 
+# ROI sequence cadence (samples at 120 Hz):
+#   sweep boxes draw every SWEEP_STEP samples (low alpha, thin)
+#   snapshot boxes draw every SNAPSHOT_STEP samples (high alpha, crisp)
+ROI_SNAPSHOT_ALPHA = 0.85
+ROI_SNAPSHOT_LW = 1.0
+
+
+def _pick_fixation_rois(trace_px, *, fs=120.0, pix_per_deg=None,
+                        vel_thresh_deg_s=20.0, min_dur_s=0.10,
+                        min_sep_deg=1.0):
+    """Pick one sample index per fixation in a gaze trace.
+
+    A "fixation" is a contiguous run of samples below ``vel_thresh_deg_s``
+    lasting at least ``min_dur_s``. The median sample of each run is
+    chosen as the snapshot index. Indices closer than ``min_sep_deg`` to
+    a previously-kept snapshot (in screen-pixel space) are dropped to
+    avoid crowding.
+    """
+    trace = np.asarray(trace_px, dtype=float)
+    if len(trace) < 2 or pix_per_deg is None:
+        return []
+    dxy = np.diff(trace, axis=0, prepend=trace[:1])
+    speed_px_per_sample = np.linalg.norm(dxy, axis=1)
+    vel_thresh_px = vel_thresh_deg_s * pix_per_deg / fs
+    fix = speed_px_per_sample < vel_thresh_px
+
+    min_n = max(2, int(round(min_dur_s * fs)))
+    runs = []
+    i = 0
+    while i < len(fix):
+        if fix[i]:
+            j = i
+            while j < len(fix) and fix[j]:
+                j += 1
+            if j - i >= min_n:
+                runs.append((i, j))
+            i = j
+        else:
+            i += 1
+
+    min_sep_px = min_sep_deg * pix_per_deg
+    kept = []
+    for a, b in runs:
+        mid = (a + b) // 2
+        c = trace[mid]
+        if any(np.hypot(c[0] - trace[k, 0], c[1] - trace[k, 1]) < min_sep_px
+               for k in kept):
+            continue
+        kept.append(mid)
+    return kept
+
+
 def _project_screen(ax, image, corners3d, *, source_box=None,
                     roi=None, screen_shape=None,
                     eye_trace_px=None, eye_trace_lw=0.8,
                     eye_trace_color="#e6c43a",
+                    roi_sequence_px=None,
                     zorder=2, edge_color="#222", edge_width=0.9,
                     roi_color=CYAN, roi_width=2.0):
     """Render a screen face. Optionally crop the image to `source_box` and
@@ -231,7 +284,23 @@ def _project_screen(ax, image, corners3d, *, source_box=None,
                            alpha=0.95, zorder=zorder + 0.15,
                            solid_capstyle="round", solid_joinstyle="round"))
 
-    return dst_quad, roi_quad, H_fwd
+    last_snapshot_quad = None
+    if roi_sequence_px is not None and len(roi_sequence_px) > 0:
+        seq = np.asarray(roi_sequence_px, dtype=float)
+        for r in seq:
+            r0, r1 = float(r[0, 0]), float(r[0, 1])
+            c0, c1 = float(r[1, 0]), float(r[1, 1])
+            src = np.array([[c0, r1], [c1, r1], [c1, r0], [c0, r0]],
+                           dtype=np.float64)
+            quad = _apply_h(H_fwd, src)
+            ax.add_patch(Polygon(quad, closed=True, fill=False,
+                                 edgecolor=roi_color,
+                                 linewidth=ROI_SNAPSHOT_LW,
+                                 alpha=ROI_SNAPSHOT_ALPHA,
+                                 zorder=zorder + 0.22))
+        last_snapshot_quad = quad
+
+    return dst_quad, roi_quad, H_fwd, last_snapshot_quad
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -361,17 +430,27 @@ def plot_panel_a_stimulus(ax, assets):
         z = layer * TRAIN_Z_STEP
         x = TRAIN_CX_FRONT - layer * TRAIN_X_STEP
         corners = screen_corners_3d((x, SCR_CY, z), SCR_W, SCR_H)
-        # Eye trace overlay on the natural (front) image only.
+        # Eye trace + ROI sequence overlay on the natural (front) image only.
         eye_trace = assets.freeview_trace_px if key == "backimage" else None
-        dst, _, H_fwd = _project_screen(
+        if key == "backimage":
+            fix_idx = _pick_fixation_rois(
+                assets.freeview_trace_px,
+                pix_per_deg=assets.pix_per_deg,
+            )
+            roi_seq = (assets.freeview_roi_seq_px[fix_idx]
+                       if len(fix_idx) else None)
+            print(f"    [roi seq] backimage fixations kept: {len(fix_idx)}")
+        else:
+            roi_seq = None
+        # Static representative ROI suppressed — the sequence's last
+        # snapshot now serves as the "current frame" marker.
+        dst, _, H_fwd, _ = _project_screen(
             ax, assets.screens[key], corners,
-            # ROI only on the natural-image (front) screen for continuity
-            # with the test screen; gratings / Gaborium stay clean.
-            roi=assets.rois.get(key) if key == "backimage" else None,
             screen_shape=assets.screen_shape,
             eye_trace_px=eye_trace,
             eye_trace_lw=1.0,
             eye_trace_color="#ffd84d",
+            roi_sequence_px=roi_seq,
             roi_width=1.4,
             zorder=2 + i,
         )
@@ -404,7 +483,10 @@ def plot_panel_a_stimulus(ax, assets):
         -assets.behavior_eyepos[:, 1] * ppd + roi_rcent,   # +y deg → up
     ])
 
-    test_dst, test_roi_quad, _ = _project_screen(
+    # Test screen carries the single static ROI used to populate cube[-1]
+    # — keeps the magnification-line anchor visually identical to the lag
+    # cube's front face.
+    test_dst, test_roi_quad, _, _ = _project_screen(
         ax, assets.screens["fixrsvp"], test_corners,
         source_box=zoom_box,
         roi=fixrsvp_roi,
@@ -491,11 +573,11 @@ def plot_panel_a_stimulus(ax, assets):
 
     cube_top_2d = cube_p2[[3, 6, 7], 1].max()
     cube_cx_proj = cube_p2[:, 0].mean()
-    ax.text(cube_cx_proj, cube_top_2d + 0.45, "Model input",
+    ax.text(cube_cx_proj, cube_top_2d + 1.10, "Model input",
             ha="center", va="bottom",
             fontsize=10, color=TEXT_COLOR, fontweight="bold")
-    ax.text(cube_cx_proj, cube_top_2d + 0.05,
-            "ROI × time", ha="center", va="bottom",
+    ax.text(cube_cx_proj, cube_top_2d + 0.70,
+            "space × space × time", ha="center", va="bottom",
             fontsize=7.0, color="#555", style="italic")
 
     # ── Scale bars under each stimulus zone ─────────────────────────────
@@ -550,6 +632,39 @@ def plot_panel_a_stimulus(ax, assets):
         arrowprops=dict(arrowstyle="<-", lw=0.9, color=ARROW_COLOR),
     )
     mid = 0.5 * (p_front_bot + p_back_bot) + np.array([0.0, -0.25])
-    ax.text(mid[0], mid[1], f"time  ({n_lags} lags · {ms:.0f} ms)",
+    ax.text(mid[0], mid[1], f"{ms:.0f} ms",
             ha="center", va="top",
             fontsize=7, color=TEXT_COLOR, style="italic")
+    ax.text(mid[0], mid[1] - 0.40, "(120 Hz)",
+            ha="center", va="top",
+            fontsize=6.5, color="#555", style="italic")
+
+    # ── Front-face spatial extent labels (width below, height to left) ──
+    # Cube front face spans the same pixel ROI as the model input;
+    # convert to degrees using the screen pixels-per-degree.
+    cube_h_deg = cube.shape[1] / ppd
+    cube_w_deg = cube.shape[2] / ppd
+    fLL, fLR, fUR, fUL = cube_p2[0], cube_p2[1], cube_p2[2], cube_p2[3]
+    # Width label: below the front face bottom edge, outside the silhouette.
+    width_mid = 0.5 * (fLL + fLR) + np.array([0.0, -0.18])
+    ax.text(width_mid[0], width_mid[1], f"{cube_w_deg:.1f}°",
+            ha="center", va="top", fontsize=7,
+            color=TEXT_COLOR, style="italic")
+    # Height label: just outside the front face's right edge.
+    height_mid = 0.5 * (fLR + fUR) + np.array([0.18, 0.0])
+    ax.text(height_mid[0], height_mid[1], f"{cube_h_deg:.1f}°",
+            ha="left", va="center", fontsize=7,
+            color=TEXT_COLOR, style="italic", rotation=90)
+
+    # ── Tighten axes limits to the actual drawn content ─────────────────
+    xs, ys = [], []
+    for q in train_dst_quads + [test_dst, cube_p2]:
+        xs.extend([q[:, 0].min(), q[:, 0].max()])
+        ys.extend([q[:, 1].min(), q[:, 1].max()])
+    ys.append(header_y + 0.5)         # top of headers
+    ys.append(cube_top_2d + 1.4)      # top of Model input header
+    ys.append(min(train_bar_y, test_bar_y) - 0.7)   # below scalebar labels
+    ys.append(mid[1] - 0.3)           # below cube time-axis label
+    pad_x, pad_y = 0.4, 0.2
+    ax.set_xlim(min(xs) - pad_x, max(xs) + pad_x)
+    ax.set_ylim(min(ys) - pad_y, max(ys) + pad_y)
