@@ -1,5 +1,5 @@
 """
-Figure 2 panel I: PSTH and FEM eigenspectra (median + IQR per subject),
+Figure 3 panel E: PSTH and FEM eigenspectra (median + IQR per subject),
 log y-scale.
 """
 import numpy as np
@@ -9,7 +9,7 @@ from _panel_common import standalone_save
 from compute_fig2_data import load_fig2_data
 
 
-def plot_panel_i(ax=None, refresh=False, data=None, max_dims=10):
+def plot_panel_e(ax=None, refresh=False, data=None, max_dims=10):
     if data is None:
         data = load_fig2_data(refresh=refresh)
     if ax is None:
@@ -56,6 +56,6 @@ def plot_panel_i(ax=None, refresh=False, data=None, max_dims=10):
 
 
 if __name__ == "__main__":
-    fig, ax = plot_panel_i()
+    fig, ax = plot_panel_e()
     fig.tight_layout()
-    standalone_save(fig, "panel_i_eigenspectra")
+    standalone_save(fig, "panel_e_eigenspectra")

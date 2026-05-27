@@ -1,5 +1,5 @@
 """
-Figure 2 panel H: Δz (corrected - uncorrected) vs counting window per
+Figure 3 panel D: Δz (corrected - uncorrected) vs counting window per
 subject, with shuffle null 95% CI bands.
 """
 import numpy as np
@@ -10,7 +10,7 @@ from _panel_common import standalone_save
 from compute_fig2_data import load_fig2_data
 
 
-def plot_panel_h(ax=None, refresh=False, data=None):
+def plot_panel_d(ax=None, refresh=False, data=None):
     if data is None:
         data = load_fig2_data(refresh=refresh)
     if ax is None:
@@ -64,6 +64,6 @@ def plot_panel_h(ax=None, refresh=False, data=None):
 
 
 if __name__ == "__main__":
-    fig, ax = plot_panel_h()
+    fig, ax = plot_panel_d()
     fig.tight_layout()
-    standalone_save(fig, "panel_h_effect_size")
+    standalone_save(fig, "panel_d_effect_size")

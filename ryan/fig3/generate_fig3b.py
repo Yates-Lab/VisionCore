@@ -1,5 +1,5 @@
 """
-Figure 2 panel F: noise correlation scatter (FEM-corrected vs uncorrected)
+Figure 3 panel B: noise correlation scatter (FEM-corrected vs uncorrected)
 for the primary counting window, colored by subject.
 """
 import numpy as np
@@ -9,7 +9,7 @@ from _panel_common import standalone_save
 from compute_fig2_data import load_fig2_data
 
 
-def plot_panel_f(ax=None, refresh=False, data=None):
+def plot_panel_b(ax=None, refresh=False, data=None):
     if data is None:
         data = load_fig2_data(refresh=refresh)
     if ax is None:
@@ -46,6 +46,6 @@ def plot_panel_f(ax=None, refresh=False, data=None):
 
 
 if __name__ == "__main__":
-    fig, ax = plot_panel_f()
+    fig, ax = plot_panel_b()
     fig.tight_layout()
-    standalone_save(fig, "panel_f_noisecorr_scatter")
+    standalone_save(fig, "panel_b_noisecorr_scatter")

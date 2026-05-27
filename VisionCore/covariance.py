@@ -767,7 +767,10 @@ def estimate_rate_covariance(SpikeCounts, EyeTraj, T_idx, n_bins=25,
     Ctotal : ndarray (C, C), optional
         Total covariance for physical limit check.
     intercept_mode : str
-        'linear', 'isotonic', 'log_euclidean', or 'lowest_bin'.
+        'linear', 'isotonic', 'log_euclidean', 'lowest_bin', or
+        'below_threshold'. The 'below_threshold' mode takes a
+        `threshold` kwarg (degrees) and pools all pair samples with
+        Δe < threshold into a single bin used as the intercept.
 
     Returns
     -------
@@ -829,6 +832,28 @@ def estimate_rate_covariance(SpikeCounts, EyeTraj, T_idx, n_bins=25,
         Crate = fit_intercept_log_euclidean(Ceye, bin_centers, count_e, **ikw)
     elif intercept_mode == 'lowest_bin':
         Crate = Ceye[0].copy()
+    elif intercept_mode == 'below_threshold':
+        threshold = float(ikw.get('threshold', 0.05))
+        # Recompute conditional second moments pooling all pairs with
+        # Δe < threshold into a single bin. Independent of the caller's
+        # n_bins, so the intercept estimate is session-invariant.
+        EyeFlat = EyeTraj.reshape(EyeTraj.shape[0], -1)
+        max_dist = float(
+            (torch.cdist(EyeFlat, EyeFlat).max()
+             / torch.sqrt(torch.tensor(float(EyeTraj.shape[1]),
+                                       device=EyeTraj.device,
+                                       dtype=EyeTraj.dtype))
+             ).detach().cpu()
+        )
+        bin_edges_thr = np.array([0.0, threshold, max(max_dist, threshold) + 1e-6])
+        MM_thr, _, count_thr, _ = compute_conditional_second_moments(
+            SpikeCounts, EyeTraj, T_idx, n_bins=bin_edges_thr
+        )
+        if count_thr[0] == 0:
+            raise ValueError(
+                f"below_threshold: no pairs with Δe < {threshold}"
+            )
+        Crate = MM_thr[0] - Erate[:, None] * Erate[None, :]
     else:
         raise ValueError(f"Invalid intercept_mode: {intercept_mode!r}")
 

@@ -1,15 +1,13 @@
 """
-Compose Figure 2: arrange panels C-K (FEM-modulation histogram, Fano
-factor analysis, noise correlations, and subspace alignment) into a
-single composite figure.
+Compose Figure 2:
+    Row 1: A (eye + spike traces) + B (Δ-eye histogram + rate variance)
+    Row 2: C (FEM modulation) + D (Δ variance vs rate) + E (Fano factor)
 
-Each panel is rendered by its own module (generate_fig2c.py … 2k.py) that
-loads precomputed derived data from compute_fig2_data.py. This composer
-just lays them out with GridSpec and saves the result.
+Population panels have moved to Figure 3.
 
 Usage:
     uv run ryan/fig2/generate_figure2.py
-    uv run ryan/fig2/generate_figure2.py --refresh    # recompute derived data
+    uv run ryan/fig2/generate_figure2.py --refresh
 """
 import argparse
 import matplotlib.pyplot as plt
@@ -17,36 +15,30 @@ from matplotlib.gridspec import GridSpec
 
 from _panel_common import FIG_DIR
 from compute_fig2_data import load_fig2_data
+from generate_fig2a import plot_panel_a, make_axes as make_axes_a
 from generate_fig2c import plot_panel_c
 from generate_fig2d import plot_panel_d
 from generate_fig2e import plot_panel_e
-from generate_fig2f import plot_panel_f
-from generate_fig2g import plot_panel_g
-from generate_fig2h import plot_panel_h
-from generate_fig2i import plot_panel_i
-from generate_fig2j import plot_panel_j
-from generate_fig2k import plot_panel_k
 
 
 def compose(refresh=False):
     data = load_fig2_data(refresh=refresh)
 
-    fig = plt.figure(figsize=(14, 12), constrained_layout=True)
-    gs = GridSpec(3, 12, figure=fig, hspace=0.1, wspace=0.1)
+    fig = plt.figure(figsize=(14, 10))
+    gs = GridSpec(2, 3, height_ratios=[1.0, 1.0], hspace=0.35, wspace=0.32,
+                  figure=fig)
 
-    panels = [
-        ("C", plot_panel_c, gs[0, 0:4]),
-        ("D", plot_panel_d, gs[0, 4:8]),
-        ("E", plot_panel_e, gs[0, 8:12]),
-        ("F", plot_panel_f, gs[1, 0:4]),
-        ("G", plot_panel_g, gs[1, 4:8]),
-        ("H", plot_panel_h, gs[1, 8:12]),
-        ("I", plot_panel_i, gs[2, 0:4]),
-        ("J", plot_panel_j, gs[2, 4:8]),
-        ("K", plot_panel_k, gs[2, 8:12]),
-    ]
+    # --- Row 1: panel A (left half) + panel B (right half), both inside
+    # the lead-in 2x2 layout that A's make_axes builds.
+    axes_a = make_axes_a(fig, subplot_spec=gs[0, :])
+    plot_panel_a(axes=axes_a)
 
-    for letter, plot_fn, spec in panels:
+    # --- Row 2: C, D, E ---
+    for letter, plot_fn, spec in [
+        ("C", plot_panel_c, gs[1, 0]),
+        ("D", plot_panel_d, gs[1, 1]),
+        ("E", plot_panel_e, gs[1, 2]),
+    ]:
         ax = fig.add_subplot(spec)
         plot_fn(ax=ax, data=data)
         ax.set_title(letter, loc="left", fontweight="bold")

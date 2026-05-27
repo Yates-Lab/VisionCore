@@ -33,6 +33,17 @@ from VisionCore.covariance import (
 )
 from DataYatesV1 import get_free_device
 
+# Inclusion thresholds + intercept config are sourced from the figure-2
+# pipeline so this debug viewer always matches the published analysis.
+from compute_fig2_data import (
+    MIN_RATE_HZ,
+    MIN_PSTH_R2,
+    MIN_VAR,
+    INTERCEPT_MODE,
+    INTERCEPT_KWARGS,
+    INTERCEPT_THRESHOLD,
+)
+
 mpl.rcParams["pdf.fonttype"] = 42
 mpl.rcParams["ps.fonttype"] = 42
 
@@ -48,9 +59,6 @@ DT = 1.0 / 120.0
 WINDOW_BINS = 2              # counting window (~16.7 ms at 120 Hz)
 T_HIST_BINS = 1              # history window for eye trajectory similarity
 N_DIST_BINS = 15
-INTERCEPT_MODE = "linear"
-INTERCEPT_D_MAX = 0.2        # only fit bins with Δeye <= 0.2 deg
-INTERCEPT_KWARGS = {"d_max": INTERCEPT_D_MAX, "eval_at_first_bin": False}
 SUBJECTS = ("Allen", "Logan")
 
 N_SPLITS = 100               # random halvings for split-half PSTH R^2
@@ -217,22 +225,6 @@ def load_payloads(recompute=False):
 # ---------------------------------------------------------------------------
 # Plotting
 # ---------------------------------------------------------------------------
-def _weighted_linear_fit(x, y, w):
-    """Weighted least-squares linear fit y ~ a + b*x. Returns (a, b) or (nan, nan)."""
-    S0 = w.sum()
-    Sx = (w * x).sum()
-    Sxx = (w * x * x).sum()
-    Sy = (w * y).sum()
-    Sxy = (w * x * y).sum()
-    det = S0 * Sxx - Sx * Sx
-    if det <= 0:
-        return np.nan, np.nan
-    slope = (S0 * Sxy - Sx * Sy) / det
-    intercept = (Sxx * Sy - Sx * Sxy) / det
-    return float(intercept), float(slope)
-
-
-
 def plot_unit_page(p, j, fig):
     """Draw the 4-panel page for unit j of session payload p."""
     robs = p["robs"]
@@ -269,11 +261,37 @@ def plot_unit_page(p, j, fig):
     n_valid_bins = float(np.sum(np.isfinite(robs[:, :, j])))
     rate_hz = n_spikes / (n_valid_bins * DT) if n_valid_bins > 0 else np.nan
 
+    # Inclusion check — mirrors the fig2 pipeline's neuron-level filter
+    # in compute_fig2_data._compute_metrics.
+    reasons = []
+    if not np.isfinite(rate_hz) or rate_hz <= MIN_RATE_HZ:
+        reasons.append(f"rate {rate_hz:.2f}≤{MIN_RATE_HZ}")
+    if not np.isfinite(r2) or r2 <= MIN_PSTH_R2:
+        reasons.append(f"R²={r2:.3f}≤{MIN_PSTH_R2}")
+    if not (np.isfinite(var_tot) and var_tot > MIN_VAR):
+        reasons.append(f"Var(total)={var_tot:.3g}≤{MIN_VAR}")
+    if not np.isfinite(var_rate):
+        reasons.append("Crate non-finite")
+    if not np.isfinite(var_psth):
+        reasons.append("Cpsth non-finite")
+    if not np.isfinite(Erate[j]):
+        reasons.append("Erate non-finite")
+    included = len(reasons) == 0
+    status_text = "INCLUDED" if included else f"EXCLUDED: {', '.join(reasons)}"
+    status_color = "tab:green" if included else "tab:red"
+
     fig.suptitle(
         f"{p['session']}  unit {j} (orig {int(p['neuron_mask'][j])})  "
         f"  rate={rate_hz:.2f} Hz   R²(split-half)={r2:.3f}   "
         f"1-α={one_minus_alpha:.3f}",
         fontsize=11,
+    )
+    fig.text(
+        0.5, 0.945, status_text,
+        ha="center", va="bottom", fontsize=10, fontweight="bold",
+        color="white",
+        bbox=dict(facecolor=status_color, edgecolor="none",
+                  boxstyle="round,pad=0.3"),
     )
 
     gs = fig.add_gridspec(2, 2, hspace=0.35, wspace=0.3)
@@ -331,21 +349,15 @@ def plot_unit_page(p, j, fig):
                        color="tab:blue", alpha=0.7, edgecolor="k", linewidth=0.3,
                        label="Ceye[k, j, j]")
 
-    # Linear extrapolator over bins with 0 < x <= d_max
-    d_max = INTERCEPT_D_MAX
-    fit_mask = ok & (bin_centers > 0) & (bin_centers <= d_max)
-    if fit_mask.sum() >= 2:
-        a_fit, b_fit = _weighted_linear_fit(
-            bin_centers[fit_mask], var_by_bin[fit_mask], count_e[fit_mask],
-        )
-        if np.isfinite(a_fit):
-            x_line = np.array([0.0, d_max])
-            ax_cov.plot(x_line, a_fit + b_fit * x_line,
-                        color="tab:red", ls="--", lw=1.2,
-                        label=f"Linear fit (≤{d_max:g}°)")
-            ax_cov.scatter([0.0], [a_fit], marker="x", color="tab:red",
-                           s=80, linewidths=2.0, zorder=5,
-                           label=f"Intercept={a_fit:.3g}")
+    # Below-threshold pooling: shade the bins that contribute to Crate
+    # (Δe < INTERCEPT_THRESHOLD) and mark the resulting intercept.
+    ax_cov.axvspan(0.0, INTERCEPT_THRESHOLD, color="tab:red", alpha=0.12,
+                   label=f"pooled (Δe<{INTERCEPT_THRESHOLD:g}°)")
+    if np.isfinite(var_rate):
+        ax_cov.scatter([INTERCEPT_THRESHOLD / 2.0], [var_rate],
+                       marker="x", color="tab:red",
+                       s=80, linewidths=2.0, zorder=5,
+                       label=f"Intercept={var_rate:.3g}")
     if np.isfinite(var_psth):
         ax_cov.axhline(var_psth, color="tab:green", ls="--", lw=1.0,
                        label=f"PSTH var={var_psth:.3g}")

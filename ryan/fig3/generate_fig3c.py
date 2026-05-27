@@ -1,5 +1,5 @@
 """
-Figure 2 panel G: mean Fisher z noise correlation vs counting window,
+Figure 3 panel C: mean Fisher z noise correlation vs counting window,
 per subject, both uncorrected and FEM-corrected.
 """
 import numpy as np
@@ -10,7 +10,7 @@ from _panel_common import standalone_save
 from compute_fig2_data import load_fig2_data
 
 
-def plot_panel_g(ax=None, refresh=False, data=None):
+def plot_panel_c(ax=None, refresh=False, data=None):
     if data is None:
         data = load_fig2_data(refresh=refresh)
     if ax is None:
@@ -59,6 +59,6 @@ def plot_panel_g(ax=None, refresh=False, data=None):
 
 
 if __name__ == "__main__":
-    fig, ax = plot_panel_g()
+    fig, ax = plot_panel_c()
     fig.tight_layout()
-    standalone_save(fig, "panel_g_noisecorr_vs_window")
+    standalone_save(fig, "panel_c_noisecorr_vs_window")

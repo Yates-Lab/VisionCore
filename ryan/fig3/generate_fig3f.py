@@ -1,6 +1,6 @@
 """
-Figure 2 panel K: subspace alignment scatter — PSTH variance captured by
-the FEM subspace (X) vs FEM variance captured by the PSTH subspace (Y).
+Figure 3 panel F: participation-ratio scatter (FEM vs PSTH), one point per
+session, colored by subject.
 """
 import numpy as np
 import matplotlib.pyplot as plt
@@ -9,7 +9,7 @@ from _panel_common import standalone_save
 from compute_fig2_data import load_fig2_data
 
 
-def plot_panel_k(ax=None, refresh=False, data=None):
+def plot_panel_f(ax=None, refresh=False, data=None):
     if data is None:
         data = load_fig2_data(refresh=refresh)
     if ax is None:
@@ -19,20 +19,21 @@ def plot_panel_k(ax=None, refresh=False, data=None):
 
     SUBJECT_COLORS = data["SUBJECT_COLORS"]
     sub_subjects = data["sub_subjects"]
-    var_p_given_f = data["var_p_given_f"]
-    var_f_given_p = data["var_f_given_p"]
+    pr_fem_list = data["pr_fem_list"]
+    pr_psth_list = data["pr_psth_list"]
 
     for subj in sorted(set(sub_subjects)):
-        s_mask = [s == subj for s in sub_subjects]
-        ax.scatter(np.array(var_p_given_f)[s_mask],
-                   np.array(var_f_given_p)[s_mask],
+        s_mask = np.array(sub_subjects) == subj
+        ax.scatter(np.array(pr_fem_list)[s_mask],
+                   np.array(pr_psth_list)[s_mask],
                    c=SUBJECT_COLORS.get(subj, "gray"), s=40,
                    edgecolors="black", linewidths=0.5, label=subj)
-    ax.plot([0, 1], [0, 1], "k--", alpha=0.3)
-    ax.set_xlabel("X: PSTH var in FEM subspace")
-    ax.set_ylabel("Y: FEM var in PSTH subspace")
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
+    pr_max = max(np.max(pr_psth_list), np.max(pr_fem_list)) * 1.1
+    ax.plot([0, pr_max], [0, pr_max], "k--", alpha=0.3)
+    ax.set_xlim(0, pr_max)
+    ax.set_ylim(0, pr_max)
+    ax.set_xlabel("FEM PR")
+    ax.set_ylabel("PSTH PR")
     ax.legend(frameon=False, fontsize=7)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -41,6 +42,6 @@ def plot_panel_k(ax=None, refresh=False, data=None):
 
 
 if __name__ == "__main__":
-    fig, ax = plot_panel_k()
+    fig, ax = plot_panel_f()
     fig.tight_layout()
-    standalone_save(fig, "panel_k_subspace_alignment")
+    standalone_save(fig, "panel_f_participation_ratio")
