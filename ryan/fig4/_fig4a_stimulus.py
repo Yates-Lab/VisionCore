@@ -424,7 +424,7 @@ SCR_CY = 6.5
 # screens. TRAIN_CX_FRONT keeps the back-most screen clear of the left edge.
 TRAIN_CX_FRONT = 7.8       # world x of the front (natural-image) screen
 TRAIN_X_STEP = 0.8         # leftward per layer
-TRAIN_Z_STEP = 3.4         # back-into-page per layer
+TRAIN_Z_STEP = 2.6         # back-into-page per layer (sets the stack's Y span)
 
 # Test screen — pulled in close to the training stack (kept just clear of the
 # coplanar front screen so they don't intersect).
@@ -508,10 +508,17 @@ def plot_panel_a_stimulus(ax, assets):
             front_screen_homography = H_fwd
 
     # ── Test screen, zoomed to central TEST_ZOOM_DEG ────────────────────
+    # Vertically center the test screen on the training stack's visual center.
+    # The z-stagger lifts the back training screens, so the stack's bbox
+    # center sits above SCR_CY; matching the test screen to it aligns the
+    # "model input" screen with the middle of the training stack. The lag
+    # cube tracks the test ROI, so it follows up too.
+    train_ys = np.concatenate([q[:, 1] for q in train_dst_quads])
+    stack_center_y = 0.5 * (train_ys.min() + train_ys.max())
     # Crop is centered on the *screen* (not on the ROI) so the fixRSVP
     # image sits centered in the rendered view; the ROI marker may end up
     # off-centre, which is fine.
-    test_corners = screen_corners_3d((TEST_CX, SCR_CY, 0.0), SCR_W, SCR_H)
+    test_corners = screen_corners_3d((TEST_CX, stack_center_y, 0.0), SCR_W, SCR_H)
     fixrsvp_roi = assets.rois.get("fixrsvp")
     screen_ccent_px = W / 2.0
     screen_rcent_px = H / 2.0
@@ -550,8 +557,8 @@ def plot_panel_a_stimulus(ax, assets):
     train_front_right_x = max(train_dst_quads[-1][:, 0])
     test_left_x = test_dst[:, 0].min()
     sep_x = 0.5 * (train_front_right_x + test_left_x)
-    sep_top = SCR_CY + SCR_H / 2 + 0.2
-    sep_bot = SCR_CY - SCR_H / 2 - 0.2
+    sep_top = test_dst[:, 1].max() + 0.2
+    sep_bot = test_dst[:, 1].min() - 0.2
     ax.add_line(Line2D([sep_x, sep_x], [sep_bot, sep_top],
                        color="#666", linewidth=1.1,
                        linestyle=(0, (4, 3)), zorder=2.6))
@@ -565,7 +572,7 @@ def plot_panel_a_stimulus(ax, assets):
     if test_roi_quad is not None:
         roi_center_2d = test_roi_quad.mean(axis=0)
     else:
-        roi_center_2d = np.array([test_dst[:, 0].mean(), SCR_CY])
+        roi_center_2d = np.array([test_dst[:, 0].mean(), stack_center_y])
     test_right_x = test_dst[:, 0].max()
     # Pick a front-face position so the back face sits just to the right
     # of the test screen with a small gap.
