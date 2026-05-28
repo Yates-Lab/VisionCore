@@ -5,19 +5,21 @@ Thin composer that places two subscripts side-by-side:
   * `_fig4a_architecture.plot_panel_a_architecture` — Adapter → … → Readout
 
 Both subscripts consume the same `PanelAAssets` produced by
-`_fig4a_data.load_panel_a_assets`. The stimulus subscript renders every
-element in a single 3D world with a shared cabinet projection so the
-panel reads as one consistent viewpoint.
+`_fig4a_data.load_panel_a_assets`. Each renders every element into a single
+axes with a shared `set_aspect("equal")` projection.
 
-`main()` renders each half into its own tight figure, then stitches the
-two PNGs at matched pixel height. This guarantees vertical alignment of
-the two halves and eliminates the dead space that gridspec-based
-embedding produces when each axes uses `set_aspect("equal")` over
-different data aspect ratios.
+Both halves are drawn natively into one matplotlib figure as two
+manually-positioned axes. Each axes box is sized to its half's data aspect
+ratio (read back after plotting), so `set_aspect("equal")` fills the box with
+no dead space and the two halves share a common drawn height. Because the
+output stays vector and text stays in points, the panel is editable and its
+font sizes match the other panels — unlike the old approach, which stitched
+two rasterized PNGs at matched pixel height (scaling the text with the
+bitmap).
 
-`plot_panel_a()` remains for embedding inside a larger composite figure
-(generate_figure4.py). It tries to match each half's drawn-content
-aspect ratio when sizing the gridspec slots.
+`render_panel_a()` builds the standalone figure (used by `main()` and by the
+composite's standalone-PDF pass). `plot_panel_a()` fits the same two
+matched-aspect axes inside an existing figure's slot for the composite.
 
 Usage:
     uv run ryan/fig4/generate_fig4a.py [--recompute]
@@ -25,10 +27,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import io
+import warnings
 
 import matplotlib.pyplot as plt
-from PIL import Image
 
 from _fig4_data import FIG_DIR, configure_matplotlib
 from _fig4a_data import load_panel_a_assets
@@ -36,75 +37,19 @@ from _fig4a_stimulus import plot_panel_a_stimulus
 from _fig4a_architecture import plot_panel_a_architecture
 
 
-# Width ratio of stimulus : architecture halves (used in the embedded path).
-WIDTH_RATIOS = (1.0, 1.25)
+# Common drawn height of the standalone panel (inches). Each half's width is
+# derived from this and its data aspect ratio.
+PANEL_HEIGHT_IN = 4.0
 
-# Inter-panel gutter as a fraction of stitched panel height.
-STITCH_GUTTER_FRAC = 0.05
-
-
-def plot_panel_a(*, ax=None, subplotspec=None, fig=None,
-                 assets=None, recompute=False):
-    """Render panel A inline into an existing figure / subplotspec.
-
-    Pass one of:
-      * `subplotspec=` — embed inside an existing figure's GridSpec slot
-        (preferred for the composite figure).
-      * `ax=` — backwards-compatible: subdivide the given axes into two.
-      * neither — create a fresh standalone figure.
-
-    Note: the standalone `main()` below produces a tighter result by
-    stitching independently-rendered PNGs. Use that for the published
-    panel.
-    """
-    if assets is None:
-        assets = load_panel_a_assets(recompute=recompute)
-
-    if subplotspec is not None and fig is None:
-        fig = subplotspec.get_gridspec().figure
-    elif ax is not None:
-        fig = ax.figure
-        subplotspec = ax.get_subplotspec()
-        ax.set_visible(False)
-    elif subplotspec is None:
-        fig = plt.figure(figsize=(14.0, 6.0))
-        subplotspec = fig.add_gridspec(1, 1)[0, 0]
-
-    gs = subplotspec.subgridspec(1, 2, width_ratios=WIDTH_RATIOS, wspace=0.04)
-    ax_stim = fig.add_subplot(gs[0, 0])
-    ax_arch = fig.add_subplot(gs[0, 1])
-
-    plot_panel_a_stimulus(ax_stim, assets)
-    plot_panel_a_architecture(ax_arch, assets)
-
-    return fig, (ax_stim, ax_arch)
+# Inter-half gutter as a fraction of the panel's drawn height.
+GUTTER_FRAC = 0.05
 
 
-def _render_half_png(plot_fn, assets, figsize, *, dpi=300, pad_inches=0.02):
-    """Render a single half into a tight PNG and return a PIL.Image.
-
-    The passed `figsize` height is taken as authoritative; the width is
-    rescaled after plotting to match the data aspect that set_aspect("equal")
-    has pinned. Without this, a mismatch between the requested aspect and
-    the data aspect produces wide empty borders (or overlapping labels).
-    """
-    fig, ax = plt.subplots(figsize=figsize)
-    plot_fn(ax, assets)
-    _assert_aspect_equal(ax, plot_fn.__name__)
-    # Resize the figure to match the actual data aspect so the saved PNG
-    # has no excess whitespace and labels don't get squeezed.
+def _data_aspect(ax):
+    """Width:height of the axes' data limits (set by the plot function)."""
     x_lo, x_hi = ax.get_xlim()
     y_lo, y_hi = ax.get_ylim()
-    data_aspect = (x_hi - x_lo) / (y_hi - y_lo)
-    _, fig_h = figsize
-    fig.set_size_inches(fig_h * data_aspect, fig_h)
-    fig.tight_layout(pad=0.05)
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", bbox_inches="tight", dpi=dpi,
-                pad_inches=pad_inches)
-    plt.close(fig)
-    buf.seek(0)
-    return Image.open(buf).convert("RGBA")
+    return (x_hi - x_lo) / (y_hi - y_lo)
 
 
 def _assert_aspect_equal(ax, where):
@@ -113,7 +58,6 @@ def _assert_aspect_equal(ax, where):
     silently overwrites `ax.set_aspect("equal")` — circle/marker glyphs
     then render as ellipses. Catches regressions when new imshows are
     added without the protective wrapper."""
-    import warnings
     asp = ax.get_aspect()
     if asp != "equal" and asp != 1.0:
         warnings.warn(
@@ -126,53 +70,128 @@ def _assert_aspect_equal(ax, where):
         )
 
 
-def _stitch_halves(stim_img, arch_img, *, gutter_frac=STITCH_GUTTER_FRAC):
-    """Scale both halves to a common pixel height, then concatenate.
+def _plot_halves(fig, ax_stim, ax_arch, assets):
+    """Draw both halves and return their (stimulus, architecture) aspects."""
+    plot_panel_a_stimulus(ax_stim, assets)
+    _assert_aspect_equal(ax_stim, "plot_panel_a_stimulus")
+    plot_panel_a_architecture(ax_arch, assets)
+    _assert_aspect_equal(ax_arch, "plot_panel_a_architecture")
+    return _data_aspect(ax_stim), _data_aspect(ax_arch)
 
-    Height is matched to the taller of the two so the smaller half is
-    upsampled (cheaper visual cost than downsampling the denser
-    architecture). The gutter is sized as a fraction of the matched
-    height so it scales with the figure.
+
+def render_panel_a(assets=None, *, recompute=False,
+                   height_in=PANEL_HEIGHT_IN, gutter_frac=GUTTER_FRAC):
+    """Build a standalone panel-A figure with both halves drawn directly.
+
+    Returns `(fig, (ax_stim, ax_arch))`. The figure is sized so each half's
+    axes box exactly matches its data aspect ratio at a shared height — no
+    dead space, no rasterization, fonts in true points.
     """
-    target_h = max(stim_img.height, arch_img.height)
+    if assets is None:
+        assets = load_panel_a_assets(recompute=recompute)
 
-    def _scale(im, h):
-        if im.height == h:
-            return im
-        new_w = int(round(im.width * h / im.height))
-        return im.resize((new_w, h), Image.LANCZOS)
+    # Placeholder size; rescaled once the data aspects are known.
+    fig = plt.figure(figsize=(2 * height_in, height_in))
+    ax_stim = fig.add_axes([0.0, 0.0, 0.5, 1.0])
+    ax_arch = fig.add_axes([0.5, 0.0, 0.5, 1.0])
 
-    stim_r = _scale(stim_img, target_h)
-    arch_r = _scale(arch_img, target_h)
-    gutter = int(round(gutter_frac * target_h))
-    total_w = stim_r.width + gutter + arch_r.width
-    composite = Image.new("RGBA", (total_w, target_h), (255, 255, 255, 255))
-    composite.paste(stim_r, (0, 0), stim_r)
-    composite.paste(arch_r, (stim_r.width + gutter, 0), arch_r)
-    return composite
+    a_stim, a_arch = _plot_halves(fig, ax_stim, ax_arch, assets)
+
+    gutter_in = gutter_frac * height_in
+    w_stim = height_in * a_stim
+    w_arch = height_in * a_arch
+    total_w = w_stim + gutter_in + w_arch
+    fig.set_size_inches(total_w, height_in)
+
+    ax_stim.set_position([0.0, 0.0, w_stim / total_w, 1.0])
+    ax_arch.set_position([(w_stim + gutter_in) / total_w, 0.0,
+                          w_arch / total_w, 1.0])
+    return fig, (ax_stim, ax_arch)
+
+
+def _fit_two_axes_in_rect(fig, ax_stim, ax_arch, rect, a_stim, a_arch,
+                          *, gutter_frac=GUTTER_FRAC):
+    """Position two equal-aspect axes side-by-side, centered inside `rect`.
+
+    `rect` is the target slot as a figure-fraction Bbox. Both axes are given
+    a common drawn height and widths proportional to their data aspects, then
+    scaled to fit within the slot (height-limited if the slot is wide enough,
+    else width-limited) and centered. The axes are removed from the layout
+    engine so constrained_layout won't override these positions.
+    """
+    fw, fh = fig.get_size_inches()
+    slot_w_in = rect.width * fw
+    slot_h_in = rect.height * fh
+    gutter_in = gutter_frac * slot_h_in
+
+    # Try filling the slot height; shrink to the slot width if that overflows.
+    h_in = slot_h_in
+    if h_in * (a_stim + a_arch) + gutter_in > slot_w_in:
+        h_in = (slot_w_in - gutter_in) / (a_stim + a_arch)
+    w_stim = h_in * a_stim
+    w_arch = h_in * a_arch
+    used_w_in = w_stim + gutter_in + w_arch
+
+    # Center the used block within the slot.
+    x0 = rect.x0 + (rect.width - used_w_in / fw) / 2.0
+    y0 = rect.y0 + (rect.height - h_in / fh) / 2.0
+    h_frac = h_in / fh
+
+    ax_stim.set_position([x0, y0, w_stim / fw, h_frac])
+    ax_arch.set_position([x0 + (w_stim + gutter_in) / fw, y0,
+                          w_arch / fw, h_frac])
+    for ax in (ax_stim, ax_arch):
+        ax.set_in_layout(False)
+
+
+def plot_panel_a(*, ax=None, subplotspec=None, fig=None,
+                 assets=None, recompute=False, gutter_frac=GUTTER_FRAC):
+    """Render panel A, fitting both halves at matched data aspect.
+
+    Pass one of:
+      * `subplotspec=` — embed inside an existing figure's GridSpec slot
+        (preferred for the composite figure).
+      * `ax=` — embed into the slot occupied by `ax` (the axes is hidden).
+      * neither — build a fresh standalone figure via `render_panel_a`.
+    """
+    if assets is None:
+        assets = load_panel_a_assets(recompute=recompute)
+
+    if subplotspec is not None:
+        if fig is None:
+            fig = subplotspec.get_gridspec().figure
+        rect = subplotspec.get_position(fig)
+    elif ax is not None:
+        fig = ax.figure
+        ss = ax.get_subplotspec()
+        rect = ss.get_position(fig) if ss is not None else ax.get_position()
+        ax.set_visible(False)
+        ax.set_in_layout(False)
+    else:
+        return render_panel_a(assets, gutter_frac=gutter_frac)
+
+    ax_stim = fig.add_axes([rect.x0, rect.y0, rect.width / 2, rect.height])
+    ax_arch = fig.add_axes([rect.x0 + rect.width / 2, rect.y0,
+                            rect.width / 2, rect.height])
+
+    a_stim, a_arch = _plot_halves(fig, ax_stim, ax_arch, assets)
+    _fit_two_axes_in_rect(fig, ax_stim, ax_arch, rect, a_stim, a_arch,
+                          gutter_frac=gutter_frac)
+    return fig, (ax_stim, ax_arch)
 
 
 def main(recompute=False):
     configure_matplotlib()
     assets = load_panel_a_assets(recompute=recompute)
 
-    stim_img = _render_half_png(plot_panel_a_stimulus, assets, (10, 4))
-    arch_img = _render_half_png(plot_panel_a_architecture, assets, (12, 4.5))
-
-    # Also persist the standalone halves so the per-subscript browsers
-    # stay in sync with whatever the composite is showing.
-    stim_img.convert("RGB").save(FIG_DIR / "panel_a_stimulus.png",
-                                  dpi=(300, 300))
-    arch_img.convert("RGB").save(FIG_DIR / "panel_a_architecture.png",
-                                  dpi=(300, 300))
-
-    composite = _stitch_halves(stim_img, arch_img)
+    fig, _ = render_panel_a(assets)
     out_png = FIG_DIR / "panel_a_schematic.png"
     out_pdf = FIG_DIR / "panel_a_schematic.pdf"
-    composite.convert("RGB").save(out_png, dpi=(300, 300))
-    composite.convert("RGB").save(out_pdf, resolution=300.0)
-    print(f"Saved {out_png}  ({composite.width}×{composite.height} px)")
+    fig.savefig(out_pdf, bbox_inches="tight", dpi=300)
+    fig.savefig(out_png, bbox_inches="tight", dpi=200)
+    plt.close(fig)
     print(f"Saved {out_pdf}")
+    print(f"Saved {out_png}")
 
 
 if __name__ == "__main__":

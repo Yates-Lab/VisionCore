@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 
 from _fig4_data import FIG_DIR, configure_matplotlib, load_fig4_data
 from _fig4_helpers import select_example_neuron
-from generate_fig4a import plot_panel_a
+from generate_fig4a import plot_panel_a, render_panel_a
 from generate_fig4b import plot_panel_b
 from generate_fig4c import plot_panel_c
 from generate_fig4d import plot_panel_d
@@ -28,8 +28,7 @@ from generate_fig4f import plot_panel_f
 
 
 def _save_standalone_panels(data, example):
-    fig_a, _ = plot_panel_a()
-    fig_a.tight_layout(pad=0.2)
+    fig_a, _ = render_panel_a()
     fig_a.savefig(FIG_DIR / "panel_a_schematic.pdf", bbox_inches="tight", dpi=300)
     plt.close(fig_a)
 
