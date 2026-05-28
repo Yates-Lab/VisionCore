@@ -19,8 +19,10 @@ ARCH_CENTER_Y so inter-stage flow arrows are perfectly horizontal:
                  recurrent loop on top. A small Behavior placeholder sits
                  above the incoming arrow, with a concatenation arrow to
                  the ConvGRU input.
-    Readout    — Gaussian spatial sampler (mean/std per example neuron),
-                 depthwise feature-weight strip, observed/predicted traces.
+    Readout    — per example unit: a horizontal feature-weight block (128
+                 depthwise weights as bands) + a conv-kernel-style spatial
+                 prism whose front face is a localized Gaussian sampler.
+                 Laid out as two units, a ⋮, then one (the rest are implied).
 
 Output channels are tiled in (y, z); within each tile-grid we draw
 back-to-front in z so front kernels correctly occlude rear kernels.
@@ -28,13 +30,13 @@ back-to-front in z so front kernels correctly occlude rear kernels.
 from __future__ import annotations
 
 import numpy as np
-from matplotlib.patches import FancyArrowPatch, Rectangle
+from matplotlib.patches import Circle, FancyArrowPatch, Rectangle
 
 from _fig4a_glyphs import (
     TEXT_COLOR,
     draw_channel_grid,
-    draw_recurrent_loop, draw_gaussian_readout, draw_pool_glyph,
-    draw_arrow_skip, draw_op_marker,
+    draw_recurrent_loop, draw_feature_weight_block, draw_spatial_readout_prism,
+    draw_pool_glyph, draw_arrow_skip, draw_op_marker,
 )
 
 
@@ -58,9 +60,9 @@ FE_GAP   = 0.06         # vertical gap between stacked frontend channels
 # Inter-stage horizontal gaps (front-face right of N → front-face left of N+1).
 # Keyed by the transition name so the Flask tuner can override per-edge.
 DEFAULT_GAPS = {
-    "fe_to_stem":      0.55,   # frontend → stem (frontend has tiny depth)
-    "stem_to_blk1":    0.30,
-    "blk1_to_blk2":    0.65,
+    "fe_to_stem":      0.385,  # frontend → stem (frontend has tiny depth)
+    "stem_to_blk1":    0.45,
+    "blk1_to_blk2":    1.21875,
     "blk2_to_gru":     0.80,   # widened to fit Behavior box below the arrow
     "gru_to_readout":  0.30,   # readouts sit close to ConvGRU
 }
@@ -91,7 +93,7 @@ SKIP_CORNER_R = 0.12
 # pipeline body) and is left-justified to the vertical concat arrow that
 # feeds the concat marker on the blk2→gru flow arrow.
 BEH_HEIGHT = 0.32
-BEH_WIDTH  = 0.55
+BEH_WIDTH  = 0.825
 BEH_Y_GAP  = 0.20       # gap from ConvGRU bottom down to top of behavior box
 
 # Canvas (will be tightened in plot)
@@ -265,11 +267,13 @@ def plot_panel_a_architecture(ax, assets, *, gaps=None, x_start=None):
     g_xmin, g_xmax, g_ymin, g_ymax = gru_grid["bbox2d"]
     gru_loop_base = g_ymax - 0.10
     gru_loop_height = 0.37
-    draw_recurrent_loop(ax, x0=g_xmin, x1=g_xmax,
+    gru_loop_shift = gru_loop_height / 2.0 * 0.75   # nudge loop 0.75 radius right
+    draw_recurrent_loop(ax, x0=g_xmin + gru_loop_shift,
+                        x1=g_xmax + gru_loop_shift,
                         y_top=gru_loop_base,
                         arc_height=gru_loop_height,
                         color="#7e3f8a", lw=1.4,
-                        label=None)
+                        label=None, gap_frac=0.28)
     # Label above the loop (loop_top + tiny pad)
     gru_loop_top = gru_loop_base + gru_loop_height
     label_tops.append(_stage_label_top(
@@ -279,63 +283,91 @@ def plot_panel_a_architecture(ax, assets, *, gaps=None, x_start=None):
     stage_records.append({"name": "gru", "grid": gru_grid})
     x_cursor = _next_x(gru_grid, g["gru_to_readout"])
 
-    # ── Readouts (three example neurons stacked) ────────────────────────
-    # Three vertically stacked Gaussian readouts illustrate the per-neuron
-    # spatial sampler + depthwise feature weights. Stacking ordering:
-    # lowest-baseline neuron at the bottom (already sorted in assets).
+    # ── Readouts (example units: 2 on top, ⋮, 1 on bottom) ──────────────
+    # Each readout = a horizontal feature-weight block (the 128 depthwise
+    # weights as colored bands, frontend-beam style) with a conv-kernel-style
+    # spatial prism centered to its right (front face = a localized Gaussian
+    # sampler, no per-feature coloring). The split makes the factorized form
+    # explicit: a per-feature weighting × a shared spatial sampler. The ⋮
+    # stands in for the remaining trained units. All units are real, pulled
+    # from the checkpoint (assets.example_neurons), spanning baseline rate.
     examples = assets.example_neurons
-    n_examples = len(examples)
-    readout_size = 0.75
-    feat_width = 0.18
-    row_pitch = readout_size + 0.25
-    col_height = readout_size + row_pitch * (n_examples - 1)
-    # Center the stack on the kernel baseline so the fan-out arrows from
-    # the GRU exit horizontally and the column sits visually inline with
-    # the rest of the pipeline.
+    feat_w, feat_h = 0.62, 0.16        # feature-weight block (horizontal beam)
+    prism_size = 0.50                  # spatial prism front-face side
+    feat_to_prism = 0.14               # gap: feature block → spatial prism
+    row_pitch = prism_size + 0.30      # vertical pitch between adjacent readouts
+    ellipsis_gap = 0.60                # extra vertical room holding the ⋮ glyph
+
     g_xmin, g_xmax, g_ymin, g_ymax = gru_grid["bbox2d"]
     gru_center_y = 0.5 * (g_ymin + g_ymax)
-    col_y0 = gru_center_y - col_height / 2
 
+    # Front-face centers, top → bottom: two readouts a normal pitch apart, a
+    # larger gap (with the ⋮), then one readout. Centered on the GRU midline.
+    span = 2 * row_pitch + ellipsis_gap
+    centers = [gru_center_y + span / 2,                  # top
+               gru_center_y + span / 2 - row_pitch,      # second
+               gru_center_y - span / 2]                  # bottom
+    ellipsis_y = 0.5 * (centers[1] + centers[2])
+    # Highest baseline on top → lowest on bottom (examples sorted low→high).
+    slot_neurons = [examples[min(i, len(examples) - 1)] for i in (2, 1, 0)]
+
+    prism_x = x_cursor + feat_w + feat_to_prism
     readout_records = []
-    for k, neuron in enumerate(examples):
-        # Bottom-up positions so examples[0] (lowest baseline) sits at bottom.
-        y_k = col_y0 + k * row_pitch
-        ro_k = draw_gaussian_readout(
-            ax, neuron["mean"], neuron["std"], neuron["features"],
-            x0=x_cursor, y0=y_k, size=readout_size, feat_width=feat_width,
-            zorder=4.0,
-        )
-        readout_records.append({"ro": ro_k})
+    for cy, neuron in zip(centers, slot_neurons):
+        fb = draw_feature_weight_block(
+            ax, neuron["features"],
+            x0=x_cursor, y0=cy - feat_h / 2, w=feat_w, h=feat_h, zorder=4.0)
+        sp = draw_spatial_readout_prism(
+            ax, neuron["mean"], neuron["std"],
+            x0=prism_x, y0=cy - prism_size / 2, size=prism_size, zorder=4.2)
+        readout_records.append({"fb": fb, "sp": sp})
 
-    # Header label above the stack.
-    col_x_lo = readout_records[0]["ro"]["x_left"]
-    col_x_hi = max(r["ro"]["x_right"] for r in readout_records)
-    col_top_y = col_y0 + col_height
-    ax.text(0.5 * (col_x_lo + col_x_hi), col_top_y + 0.12,
-            "Readouts", ha="center", va="bottom",
-            fontsize=8.5, color=TEXT_COLOR)
+    # ⋮ between the top pair and the bottom readout (three stacked dots —
+    # robust across PDF/PNG backends vs. relying on a unicode glyph).
+    ell_x = 0.5 * (x_cursor + prism_x + prism_size)
+    for dy in (-0.11, 0.0, 0.11):
+        ax.add_patch(Circle((ell_x, ellipsis_y + dy), 0.022,
+                            facecolor="#666", edgecolor="none", zorder=4.6))
 
-    # Use the middle readout as the "stage anchor" for inter-stage arrows.
-    stage_records.append({"name": "readout",
-                          "ro": readout_records[len(readout_records) // 2]["ro"]})
+    # Column extent for the title, GRU→readout arrow, and axis tightening.
+    col_x_left = x_cursor
+    col_x_right = max(r["sp"]["x_right"] for r in readout_records)
+    col_y_bottom = min(r["sp"]["y_bottom"] for r in readout_records)
+    col_y_top = max(r["sp"]["y_top"] for r in readout_records)
+
+    # Title + sub-label in the shared stage-label style (bold name + italic
+    # grey sub), riding above the top readout.
+    n_units = assets.arch.get("n_trained_units")
+    sub = f"factorized · N={n_units}" if n_units else "factorized"
+    title_x = 0.5 * (col_x_left + col_x_right)
+    y_sub = col_y_top + LABEL_GAP
+    y_title = y_sub + SUB_GAP
+    ax.text(title_x, y_sub, sub, ha="center", va="baseline",
+            fontsize=7.0, color="#555", style="italic")
+    ax.text(title_x, y_title, "Readouts", ha="center", va="baseline",
+            fontsize=8.5, color=TEXT_COLOR, fontweight="bold")
+    label_tops.append(y_title)
+
+    stage_records.append({"name": "readout", "ro": {
+        "x_left": col_x_left, "x_right": col_x_right,
+        "y_bottom": col_y_bottom, "y_top": col_y_top}})
 
     # ── Inter-stage flow arrows ─────────────────────────────────────────
     arrows = _connect_stages(ax, stage_records[:-1])
     # Single short GRU → readout arrow: from the GRU right anchor to the
-    # left edge of the readout column at the GRU center height.
+    # left edge of the readout column (feature blocks) at the GRU center.
     gru_anchor = _stage_right_anchor(stage_records[-2])
-    col_x_left = min(r["ro"]["x_left"] for r in readout_records)
     ax.annotate("",
                 xy=(col_x_left - 0.04, gru_anchor[1]),
                 xytext=(gru_anchor[0] + 0.04, gru_anchor[1]),
                 arrowprops=dict(arrowstyle="->", lw=1.0, color="#333"),
                 zorder=4.8)
 
-    # ── ResBlock 1 residual: fork from mid(stem→blk1) into '+' at 1/4(blk1→blk2)
+    # ── ResBlock 1 residual: fork from mid(stem→blk1) into '+' at 1/5(blk1→blk2)
     a_in1  = arrows["stem→block1"]
     a_out1 = arrows["block1→block2"]
     x_fork1 = _arrow_frac(a_in1,  0.50)[0]
-    x_plus1 = _arrow_frac(a_out1, 0.25)[0]
+    x_plus1 = _arrow_frac(a_out1, 1.0 / 5.0)[0]
     draw_arrow_skip(ax, x_fork1, x_plus1, ARCH_CENTER_Y,
                     depth=SKIP_DEPTH, corner_r=SKIP_CORNER_R,
                     color=SKIP_COLOR, lw=SKIP_LW, zorder=4.7)
@@ -412,7 +444,7 @@ def plot_panel_a_architecture(ax, assets, *, gaps=None, x_start=None):
         elif "ro" in s:
             all_xs.extend([s["ro"]["x_left"], s["ro"]["x_right"]])
             all_ys.extend([s["ro"]["y_bottom"], s["ro"]["y_top"]])
-    all_ys.extend([col_y0, col_y0 + col_height + 0.35])
+    all_ys.extend([col_y_bottom, y_title + 0.35])
     # Header sits above all labels.
     all_ys.append(header_y + 0.35)
     # Residual ⊔-skips dip to y = ARCH_CENTER_Y - SKIP_DEPTH (the U bottoms

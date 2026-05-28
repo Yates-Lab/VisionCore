@@ -91,6 +91,22 @@ def _load_arch_info():
 # ----------------------------------------------------------------------------
 # Frontend weight extraction (from trained checkpoint)
 # ----------------------------------------------------------------------------
+def _load_n_trained_units():
+    """Total trained units across all per-dataset readout heads, summed from
+    the checkpoint's `model.readouts.*.mean` row counts. Cheap — loads only
+    the state_dict (CPU), no session data."""
+    import re
+    import torch
+    from _fig4_data import CHECKPOINT_PATH
+    ckpt = torch.load(CHECKPOINT_PATH, map_location="cpu", weights_only=False)
+    sd = ckpt["state_dict"] if "state_dict" in ckpt else ckpt
+    total = 0
+    for k, v in sd.items():
+        if re.match(r"model\.readouts\.\d+\.mean$", k):
+            total += int(v.shape[0])
+    return total
+
+
 def _load_frontend_weights():
     """Pull learned (num_channels, kernel_size) temporal kernels from the
     pinned digital-twin checkpoint.
@@ -750,7 +766,16 @@ def load_panel_a_assets(recompute: bool = False) -> PanelAAssets:
     if PANEL_A_CACHE_PATH.exists() and not recompute:
         print(f"Loading fig4a assets from {PANEL_A_CACHE_PATH}")
         with open(PANEL_A_CACHE_PATH, "rb") as f:
-            return dill.load(f)
+            assets = dill.load(f)
+        # One-time backfill so existing caches gain the trained-unit count
+        # without a full session recompute (arch is a plain dict).
+        if "n_trained_units" not in assets.arch:
+            assets.arch["n_trained_units"] = _load_n_trained_units()
+            with open(PANEL_A_CACHE_PATH, "wb") as f:
+                dill.dump(assets, f)
+            print(f"  backfilled n_trained_units="
+                  f"{assets.arch['n_trained_units']} into cache")
+        return assets
 
     from DataYatesV1.utils.io import get_session
     from DataYatesV1.exp.general import get_trial_protocols
@@ -844,6 +869,7 @@ def load_panel_a_assets(recompute: bool = False) -> PanelAAssets:
         freeview_trace_px, freeview_roi_seq = freeview_result
 
     arch = _load_arch_info()
+    arch["n_trained_units"] = _load_n_trained_units()
 
     print("  loading frontend weights from checkpoint...")
     frontend_weights = _load_frontend_weights()

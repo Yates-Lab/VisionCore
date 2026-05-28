@@ -829,79 +829,133 @@ def draw_recurrent_loop(ax, x0, x1, y_top, *, arc_height=0.9, color="#7e3f8a",
                 color=color, style="italic", zorder=zorder + 0.1)
 
 
-def draw_gaussian_readout(ax, mean, std, features, x0, y0, *,
-                          size=0.85, feat_width=0.18, gap=0.12,
-                          zorder=4.0, label_color=TEXT_COLOR):
-    """Draw the Gaussian readout glyph: a small 2D Gaussian face showing
-    the sampling location (mean) and extent (std) in normalized feature-map
-    coords, followed by a thin heatmap strip of the depthwise feature
-    weights.
+# Display-only shrink applied to readout std. The trained spatial stds are
+# near-full-field in normalized [-1, 1] coords (~0.5–1.25), so we scale them
+# down for the schematic to read as localized receptive fields.
+STD_DISPLAY_SCALE = 0.35
 
-    `mean`, `std` are 2-vectors in [-1, 1] feature-map coords. `features`
-    is a 1D array of per-feature readout weights.
+# Readout prisms share the conv-kernel cabinet shading (top darkest, side
+# medium) but in the readout green family so the stage reads as one module.
+RO_TOP_COLOR  = "#3f8a3f"
+RO_SIDE_COLOR = "#8cc28c"
+RO_EDGE_COLOR = "#1f5e1f"
+
+
+def draw_feature_weight_block(ax, features, x0, y0, w, h, *,
+                              depth=0.20, cmap="RdBu_r",
+                              side_color=RO_SIDE_COLOR,
+                              edge_color=RO_EDGE_COLOR, edge_width=0.5,
+                              zorder=4.0):
+    """Horizontal feature-weight prism (frontend-beam style).
+
+    The N depthwise readout weights are drawn as colored BANDS that wrap from
+    the front face up onto the top face (one slab per feature), so the banding
+    reads in 3D. The right end-cap is a solid side face. Front face is axis-
+    aligned at z=0 so the front strip is crisp; the top bands are cabinet-
+    projected parallelograms sharing the same colormap/normalization.
     """
-    res = 96
-    grid = np.linspace(-1, 1, res)
-    X, Y = np.meshgrid(grid, grid)
-    sx = max(float(std[0]), 0.05)
-    sy = max(float(std[1]), 0.05)
-    G = np.exp(-(((X - float(mean[0])) ** 2) / (2 * sx * sx)
-                 + ((Y - float(mean[1])) ** 2) / (2 * sy * sy)))
-    G = (G / G.max() * 255).astype(np.uint8)
-
-    # Gaussian face — use a light→saturated green colormap to match readout.
-    from matplotlib.colors import LinearSegmentedColormap
-    cmap = LinearSegmentedColormap.from_list(
-        "readout_gauss", ["#f4faf2", "#8cc28c", "#1f5e1f"], N=256,
-    )
-    ax.imshow(G, extent=(x0, x0 + size, y0, y0 + size),
-              origin="lower", cmap=cmap, zorder=zorder,
-              interpolation="bilinear")
-    # Crisp outline so it reads as a "face" matching nearby prisms.
-    ax.add_patch(Rectangle((x0, y0), size, size, fill=False,
-                           edgecolor="#1b3a5b", linewidth=0.5,
-                           zorder=zorder + 0.2))
-    # Mean dot + std ellipse
-    cx = x0 + (float(mean[0]) + 1) / 2 * size
-    cy = y0 + (float(mean[1]) + 1) / 2 * size
-    rx = sx / 2 * size
-    ry = sy / 2 * size
-    ax.add_patch(Circle((cx, cy), 0.012 * size + 0.02,
-                        facecolor="#222", edgecolor="white", linewidth=0.4,
-                        zorder=zorder + 0.4))
-    from matplotlib.patches import Ellipse
-    ax.add_patch(Ellipse((cx, cy), 2 * rx, 2 * ry, fill=False,
-                         edgecolor="#222", linewidth=0.7, linestyle=(0, (3, 2)),
-                         zorder=zorder + 0.3))
-
-    # Feature-weight strip to the right
-    fw_x0 = x0 + size + gap
     feats = np.asarray(features, dtype=float)
-    fw_img = feats[::-1, None]   # (n_feat, 1), top = first feature
+    N = len(feats)
     vmax = float(np.abs(feats).max()) or 1.0
-    # NOTE: do NOT pass aspect="auto" — matplotlib's imshow unconditionally
-    # calls ax.set_aspect(aspect), which would clobber the caller's
-    # set_aspect("equal") and render circle patches (op markers, mean dot)
-    # as ellipses. With extent= the strip already fills its rectangle.
-    ax.imshow(fw_img, extent=(fw_x0, fw_x0 + feat_width, y0, y0 + size),
-              origin="upper", cmap="RdBu_r", vmin=-vmax, vmax=vmax,
-              zorder=zorder, interpolation="nearest")
-    ax.add_patch(Rectangle((fw_x0, y0), feat_width, size, fill=False,
-                           edgecolor="#1b3a5b", linewidth=0.5,
-                           zorder=zorder + 0.2))
-    ax.text(fw_x0 + feat_width / 2, y0 - 0.08,
-            f"{len(feats)}", ha="center", va="top",
-            fontsize=6.0, color=label_color, style="italic")
-    ax.text(fw_x0 + feat_width / 2, y0 + size + 0.08,
-            "ch wts", ha="center", va="bottom",
-            fontsize=6.0, color=label_color, style="italic")
+    from matplotlib.colors import Normalize
+    norm = Normalize(vmin=-vmax, vmax=vmax)
+    cmap_obj = plt.get_cmap(cmap)
+
+    dvx, dvy = CAB_DEPTH_VEC * depth
+    fL, fR, fB, fT = x0, x0 + w, y0, y0 + h
+    bR = fR + dvx
+
+    # Right end-cap (solid side face).
+    right = np.array([[fR, fB], [fR, fT], [bR, fT + dvy], [bR, fB + dvy]])
+    ax.add_patch(Polygon(right, closed=True, facecolor=side_color,
+                         edgecolor=edge_color, linewidth=edge_width,
+                         zorder=zorder + 0.15))
+    # Top face: one banded parallelogram per feature (matches the front strip).
+    dw = w / N
+    for b in range(N):
+        col = cmap_obj(norm(feats[b]))
+        xa, xb = fL + b * dw, fL + (b + 1) * dw
+        top = np.array([[xa, fT], [xb, fT],
+                        [xb + dvx, fT + dvy], [xa + dvx, fT + dvy]])
+        ax.add_patch(Polygon(top, closed=True, facecolor=col,
+                             edgecolor="none", zorder=zorder + 0.1))
+    # Front face = crisp banded heat strip (same cmap/norm as the top bands).
+    ax.imshow(feats[None, :], extent=(fL, fR, fB, fT), origin="upper",
+              cmap=cmap, vmin=-vmax, vmax=vmax, zorder=zorder + 0.3,
+              interpolation="nearest")
+    # Outline: front rectangle + top parallelogram edges.
+    ax.add_patch(Rectangle((fL, fB), w, h, fill=False,
+                           edgecolor=edge_color, linewidth=edge_width,
+                           zorder=zorder + 0.4))
+    top_outline = np.array([[fL, fT], [fR, fT],
+                            [bR, fT + dvy], [fL + dvx, fT + dvy]])
+    ax.add_patch(Polygon(top_outline, closed=True, fill=False,
+                         edgecolor=edge_color, linewidth=edge_width,
+                         zorder=zorder + 0.4))
+    return {
+        "x_left": fL, "x_right": bR,
+        "y_bottom": fB, "y_top": fT + dvy,
+        "front_x_right": fR, "center_y": 0.5 * (fB + fT),
+    }
+
+
+def draw_spatial_readout_prism(ax, mean, std, x0, y0, size, *,
+                               thickness=0.07, std_scale=STD_DISPLAY_SCALE,
+                               front_color="#d9ecd9",
+                               top_color=RO_TOP_COLOR, side_color=RO_SIDE_COLOR,
+                               edge_color=RO_EDGE_COLOR, edge_width=0.5,
+                               gauss_color="#1f5e1f", curve_amp=0.20,
+                               curve_gap=0.10, zorder=4.0):
+    """Spatial-readout sheet (conv-kernel style, but a single time slice).
+
+    The readout has no time depth, so the prism is a thin SHEET — 1 tap in the
+    time/x axis (like the stem's 1×7×7 kernels) — whose broad face is the y–z
+    (right) plane = the H×W feature map. The spatial RF center is marked with a
+    dot on that face, and a small vertical Gaussian profile is drawn to the
+    right (with a leader line to the dot) to schematize the spatial spread —
+    no imshow warped onto the slanted plane.
+
+    `mean`, `std` are 2-vectors in [-1, 1] feature-map coords: index 1 is the
+    vertical (H, up) axis, index 0 the horizontal (W) axis = the depth axis.
+    """
+    sy = max(float(std[1]) * std_scale, 0.05)
+    dvx, dvy = CAB_DEPTH_VEC
+
+    # Thin sheet: x = time (1 tap), y = H, z = W (= the depth into the page).
+    draw_kernel_prism(ax, (x0, y0, 0.0), (thickness, size, size),
+                      front_color=front_color, side_color=side_color,
+                      top_color=top_color, edge_color=edge_color,
+                      edge_width=edge_width, zorder=zorder)
+
+    fR, fB, fT = x0 + thickness, y0, y0 + size
+    # RF center on the right (y–z = H×W) face: H → vertical, W → depth.
+    fz = (float(mean[0]) + 1) / 2 * size
+    fy = fB + (float(mean[1]) + 1) / 2 * size
+    dot_x = fR + fz * dvx
+    dot_y = fy + fz * dvy
+    ax.add_patch(Circle((dot_x, dot_y), 0.022,
+                        facecolor="#222", edgecolor="white", linewidth=0.5,
+                        zorder=zorder + 0.6))
+
+    # Vertical Gaussian profile to the right, centered on the dot's height.
+    x_base = fR + size * dvx + curve_gap
+    sigma = max(sy * size / 2, 0.03)             # normalized std → world (face)
+    yhalf = min(3 * sigma, 0.45 * size)
+    yy = np.linspace(dot_y - yhalf, dot_y + yhalf, 80)
+    amp = curve_amp * np.exp(-((yy - dot_y) ** 2) / (2 * sigma * sigma))
+    ax.plot([x_base, x_base], [yy[0], yy[-1]], color=gauss_color, lw=0.6,
+            zorder=zorder + 0.5)                 # vertical axis
+    ax.plot(x_base + amp, yy, color=gauss_color, lw=1.1, zorder=zorder + 0.55,
+            solid_capstyle="round")              # bell, bulging right
+    # Leader line from the RF dot to the profile axis at the same height.
+    ax.plot([dot_x, x_base], [dot_y, dot_y], color="#555", lw=0.6,
+            linestyle=(0, (2, 1.5)), zorder=zorder + 0.45)
 
     return {
-        "x_left": x0,
-        "x_right": fw_x0 + feat_width,
-        "y_bottom": y0,
-        "y_top": y0 + size,
-        "feat_strip_x": fw_x0,
+        "x_left": x0, "x_right": x_base + curve_amp,
+        "y_bottom": min(fB, dot_y - yhalf),
+        "y_top": max(fT + size * dvy, dot_y + yhalf),
+        "center_y": 0.5 * (fB + fT),
     }
 
 
