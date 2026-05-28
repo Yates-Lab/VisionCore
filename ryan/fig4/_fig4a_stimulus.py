@@ -712,3 +712,6 @@ def plot_panel_a_stimulus(ax, assets):
     pad_x, pad_y = 0.4, 0.2
     ax.set_xlim(min(xs) - pad_x, max(xs) + pad_x)
     ax.set_ylim(min(ys) - pad_y, max(ys) + pad_y)
+    # See note in plot_panel_a_architecture: imshow(aspect=...) clobbers
+    # ax.set_aspect, so re-anchor to "equal" defensively at the end.
+    ax.set_aspect("equal")

@@ -81,9 +81,23 @@ def plot_panel_a(*, ax=None, subplotspec=None, fig=None,
 
 
 def _render_half_png(plot_fn, assets, figsize, *, dpi=300, pad_inches=0.02):
-    """Render a single half into a tight PNG and return a PIL.Image."""
+    """Render a single half into a tight PNG and return a PIL.Image.
+
+    The passed `figsize` height is taken as authoritative; the width is
+    rescaled after plotting to match the data aspect that set_aspect("equal")
+    has pinned. Without this, a mismatch between the requested aspect and
+    the data aspect produces wide empty borders (or overlapping labels).
+    """
     fig, ax = plt.subplots(figsize=figsize)
     plot_fn(ax, assets)
+    _assert_aspect_equal(ax, plot_fn.__name__)
+    # Resize the figure to match the actual data aspect so the saved PNG
+    # has no excess whitespace and labels don't get squeezed.
+    x_lo, x_hi = ax.get_xlim()
+    y_lo, y_hi = ax.get_ylim()
+    data_aspect = (x_hi - x_lo) / (y_hi - y_lo)
+    _, fig_h = figsize
+    fig.set_size_inches(fig_h * data_aspect, fig_h)
     fig.tight_layout(pad=0.05)
     buf = io.BytesIO()
     fig.savefig(buf, format="png", bbox_inches="tight", dpi=dpi,
@@ -91,6 +105,25 @@ def _render_half_png(plot_fn, assets, figsize, *, dpi=300, pad_inches=0.02):
     plt.close(fig)
     buf.seek(0)
     return Image.open(buf).convert("RGBA")
+
+
+def _assert_aspect_equal(ax, where):
+    """Warn loudly if a plot function left the axes with non-equal aspect.
+    The usual culprit is an `ax.imshow(..., aspect="auto")` call that
+    silently overwrites `ax.set_aspect("equal")` — circle/marker glyphs
+    then render as ellipses. Catches regressions when new imshows are
+    added without the protective wrapper."""
+    import warnings
+    asp = ax.get_aspect()
+    if asp != "equal" and asp != 1.0:
+        warnings.warn(
+            f"[{where}] axes aspect is {asp!r} after plotting — circles "
+            f"will render as ellipses. Likely cause: an imshow call with "
+            f"aspect='auto' (or a numeric aspect). Either drop the aspect "
+            f"arg (extent= already pins the image) or re-call "
+            f"ax.set_aspect('equal') after.",
+            stacklevel=2,
+        )
 
 
 def _stitch_halves(stim_img, arch_img, *, gutter_frac=STITCH_GUTTER_FRAC):

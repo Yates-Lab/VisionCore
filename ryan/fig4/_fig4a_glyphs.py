@@ -39,7 +39,7 @@ TEXT_COLOR = "#222222"
 # the lower-left rather than receding into the page).
 # ──────────────────────────────────────────────────────────────────────────
 CAB_ALPHA = np.deg2rad(45.0)
-CAB_DEPTH = 0.5
+CAB_DEPTH = 0.50
 CAB_DEPTH_VEC = np.array([
     +np.cos(CAB_ALPHA) * CAB_DEPTH,
     +np.sin(CAB_ALPHA) * CAB_DEPTH,
@@ -881,9 +881,13 @@ def draw_gaussian_readout(ax, mean, std, features, x0, y0, *,
     feats = np.asarray(features, dtype=float)
     fw_img = feats[::-1, None]   # (n_feat, 1), top = first feature
     vmax = float(np.abs(feats).max()) or 1.0
+    # NOTE: do NOT pass aspect="auto" — matplotlib's imshow unconditionally
+    # calls ax.set_aspect(aspect), which would clobber the caller's
+    # set_aspect("equal") and render circle patches (op markers, mean dot)
+    # as ellipses. With extent= the strip already fills its rectangle.
     ax.imshow(fw_img, extent=(fw_x0, fw_x0 + feat_width, y0, y0 + size),
               origin="upper", cmap="RdBu_r", vmin=-vmax, vmax=vmax,
-              aspect="auto", zorder=zorder, interpolation="nearest")
+              zorder=zorder, interpolation="nearest")
     ax.add_patch(Rectangle((fw_x0, y0), feat_width, size, fill=False,
                            edgecolor="#1b3a5b", linewidth=0.5,
                            zorder=zorder + 0.2))
@@ -986,3 +990,51 @@ def draw_pool_glyph(ax, x, y, *, color="#222", fontsize=7.5, zorder=12.0):
             zorder=zorder,
             bbox=dict(boxstyle="round,pad=0.18",
                       facecolor="white", edgecolor=color, linewidth=0.7))
+
+
+def draw_op_marker(ax, x, y, *, color="#222", radius=0.10, lw=0.9,
+                   facecolor="white", zorder=12.0):
+    """Circled-'+' operator marker (residual sum or concatenation point).
+    A small white-filled circle with a + drawn inside, centered on (x, y).
+    Use `color="#222"` for residual sums on flow arrows and a contrasting
+    hue (e.g. the behavior palette) for concatenations."""
+    ax.add_patch(Circle((x, y), radius, facecolor=facecolor,
+                        edgecolor=color, linewidth=lw, zorder=zorder))
+    r = radius * 0.55
+    ax.plot([x - r, x + r], [y, y], color=color, lw=lw,
+            zorder=zorder + 0.1, solid_capstyle="round")
+    ax.plot([x, x], [y - r, y + r], color=color, lw=lw,
+            zorder=zorder + 0.1, solid_capstyle="round")
+
+
+def draw_arrow_skip(ax, x0, x1, y_top, *, depth=0.6, corner_r=0.12,
+                    color="#222", lw=1.0, zorder=4.7, mutation_scale=10):
+    """⊔-style residual that taps off (x0, y_top), drops, runs across the
+    bottom, and climbs UP to (x1, y_top) with an arrowhead at the (x1,
+    y_top) end. Use to wire a block's residual from a fork point on one
+    flow arrow into a '+' (sum) marker on the next flow arrow."""
+    from matplotlib.path import Path
+    r = min(corner_r, depth * 0.5, abs(x1 - x0) * 0.45)
+    y_bot = y_top - depth
+    verts = [
+        (x0, y_top),
+        (x0, y_bot + r),
+        (x0, y_bot),
+        (x0 + r, y_bot),
+        (x1 - r, y_bot),
+        (x1, y_bot),
+        (x1, y_bot + r),
+        (x1, y_top),
+    ]
+    codes = [Path.MOVETO,
+             Path.LINETO,
+             Path.CURVE3, Path.CURVE3,
+             Path.LINETO,
+             Path.CURVE3, Path.CURVE3,
+             Path.LINETO]
+    path = Path(verts, codes)
+    ax.add_patch(FancyArrowPatch(
+        path=path, arrowstyle="-|>", lw=lw, color=color,
+        zorder=zorder, mutation_scale=mutation_scale,
+        joinstyle="round", capstyle="round",
+    ))

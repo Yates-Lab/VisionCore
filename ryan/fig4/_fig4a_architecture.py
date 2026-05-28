@@ -32,8 +32,9 @@ from matplotlib.patches import FancyArrowPatch, Rectangle
 
 from _fig4a_glyphs import (
     TEXT_COLOR,
-    draw_channel_grid, draw_skip_staple,
+    draw_channel_grid,
     draw_recurrent_loop, draw_gaussian_readout, draw_pool_glyph,
+    draw_arrow_skip, draw_op_marker,
 )
 
 
@@ -46,8 +47,11 @@ from _fig4a_glyphs import (
 # ──────────────────────────────────────────────────────────────────────────
 S_PIX = 0.030           # world units per spatial tap (convnet & GRU)
 S_T   = S_PIX           # world units per time tap (isotropic: 1×1×1 is a cube)
-S_T_FE = S_T            # frontend time scale: identical to rest
-S_FE_SPATIAL = 0.20     # frontend "unit" spatial face (taps=1 but drawn big)
+# Frontend and stem are scaled up so they draw the eye — they're the
+# learned input-shaping stages and pay for their visual real estate.
+S_T_FE = 1.5 * S_T            # frontend time scale: 50% larger than rest
+S_FE_SPATIAL = 0.30           # frontend spatial face (50% larger)
+STEM_SCALE = 1.5              # per-tap multiplier on stem kt/kh/kw
 GRID_GAP = 0.04         # gap between cells in a grid
 FE_GAP   = 0.06         # vertical gap between stacked frontend channels
 
@@ -55,9 +59,9 @@ FE_GAP   = 0.06         # vertical gap between stacked frontend channels
 # Keyed by the transition name so the Flask tuner can override per-edge.
 DEFAULT_GAPS = {
     "fe_to_stem":      0.55,   # frontend → stem (frontend has tiny depth)
-    "stem_to_blk1":    1.00,
+    "stem_to_blk1":    0.30,
     "blk1_to_blk2":    0.65,
-    "blk2_to_gru":     0.50,
+    "blk2_to_gru":     0.80,   # widened to fit Behavior box below the arrow
     "gru_to_readout":  0.30,   # readouts sit close to ConvGRU
 }
 DEFAULT_X_START = 0.0           # world x of the front-lower-left of the frontend
@@ -74,16 +78,21 @@ LABEL_GAP     = 0.18    # title sits this far above the stage front-top
 SUB_GAP       = 0.32    # sub-label sits this far ABOVE the title
 HEADER_GAP    = 0.55    # header sits this far above the highest sub-label
 
-# Residual staple (⊔) beneath each block.
-SKIP_DEPTH = 0.55
-SKIP_COLOR = "#222"     # same colour as flow arrows (was cyan)
+# Residual ⊔-skip that taps off the upstream flow arrow and merges into a
+# '+' marker on the downstream flow arrow. SKIP_DEPTH is measured from
+# ARCH_CENTER_Y (the flow line) and must clear the deepest block bottom
+# plus a small margin so the ⊔ floor sits cleanly under the blocks.
+SKIP_DEPTH = 1.8
+SKIP_COLOR = "#222"     # same colour as flow arrows
 SKIP_LW    = 1.0
-SKIP_CORNER_R = 0.10
+SKIP_CORNER_R = 0.12
 
-# Behavior placeholder.
-BEH_HEIGHT = 0.40
-BEH_WIDTH  = 1.00
-BEH_Y_GAP  = 0.55       # gap above the inter-stage arrow midpoint
+# Behavior placeholder. Sits BELOW the blk2→gru flow arrow, centered on
+# the concat (⊕) marker; kept narrow so the box fits laterally between
+# ResBlock 2's bbox right and the ConvGRU's left edge.
+BEH_HEIGHT = 0.32
+BEH_WIDTH  = 0.55
+BEH_Y_GAP  = 0.45       # gap from flow arrow down to top of behavior box
 
 # Canvas (will be tightened in plot)
 CANVAS_W = 22.0
@@ -103,7 +112,7 @@ PAL_READOUT  = ("#d9ecd9", "#8cc28c", "#3f8a3f", "#1f5e1f")
 # +z (into page) projects UP-AND-RIGHT, so back-layer kernels in a grid
 # stack toward the upper-right of the front layer.
 _CAB_ALPHA = np.deg2rad(45.0)
-_CAB_DEPTH = 0.5
+_CAB_DEPTH = 0.50
 _CAB_DEPTH_VEC = np.array([
     +np.cos(_CAB_ALPHA) * _CAB_DEPTH,
     +np.sin(_CAB_ALPHA) * _CAB_DEPTH,
@@ -166,7 +175,9 @@ def plot_panel_a_architecture(ax, assets, *, gaps=None, x_start=None):
     pad = 0.10 * (w_max - w_min)
     w_min -= pad; w_max += pad
     K = fe_weights.shape[1]
-    ts = np.linspace(0, 1, K)
+    # Flip time L→R so present (t=0) is on the right edge of the kernel
+    # face — matches the stimulus lag cube's "newest frame at front" axis.
+    ts = np.linspace(1, 0, K)
     for c in range(fe_n):
         y_cell = fe_y0 + c * (fe_kh + FE_GAP)
         xs = x_cursor + ts * fe_kt
@@ -187,12 +198,15 @@ def plot_panel_a_architecture(ax, assets, *, gaps=None, x_start=None):
     x_cursor = _next_x(fe_grid, g["fe_to_stem"])
 
     # ── Stem ────────────────────────────────────────────────────────────
-    stem_y0 = _y0_for_center(rows=2, kh=stem_kh * S_PIX, gap=GRID_GAP,
-                             cols=4, kw=stem_kw * S_PIX)
+    stem_kt_w = stem_kt * S_T   * STEM_SCALE
+    stem_kh_w = stem_kh * S_PIX * STEM_SCALE
+    stem_kw_w = stem_kw * S_PIX * STEM_SCALE
+    stem_y0 = _y0_for_center(rows=2, kh=stem_kh_w, gap=GRID_GAP,
+                             cols=4, kw=stem_kw_w)
     stem_grid = draw_channel_grid(
         ax, x_left=x_cursor, y0=stem_y0, z0=0.0,
         n_channels=8, rows=2, cols=4,
-        kt=stem_kt * S_T, kh=stem_kh * S_PIX, kw=stem_kw * S_PIX,
+        kt=stem_kt_w, kh=stem_kh_w, kw=stem_kw_w,
         gap=GRID_GAP, palette=PAL_STEM, base_zorder=2.0, edge_width=0.25,
         hue_jitter=0.08,
     )
@@ -212,7 +226,6 @@ def plot_panel_a_architecture(ax, assets, *, gaps=None, x_start=None):
         gap=GRID_GAP, palette=PAL_BLOCK1, base_zorder=2.0, edge_width=0.20,
         hue_jitter=0.10,
     )
-    _draw_block_skip(ax, blk1_grid, depth=SKIP_DEPTH)
     label_tops.append(_stage_label_top(
         ax, blk1_grid, name="ResBlock 1",
         sub=f"{blk1_kt}×{blk1_kh}×{blk1_kw} · 64 ch"))
@@ -230,7 +243,6 @@ def plot_panel_a_architecture(ax, assets, *, gaps=None, x_start=None):
         gap=GRID_GAP, palette=PAL_BLOCK2, base_zorder=2.0, edge_width=0.18,
         hue_jitter=0.10,
     )
-    _draw_block_skip(ax, blk2_grid, depth=SKIP_DEPTH)
     label_tops.append(_stage_label_top(
         ax, blk2_grid, name="ResBlock 2",
         sub=f"{blk2_kt}×{blk2_kh}×{blk2_kw} · 128 ch"))
@@ -307,7 +319,7 @@ def plot_panel_a_architecture(ax, assets, *, gaps=None, x_start=None):
                           "ro": readout_records[len(readout_records) // 2]["ro"]})
 
     # ── Inter-stage flow arrows ─────────────────────────────────────────
-    arrow_mids = _connect_stages(ax, stage_records[:-1])
+    arrows = _connect_stages(ax, stage_records[:-1])
     # Single short GRU → readout arrow: from the GRU right anchor to the
     # left edge of the readout column at the GRU center height.
     gru_anchor = _stage_right_anchor(stage_records[-2])
@@ -318,31 +330,54 @@ def plot_panel_a_architecture(ax, assets, *, gaps=None, x_start=None):
                 arrowprops=dict(arrowstyle="->", lw=1.0, color="#333"),
                 zorder=4.8)
 
-    # ── ↓2× downsample badge on block1→block2 arrow ─────────────────────
-    if "block1→block2" in arrow_mids:
-        mx, my = arrow_mids["block1→block2"]
-        draw_pool_glyph(ax, mx, my)
+    # ── ResBlock 1 residual: fork from mid(stem→blk1) into '+' at 1/4(blk1→blk2)
+    a_in1  = arrows["stem→block1"]
+    a_out1 = arrows["block1→block2"]
+    x_fork1 = _arrow_frac(a_in1,  0.50)[0]
+    x_plus1 = _arrow_frac(a_out1, 0.25)[0]
+    draw_arrow_skip(ax, x_fork1, x_plus1, ARCH_CENTER_Y,
+                    depth=SKIP_DEPTH, corner_r=SKIP_CORNER_R,
+                    color=SKIP_COLOR, lw=SKIP_LW, zorder=4.7)
+    draw_op_marker(ax, x_plus1, ARCH_CENTER_Y, color=SKIP_COLOR,
+                   radius=0.10, lw=0.9, zorder=12.0)
 
-    # ── Behavior placeholder above block2→gru arrow ─────────────────────
-    if "block2→gru" in arrow_mids:
-        ax_mid_x, ax_mid_y = arrow_mids["block2→gru"]
-        beh_x = ax_mid_x - BEH_WIDTH / 2
-        beh_y = ax_mid_y + BEH_Y_GAP
-        ax.add_patch(Rectangle((beh_x, beh_y), BEH_WIDTH, BEH_HEIGHT,
-                               facecolor="#ead6f5", edgecolor="#7e3f8a",
-                               linewidth=0.9, zorder=12.0))
-        ax.text(beh_x + BEH_WIDTH / 2, beh_y + BEH_HEIGHT / 2,
-                "Behavior", ha="center", va="center",
-                fontsize=8.0, color="#3e1a48", fontweight="bold",
-                zorder=12.1)
-        # Concatenation arrow from box bottom down to the inter-stage
-        # arrow midpoint (symbolises ⊕ into the recurrent input).
-        ax.add_patch(FancyArrowPatch(
-            (ax_mid_x, beh_y - 0.02),
-            (ax_mid_x, ax_mid_y + 0.05),
-            arrowstyle="-|>", lw=1.0, color="#7e3f8a",
-            mutation_scale=10, zorder=12.0,
-        ))
+    # ── ↓2× downsample badge at the midpoint of blk1→blk2 ───────────────
+    mx, my = _arrow_frac(a_out1, 0.50)
+    draw_pool_glyph(ax, mx, my)
+
+    # ── ResBlock 2 residual: fork 3/4(blk1→blk2) → '+' at 1/3(blk2→gru)
+    a_out2 = arrows["block2→gru"]
+    x_fork2 = _arrow_frac(a_out1, 0.75)[0]
+    x_plus2 = _arrow_frac(a_out2, 1.0 / 3.0)[0]
+    draw_arrow_skip(ax, x_fork2, x_plus2, ARCH_CENTER_Y,
+                    depth=SKIP_DEPTH, corner_r=SKIP_CORNER_R,
+                    color=SKIP_COLOR, lw=SKIP_LW, zorder=4.7)
+    draw_op_marker(ax, x_plus2, ARCH_CENTER_Y, color=SKIP_COLOR,
+                   radius=0.10, lw=0.9, zorder=12.0)
+
+    # ── Behavior concat (⊕) at 2/3 of blk2→gru, box below the arrow ────
+    x_concat, y_concat = _arrow_frac(a_out2, 2.0 / 3.0)
+    beh_x = x_concat - BEH_WIDTH / 2
+    beh_top = y_concat - BEH_Y_GAP
+    beh_bot = beh_top - BEH_HEIGHT
+    ax.add_patch(Rectangle((beh_x, beh_bot), BEH_WIDTH, BEH_HEIGHT,
+                           facecolor="#ead6f5", edgecolor="#7e3f8a",
+                           linewidth=0.9, zorder=12.0))
+    ax.text(beh_x + BEH_WIDTH / 2, beh_bot + BEH_HEIGHT / 2,
+            "Behavior", ha="center", va="center",
+            fontsize=8.0, color="#3e1a48", fontweight="bold",
+            zorder=12.1)
+    # Arrow from the box top up to just below the ⊕ marker (radius=0.12).
+    ax.add_patch(FancyArrowPatch(
+        (x_concat, beh_top + 0.01),
+        (x_concat, y_concat - 0.14),
+        arrowstyle="-|>", lw=1.0, color="#7e3f8a",
+        mutation_scale=10, zorder=11.9,
+    ))
+    # ⊕ marker drawn LAST so it sits on top of the flow arrow and the
+    # behavior arrowhead.
+    draw_op_marker(ax, x_concat, y_concat, color="#7e3f8a",
+                   radius=0.12, lw=1.0, zorder=12.5)
 
     # ── Header ──────────────────────────────────────────────────────────
     # Centered over the pipeline body (Stem → ConvGRU), sitting above the
@@ -356,8 +391,11 @@ def plot_panel_a_architecture(ax, assets, *, gaps=None, x_start=None):
             fontsize=11, color=TEXT_COLOR, fontweight="bold")
 
     # ── Tighten axes ────────────────────────────────────────────────────
-    all_xs = [0]
-    all_ys = [0]
+    # Only include actual content extents — historically this seeded the
+    # bounds with (0, 0), which left ~half the figure empty below the
+    # architecture once we enforced set_aspect("equal").
+    all_xs = []
+    all_ys = []
     for s in stage_records:
         if "grid" in s:
             xmin, xmax, ymin, ymax = s["grid"]["bbox2d"]
@@ -369,14 +407,19 @@ def plot_panel_a_architecture(ax, assets, *, gaps=None, x_start=None):
     all_ys.extend([col_y0, col_y0 + col_height + 0.35])
     # Header sits above all labels.
     all_ys.append(header_y + 0.35)
-    # Skip staples dip below each block.
-    blk_y_bot = min(stage_records[i]["grid"]["y_bottom"] for i in (2, 3))
-    all_ys.append(blk_y_bot - SKIP_DEPTH - 0.20)
+    # Residual ⊔-skips dip to y = ARCH_CENTER_Y - SKIP_DEPTH (the U bottoms
+    # are anchored to the flow line, not to the block bottoms).
+    all_ys.append(ARCH_CENTER_Y - SKIP_DEPTH - 0.20)
     pad_x, pad_y = 0.3, 0.1
     x_lo, x_hi = min(all_xs) - pad_x, max(all_xs) + pad_x
     y_lo, y_hi = min(all_ys) - pad_y, max(all_ys) + pad_y
     ax.set_xlim(x_lo, x_hi)
     ax.set_ylim(y_lo, y_hi)
+    # Defensive: matplotlib's imshow always calls ax.set_aspect(...), so
+    # any imshow with aspect="auto" silently flattens the axes — making
+    # circle patches render as ellipses. Re-anchor to "equal" here so the
+    # final state is correct even if a new imshow sneaks in upstream.
+    ax.set_aspect("equal")
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -432,22 +475,14 @@ def _stage_label_top(ax, grid, *, name, sub=None, name_fs=8.5, sub_fs=7.0,
     return y_title
 
 
-def _draw_block_skip(ax, grid, *, depth=SKIP_DEPTH):
-    """Per-block residual ⊔-staple beneath a kernel grid. Drops from just
-    below the block's front-bottom-left corner, runs across, climbs back
-    up to the front-bottom-right corner. Rendered in flow-arrow black."""
-    x0 = grid["x_left"] - 0.05
-    x1 = grid["x_right"] + 0.05
-    y_top = grid["y_bottom"] - 0.05
-    draw_skip_staple(ax, x0, x1, y_top,
-                     depth=depth, corner_r=SKIP_CORNER_R,
-                     color=SKIP_COLOR, lw=SKIP_LW)
-
-
 def _connect_stages(ax, stage_records):
     """Draw horizontal flow arrows between consecutive stages, threading
-    them along the projected mid-y of each stage's front face."""
-    arrow_mids = {}
+    them along the projected mid-y of each stage's front face. Returns a
+    dict keyed by "stageA→stageB" mapping to the arrow's start/end x and
+    its y (constant along the arrow). Callers use `_arrow_frac` to anchor
+    residual forks, sum markers, and concat markers at fractional points
+    along these arrows."""
+    arrows = {}
     for i in range(len(stage_records) - 1):
         a = stage_records[i]
         b = stage_records[i + 1]
@@ -459,8 +494,16 @@ def _connect_stages(ax, stage_records):
         ax.annotate("", xy=(x_end, y_mid), xytext=(x_start, y_mid),
                     arrowprops=dict(arrowstyle="->", lw=1.0, color="#333"),
                     zorder=4.8)
-        arrow_mids[f"{a['name']}→{b['name']}"] = ((x_start + x_end) / 2, y_mid)
-    return arrow_mids
+        arrows[f"{a['name']}→{b['name']}"] = {
+            "x_start": x_start, "x_end": x_end, "y": y_mid,
+        }
+    return arrows
+
+
+def _arrow_frac(arrow, frac):
+    """(x, y) at fraction `frac ∈ [0, 1]` along an arrow record."""
+    return (arrow["x_start"] + frac * (arrow["x_end"] - arrow["x_start"]),
+            arrow["y"])
 
 
 def _stage_right_anchor(rec):
