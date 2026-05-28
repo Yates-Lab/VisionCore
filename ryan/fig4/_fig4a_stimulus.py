@@ -411,20 +411,24 @@ def _draw_lag_cube(ax, cube, corners3d, *, outline=CYAN, edge_width=1.4,
 CANVAS_W = 28.0
 CANVAS_H = 12.0
 
-# Screen geometry
-SCR_W = 5.6
-SCR_H = 4.2
+# Screen geometry. Kept at 4:3 (the 16:9 source is already drawn squished);
+# sized small so the stimulus half's footprint stays narrow relative to the
+# architecture half (~52/47 width split in the composed panel).
+SCR_W = 4.8
+SCR_H = 3.6
 SCR_CY = 6.5
 
-# Training stack — fanned in x AND staggered in z. The front screen sits
-# far enough right that the back-most screen (offset left + projected
-# up-and-left by depth) doesn't clip the canvas's left edge.
+# Training stack — lightly fanned in x and deeply staggered in z. The deep
+# z-stagger lifts the back screens up-and-left (cabinet depth), adding
+# vertical extent that narrows the half's aspect without distorting the
+# screens. TRAIN_CX_FRONT keeps the back-most screen clear of the left edge.
 TRAIN_CX_FRONT = 7.8       # world x of the front (natural-image) screen
-TRAIN_X_STEP = 1.7         # leftward per layer
-TRAIN_Z_STEP = 1.7         # back-into-page per layer
+TRAIN_X_STEP = 0.8         # leftward per layer
+TRAIN_Z_STEP = 3.4         # back-into-page per layer
 
-# Test screen — moved closer to training stack.
-TEST_CX = 13.6
+# Test screen — pulled in close to the training stack (kept just clear of the
+# coplanar front screen so they don't intersect).
+TEST_CX = 12.5
 TEST_ZOOM_DEG = 5.0        # extent of the zoomed test view (degrees)
 
 # Lag cube. Kept compact so cabinet projection of the depth axis doesn't
@@ -432,6 +436,11 @@ TEST_ZOOM_DEG = 5.0        # extent of the zoomed test view (degrees)
 CUBE_W = 2.35
 CUBE_H = 1.80
 CUBE_D = 2.45
+
+# Horizontal gap (world units) between the test screen's right edge and the
+# lag cube's back face. Small → the "Model input" cube nearly abuts the test
+# screen, tightening the stimulus half's footprint.
+CUBE_GAP = 0.30
 
 # Scale bars (deg)
 TRAIN_SCALEBAR_DEG = 10.0
@@ -562,8 +571,7 @@ def plot_panel_a_stimulus(ax, assets):
     # of the test screen with a small gap.
     back_off_2d = _back_face_center_offset_2d(
         CUBE_D, CUBE_YAW_DEG, CUBE_PITCH_DEG, CUBE_ROLL_DEG)
-    gap = 2.0
-    cube_front_cx = test_right_x + gap - back_off_2d[0]   # back face at test_right_x + gap
+    cube_front_cx = test_right_x + CUBE_GAP - back_off_2d[0]   # back face at test_right_x + CUBE_GAP
     cube_front_cy = roi_center_2d[1] - back_off_2d[1]     # back face vertically at ROI
 
     cube = assets.lag_cube[::-1]
