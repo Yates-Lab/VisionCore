@@ -32,11 +32,16 @@ TEXT_COLOR = "#222222"
 # cabinet projection: depth is foreshortened to half so cube-shaped kernels
 # read as square-fronted blocks (slant edge ≈ ½ vertical edge) instead of
 # slanted rhombi. α=45° is the standard cabinet angle.
+#
+# Depth projects UP-AND-RIGHT so each kernel's visible faces are
+# front + top + RIGHT — matching the stimulus lag cube's apparent
+# orientation and the usual isometric look (block "coming out" toward
+# the lower-left rather than receding into the page).
 # ──────────────────────────────────────────────────────────────────────────
 CAB_ALPHA = np.deg2rad(45.0)
 CAB_DEPTH = 0.5
 CAB_DEPTH_VEC = np.array([
-    -np.cos(CAB_ALPHA) * CAB_DEPTH,
+    +np.cos(CAB_ALPHA) * CAB_DEPTH,
     +np.sin(CAB_ALPHA) * CAB_DEPTH,
 ])
 
@@ -73,26 +78,26 @@ def draw_axis_aligned_prism(ax, center, size, *,
                             edge_width=0.4, zorder=2, alpha=1.0):
     """Draw an axis-aligned rectangular prism in cabinet projection.
 
-    Visible faces: front (z=cz-sz/2), top (y=cy+sy/2), and LEFT
-    (x=cx-sx/2). With +z going into the page (up-and-left), the left and
-    top faces face the viewer; the right and bottom faces are hidden.
+    Visible faces: front (z=cz-sz/2), top (y=cy+sy/2), and RIGHT
+    (x=cx+sx/2). With +z going into the page (up-and-right), the right
+    and top faces face the viewer; the left and bottom faces are hidden.
     """
     c = axis_aligned_box_corners(center, size)
     # corner indices: 0..3 front (LL,LR,UR,UL); 4..7 back
     front = cab_project(c[[0, 1, 2, 3]])
     top   = cab_project(c[[3, 2, 6, 7]])    # front-UL, front-UR, back-UR, back-UL
-    left  = cab_project(c[[0, 3, 7, 4]])    # front-LL, front-UL, back-UL, back-LL
+    right = cab_project(c[[1, 2, 6, 5]])    # front-LR, front-UR, back-UR, back-LR
 
     ax.add_patch(Polygon(top, closed=True, facecolor=top_color,
                          edgecolor=edge_color, linewidth=edge_width,
                          zorder=zorder + 0.1, alpha=alpha))
-    ax.add_patch(Polygon(left, closed=True, facecolor=side_color,
+    ax.add_patch(Polygon(right, closed=True, facecolor=side_color,
                          edgecolor=edge_color, linewidth=edge_width,
                          zorder=zorder + 0.2, alpha=alpha))
     ax.add_patch(Polygon(front, closed=True, facecolor=front_color,
                          edgecolor=edge_color, linewidth=edge_width,
                          zorder=zorder + 0.3, alpha=alpha))
-    return front, top, left
+    return front, top, right
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -557,8 +562,9 @@ def draw_kernel_prism(ax, front_lower_left_3d, size_3d, *,
     """Draw a kernel prism whose front-lower-left corner sits at the given
     3D world point, with extents (sx, sy, sz). Cabinet projection.
 
-    Returns the three projected quads (front, top, left) for use by callers
-    that want to attach decorations.
+    Returns the three projected quads (front, top, side) for use by callers
+    that want to attach decorations. `side` is the right face (depth goes
+    up-and-right in our cabinet projection).
     """
     fx, fy, fz = front_lower_left_3d
     sx, sy, sz = size_3d
@@ -615,13 +621,13 @@ def draw_channel_grid(ax, x_left, y0, z0, *, n_channels, rows, cols,
             z_local = base_zorder + (n_z_layers - 1 - iz) * 0.5 + iy * 0.01
             fc, sc, tc, ec = _maybe_jitter_palette(palette, hue_jitter,
                                                    iy * cols + iz, drawn)
-            front, top, left = draw_kernel_prism(
+            front, top, side = draw_kernel_prism(
                 ax, front_ll, (kt, kh, kw),
                 front_color=fc, side_color=sc, top_color=tc,
                 edge_color=ec, edge_width=edge_width,
                 zorder=z_local,
             )
-            for quad in (front, top, left):
+            for quad in (front, top, side):
                 xs.extend(quad[:, 0])
                 ys.extend(quad[:, 1])
             drawn += 1

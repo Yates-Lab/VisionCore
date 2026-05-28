@@ -100,10 +100,12 @@ PAL_READOUT  = ("#d9ecd9", "#8cc28c", "#3f8a3f", "#1f5e1f")
 
 
 # Cabinet depth vector (mirror of _fig4a_glyphs.CAB_DEPTH_VEC).
+# +z (into page) projects UP-AND-RIGHT, so back-layer kernels in a grid
+# stack toward the upper-right of the front layer.
 _CAB_ALPHA = np.deg2rad(45.0)
 _CAB_DEPTH = 0.5
 _CAB_DEPTH_VEC = np.array([
-    -np.cos(_CAB_ALPHA) * _CAB_DEPTH,
+    +np.cos(_CAB_ALPHA) * _CAB_DEPTH,
     +np.sin(_CAB_ALPHA) * _CAB_DEPTH,
 ])
 
@@ -396,10 +398,13 @@ def _y0_for_center(*, rows, kh, gap, cols=1, kw=None, center_y=ARCH_CENTER_Y):
 
 
 def _next_x(grid, gap):
-    """Next x-cursor = front-face right of grid + gap. (We measure from the
-    front face, not bbox, so cabinet depth doesn't push the next stage
-    visually downstream — adjacent backs are allowed to overlap in z.)"""
-    return grid["x_right"] + gap
+    """Next x-cursor = projected bbox right + gap. With depth projecting
+    up-and-right, the back-row kernels of stage N extend rightward beyond
+    the front-face right edge; advancing from bbox-right keeps a clean
+    visual gap between N's back layer and N+1's front face. In the prior
+    up-and-left orientation bbox-right collapsed to front-face right, so
+    DEFAULT_GAPS values still read the same visually."""
+    return grid["bbox2d"][1] + gap
 
 
 def _stage_label_top(ax, grid, *, name, sub=None, name_fs=8.5, sub_fs=7.0,
@@ -459,13 +464,16 @@ def _connect_stages(ax, stage_records):
 
 
 def _stage_right_anchor(rec):
-    """2D anchor on the right side of a stage for flow-arrow start. Y sits
-    at the visual bbox center (= ARCH_CENTER_Y after the depth-aware shift)
-    so arrows trace a single horizontal line through every stage."""
+    """2D anchor on the right side of a stage for flow-arrow start. X sits
+    at the bbox-right (past the back-layer overhang, since depth projects
+    up-and-right) so flow arrows don't slice across this stage's own
+    back-row kernels. Y sits at the visual bbox center (= ARCH_CENTER_Y
+    after the depth-aware shift) so arrows trace a single horizontal line
+    through every stage."""
     if "grid" in rec:
         g = rec["grid"]
-        _, _, ymin, ymax = g["bbox2d"]
-        return np.array([g["x_right"], 0.5 * (ymin + ymax)])
+        xmin, xmax, ymin, ymax = g["bbox2d"]
+        return np.array([xmax, 0.5 * (ymin + ymax)])
     ro = rec["ro"]
     return np.array([ro["x_right"], (ro["y_bottom"] + ro["y_top"]) / 2])
 
