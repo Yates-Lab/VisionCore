@@ -781,52 +781,50 @@ def draw_skip_staple(ax, x0, x1, y_top, *, depth=0.6, corner_r=0.12,
 
 def draw_recurrent_loop(ax, x0, x1, y_top, *, arc_height=0.9, color="#7e3f8a",
                         lw=1.4, zorder=4.5, label="h$_{t-1}$",
-                        label_fontsize=7.0, inset=0.18):
-    """Tall closed loop perched on top of a block, indicating recurrence.
-    Two near-vertical legs (input on the left, output on the right) connected
-    by a flat top, drawn as a single rounded rectangular path with an
-    arrowhead on the descending (left) leg.
+                        label_fontsize=7.0, gap_frac=1.0 / 5.0):
+    """Standard recurrence glyph perched on top of a block: a circle with
+    its bottom `gap_frac` of circumference removed (the opening faces the
+    block) and a single arrowhead on the LEFT side pointing down, so the
+    loop reads as the hidden state feeding back into the cell.
 
-    `x0` (left) and `x1` (right) are the block's left/right x; `y_top` is the
-    block's projected top. `inset` shrinks the loop horizontally so it stays
-    visually planted on the block."""
+    `x0`/`x1` are the block's left/right x (used only to center the circle);
+    `y_top` is the block's projected top. `arc_height` sets the diameter."""
     from matplotlib.path import Path
-    from matplotlib.patches import FancyArrowPatch
-    span = x1 - x0
-    lx = x0 + inset * span
-    rx = x1 - inset * span
-    base_y = y_top + 0.04
-    top_y = y_top + arc_height
-    corner_r = min(0.18, (rx - lx) * 0.35, arc_height * 0.45)
+    from matplotlib.patches import PathPatch
 
-    # Use a FancyArrowPatch along a custom path to get an arrowhead on the
-    # descending leg. Construct an explicit rounded-rectangle path: up the
-    # right leg → across the top → down the left leg into the block top.
-    verts = [
-        (rx, base_y),                       # start: rises from right edge
-        (rx, top_y - corner_r),             # straight up
-        (rx, top_y),                        # ctrl: top-right round
-        (rx - corner_r, top_y),             # corner end
-        (lx + corner_r, top_y),             # across the top
-        (lx, top_y),                        # ctrl: top-left round
-        (lx, top_y - corner_r),             # corner end
-        (lx, base_y),                       # straight down (arrow target)
-    ]
-    codes = [Path.MOVETO,
-             Path.LINETO,
-             Path.CURVE3, Path.CURVE3,
-             Path.LINETO,
-             Path.CURVE3, Path.CURVE3,
-             Path.LINETO]
-    path = Path(verts, codes)
-    ax.add_patch(FancyArrowPatch(
-        path=path,
-        arrowstyle="-|>", lw=lw, color=color,
-        zorder=zorder, mutation_scale=12,
-        joinstyle="round", capstyle="round",
-    ))
+    R = arc_height / 2.0
+    cx = 0.5 * (x0 + x1)
+    cy = y_top + 0.04 + R               # circle bottom sits just above block
+
+    # Gap centered on the bottom (south = -90°). Draw the remaining arc
+    # counter-clockwise from the bottom-right gap edge, up the right, over
+    # the top, and down the left — ending at the bottom-left gap edge.
+    gap_deg = 360.0 * gap_frac
+    start = -90.0 + gap_deg / 2.0
+    end = 270.0 - gap_deg / 2.0
+    th = np.deg2rad(np.linspace(start, end, 160))
+    ax.add_patch(PathPatch(
+        Path(np.column_stack([cx + R * np.cos(th), cy + R * np.sin(th)])),
+        edgecolor=color, facecolor="none", lw=lw,
+        zorder=zorder, capstyle="round"))
+
+    # Arrowhead: a filled triangle whose BASE sits on the arc's end point
+    # (bottom-left gap edge, on the left side) and whose tip extends forward
+    # along the counter-clockwise tangent — the arc flows straight into the
+    # head, with no line poking past it.
+    er = np.deg2rad(end)
+    base_center = np.array([cx + R * np.cos(er), cy + R * np.sin(er)])
+    tangent = np.array([-np.sin(er), np.cos(er)])      # CCW travel direction
+    normal = np.array([-tangent[1], tangent[0]])
+    tip = base_center + 0.26 * arc_height * tangent
+    ax.add_patch(Polygon(
+        [tip, base_center + 0.16 * arc_height * normal,
+         base_center - 0.16 * arc_height * normal],
+        closed=True, facecolor=color, edgecolor=color,
+        linewidth=0, zorder=zorder + 0.1))
+
     if label is not None:
-        ax.text((lx + rx) / 2, top_y + 0.08, label,
+        ax.text(cx, cy + R + 0.08, label,
                 ha="center", va="bottom", fontsize=label_fontsize,
                 color=color, style="italic", zorder=zorder + 0.1)
 
@@ -993,18 +991,28 @@ def draw_pool_glyph(ax, x, y, *, color="#222", fontsize=7.5, zorder=12.0):
 
 
 def draw_op_marker(ax, x, y, *, color="#222", radius=0.10, lw=0.9,
-                   facecolor="white", zorder=12.0):
-    """Circled-'+' operator marker (residual sum or concatenation point).
-    A small white-filled circle with a + drawn inside, centered on (x, y).
-    Use `color="#222"` for residual sums on flow arrows and a contrasting
-    hue (e.g. the behavior palette) for concatenations."""
+                   facecolor="white", zorder=12.0, symbol="+"):
+    """Circled operator marker. A small white-filled circle centered on
+    (x, y) with `symbol` drawn inside:
+        "+"  → residual sum (horizontal + vertical stroke)
+        "||" → concatenation (two vertical strokes)
+    Keeping the circle identical and switching only the inner glyph lets
+    sum and concat markers share a size while reading differently."""
     ax.add_patch(Circle((x, y), radius, facecolor=facecolor,
                         edgecolor=color, linewidth=lw, zorder=zorder))
     r = radius * 0.55
-    ax.plot([x - r, x + r], [y, y], color=color, lw=lw,
-            zorder=zorder + 0.1, solid_capstyle="round")
-    ax.plot([x, x], [y - r, y + r], color=color, lw=lw,
-            zorder=zorder + 0.1, solid_capstyle="round")
+    if symbol == "+":
+        ax.plot([x - r, x + r], [y, y], color=color, lw=lw,
+                zorder=zorder + 0.1, solid_capstyle="round")
+        ax.plot([x, x], [y - r, y + r], color=color, lw=lw,
+                zorder=zorder + 0.1, solid_capstyle="round")
+    elif symbol == "||":
+        d = radius * 0.30
+        for dx in (-d, d):
+            ax.plot([x + dx, x + dx], [y - r, y + r], color=color, lw=lw,
+                    zorder=zorder + 0.1, solid_capstyle="round")
+    else:
+        raise ValueError(f"unknown op-marker symbol: {symbol!r}")
 
 
 def draw_arrow_skip(ax, x0, x1, y_top, *, depth=0.6, corner_r=0.12,

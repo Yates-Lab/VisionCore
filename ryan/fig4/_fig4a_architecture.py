@@ -39,18 +39,18 @@ from _fig4a_glyphs import (
 
 
 # ──────────────────────────────────────────────────────────────────────────
-# World-unit scales — every kernel everywhere uses the SAME mapping
-# (taps → world units) so a 9×9 reads visibly larger than a 5×5. The
-# frontend uses the same temporal scale as the rest so its 16-tap kernels
-# don't dominate; it gets a slightly larger spatial face only because each
-# channel is 1×1 in space and needs *some* visible footprint.
+# World-unit scales — every convnet/GRU kernel uses the SAME mapping
+# (taps → world units) so a 9×9 reads visibly larger than a 5×5.
 # ──────────────────────────────────────────────────────────────────────────
 S_PIX = 0.030           # world units per spatial tap (convnet & GRU)
 S_T   = S_PIX           # world units per time tap (isotropic: 1×1×1 is a cube)
-# Frontend and stem are scaled up so they draw the eye — they're the
-# learned input-shaping stages and pay for their visual real estate.
-S_T_FE = 1.5 * S_T            # frontend time scale: 50% larger than rest
-S_FE_SPATIAL = 0.30           # frontend spatial face (50% larger)
+# Frontend kernels are depthwise temporal (kt=frontend_k taps, 1×1 spatial),
+# rendered at their true (frontend_k : 1 : 1) aspect so each beam reads as
+# frontend_k× longer than it is wide/tall. FE_SCALE is the single knob: the
+# frontend's per-tap size is FE_SCALE × the per-tap size (S_PIX) every other
+# kernel uses. Lower it to shrink the whole frontend — length and
+# cross-section scale together, so the aspect is preserved.
+FE_SCALE = 2.0
 STEM_SCALE = 1.5              # per-tap multiplier on stem kt/kh/kw
 GRID_GAP = 0.04         # gap between cells in a grid
 FE_GAP   = 0.06         # vertical gap between stacked frontend channels
@@ -87,12 +87,12 @@ SKIP_COLOR = "#222"     # same colour as flow arrows
 SKIP_LW    = 1.0
 SKIP_CORNER_R = 0.12
 
-# Behavior placeholder. Sits BELOW the blk2→gru flow arrow, centered on
-# the concat (⊕) marker; kept narrow so the box fits laterally between
-# ResBlock 2's bbox right and the ConvGRU's left edge.
+# Behavior placeholder. Drops below the ConvGRU block (clearing the
+# pipeline body) and is left-justified to the vertical concat arrow that
+# feeds the concat marker on the blk2→gru flow arrow.
 BEH_HEIGHT = 0.32
 BEH_WIDTH  = 0.55
-BEH_Y_GAP  = 0.45       # gap from flow arrow down to top of behavior box
+BEH_Y_GAP  = 0.20       # gap from ConvGRU bottom down to top of behavior box
 
 # Canvas (will be tightened in plot)
 CANVAS_W = 22.0
@@ -152,9 +152,10 @@ def plot_panel_a_architecture(ax, assets, *, gaps=None, x_start=None):
     # Vertical stack (rows=fe_n, cols=1): each channel is its own beam,
     # visually distinct. Front face = oscilloscope showing the learned
     # temporal weight curve for that channel.
-    fe_kt = arch["frontend_k"] * S_T_FE
-    fe_kh = S_FE_SPATIAL
-    fe_kw = S_FE_SPATIAL
+    fe_unit = S_PIX * FE_SCALE
+    fe_kt = arch["frontend_k"] * fe_unit
+    fe_kh = fe_unit
+    fe_kw = fe_unit
     fe_n  = arch["frontend_channels"]
     fe_y0 = _y0_for_center(rows=fe_n, kh=fe_kh, gap=FE_GAP,
                            cols=1, kw=fe_kw)
@@ -262,12 +263,12 @@ def plot_panel_a_architecture(ax, assets, *, gaps=None, x_start=None):
     )
     # Tall closed recurrent loop on top of the GRU.
     g_xmin, g_xmax, g_ymin, g_ymax = gru_grid["bbox2d"]
-    gru_loop_base = g_ymax + 0.04
-    gru_loop_height = 0.55
+    gru_loop_base = g_ymax - 0.10
+    gru_loop_height = 0.37
     draw_recurrent_loop(ax, x0=g_xmin, x1=g_xmax,
                         y_top=gru_loop_base,
                         arc_height=gru_loop_height,
-                        color="#7e3f8a", lw=1.4, inset=0.18,
+                        color="#7e3f8a", lw=1.4,
                         label=None)
     # Label above the loop (loop_top + tiny pad)
     gru_loop_top = gru_loop_base + gru_loop_height
@@ -355,10 +356,14 @@ def plot_panel_a_architecture(ax, assets, *, gaps=None, x_start=None):
     draw_op_marker(ax, x_plus2, ARCH_CENTER_Y, color=SKIP_COLOR,
                    radius=0.10, lw=0.9, zorder=12.0)
 
-    # ── Behavior concat (⊕) at 2/3 of blk2→gru, box below the arrow ────
+    # ── Behavior concat at 2/3 of blk2→gru ──────────────────────────────
+    # Marker sits on the flow arrow; the Behavior box drops below the
+    # ConvGRU block (so it stops crowding the pipeline body) and is
+    # left-justified to the vertical arrow feeding the marker.
     x_concat, y_concat = _arrow_frac(a_out2, 2.0 / 3.0)
-    beh_x = x_concat - BEH_WIDTH / 2
-    beh_top = y_concat - BEH_Y_GAP
+    gru_bottom = gru_grid["bbox2d"][2]
+    beh_x = x_concat
+    beh_top = gru_bottom - BEH_Y_GAP
     beh_bot = beh_top - BEH_HEIGHT
     ax.add_patch(Rectangle((beh_x, beh_bot), BEH_WIDTH, BEH_HEIGHT,
                            facecolor="#ead6f5", edgecolor="#7e3f8a",
@@ -367,17 +372,20 @@ def plot_panel_a_architecture(ax, assets, *, gaps=None, x_start=None):
             "Behavior", ha="center", va="center",
             fontsize=8.0, color="#3e1a48", fontweight="bold",
             zorder=12.1)
-    # Arrow from the box top up to just below the ⊕ marker (radius=0.12).
+    # Vertical concat arrow from the box top up to just below the marker,
+    # rising along the box's left edge (= x_concat).
     ax.add_patch(FancyArrowPatch(
         (x_concat, beh_top + 0.01),
-        (x_concat, y_concat - 0.14),
+        (x_concat, y_concat - 0.12),
         arrowstyle="-|>", lw=1.0, color="#7e3f8a",
         mutation_scale=10, zorder=11.9,
     ))
-    # ⊕ marker drawn LAST so it sits on top of the flow arrow and the
-    # behavior arrowhead.
-    draw_op_marker(ax, x_concat, y_concat, color="#7e3f8a",
-                   radius=0.12, lw=1.0, zorder=12.5)
+    # Concatenation marker: black circle with a '||' glyph (NOT the '+'
+    # used by residual sums) so concat and addition read differently.
+    # Same radius as the residual-sum markers. Drawn LAST so it sits above
+    # the flow arrow and the behavior arrowhead.
+    draw_op_marker(ax, x_concat, y_concat, color="#222",
+                   radius=0.10, lw=1.0, zorder=12.5, symbol="||")
 
     # ── Header ──────────────────────────────────────────────────────────
     # Centered over the pipeline body (Stem → ConvGRU), sitting above the
