@@ -7,7 +7,7 @@
 *.wandb
 *.json
 *.txt
-jake/*
+jake/multidataset_ddp/*
 *.pyc
 *.egg-info/
 __pycache__/
