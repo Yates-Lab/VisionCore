@@ -32,6 +32,8 @@ import torch
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpecFromSubplotSpec
 from matplotlib.patches import FancyArrowPatch
+from matplotlib.path import Path
+from matplotlib.transforms import offset_copy
 
 from VisionCore.paths import CACHE_DIR
 from VisionCore.covariance import (
@@ -64,6 +66,40 @@ DECOMP_SEG_MIN = 36
 UNIT_EXPLORE_CACHE = CACHE_DIR / "fig2_unit_explore.pkl"
 PAIR_SCAN_CACHE = CACHE_DIR / f"fig2_lead_pair_scan_{SESSION}.pkl"
 UNIFORM_CACHE = CACHE_DIR / f"fig2a_uniform_bins_{SESSION}.pkl"
+
+
+def make_axes(fig, subplot_spec=None):
+    """Create the sub-gridspec for panel A inside `fig` (or inside the given
+    `subplot_spec`). Returns a dict of 5 axes:
+    {"eye", "delta", "spk", "hist", "cov"}.
+
+    Left column has 3 rows (eye, skinny delta-eye trajectory, spike rates);
+    right column has 2 rows (histogram, rate-variance). The two columns are
+    built as independent nested gridspecs so the skinny delta row on the left
+    does not force a thin slot in the right column.
+    """
+    if subplot_spec is None:
+        outer = fig.add_gridspec(1, 2, width_ratios=[1.0, 1.0], wspace=0.28)
+    else:
+        outer = GridSpecFromSubplotSpec(
+            1, 2, subplot_spec=subplot_spec,
+            width_ratios=[1.0, 1.0], wspace=0.28,
+        )
+    gs_left = GridSpecFromSubplotSpec(
+        3, 1, subplot_spec=outer[0, 0],
+        height_ratios=[1.0, 0.25, 1.0], hspace=0.12,
+    )
+    gs_right = GridSpecFromSubplotSpec(
+        2, 1, subplot_spec=outer[0, 1],
+        height_ratios=[2.0, 3.0], hspace=0.12,
+    )
+    ax_eye = fig.add_subplot(gs_left[0, 0])
+    ax_delta = fig.add_subplot(gs_left[1, 0], sharex=ax_eye)
+    ax_spk = fig.add_subplot(gs_left[2, 0], sharex=ax_eye)
+    ax_hist = fig.add_subplot(gs_right[0, 0])
+    ax_cov = fig.add_subplot(gs_right[1, 0], sharex=ax_hist)
+    return {"eye": ax_eye, "delta": ax_delta, "spk": ax_spk,
+            "hist": ax_hist, "cov": ax_cov}
 
 
 def _load_unit_payload():
@@ -127,22 +163,8 @@ def _compute_uniform_bins():
     return out
 
 
-def make_axes(fig, subplot_spec=None):
-    """Create the 2x2 sub-gridspec for panel A inside `fig` (or inside
-    the given `subplot_spec` of fig). Returns a dict of 4 axes:
-    {"eye", "spk", "hist", "cov"}.
-    """
-    kwargs = dict(width_ratios=[1.0, 1.0], height_ratios=[1.0, 1.0],
-                  hspace=0.12, wspace=0.28)
-    if subplot_spec is None:
-        gs = fig.add_gridspec(2, 2, **kwargs)
-    else:
-        gs = GridSpecFromSubplotSpec(2, 2, subplot_spec=subplot_spec, **kwargs)
-    ax_eye = fig.add_subplot(gs[0, 0])
-    ax_spk = fig.add_subplot(gs[1, 0], sharex=ax_eye)
-    ax_hist = fig.add_subplot(gs[0, 1])
-    ax_cov = fig.add_subplot(gs[1, 1], sharex=ax_hist)
-    return {"eye": ax_eye, "spk": ax_spk, "hist": ax_hist, "cov": ax_cov}
+
+
 
 
 def plot_panel_a(axes=None, fig=None, refresh=False, data=None):
@@ -156,6 +178,7 @@ def plot_panel_a(axes=None, fig=None, refresh=False, data=None):
             fig = plt.figure(figsize=(11, 6.5))
         axes = make_axes(fig)
     ax_eye = axes["eye"]
+    ax_delta = axes["delta"]
     ax_spk = axes["spk"]
     ax_hist = axes["hist"]
     ax_cov = axes["cov"]
@@ -196,13 +219,40 @@ def plot_panel_a(axes=None, fig=None, refresh=False, data=None):
     trace_lw = 2.0
 
     # ---------- top-left: eye traces ----------
-    ax_eye.set_title("A", loc="left", fontweight="bold")
+    ax_eye.set_title("A", loc="left", fontweight="bold", pad=30)
+    ax_eye.set_ylabel("Eye position (°)")
     ax_eye.plot(t_ms, e_a, color=color_a, lw=trace_lw)
     ax_eye.plot(t_ms, e_b, color=color_b, lw=trace_lw)
-    ax_eye.set_ylabel("Eye position (°)")
     ax_eye.spines["top"].set_visible(False)
     ax_eye.spines["right"].set_visible(False)
+    ax_eye.spines["left"].set_visible(False)
+    ax_eye.set_yticks([])
     plt.setp(ax_eye.get_xticklabels(), visible=False)
+    # Ensure the scale bar fits and add a 0.2° vertical scale bar at the right.
+    ymin, ymax = ax_eye.get_ylim()
+    ax_eye.set_ylim(min(ymin, -0.55), ymax)
+    sb_x_eye = t_ms[-1] + 12
+    ax_eye.plot([sb_x_eye, sb_x_eye], [-0.5, -0.3], color="k", lw=2, clip_on=False)
+    ax_eye.text(sb_x_eye + 5, -0.4, "0.2°",
+                rotation=90, va="center", ha="left", fontsize=8,
+                clip_on=False)
+
+    # ---------- middle-left: Δ eye trajectory over time ----------
+    delta_e = np.abs(e_a - e_b)
+    ax_delta.fill_between(t_ms, 0.0, delta_e, color="0.55", alpha=0.55, lw=0)
+    ax_delta.plot(t_ms, delta_e, color="0.2", lw=1.0)
+    ax_delta.set_ylim(0.0, 1.3)
+    ax_delta.set_ylabel("Δ eye (°)")
+    ax_delta.spines["top"].set_visible(False)
+    ax_delta.spines["right"].set_visible(False)
+    ax_delta.spines["left"].set_visible(False)
+    ax_delta.set_yticks([])
+    plt.setp(ax_delta.get_xticklabels(), visible=False)
+    ax_delta.plot([sb_x_eye, sb_x_eye], [0.0, 1.0], color="k", lw=2,
+                  clip_on=False)
+    ax_delta.text(sb_x_eye + 5, 0.5, "1°",
+                  rotation=90, va="center", ha="left", fontsize=8,
+                  clip_on=False)
 
     # ---------- bottom-left: spike rate (raw, jagged, offset) ----------
     ymax = float(max(r_a.max(), r_b.max(), 1.0))
@@ -212,6 +262,7 @@ def plot_panel_a(axes=None, fig=None, refresh=False, data=None):
     ax_spk.axhline(0, color="0.7", lw=0.5, zorder=-1)
     ax_spk.axhline(offset, color="0.7", lw=0.5, zorder=-1)
     ax_spk.set_xlabel("Time from fixation onset (ms)")
+    ax_spk.set_ylabel("Spike rates")
     ax_spk.set_yticks([])
     ax_spk.spines["left"].set_visible(False)
     ax_spk.spines["top"].set_visible(False)
@@ -230,13 +281,13 @@ def plot_panel_a(axes=None, fig=None, refresh=False, data=None):
         t1 = slice_[1] * DT * 1000.0
         ax.axvspan(t0, t1, color="0.85", zorder=-1)
 
-    for ax in (ax_eye, ax_spk):
+    for ax in (ax_eye, ax_delta, ax_spk):
         _shade(ax, W1)
         _shade(ax, W2)
 
 
     # ---------- top-right: distribution of Δ eye trajectory ----------
-    ax_hist.set_title("B", loc="left", fontweight="bold")
+    ax_hist.set_title("B", loc="left", fontweight="bold", pad=30)
     ax_hist.bar(bin_centers, count_e, width=bin_width * 0.9,
                 color="0.55", edgecolor="white", linewidth=0.4,
                 align="center")
@@ -251,28 +302,13 @@ def plot_panel_a(axes=None, fig=None, refresh=False, data=None):
     ok = np.isfinite(var_by_bin) & (count_e > 0)
     ax_cov.axhline(0, color="0.7", lw=0.5, zorder=-1)
     ax_cov.plot(bin_centers[ok], var_by_bin[ok],
-                color="tab:purple", lw=1.5, marker="o", ms=4,
+                color="k", lw=1.5, marker="o", ms=4,
                 markeredgecolor="k", markeredgewidth=0.4, zorder=3)
 
-    # Var(PSTH) horizontal reference line
+    # Var(PSTH) horizontal reference line. Right edge sits just left of the
+    # green (close-eye) highlight bar so the label doesn't get covered.
     var_psth = float(p["Cpsth"][j, j])
     ax_cov.axhline(var_psth, color="k", ls="--", lw=1.0, zorder=2)
-    ax_cov.text(HIST_D_MAX, var_psth, "Var(PSTH)  ",
-                ha="right", va="bottom", fontsize=12)
-
-    # Vertical guide on the lowest bin labeled Var(Δe < 0.1°)
-    lowest_x = float(bin_centers[0])
-    lowest_y = float(var_by_bin[0]) if np.isfinite(var_by_bin[0]) else 0.0
-    ymax_cov = max(np.nanmax(var_by_bin[ok]), var_psth) if np.any(ok) else lowest_y
-    ax_cov.annotate(
-        rf"Var($\Delta e < {INTERCEPT_THRESHOLD:g}\degree$)",
-        xy=(lowest_x, lowest_y),
-        xytext=(lowest_x + 0.20, lowest_y - 0.4 * (ymax_cov - lowest_y)
-                if ymax_cov > lowest_y else lowest_y - 0.2),
-        fontsize=12, ha="left", va="center",
-        arrowprops=dict(arrowstyle="->", color="k", lw=0.8,
-                        shrinkA=2, shrinkB=4),
-    )
 
     ax_cov.set_xlabel("Δ eye trajectory (°)")
     ax_cov.set_ylabel("Rate variance (spk²)")
@@ -304,16 +340,38 @@ def plot_panel_a(axes=None, fig=None, refresh=False, data=None):
 
     x_w1 = _bin_for(d_w1)
     x_w2 = _bin_for(d_w2)
-    c_w1 = "tab:green"
-    c_w2 = "tab:red"
+    band_color = "0.85"
 
-    for x, c in [(x_w1, c_w1), (x_w2, c_w2)]:
+    for x in (x_w1, x_w2):
         half = bin_width / 2.0
         for ax in (ax_hist, ax_cov):
-            ax.axvspan(x - half, x + half, color=c, alpha=0.25, zorder=-1)
+            ax.axvspan(x - half, x + half, color=band_color, zorder=-1)
 
-    _distance_marker(t_w1_mid, c_w1)
-    _distance_marker(t_w2_mid, c_w2)
+    _distance_marker(t_w1_mid, band_color)
+    _distance_marker(t_w2_mid, band_color)
+
+    # Var(PSTH) label — right edge just left of the green (W1) highlight bar.
+    psth_label_x = x_w1 - 0.6 * bin_width
+    ax_cov.text(psth_label_x, var_psth, "Var(PSTH)",
+                ha="right", va="bottom", fontsize=12)
+
+    # Var(Δe < threshold) label — sits down and to the right of the lowest-bin
+    # marker, left/center justified, with the arrow emerging just to its left.
+    lowest_x = float(bin_centers[0])
+    lowest_y = float(var_by_bin[0]) if np.isfinite(var_by_bin[0]) else 0.0
+    ymax_cov = np.nanmax(var_by_bin[ok]) if np.any(ok) else lowest_y
+    # Shift the text down by one ~12pt text-height (~14 pts) via an offset
+    # transform so the nudge is independent of the y-axis data range.
+    text_trans = offset_copy(ax_cov.transData, fig=fig, y=-14, units="points")
+    ax_cov.annotate(
+        rf"Var($\Delta e < {INTERCEPT_THRESHOLD:g}\degree$)",
+        xy=(lowest_x, lowest_y),
+        xytext=(lowest_x + 4.5 * bin_width, lowest_y),
+        textcoords=text_trans,
+        fontsize=12, ha="left", va="center",
+        arrowprops=dict(arrowstyle="->", color="k", lw=0.8,
+                        shrinkA=6, shrinkB=4),
+    )
 
     # Force a draw so transforms have correct positions before placing arrows
     fig.canvas.draw()
@@ -321,32 +379,66 @@ def plot_panel_a(axes=None, fig=None, refresh=False, data=None):
     t_w1_ms = 0.5 * (W1[0] + W1[1]) * DT * 1000.0
     t_w2_ms = 0.5 * (W2[0] + W2[1]) * DT * 1000.0
 
-    def _arrow(ax_src, ax_dst, x_src_ms, x_dst_data, color):
-        # Source: top of the source axes at x_src_ms.
-        # Destination: top of the destination axes at x_dst_data.
-        # Both anchored at the top of their axes so the arrow rides above
-        # the data and never crosses traces or legends.
-        src_disp = ax_src.transAxes.transform((0.0, 1.02))
-        # X in data, Y in axes fraction = (x_src_ms_data, top of axes)
-        src_disp = ax_src.transData.transform((x_src_ms, ax_src.get_ylim()[1])) \
-            + np.array([0.0, 18.0])
-        dst_disp = ax_dst.transData.transform((x_dst_data, ax_dst.get_ylim()[1])) \
-            + np.array([0.0, 18.0])
+    def _orthogonal_arrow(ax_src, ax_dst, x_src_data, y_src_data,
+                          x_dst_data, y_dst_data, color="0.3",
+                          corridor_offset_pts=14.0):
+        """Draw an orthogonal connector (up → across → down) with rounded
+        corners from a data point in ax_src to a data point in ax_dst, with
+        the arrow head landing on the destination point.
+        """
         inv = fig.transFigure.inverted()
+        # Tail starts a few pixels above the source marker so it visibly
+        # detaches from the black distance-marker dot.
+        src_disp = ax_src.transData.transform((x_src_data, y_src_data)) \
+            + np.array([0.0, 12.0])
+        dst_disp = ax_dst.transData.transform((x_dst_data, y_dst_data))
+        # Corridor sits comfortably above both axes' top edges.
+        top_src = ax_src.transAxes.transform((0.0, 1.0))[1]
+        top_dst = ax_dst.transAxes.transform((0.0, 1.0))[1]
+        y_corr_disp = max(top_src, top_dst) + corridor_offset_pts
         p_src = inv.transform(src_disp)
         p_dst = inv.transform(dst_disp)
+        cy = inv.transform((0.0, y_corr_disp))[1]
+        sx, sy = p_src
+        ex, ey = p_dst
+        # Corner radius in figure-fraction; cap to avoid overshoot.
+        r = min(0.008, abs(ex - sx) / 2.5, abs(cy - sy) / 2.0,
+                abs(cy - ey) / 2.0)
+        sign = 1.0 if ex >= sx else -1.0
+        verts = [
+            (sx, sy),
+            (sx, cy - r),
+            (sx, cy),                   # CURVE3 control
+            (sx + sign * r, cy),        # CURVE3 end
+            (ex - sign * r, cy),
+            (ex, cy),                   # CURVE3 control
+            (ex, cy - r),               # CURVE3 end
+            (ex, ey),
+        ]
+        codes = [
+            Path.MOVETO, Path.LINETO,
+            Path.CURVE3, Path.CURVE3,
+            Path.LINETO,
+            Path.CURVE3, Path.CURVE3,
+            Path.LINETO,
+        ]
+        path = Path(verts, codes)
         arrow = FancyArrowPatch(
-            p_src, p_dst,
-            transform=fig.transFigure,
-            arrowstyle="->", mutation_scale=14, lw=1.3,
-            color=color, alpha=0.9,
-            connectionstyle="arc3,rad=-0.12",
-            shrinkA=2, shrinkB=2,
+            path=path, transform=fig.transFigure,
+            arrowstyle="->", mutation_scale=12, lw=1.3,
+            color=color,
         )
         fig.patches.append(arrow)
 
-    _arrow(ax_eye, ax_hist, t_w1_ms, x_w1, c_w1)
-    _arrow(ax_eye, ax_hist, t_w2_ms, x_w2, c_w2)
+    # Source y = just above the topmost endpoint of the black distance marker.
+    y_src_w1 = max(float(e_a[t_w1_mid]), float(e_b[t_w1_mid]))
+    y_src_w2 = max(float(e_a[t_w2_mid]), float(e_b[t_w2_mid]))
+    # Destination y = top of the (now neutral) shaded band on the histogram.
+    y_dst_hist = ax_hist.get_ylim()[1]
+    _orthogonal_arrow(ax_eye, ax_hist, t_w1_ms, y_src_w1, x_w1, y_dst_hist,
+                      corridor_offset_pts=24.0)
+    _orthogonal_arrow(ax_eye, ax_hist, t_w2_ms, y_src_w2, x_w2, y_dst_hist,
+                      corridor_offset_pts=16.0)
 
 
 if __name__ == "__main__":

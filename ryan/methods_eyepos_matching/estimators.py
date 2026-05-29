@@ -68,12 +68,22 @@ def _weighted_cov(S, w):
     return C / denom if denom > 0 else C
 
 
-def _split_half_psth_cov(S, T, sw, n_boot, seed, min_tpp):
+def _split_half_psth_cov(S, T, sw, n_boot, seed, min_tpp,
+                         phase_weighting="pair_count"):
     """Split-half PSTH covariance with per-sample target weights sw.
 
     The phase mean at phase t is the sw-weighted mean of its trials (=> E_q[r|t]).
-    Phases are combined with pair-count (n_t^2) weighting, matching the empirical
-    pipeline, and the cross-covariance of disjoint trial halves cancels Poisson.
+    Phases are combined across-phase with one of two weightings:
+
+      * ``'pair_count'`` (default, matched): w_t = n_t(n_t-1)/2, the same weight
+        the close-pair rate estimator implicitly uses (its pool ~ n_t pairs per
+        phase). This is the post-fix pipeline (covariance.py).
+      * ``'uniform'``: w_t = 1, the pre-fix historical Cpsth weighting (1/T per
+        phase). Provided so the Extension-1 bias under variable n_t can be
+        exhibited against the matched case.
+
+    The cross-covariance of disjoint trial halves cancels Poisson regardless of
+    the weighting.
     """
     rng = np.random.default_rng(seed)
     phases = [t for t in np.unique(T) if (T == t).sum() >= min_tpp]
@@ -81,7 +91,12 @@ def _split_half_psth_cov(S, T, sw, n_boot, seed, min_tpp):
         return np.full((S.shape[1], S.shape[1]), np.nan)
     idx_by_t = {t: np.where(T == t)[0] for t in phases}
     nt = np.array([len(idx_by_t[t]) for t in phases], float)
-    wph = nt * (nt - 1) / 2
+    if phase_weighting == "pair_count":
+        wph = nt * (nt - 1) / 2
+    elif phase_weighting == "uniform":
+        wph = np.ones_like(nt)
+    else:
+        raise ValueError(f"unknown phase_weighting: {phase_weighting!r}")
     wph = wph / wph.sum()
 
     C = np.zeros((S.shape[1], S.shape[1]))
@@ -146,7 +161,7 @@ def _close_pair_second_moment(S, E, T, phat, target, threshold, weight_clip):
 
 def decompose(counts, eye, target="full", valid=None, threshold=0.05,
               density="kde", weight_clip=1e6, n_boot=20, seed=42,
-              min_trials_per_phase=10):
+              min_trials_per_phase=10, phase_weighting="pair_count"):
     """Distribution-matched LOTC decomposition of a multi-cell session.
 
     Parameters
@@ -171,6 +186,12 @@ def decompose(counts, eye, target="full", valid=None, threshold=0.05,
         upweighted by 1/p, so capping trades the resulting tail variance for bias.
         This unbounded-weight cost is precisely why target='central' (bounded
         weights, prop to p) is the more stable choice.
+    phase_weighting : {'pair_count', 'uniform'}
+        How Cpsth weights phases (see ``_split_half_psth_cov``). 'pair_count' is
+        the matched / post-fix default; 'uniform' is the pre-fix historical
+        Cpsth weighting, exposed so the Extension-1 bias under variable n_t can
+        be demonstrated against the matched case. Under constant n_t the two
+        coincide.
     n_boot, seed, min_trials_per_phase : see helpers.
 
     Returns
@@ -197,13 +218,30 @@ def decompose(counts, eye, target="full", valid=None, threshold=0.05,
 
     # per-sample target weight: 'central' reweights p -> p^2 (weight prop to p_hat)
     if target == "central":
-        sw = p_samp.copy()
+        tw = p_samp.copy()
     else:                            # 'naive' and 'full' keep full-p sampling
-        sw = np.ones(len(S))
+        tw = np.ones(len(S))
+
+    # per-sample phase compensation so total weight at phase t matches the chosen
+    # cross-phase scheme. 'pair_count' (matched): n_t * pw_t = n_t(n_t-1)/2 (the
+    # pair count, identical to MM's intrinsic phase weighting). 'uniform': n_t *
+    # pw_t = 1 (the pre-fix historical Cpsth weighting). Under constant n_t both
+    # collapse to a constant and cancel in normalization, preserving every
+    # constant-n_t behavior (including ``test_naive_path_matches_existing_pipeline``).
+    nt_by_t = {t: int((T == t).sum()) for t in np.unique(T)}
+    if phase_weighting == "pair_count":
+        pw_t = {t: max(nt_by_t[t] - 1, 0) / 2.0 for t in nt_by_t}
+    elif phase_weighting == "uniform":
+        pw_t = {t: (1.0 / nt_by_t[t]) if nt_by_t[t] > 0 else 0.0 for t in nt_by_t}
+    else:
+        raise ValueError(f"unknown phase_weighting: {phase_weighting!r}")
+    phase_w = np.array([pw_t[t] for t in T], dtype=float)
+    sw = tw * phase_w
 
     Erate = _weighted_mean(S, sw)
     Ctotal = _weighted_cov(S, sw)
-    Cpsth = _split_half_psth_cov(S, T, sw, n_boot, seed, min_trials_per_phase)
+    Cpsth = _split_half_psth_cov(S, T, sw, n_boot, seed, min_trials_per_phase,
+                                 phase_weighting=phase_weighting)
     MM = _close_pair_second_moment(S, E, T, phat, target, threshold, weight_clip)
     Crate = MM - np.outer(Erate, Erate)
 

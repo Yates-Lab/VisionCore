@@ -130,3 +130,100 @@ def test_naive_path_matches_existing_pipeline():
     a, b = d["one_minus_alpha"], ref["one_minus_alpha"]
     ok = np.isfinite(a) & np.isfinite(b)
     assert np.allclose(a[ok], b[ok], atol=0.05), f"{a} vs {b}"
+
+
+# ---------------------------------------------------------------------------
+# Extension 1: consistent phase weighting under variable n_t
+#
+# When fixation durations vary, the number of trials per phase n_t varies. The
+# McFarland close-pair second moment is intrinsically pair-count weighted across
+# phases (n_t(n_t-1)/2 pairs available in each phase). For the LOTC decomposition
+# to hold term-by-term, Cpsth and the mean entering Crate's variance subtraction
+# must use the same pair-count weighting. The historical pipeline used uniform
+# (1/T) weighting in Cpsth, biasing 1-alpha away from 0 even on a homogeneous
+# stimulus where the truth is exactly 0 under every weighting. See
+# `ryan/fig2/bias_diagnosis/FINAL_REPORT.md`.
+# ---------------------------------------------------------------------------
+
+
+def _staircase_n_t(n_phases, lo=20, hi=80):
+    """Monotone-decaying phase trial counts mimicking fixRSVP fixation durations.
+
+    Roughly the bias_diagnosis staircase shape; an exact mirror is unnecessary
+    since we only need a non-degenerate spread of n_t across phases.
+    """
+    return np.linspace(hi, lo, n_phases).round().astype(int)
+
+
+def test_variable_n_t_session_masks_correctly():
+    """Sanity: passing n_trials_per_phase produces a valid-mask whose row sums
+    equal the requested per-phase counts and whose invalid entries are NaN."""
+    nt = _staircase_n_t(20, lo=10, hi=40)
+    sess = make_session(["flat"], n_trials=int(nt.max()), n_phases=20,
+                        sigma_eye=SIG, seed=0, n_trials_per_phase=nt)
+    assert sess["valid"].shape == (int(nt.max()), 20)
+    assert np.array_equal(sess["valid"].sum(0), nt)
+    assert np.all(np.isnan(sess["spikes"][~sess["valid"]]))
+    assert np.all(np.isfinite(sess["spikes"][sess["valid"]]))
+
+
+def test_uniform_phase_weighting_biased_on_homogeneous_under_variable_nt():
+    """Under variable n_t, the unmatched (uniform) phase weighting biases 1-alpha
+    away from 0 on a homogeneous (flat) profile, where the truth is exactly 0
+    under every weighting (Var_fem = 0). Matched (pair_count) weighting recovers 0.
+
+    This is the synthetic analogue of the bias_diagnosis shuffle-null bias: eye
+    trajectories are real, the rate has no eye dependence, and the bias is purely
+    the Cpsth/Crate phase-weighting mismatch. The PSTH envelope concentrates
+    amplitude in high-n_t phases (mirroring fixRSVP onset transients) so the bias
+    is structural rather than seed noise. Deterministic rates isolate the
+    weighting effect from Poisson sampling noise in low-n_t phases.
+    """
+    nt = _staircase_n_t(NPH, lo=15, hi=int(NTR * 0.6))
+    env = np.linspace(1.0, 0.05, NPH)
+    omas = {"uniform": [], "pair_count": []}
+    for s in range(6):
+        sess = make_session(["flat", "flat", "flat"], n_trials=NTR, n_phases=NPH,
+                            sigma_eye=SIG, seed=s, n_trials_per_phase=nt,
+                            psth_envelope=env)
+        for pw in omas:
+            d = decompose(sess["rate"], sess["eye"], target="naive",
+                          density="gaussian", phase_weighting=pw)
+            omas[pw].append(d["one_minus_alpha"])
+    med_uni = float(np.nanmedian(np.array(omas["uniform"])))
+    med_pair = float(np.nanmedian(np.array(omas["pair_count"])))
+    assert abs(med_pair) < 0.05, f"matched 1-alpha not near 0: {med_pair}"
+    assert med_uni > med_pair + 0.10, \
+        f"uniform-weighting bias not exhibited: uniform {med_uni} vs pair {med_pair}"
+
+
+def test_pair_count_phase_weighting_recovers_truth_under_variable_nt():
+    """Under variable n_t with a non-trivial eye profile, only the matched
+    (pair_count) phase weighting recovers the pair-count-weighted ground-truth
+    1-alpha for the p target. Uniform weighting is more biased.
+    """
+    from synthetic import ground_truth
+    nt = _staircase_n_t(NPH, lo=15, hi=int(NTR * 0.6))
+    pair_w = nt * (nt - 1) / 2.0
+    kinds = ["central", "linear"]
+    oma_pair, oma_uni, truth_p = [], [], None
+    for s in range(6):
+        sess = make_session(kinds, n_trials=NTR, n_phases=NPH, sigma_eye=SIG,
+                            seed=s, n_trials_per_phase=nt)
+        if truth_p is None:
+            truth_p = np.array([
+                ground_truth(k, SIG, sess["psth"][:, c], phase_weights=pair_w)
+                ["p"]["one_minus_alpha"] for c, k in enumerate(kinds)])
+        d_pair = decompose(sess["rate"], sess["eye"], target="full",
+                           density="gaussian", phase_weighting="pair_count")
+        d_uni = decompose(sess["rate"], sess["eye"], target="full",
+                          density="gaussian", phase_weighting="uniform")
+        oma_pair.append(d_pair["one_minus_alpha"])
+        oma_uni.append(d_uni["one_minus_alpha"])
+    oma_pair = np.nanmean(oma_pair, 0)
+    oma_uni = np.nanmean(oma_uni, 0)
+    err_pair = np.abs(oma_pair - truth_p)
+    err_uni = np.abs(oma_uni - truth_p)
+    assert np.all(err_pair < 0.08), f"pair_count off: got {oma_pair}, want {truth_p}"
+    assert np.all(err_uni > err_pair), \
+        f"uniform not more biased: pair_err {err_pair} vs uni_err {err_uni}"

@@ -226,3 +226,50 @@ def test_psth_variance_splithalf_matches_analytic():
     analytic = rate_variance_components(r)["sigma2_between"]
     sh = psth_variance_splithalf(r, n_boot=100, seed=0)
     assert_allclose(sh, analytic, rtol=0.15)
+
+
+# --- pipeline_one_minus_alpha (empirical close-pair estimator on model rates) ---
+#
+# This is "estimator B": the SAME close-pair below_threshold(0.05deg) intercept +
+# split-half PSTH used on real spikes in fig2, but applied to a DETERMINISTIC
+# multi-neuron rate field (no Poisson). It lets panel D put both axes on the same
+# estimator. These two tests pin the estimator at the extremes against ground
+# truth, using a discrete eye grid so exact-zero-distance close pairs exist at
+# every eye position (removing the central-sampling deflation, which is a
+# separate question tested elsewhere).
+
+def test_pipeline_one_minus_alpha_pure_psth_gives_zero():
+    """Rate depends only on phase, not eye -> all variance is PSTH -> 1-alpha≈0."""
+    from VisionCore.covariance import pipeline_one_minus_alpha
+    rng = np.random.default_rng(0)
+    n_trials, n_phases, n_cells = 60, 30, 4
+    mu = rng.normal(2.0, 1.0, size=(n_phases, n_cells))        # phase-locked mean
+    rate = np.tile(mu[None, :, :], (n_trials, 1, 1))           # identical across trials
+    # eye in tight clusters + small jitter: within-cluster pairs have 0 < Δe <
+    # threshold (real eye data is continuous; exact-zero distances never occur).
+    grid = np.array([[-0.2, -0.2], [-0.2, 0.2], [0.2, -0.2],
+                     [0.2, 0.2], [0.0, 0.0]])
+    centers = grid[rng.integers(0, len(grid), size=n_trials)]
+    eyepos = (np.broadcast_to(centers[:, None, :], (n_trials, n_phases, 2))
+              + rng.normal(0.0, 0.008, size=(n_trials, n_phases, 2)))
+    out = pipeline_one_minus_alpha(rate, eyepos, threshold=0.05,
+                                   min_trials_per_phase=10)
+    assert np.all(out["one_minus_alpha"] < 0.05)
+
+
+def test_pipeline_one_minus_alpha_pure_fem_gives_one():
+    """Rate depends only on eye, phase means equal -> all variance is FEM -> 1-alpha≈1."""
+    from VisionCore.covariance import pipeline_one_minus_alpha
+    rng = np.random.default_rng(1)
+    n_trials, n_phases, n_cells = 80, 40, 4
+    grid = np.array([-0.3, -0.1, 0.1, 0.3])                    # balanced (mean 0) clusters
+    pos_idx = np.tile(np.arange(len(grid)), n_trials // len(grid))
+    rng.shuffle(pos_idx)
+    eyepos = np.zeros((n_trials, n_phases, 2))
+    eyepos[:, :, 0] = (grid[pos_idx][:, None]
+                       + rng.normal(0.0, 0.008, size=(n_trials, n_phases)))
+    gain = rng.normal(0.0, 1.0, size=n_cells)
+    rate = 5.0 + gain[None, None, :] * eyepos[:, :, 0][:, :, None]
+    out = pipeline_one_minus_alpha(rate, eyepos, threshold=0.05,
+                                   min_trials_per_phase=10)
+    assert np.all(out["one_minus_alpha"] > 0.9)

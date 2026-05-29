@@ -1096,6 +1096,122 @@ def psth_variance_splithalf(rate, valid=None, min_trials_per_phase=2,
     return acc / n_boot
 
 
+def pipeline_one_minus_alpha(rate, eyepos, valid=None, threshold=0.05,
+                             min_trials_per_phase=10, n_bins=10, n_boot=20,
+                             seed=42, device="cpu"):
+    """Per-cell 1-alpha via the empirical close-pair estimator on deterministic rates.
+
+    "Estimator B": the SAME machinery fig2 uses on real spikes -- the
+    ``below_threshold`` (Delta_e < ``threshold`` deg) close-pair intercept for the
+    rate covariance Crate (``estimate_rate_covariance``) and the bagged split-half
+    PSTH covariance (``bagged_split_half_psth_covariance``) -- but applied to a
+    DETERMINISTIC multi-neuron rate field rather than noisy spike counts. Each
+    (trial, phase) is one sample; phases are the stimulus time bins (T_idx); close
+    pairs are distinct-trial pairs whose instantaneous eye positions lie within
+    ``threshold`` degrees. There is no Poisson noise to remove and no Ctotal
+    physical-limit mask (``Ctotal=None``), so the estimator reports the rate
+    variance split directly.
+
+    This is the companion to ``rate_variance_components`` ("estimator A", the
+    all-samples one-way ANOVA). The two target the same population ratio
+    sigma2_FEM / sigma2_rate but differ in (i) estimator form and (ii) the
+    eye-position distribution they integrate FEM over: A uses *all* (trial, phase)
+    samples (the full fixational distribution) while B uses only *close pairs*
+    (Delta_e < threshold). Running both on the *same* rates isolates the
+    estimator's effect from the signal's, so panel D can place the model and the
+    neurons on the same estimator instead of comparing A-on-model to B-on-neurons.
+
+    Parameters
+    ----------
+    rate : ndarray (n_trials, n_phases, n_cells)
+        Per-trial deterministic rate; columns are stimulus phase.
+    eyepos : ndarray (n_trials, n_phases, 2)
+        Per-(trial, phase) eye position in degrees.
+    valid : ndarray (n_trials, n_phases) of bool, optional
+        Usable-sample mask; combined with finiteness of ``rate`` (over cells) and
+        ``eyepos``. If None, derived from finiteness alone.
+    threshold : float
+        Close-pair eye-distance threshold (deg) for the Crate intercept.
+    min_trials_per_phase : int
+        Phases with fewer valid trials are dropped (mirrors the empirical
+        ``min_trials_per_time``).
+    n_bins : int
+        Bin count for the initial (discarded) percentile binning inside
+        ``estimate_rate_covariance``; the ``below_threshold`` intercept itself is
+        independent of it.
+    n_boot, seed : int
+        Bagged split-half PSTH controls.
+    device : str
+        Torch device for the pairwise ops.
+
+    Returns
+    -------
+    dict with keys:
+        one_minus_alpha : ndarray (n_cells,) -- 1 - clip(Cpsth_diag/Crate_diag, 0, 1),
+                          NaN where Crate_diag <= 0.
+        crate_diag      : ndarray (n_cells,) -- diag of the close-pair rate cov.
+        cpsth_diag      : ndarray (n_cells,) -- diag of the split-half PSTH cov.
+        n_phases        : int -- phases retained.
+        n_samples       : int -- total (trial, phase) samples retained.
+    """
+    rate = np.asarray(rate, dtype=np.float64)
+    eyepos = np.asarray(eyepos, dtype=np.float64)
+    if rate.ndim != 3:
+        raise ValueError(f"rate must be 3D (trials, phases, cells), got {rate.shape}")
+    n_trials, n_phases, n_cells = rate.shape
+
+    finite = np.isfinite(rate).all(axis=2) & np.isfinite(eyepos).all(axis=2)
+    if valid is None:
+        valid = finite
+    else:
+        valid = np.asarray(valid, dtype=bool) & finite
+
+    keep_phase = valid.sum(axis=0) >= min_trials_per_phase
+    sample_mask = valid & keep_phase[None, :]
+
+    nan_diag = np.full(n_cells, np.nan)
+    nan_result = {
+        "one_minus_alpha": nan_diag.copy(), "crate_diag": nan_diag.copy(),
+        "cpsth_diag": nan_diag.copy(), "n_phases": int(keep_phase.sum()),
+        "n_samples": int(sample_mask.sum()),
+    }
+    if keep_phase.sum() < 2 or sample_mask.sum() < 2 * min_trials_per_phase:
+        return nan_result
+
+    tr_idx, ph_idx = np.where(sample_mask)
+    dev = torch.device(device if (device != "cuda" or torch.cuda.is_available())
+                       else "cpu")
+    S = torch.as_tensor(rate[tr_idx, ph_idx, :], dtype=torch.float32, device=dev)
+    EyeTraj = torch.as_tensor(eyepos[tr_idx, ph_idx, :], dtype=torch.float32,
+                              device=dev).unsqueeze(1)        # (N, 1, 2)
+    T_idx = torch.as_tensor(ph_idx, dtype=torch.long, device=dev)
+
+    Crate, Erate, *_ = estimate_rate_covariance(
+        S, EyeTraj, T_idx, n_bins=n_bins, Ctotal=None,
+        intercept_mode="below_threshold",
+        intercept_kwargs={"threshold": threshold},
+    )
+    Cpsth, _ = bagged_split_half_psth_covariance(
+        S, T_idx, n_boot=n_boot, min_trials_per_time=min_trials_per_phase,
+        seed=seed, global_mean=Erate,
+    )
+
+    crate_diag = np.diag(Crate).astype(np.float64).copy()
+    cpsth_diag = np.diag(Cpsth).astype(np.float64).copy()
+    with np.errstate(divide="ignore", invalid="ignore"):
+        alpha = np.clip(cpsth_diag / crate_diag, 0.0, 1.0)
+    one_minus_alpha = 1.0 - alpha
+    one_minus_alpha[~(crate_diag > 0)] = np.nan
+
+    return {
+        "one_minus_alpha": one_minus_alpha,
+        "crate_diag": crate_diag,
+        "cpsth_diag": cpsth_diag,
+        "n_phases": int(keep_phase.sum()),
+        "n_samples": int(sample_mask.sum()),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Trial alignment for fixRSVP data
 # ---------------------------------------------------------------------------

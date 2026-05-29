@@ -25,7 +25,7 @@ def compose(refresh=False):
     data = load_fig2_data(refresh=refresh)
 
     fig = plt.figure(figsize=(14, 10))
-    gs = GridSpec(2, 3, height_ratios=[1.0, 1.0], hspace=0.35, wspace=0.32,
+    gs = GridSpec(2, 3, height_ratios=[1.15, 0.85], hspace=0.22, wspace=0.32,
                   figure=fig)
 
     # --- Row 1: panel A (left half) + panel B (right half), both inside

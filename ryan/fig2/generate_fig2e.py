@@ -1,8 +1,9 @@
 """
 Figure 2 panel E: population (slope-through-origin) Fano factor vs counting
-window, per subject, uncorrected (solid) and FEM-corrected (dashed), with
-session-clustered bootstrap CIs. Stars above each window give the corrected-vs-
-uncorrected significance per subject (blue = Allen, green = Logan).
+window, per subject, uncorrected (dashed, open markers) and FEM-corrected
+(solid, filled markers), with session-clustered bootstrap CIs. Stars below each
+window give the corrected-vs-uncorrected significance per subject (blue = Allen,
+green = Logan).
 """
 import numpy as np
 import matplotlib.pyplot as plt
@@ -48,30 +49,32 @@ def plot_panel_e(ax=None, refresh=False, data=None):
         if not np.any(np.isfinite(s_unc)):
             continue
         color = SUBJECT_COLORS[subj]
-        ax.errorbar(WINDOWS_MS, s_unc, yerr=_yerr(s_unc, ci_unc), fmt="o-",
-                    color=color, lw=1.5, capsize=3)
-        ax.errorbar(WINDOWS_MS, s_cor, yerr=_yerr(s_cor, ci_cor), fmt="o--",
+        # Raw de-emphasized: dashed, open markers. Corrected is the hero: solid,
+        # filled markers. Linestyle convention matches panel D.
+        ax.errorbar(WINDOWS_MS, s_unc, yerr=_yerr(s_unc, ci_unc), fmt="o--",
                     color=color, lw=1.5, capsize=3, markerfacecolor="white")
-        series[subj] = dict(ci_unc=ci_unc, p=p_list)
+        ax.errorbar(WINDOWS_MS, s_cor, yerr=_yerr(s_cor, ci_cor), fmt="o-",
+                    color=color, lw=1.5, capsize=3)
+        series[subj] = dict(ci_cor=ci_cor, p=p_list)
 
     ax.axhline(1.0, color="gray", linestyle=":", alpha=0.6)
 
-    # Per-window stars sit just above the higher uncorrected point (closer to the
-    # data than a global top row), stacked per subject in subject color.
+    # Per-window stars sit just below the lower corrected point (emphasis on the
+    # corrected estimate), stacked downward per subject in subject color.
     present = list(series)
-    span = max(c[1] for s in present for c in series[s]["ci_unc"]
+    span = max(c[1] for s in present for c in series[s]["ci_cor"]
                if np.isfinite(c[1]))
     gap = 0.035 * span
-    overall_top = 0.0
+    overall_bot = np.inf
     for wi, w in enumerate(WINDOWS_MS):
-        base = np.nanmax([series[s]["ci_unc"][wi][1] for s in present])
+        base = np.nanmin([series[s]["ci_cor"][wi][0] for s in present])
         for row, subj in enumerate(present):
-            y = base + gap + row * gap
+            y = base - gap - row * gap
             ax.text(w, y, pstars(series[subj]["p"][wi]), ha="center",
-                    va="bottom", color=SUBJECT_COLORS[subj], fontsize=9)
-        overall_top = max(overall_top, base + gap + len(present) * gap)
+                    va="top", color=SUBJECT_COLORS[subj], fontsize=9)
+        overall_bot = min(overall_bot, base - gap - len(present) * gap)
 
-    ax.set_ylim(top=overall_top + 0.04 * span)
+    ax.set_ylim(bottom=overall_bot - 0.04 * span)
     ax.set_xlabel("Counting window (ms)")
     ax.set_ylabel("Population Fano factor")
     ax.set_xticks(WINDOWS_MS)
