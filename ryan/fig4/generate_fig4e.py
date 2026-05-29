@@ -1,71 +1,41 @@
-"""Figure 4 panel E: single-trial r^2 scatter (twin vs leave-one-out PSTH).
+"""Figure 4 panel E: single-trial rasters (observed | twin) for example neuron.
 
 Usage:
     uv run ryan/fig4/generate_fig4e.py
 """
-import numpy as np
 import matplotlib.pyplot as plt
-from scipy.stats import wilcoxon
 
-from _fig4_data import (
-    FIG_DIR, SUBJECTS, SUBJECT_COLORS,
-    configure_matplotlib, load_fig4_data,
-)
+from _fig4_data import FIG_DIR, configure_matplotlib, load_fig4_data
+from _fig4_helpers import draw_raster_pair, select_example_neuron
 
 
-def plot_panel_e(ax=None, data=None, legend_fontsize=8, print_stats=True):
-    """Draw the r^2 scatter on `ax`. Returns (fig, ax)."""
+def plot_panel_e(ax=None, data=None, example=None,
+                 label_fontsize=9, scale_fontsize=8, colorbar=True):
+    """Draw concatenated observed|twin raster on `ax`. Returns (fig, ax, im, example)."""
     if data is None:
         data = load_fig4_data()
-    ve_model = data["ve_model"]
-    ve_psth = data["ve_psth"]
-    subjects = data["subjects"]
-    good = data["good"]
+    if example is None:
+        example = select_example_neuron(data)
 
     if ax is None:
-        fig, ax = plt.subplots(figsize=(3, 2.5))
+        fig, ax = plt.subplots(figsize=(4.5, 2.5))
     else:
         fig = ax.figure
 
-    for subj in SUBJECTS:
-        mask = (subjects == subj) & good
-        if not mask.any():
-            continue
-        ax.scatter(ve_psth[mask], ve_model[mask], s=5, alpha=0.5,
-                   color=SUBJECT_COLORS[subj], label=subj)
-
-    lims = [0, max(0.4, np.nanmax(ve_model[good]) * 1.1)]
-    ax.plot(lims, lims, 'k--', linewidth=0.5, alpha=0.5)
-    ax.set_xlim(lims)
-    ax.set_ylim(lims)
-    ax.set_xlabel("Single-trial $r^2$ (PSTH)")
-    ax.set_ylabel("Single-trial $r^2$ (Model)")
-    ax.legend(frameon=False, fontsize=legend_fontsize)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-
-    if print_stats:
-        for subj in SUBJECTS + ["All"]:
-            mask = good.copy()
-            if subj != "All":
-                mask = mask & (subjects == subj)
-            x = ve_model[mask]
-            y = ve_psth[mask]
-            ok = np.isfinite(x) & np.isfinite(y)
-            x, y = x[ok], y[ok]
-            d = x - y
-            stat, p = wilcoxon(d, alternative='greater')
-            print(f"Panel E — {subj} (N={len(d)}): "
-                  f"median model r^2={np.median(x):.3f}, PSTH r^2={np.median(y):.3f}, "
-                  f"Wilcoxon stat={stat:.1f}, p={p:.3g}")
-
-    return fig, ax
+    im = draw_raster_pair(
+        ax, example["robs_trials_rate"], example["rhat_trials_rate"],
+        window_s=example["window_s"],
+        vmin=example["vmin"], vmax=example["vmax"],
+        label_fontsize=label_fontsize, scale_fontsize=scale_fontsize,
+    )
+    if colorbar:
+        fig.colorbar(im, ax=ax, shrink=0.8, pad=0.02, label="sp/s")
+    return fig, ax, im, example
 
 
 if __name__ == "__main__":
     configure_matplotlib()
-    fig, ax = plot_panel_e()
-    fig.tight_layout()
-    out = FIG_DIR / "panel_e_r2_scatter.pdf"
+    fig, ax, im, _ = plot_panel_e()
+    out = FIG_DIR / "panel_e_rasters.pdf"
     fig.savefig(out, bbox_inches="tight", dpi=300)
     print(f"Saved {out}")
