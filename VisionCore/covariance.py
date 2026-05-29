@@ -868,6 +868,235 @@ def estimate_rate_covariance(SpikeCounts, EyeTraj, T_idx, n_bins=25,
 
 
 # ---------------------------------------------------------------------------
+# Deterministic-rate variance decomposition (model digital twin)
+# ---------------------------------------------------------------------------
+
+def rate_variance_components(rate, valid=None, min_trials_per_phase=2):
+    """Decompose a deterministic rate matrix into PSTH and FEM variance.
+
+    This is the model-side analogue of the empirical Law-of-Total-Covariance
+    decomposition (see ``run_covariance_decomposition``). It returns, per
+    neuron, the fraction of rate variance driven by fixational eye movements
+    (``one_minus_alpha``) so the digital twin's 1-alpha can be compared cell by
+    cell against the empirically measured 1-alpha.
+
+    Why the empirical machinery is unnecessary here
+    ------------------------------------------------
+    For real neurons, spike counts S are noisy observations of a latent rate
+    r(t, e) that depends on stimulus phase t and the within-trial eye
+    trajectory e. The empirical decomposition estimates the *rate* variance and
+    splits it into a stimulus-locked (PSTH) part and an eye-movement (FEM) part:
+
+        Var_{t,e}(r) = Var_t(E_e[r|t])      +   E_t[Var_e(r|t)]
+                       \\_____ PSTH ______/      \\_____ FEM _____/   (law of total variance)
+
+    Every heavy step in ``covariance.py`` exists only to strip Poisson
+    observation noise out of S: the eye-distance binning + intercept fit
+    extrapolate distinct-trial cross-products to delta_e -> 0 (giving the
+    Poisson-free rate variance ``Crate``), and ``bagged_split_half_psth_covariance``
+    debiases the PSTH variance against the same Poisson noise.
+
+    The digital twin is *deterministic*: given its inputs it emits the rate
+    rhat[i, t] directly, with no observation noise, evaluated at each trial's
+    actual eye trajectory. So there is no Poisson term to remove, the
+    eye-distance apparatus is unnecessary, and the whole thing collapses to a
+    textbook one-way random-effects ANOVA of rhat grouped by stimulus phase t.
+
+    Estimator (analytic random-effects ANOVA)
+    ------------------------------------------
+    Group rates by phase t (column); phase t has n_t valid trials, with T kept
+    phases and N = sum_t n_t total samples. With phase mean rhat_bar(t) and
+    grand mean rhat_bar:
+
+        SS_within  = sum_t sum_i (rhat[i,t] - rhat_bar(t))^2 ,  df = N - T
+        SS_between = sum_t n_t (rhat_bar(t) - rhat_bar)^2     ,  df = T - 1
+        MS_within  = SS_within / (N - T)
+        MS_between = SS_between / (T - 1)
+
+    The mean squares have exact expectations (method of moments, no Gaussian
+    assumption) E[MS_within] = sigma2_W and E[MS_between] = sigma2_W + n0 sigma2_B
+    with the unbalanced effective group size
+
+        n0 = (N - sum_t n_t^2 / N) / (T - 1)   (= n when balanced),
+
+    yielding the unbiased component estimates
+
+        sigma2_within  (FEM)  = MS_within
+        sigma2_between (PSTH) = max((MS_between - MS_within) / n0, 0)
+        one_minus_alpha       = clip(sigma2_within / (sigma2_within + sigma2_between), 0, 1)
+
+    Note the convention difference from the empirical pipeline: the empirical
+    side estimates the total rate variance directly and takes FEM as the
+    residual ``Crate - Cpsth``; here both components are estimated directly and
+    the total is their sum. Both target the identical population ratio
+    sigma2_W / (sigma2_W + sigma2_B).
+
+    Why MS_between must be debiased even with exact rates
+    -----------------------------------------------------
+    With finite n_t the naive between-phase variance Var_t(rhat_bar(t)) is
+    biased up by E_t[Var_e(r|t)/n_t]: each phase mean still averages only n_t
+    eye-trajectory draws. Subtracting MS_within / n0 removes exactly this term.
+    Skipping it would inflate alpha (deflate 1-alpha) by an alpha-dependent
+    amount -- a pure estimator artifact, worst precisely for the FEM-dominated
+    cells this comparison is about. ``psth_variance_splithalf`` is an
+    assumption-light cross-check that achieves the same debiasing by cancelling
+    the per-phase sampling noise across disjoint trial halves.
+
+    1-alpha is invariant to the affine rescaling rhat -> a*rhat + b applied
+    upstream (rescale_rhat): a shift leaves every variance unchanged and a scale
+    multiplies both components by a^2, cancelling in the ratio.
+
+    Parameters
+    ----------
+    rate : ndarray (n_trials, n_phases)
+        Per-trial deterministic rate (or expected count) for ONE neuron.
+        Columns are stimulus phase (time bin); rows are repeats/trials.
+        Non-finite entries are treated as missing.
+    valid : ndarray (n_trials, n_phases) of bool, optional
+        Mask of usable samples (e.g. the data filter ``dfs != 0`` intersected
+        with fixation bins). Combined with ``isfinite(rate)``. If None, only
+        the finite-entry mask is used.
+    min_trials_per_phase : int
+        Phases with fewer valid trials than this are dropped (>= 2 needed for a
+        within-phase variance). Mirrors the empirical ``min_trials_per_time``.
+
+    Returns
+    -------
+    dict with keys:
+        sigma2_within  : float -- FEM (within-phase) variance component.
+        sigma2_between : float -- PSTH (between-phase) variance component (>= 0).
+        sigma2_total   : float -- sigma2_within + sigma2_between.
+        one_minus_alpha: float -- FEM fraction in [0, 1], NaN if undetermined.
+        n_phases       : int   -- number of phases retained.
+        n_samples      : int   -- total valid trial x phase samples retained.
+    """
+    rate = np.asarray(rate, dtype=np.float64)
+    if rate.ndim != 2:
+        raise ValueError(f"rate must be 2D (trials, phases), got {rate.shape}")
+
+    finite = np.isfinite(rate)
+    if valid is None:
+        valid = finite
+    else:
+        valid = np.asarray(valid, dtype=bool) & finite
+
+    nan_result = {
+        "sigma2_within": np.nan, "sigma2_between": np.nan,
+        "sigma2_total": np.nan, "one_minus_alpha": np.nan,
+        "n_phases": 0, "n_samples": 0,
+    }
+
+    r0 = np.where(valid, rate, 0.0)
+    n_t = valid.sum(axis=0).astype(np.float64)        # trials per phase
+    keep = n_t >= min_trials_per_phase
+    if keep.sum() < 2:
+        return nan_result
+
+    n_t = n_t[keep]
+    sum_t = r0.sum(axis=0)[keep]
+    sumsq_t = (r0 ** 2).sum(axis=0)[keep]
+    mu_t = sum_t / n_t
+    ss_within_t = sumsq_t - n_t * mu_t ** 2           # within-phase SS per phase
+
+    T = int(keep.sum())
+    N = float(n_t.sum())
+    if N <= T:                                        # no within-phase df
+        return nan_result
+
+    grand = (n_t * mu_t).sum() / N
+    ss_within = float(ss_within_t.sum())
+    ss_between = float((n_t * (mu_t - grand) ** 2).sum())
+
+    ms_within = ss_within / (N - T)
+    ms_between = ss_between / (T - 1)
+    n0 = (N - (n_t ** 2).sum() / N) / (T - 1)
+
+    sigma2_within = ms_within
+    sigma2_between = max((ms_between - ms_within) / n0, 0.0)
+    sigma2_total = sigma2_within + sigma2_between
+
+    if sigma2_total <= 0:
+        one_minus_alpha = np.nan
+    else:
+        one_minus_alpha = float(np.clip(sigma2_within / sigma2_total, 0.0, 1.0))
+
+    return {
+        "sigma2_within": sigma2_within,
+        "sigma2_between": sigma2_between,
+        "sigma2_total": sigma2_total,
+        "one_minus_alpha": one_minus_alpha,
+        "n_phases": T,
+        "n_samples": int(N),
+    }
+
+
+def psth_variance_splithalf(rate, valid=None, min_trials_per_phase=2,
+                            n_boot=50, seed=0):
+    """Bagged split-half estimate of the between-phase (PSTH) variance.
+
+    Assumption-light cross-check on the analytic ``sigma2_between`` from
+    ``rate_variance_components``. At each phase the valid trials are randomly
+    split into disjoint halves A and B; the cross-covariance of the two
+    half-PSTHs across phases cancels the per-phase finite-trial sampling noise
+    in expectation (the noise in A and B is independent), leaving the true
+    between-phase variance. Averaged ("bagged") over ``n_boot`` random splits.
+
+    Parameters
+    ----------
+    rate : ndarray (n_trials, n_phases)
+        Per-trial deterministic rate for ONE neuron (see
+        ``rate_variance_components``).
+    valid : ndarray (n_trials, n_phases) of bool, optional
+        Usable-sample mask, combined with isfinite(rate).
+    min_trials_per_phase : int
+        Phases with fewer valid trials are dropped (need >= 2 to split).
+    n_boot : int
+        Number of random split-half repetitions to average.
+    seed : int
+        RNG seed for reproducibility.
+
+    Returns
+    -------
+    float
+        Bagged split-half between-phase variance (may be negative for a
+        near-zero-PSTH cell), or NaN if fewer than two phases qualify.
+    """
+    rate = np.asarray(rate, dtype=np.float64)
+    finite = np.isfinite(rate)
+    if valid is None:
+        valid = finite
+    else:
+        valid = np.asarray(valid, dtype=bool) & finite
+
+    n_trials, n_phases = rate.shape
+    phase_trials = []
+    for t in range(n_phases):
+        idx = np.where(valid[:, t])[0]
+        if len(idx) >= min_trials_per_phase:
+            phase_trials.append((t, idx))
+    if len(phase_trials) < 2:
+        return np.nan
+
+    rng = np.random.default_rng(seed)
+    acc = 0.0
+    for _ in range(n_boot):
+        mu_a, mu_b = [], []
+        for t, idx in phase_trials:
+            perm = rng.permutation(idx)
+            mid = len(perm) // 2
+            if mid < 1 or len(perm) - mid < 1:
+                continue
+            mu_a.append(rate[perm[:mid], t].mean())
+            mu_b.append(rate[perm[mid:], t].mean())
+        if len(mu_a) < 2:
+            continue
+        a = np.asarray(mu_a)
+        b = np.asarray(mu_b)
+        acc += np.mean((a - a.mean()) * (b - b.mean())) * len(a) / (len(a) - 1)
+    return acc / n_boot
+
+
+# ---------------------------------------------------------------------------
 # Trial alignment for fixRSVP data
 # ---------------------------------------------------------------------------
 

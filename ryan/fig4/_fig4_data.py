@@ -190,11 +190,13 @@ def _run_inference():
         robs = robs[good_trials]
         rhat = rhat[good_trials]
         dfs = dfs[good_trials]
+        eyepos = eyepos[good_trials]
 
         iix = np.arange(min(VALID_TIME_BINS, T))
         robs = robs[:, iix]
         rhat = rhat[:, iix]
         dfs = dfs[:, iix]
+        eyepos = eyepos[:, iix]
 
         neuron_mask = np.where(np.nansum(robs, axis=(0, 1)) > MIN_TOTAL_SPIKES)[0]
         if len(neuron_mask) < 3:
@@ -204,6 +206,11 @@ def _run_inference():
         robs_used = robs[:, :, neuron_mask]
         rhat_used = rhat[:, :, neuron_mask]
         dfs_used = dfs[:, :, neuron_mask]
+        # Eye trajectory aligned to the same trials/bins (no neuron axis) and a
+        # per-(trial, bin) validity mask, used by the covariance decomposition
+        # in the panel-D simulation control.
+        eyepos_used = eyepos
+        valid_mask = np.isfinite(eyepos_used).all(axis=-1)
 
         n_trials, n_time, n_neurons = robs_used.shape
         print(f"  {n_trials} trials, {n_time} time bins, {n_neurons} neurons")
@@ -223,11 +230,11 @@ def _run_inference():
         # ccnorm via split-half (run twice, average, drop unstable).
         ccnorm1, ccabs1, ccmax1, _, _ = ccnorm_split_half_variable_trials(
             robs_used, rhat_used, dfs_used,
-            n_splits=CCNORM_N_SPLITS, return_components=True,
+            n_splits=CCNORM_N_SPLITS, return_components=True, rng=42,
         )
         ccnorm2, ccabs2, ccmax2, _, _ = ccnorm_split_half_variable_trials(
             robs_used, rhat_used, dfs_used,
-            n_splits=CCNORM_N_SPLITS, return_components=True,
+            n_splits=CCNORM_N_SPLITS, return_components=True, rng=43,
         )
         unstable = (ccnorm1 - ccnorm2) ** 2 > 0.01
         ccnorm = 0.5 * (ccnorm1 + ccnorm2)
@@ -289,6 +296,8 @@ def _run_inference():
             "robs_used": robs_used,
             "rhat_used": rhat_used,
             "dfs_used": dfs_used,
+            "eyepos_used": eyepos_used,
+            "valid_mask": valid_mask,
             "rhos": rhos,
             "ccnorm": ccnorm,
             "ccabs": ccabs,
