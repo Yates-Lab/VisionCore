@@ -27,19 +27,19 @@ def plot_panel_c(ax=None, refresh=False, data=None):
     valid_m0 = m0_full[np.isfinite(m0_full)]
     bins = np.linspace(np.nanmin(valid_m0), np.nanmax(valid_m0), 31)
 
-    for subj in SUBJECTS:
-        mask = labels == subj
-        if not mask.any():
-            continue
-        m0 = m0_full[mask]
-        color = SUBJECT_COLORS[subj]
-        ax.hist(m0, bins=bins, color=color, edgecolor="white", alpha=0.5)
-        ax.axvline(np.nanmedian(m0), color=color, linewidth=2, ls=(0, (1, 1)),
-                   label=f"Median={np.nanmedian(m0):.2f}")
+    present = [s for s in reversed(SUBJECTS) if (labels == s).any()]
+    subj_m0 = [m0_full[labels == s] for s in present]
+    subj_colors = [SUBJECT_COLORS[s] for s in present]
+    ax.hist(subj_m0, bins=bins, color=subj_colors, edgecolor="white",
+            stacked=True, alpha=0.75)
+
+    y_marker = ax.get_ylim()[1] * 1.02
+    for m0, color in zip(subj_m0, subj_colors):
+        ax.plot(np.nanmedian(m0), y_marker, marker="v", color=color,
+                markersize=10, clip_on=False)
 
     ax.set_xlabel("Fraction of rate modulation\ndue to FEM (1-α)", fontsize=11)
     ax.set_ylabel("Count", fontsize=11)
-    ax.legend(frameon=False, fontsize=11)
     ax.grid(True, alpha=0.3, zorder=-1)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
