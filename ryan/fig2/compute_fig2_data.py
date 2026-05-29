@@ -254,6 +254,10 @@ def _compute_metrics(session_results, windows_ms, windows_bins):
         shuff_alphas = []
         shuff_rho_delta_meanz, shuff_rho_c_meanz, shuff_rho_subject = [], [], []
         subject_by_ds, subject_per_neuron, subject_per_pair = [], [], []
+        session_per_neuron = []
+        # Per-session blocks of shuffle-null corrected noise variance, used to
+        # build a pooled [N_neurons, S] matrix for the Fano-slope shuffle null.
+        shuff_var_c_blocks, shuff_var_c_nvalid = [], []
 
         for sr in session_results:
             if w_idx >= len(sr["results"]):
@@ -292,6 +296,7 @@ def _compute_metrics(session_results, windows_ms, windows_bins):
             alpha = diag_psth / diag_rate
             all_alpha.append(alpha)
             subject_per_neuron.extend([sr["subject"]] * valid.sum())
+            session_per_neuron.extend([sr["session"]] * valid.sum())
 
             ff_u = np.diag(CnoiseU)[valid] / erate[valid]
             ff_c = np.diag(CnoiseC)[valid] / erate[valid]
@@ -331,6 +336,8 @@ def _compute_metrics(session_results, windows_ms, windows_bins):
             all_CnoiseC.append(CnoiseC[np.ix_(valid, valid)])
             all_Cfem.append(Cfem[np.ix_(valid, valid)])
 
+            n_valid_ds = int(valid.sum())
+            ds_shuff_var_c = []  # one entry per shuffle: corrected var per valid neuron
             if "Shuffled_Intercepts" in mats and len(mats["Shuffled_Intercepts"]) > 0:
                 for Crate_shuf in mats["Shuffled_Intercepts"]:
                     diag_rate_shuf = np.diag(Crate_shuf)[valid]
@@ -339,6 +346,11 @@ def _compute_metrics(session_results, windows_ms, windows_bins):
 
                     CnoiseC_shuf = Ctotal - Crate_shuf
                     CnoiseC_shuf = 0.5 * (CnoiseC_shuf + CnoiseC_shuf.T)
+                    # Shuffle-null corrected noise variance: the same FEM correction
+                    # (Total - Intercept), but with eye positions shuffled so the
+                    # intercept covariance carries no real eye-movement structure.
+                    # This is the variance the correction strips off by chance.
+                    ds_shuff_var_c.append(np.diag(CnoiseC_shuf)[valid])
                     NC_shuf = cov_to_corr(
                         project_to_psd(CnoiseC_shuf[np.ix_(valid, valid)]),
                         min_var=MIN_VAR,
@@ -354,6 +366,30 @@ def _compute_metrics(session_results, windows_ms, windows_bins):
                             - fisher_z_mean(rho_u[ok[:len(rho_u)]], eps=EPS_RHO)
                         )
                         shuff_rho_subject.append(sr["subject"])
+
+            # Stash this session's shuffle block as [S, n_valid] (or a None marker
+            # if shuffles are missing), keeping neuron order aligned with `erate`.
+            shuff_var_c_blocks.append(
+                np.asarray(ds_shuff_var_c) if ds_shuff_var_c else None
+            )
+            shuff_var_c_nvalid.append(n_valid_ds)
+
+        # Pool shuffle-null corrected variances across sessions into [N_total, S_min].
+        # Sessions are truncated to the smallest shuffle count so each column b is one
+        # coherent null draw pooled over all neurons; the row order matches `erate`.
+        # Sessions without shuffles contribute NaN rows (dropped per-column later).
+        present_S = [b.shape[0] for b in shuff_var_c_blocks if b is not None]
+        if present_S:
+            S_min = min(present_S)
+            rows = []
+            for blk, nv in zip(shuff_var_c_blocks, shuff_var_c_nvalid):
+                if blk is None:
+                    rows.append(np.full((nv, S_min), np.nan))
+                else:
+                    rows.append(blk[:S_min].T)  # [n_valid, S_min]
+            shuff_var_c = np.concatenate(rows, axis=0)
+        else:
+            shuff_var_c = np.empty((0, 0))
 
         metrics.append({
             "window_ms": windows_ms[w_idx],
@@ -373,7 +409,9 @@ def _compute_metrics(session_results, windows_ms, windows_bins):
             "rho_delta_meanz_by_ds": np.array(rho_delta_meanz_by_ds),
             "subject_by_ds": subject_by_ds,
             "subject_per_neuron": np.array(subject_per_neuron),
+            "session_per_neuron": np.array(session_per_neuron),
             "subject_per_pair": np.array(subject_per_pair),
+            "shuff_var_c": shuff_var_c,
             "Ctotal": all_Ctotal,
             "Cpsth": all_Cpsth,
             "Crate": all_Crate,
@@ -443,6 +481,70 @@ def _compute_alpha_stats(metrics, windows_ms):
     return m_by_window, subject_per_neuron_by_window, alpha_stats
 
 
+def _slope_through_origin(erate, var):
+    """LS slope of var = slope * erate forced through the origin (nan-safe)."""
+    ok = np.isfinite(erate) & np.isfinite(var) & (erate > 0) & (var >= 0)
+    if ok.sum() < 3:
+        return np.nan
+    e, v = erate[ok], var[ok]
+    return float(np.sum(e * v) / np.sum(e ** 2))
+
+
+def _clustered_slope_bootstrap(erate, var_u, var_c, sessions, nboot=5000, seed=0):
+    """
+    Session-clustered bootstrap of slope-through-origin Fano factors.
+
+    Neurons within a session share the same trials and eye-movement traces, so
+    they are not independent samples. A naive neuron-level bootstrap therefore
+    underestimates the true uncertainty. We instead resample whole sessions with
+    replacement, pool every neuron from the drawn sessions, and refit the pooled
+    slopes each iteration -- propagating session-level uncertainty.
+
+    Fallback: with a single session we cannot estimate between-session variance,
+    so we resample neurons within that session (the only uncertainty available)
+    rather than return a degenerate, zero-width interval.
+
+    Returns dict with 95% CIs for the uncorrected slope, corrected slope, and
+    their difference (uncorrected - corrected), plus a one-sided bootstrap p for
+    H0: corrected slope >= uncorrected slope (i.e. no FEM-driven inflation).
+    """
+    sessions = np.asarray(sessions)
+    uniq = np.unique(sessions)
+    rng = np.random.default_rng(seed)
+    n = len(erate)
+    su = np.full(nboot, np.nan)
+    sc = np.full(nboot, np.nan)
+
+    if uniq.size >= 2:
+        sess_idx = {s: np.where(sessions == s)[0] for s in uniq}
+        for b in range(nboot):
+            draw = rng.choice(uniq.size, size=uniq.size, replace=True)
+            idx = np.concatenate([sess_idx[uniq[d]] for d in draw])
+            su[b] = _slope_through_origin(erate[idx], var_u[idx])
+            sc[b] = _slope_through_origin(erate[idx], var_c[idx])
+    else:
+        for b in range(nboot):
+            idx = rng.integers(0, n, size=n)
+            su[b] = _slope_through_origin(erate[idx], var_u[idx])
+            sc[b] = _slope_through_origin(erate[idx], var_c[idx])
+
+    diff = su - sc
+
+    def _ci(a):
+        a = a[np.isfinite(a)]
+        if a.size == 0:
+            return (np.nan, np.nan)
+        return (float(np.percentile(a, 2.5)), float(np.percentile(a, 97.5)))
+
+    diff_f = diff[np.isfinite(diff)]
+    p = (float((np.sum(diff_f <= 0) + 1) / (diff_f.size + 1))
+         if diff_f.size else np.nan)
+    return {
+        "unc_ci": _ci(su), "cor_ci": _ci(sc), "diff_ci": _ci(diff),
+        "p": p, "n_sessions": int(uniq.size),
+    }
+
+
 def _compute_fano_stats(metrics, windows_ms):
     fano_stats = {}
     for w_idx, m_dict in enumerate(metrics):
@@ -450,6 +552,7 @@ def _compute_fano_stats(metrics, windows_ms):
         ff_u_v, ff_c_v, mask = paired_valid(ff_u, ff_c, positive=True)
         erate_v = erate[mask]
         subject_labels_v = m_dict["subject_per_neuron"][mask]
+        session_labels_v = m_dict["session_per_neuron"][mask]
         n_valid = len(ff_u_v)
 
         g_unc = geomean(ff_u_v)
@@ -462,35 +565,82 @@ def _compute_fano_stats(metrics, windows_ms):
         var_u = ff_u_v * erate_v
         var_c = ff_c_v * erate_v
 
-        slope_unc = float(np.sum(erate_v * var_u) / np.sum(erate_v ** 2))
-        slope_cor = float(np.sum(erate_v * var_c) / np.sum(erate_v ** 2))
-
-        rng = np.random.default_rng(0)
-        nboot = 5000
-        slopes_unc_boot = np.empty(nboot)
-        slopes_cor_boot = np.empty(nboot)
-        for b in range(nboot):
-            idx = rng.integers(0, n_valid, size=n_valid)
-            e_b = erate_v[idx]
-            slopes_unc_boot[b] = np.sum(e_b * var_u[idx]) / np.sum(e_b ** 2)
-            slopes_cor_boot[b] = np.sum(e_b * var_c[idx]) / np.sum(e_b ** 2)
-
-        diff_boot = slopes_unc_boot - slopes_cor_boot
-        slope_diff = slope_unc - slope_cor
-        slope_diff_ci = (
-            float(np.percentile(diff_boot, 2.5)),
-            float(np.percentile(diff_boot, 97.5)),
+        # Pooled slope-through-origin Fano factors with session-clustered CIs.
+        slope_unc = _slope_through_origin(erate_v, var_u)
+        slope_cor = _slope_through_origin(erate_v, var_c)
+        boot = _clustered_slope_bootstrap(
+            erate_v, var_u, var_c, session_labels_v, nboot=5000, seed=0
         )
-        p_slope = float(np.mean(diff_boot <= 0))
+        slope_unc_ci = boot["unc_ci"]
+        slope_cor_ci = boot["cor_ci"]
+        slope_diff = slope_unc - slope_cor
+        slope_diff_ci = boot["diff_ci"]
+        p_slope = boot["p"]
+
+        # Per-subject slopes + clustered CIs (drive the per-subject fitted lines
+        # and shaded bands in panel D).
+        per_subject = {}
+        for subj in np.unique(subject_labels_v):
+            s_mask = subject_labels_v == subj
+            e_s, vu_s, vc_s = erate_v[s_mask], var_u[s_mask], var_c[s_mask]
+            sess_s = session_labels_v[s_mask]
+            boot_s = _clustered_slope_bootstrap(
+                e_s, vu_s, vc_s, sess_s, nboot=2000, seed=0
+            )
+            su_s = _slope_through_origin(e_s, vu_s)
+            sc_s = _slope_through_origin(e_s, vc_s)
+            per_subject[str(subj)] = {
+                "slope_unc": su_s, "slope_cor": sc_s,
+                "slope_unc_ci": boot_s["unc_ci"], "slope_cor_ci": boot_s["cor_ci"],
+                "slope_diff": su_s - sc_s, "slope_diff_ci": boot_s["diff_ci"],
+                "p_slope": boot_s["p"], "n_sessions": boot_s["n_sessions"],
+                "n": int(s_mask.sum()),
+            }
+
+        # FEM-shuffle null on the corrected slope. `shuff_var_c` holds, per neuron,
+        # the corrected noise variance recomputed with eye positions shuffled
+        # ([N_neurons, S]); column b is one null draw pooled across sessions. For
+        # each draw we refit the pooled corrected slope and measure how much
+        # variance the correction strips off by chance. The real reduction is
+        # significant if it exceeds this null reduction.
+        shuff_var_c = m_dict.get("shuff_var_c", np.empty((0, 0)))
+        if shuff_var_c.size and shuff_var_c.shape[0] == mask.shape[0]:
+            svc = shuff_var_c[mask]  # [n_valid, S]
+            null_slope_cor = np.array([
+                _slope_through_origin(erate_v, svc[:, b])
+                for b in range(svc.shape[1])
+            ])
+            null_slope_cor = null_slope_cor[np.isfinite(null_slope_cor)]
+        else:
+            null_slope_cor = np.array([])
+
+        if null_slope_cor.size:
+            null_reduction = slope_unc - null_slope_cor
+            obs_reduction = slope_unc - slope_cor
+            slope_cor_null_ci = (
+                float(np.percentile(null_slope_cor, 2.5)),
+                float(np.percentile(null_slope_cor, 97.5)),
+            )
+            p_emp_slope = emp_p_one_sided(
+                null_reduction, obs_reduction, direction="greater"
+            )
+        else:
+            slope_cor_null_ci = (np.nan, np.nan)
+            p_emp_slope = np.nan
 
         fano_stats[windows_ms[w_idx]] = {
             "n": n_valid, "g_unc": g_unc, "g_cor": g_cor,
             "ratio": ratio, "pct_red": pct_red, "p_wil": p_wil,
             "slope_unc": slope_unc, "slope_cor": slope_cor,
+            "slope_unc_ci": slope_unc_ci, "slope_cor_ci": slope_cor_ci,
             "slope_diff": slope_diff, "slope_diff_ci": slope_diff_ci,
-            "p_slope": p_slope, "null_ratio_ci": (np.nan, np.nan),
+            "p_slope": p_slope, "n_sessions": boot["n_sessions"],
+            "slope_cor_null_ci": slope_cor_null_ci, "p_emp_slope": p_emp_slope,
+            "null_ratio_ci": (np.nan, np.nan),
+            "per_subject": per_subject,
             "erate": erate_v, "var_u": var_u, "var_c": var_c,
             "subject_per_neuron": subject_labels_v,
+            "session_per_neuron": session_labels_v,
         }
     return fano_stats
 

@@ -16,6 +16,20 @@ FIG_DIR.mkdir(parents=True, exist_ok=True)
 STAT_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def pstars(p):
+    """Significance stars from a p-value (n.s. if not significant or NaN)."""
+    import numpy as np
+    if p is None or not np.isfinite(p):
+        return "n.s."
+    if p < 1e-3:
+        return "***"
+    if p < 1e-2:
+        return "**"
+    if p < 5e-2:
+        return "*"
+    return "n.s."
+
+
 def standalone_save(fig, name):
     """Save panel figure as both .pdf and .png under FIG_DIR."""
     out = FIG_DIR / name
