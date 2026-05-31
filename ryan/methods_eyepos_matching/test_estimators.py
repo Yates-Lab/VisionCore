@@ -201,14 +201,15 @@ def test_variable_n_t_session_masks_correctly():
     assert np.all(np.isfinite(sess["spikes"][sess["valid"]]))
 
 
-def test_pair_count_time_bin_weighting_recovers_truth_under_variable_nt():
-    """Under variable n_t with a decaying alpha(t) envelope concentrating
-    amplitude in high-n_t bins, the matched (pair_count) time-bin weighting
-    recovers the closed-form 1-alpha^p; uniform weighting is biased.
+def test_pair_count_and_uniform_directions_both_recover_truth_under_variable_nt():
+    """Both consistent w_t directions (pair-count and uniform) recover the
+    closed-form 1-alpha^p under variable n_t + envelope on flat-mask + mixed
+    masks.
 
-    The truth 1-alpha is invariant under time-bin weighting in the unified model
-    (the envelope cancels in the ratio); the bias is in the ESTIMATOR, which
-    mismatches Cpsth's weighting against Crate's intrinsic pair-count weighting.
+    The truth 1-alpha is invariant under w_t in the unified model (envelope
+    cancels in the ratio; §A.5), so both directions target the same value.
+    They differ in finite-sample efficiency, which is exhibited in Fig 1C
+    with many more seeds; here we only verify both are unbiased.
     """
     nt = _staircase_n_t(NPH, lo=15, hi=int(NTR * 0.6))
     env = np.linspace(1.0, 0.05, NPH)
@@ -227,40 +228,79 @@ def test_pair_count_time_bin_weighting_recovers_truth_under_variable_nt():
                           density="gaussian", time_bin_weighting="uniform")
         oma_pair.append(d_pair["one_minus_alpha"])
         oma_uni.append(d_uni["one_minus_alpha"])
-    oma_pair = np.nanmean(oma_pair, 0)
-    oma_uni = np.nanmean(oma_uni, 0)
-    err_pair = np.abs(oma_pair - truth)
-    err_uni = np.abs(oma_uni - truth)
+    m_pair = np.nanmean(oma_pair, 0)
+    m_uni = np.nanmean(oma_uni, 0)
+    err_pair = np.abs(m_pair - truth)
+    err_uni = np.abs(m_uni - truth)
     assert np.all(err_pair < 0.10), \
-        f"pair_count off: got {oma_pair}, want {truth}"
-    assert np.all(err_uni > err_pair), \
-        f"uniform not more biased: pair_err {err_pair} vs uni_err {err_uni}"
+        f"pair_count off truth: got {m_pair}, want {truth}"
+    assert np.all(err_uni < 0.10), \
+        f"uniform off truth: got {m_uni}, want {truth}"
 
 
-def test_uniform_time_bin_weighting_biased_under_variable_nt_on_homogeneous():
-    """Even with a homogeneous (flat) mask -- where (A2) holds -- the unmatched
-    (uniform) time-bin weighting biases 1-alpha away from the closed-form 1-alpha^p
-    when n_t varies and alpha(t) is correlated with n_t. The bias is purely
-    the Cpsth/Crate weighting mismatch, not an (A2) violation.
+def test_estimator_diagonals_recover_closed_form_under_variable_nt():
+    """All three estimators (Ctotal, Cpsth, Crate) on flat-mask diagonals
+    recover the closed-form values for BOTH consistent w_t directions under
+    variable n_t + envelope, with deterministic rates.
+
+    Under (A2)+flat the closed-form diagonals are:
+        Ctotal = Crate = E_w[alpha^2] * tau^2
+        Cpsth          = E_w[alpha^2] * tau^2 * ell^2 / (ell^2 + 2 sigma^2)
+
+    Since the envelope is correlated with n_t, E_{w_pair}[alpha^2] differs
+    from E_{w_uni}[alpha^2], so pair-count and uniform target DIFFERENT
+    diagonal values -- and each must match its own closed form. This pins
+    the §1.5 table's w_t column: every estimator respects its w_t parameter.
     """
     nt = _staircase_n_t(NPH, lo=15, hi=int(NTR * 0.6))
     env = np.linspace(1.0, 0.05, NPH)
-    truth = ground_truth("flat", SIG, ell=SIG)["p"]["one_minus_alpha"]
-    omas = {"uniform": [], "pair_count": []}
+    tau = 1.0
+    ell = SIG
+    sig = SIG
+
+    w_pair = nt * (nt - 1) / 2.0
+    w_pair = w_pair / w_pair.sum()
+    w_uni = np.ones(NPH) / NPH
+    E_a2_pair = float((w_pair * env**2).sum())
+    E_a2_uni = float((w_uni * env**2).sum())
+    I_MKD = tau**2 * ell**2 / (ell**2 + 2.0 * sig**2)
+
+    truth = {
+        "pair_count": {"Ctotal": E_a2_pair * tau**2,
+                       "Cpsth":  E_a2_pair * I_MKD,
+                       "Crate":  E_a2_pair * tau**2},
+        "uniform":    {"Ctotal": E_a2_uni  * tau**2,
+                       "Cpsth":  E_a2_uni  * I_MKD,
+                       "Crate":  E_a2_uni  * tau**2},
+    }
+
+    # Sanity: envelope/n_t correlation produces genuinely different truths.
+    assert abs(truth["pair_count"]["Ctotal"] - truth["uniform"]["Ctotal"]) > 0.1
+
+    acc = {pw: {k: [] for k in ("Ctotal", "Cpsth", "Crate")}
+           for pw in ("pair_count", "uniform")}
     for s in range(6):
-        sess = make_session(["flat", "flat", "flat"], n_trials=NTR,
-                            n_time_bins=NPH, sigma_eye=SIG, seed=s,
+        sess = make_session(["flat"], n_trials=NTR, n_time_bins=NPH,
+                            sigma_eye=sig, ell=ell, tau=tau, seed=s,
                             n_trials_per_time_bin=nt, psth_envelope=env)
-        for pw in omas:
+        for pw in acc:
             d = decompose(sess["rate"], sess["eye"], target="full",
                           density="gaussian", time_bin_weighting=pw)
-            omas[pw].append(d["one_minus_alpha"])
-    med_uni = float(np.nanmedian(np.array(omas["uniform"])))
-    med_pair = float(np.nanmedian(np.array(omas["pair_count"])))
-    assert abs(med_pair - truth) < 0.06, \
-        f"matched off truth {truth}: got {med_pair}"
-    assert abs(med_uni - truth) > abs(med_pair - truth) + 0.10, \
-        f"uniform-weighting bias not exhibited: uni {med_uni} pair {med_pair} truth {truth}"
+            for k in acc[pw]:
+                acc[pw][k].append(float(d[k][0, 0]))
+
+    # Tolerance matches Ext-1's existing 1-alpha tolerance; the seed-mean SE of
+    # Ctotal at pair_count under heavy concentration on early bins is ~0.06 with
+    # 6 seeds (effective T is small), so 0.05 was too tight.
+    tol = 0.10
+    fails = []
+    for pw in acc:
+        for k in acc[pw]:
+            m = float(np.mean(acc[pw][k]))
+            t = truth[pw][k]
+            if abs(m - t) >= tol:
+                fails.append(f"{pw}/{k}: got {m:.4f}, expected {t:.4f} closed form")
+    assert not fails, "; ".join(fails)
 
 
 # ---------------------------------------------------------------------------

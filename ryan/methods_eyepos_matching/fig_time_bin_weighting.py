@@ -1,28 +1,27 @@
-r"""Figure: Extension 1 -- consistent time-bin weighting under variable n_t.
+r"""Figure: Extension 1 -- two consistent w_t directions under variable n_t.
 
-McFarland's cross-trial decomposition assumes a uniform trial/time-bin structure: the
-same number of trials in every time bin. In fixRSVP and similar paradigms with
-variable fixation durations, the number of trials per time bin n_t drops across
-time bins. The close-pair rate estimator is intrinsically pair-count weighted across
-time bins (~n_t^2). If Cpsth uses a different across-time-bin weighting -- as in the
-pre-fix pipeline, where Cpsth was uniform (1/T) -- the decomposition does not
-hold term-by-term and the estimator deviates from the closed-form 1-alpha^p,
-even on a homogeneous (flat) mask under (A2) where the closed-form truth is
-analytic.
+McFarland's cross-trial decomposition has implicit per-estimator across-bin
+weightings that coincide only under constant n_t (writeup §1.5 table). To
+restore term-by-term LOTC consistency under variable n_t, all three estimators
+(Ctotal, Cpsth, Crate) must be pinned to a single w_t. Two directions are
+consistent:
 
-This figure validates Extension 1 against the unified-architecture ground truth
-(stationary GP rate field + multiplicative mask; the (A1) violation is variable
-n_t, the (A2) violation is a non-flat mask):
+  uniform 1/T            -- McFarland's literal nested-bracket reading; each
+                            fixation-aligned bin contributes equally.
+  pair-count             -- pool-then-average over all close pairs; bin t
+    n_t(n_t-1)/2            weighted by its close-pair count, inverse-variance
+                            optimal on the close-pair pool.
 
-  A  the variable-n_t staircase across time bins (lo=15, hi=360) and the matched
-     pair-count time-bin weights ~ n_t(n_t-1)/2.
-  B  on a homogeneous (flat-mask) synthetic with the staircase and an
-     onset-transient envelope alpha(t), the unmatched (uniform) time-bin weighting
-     biases 1-alpha away from the closed-form 1-alpha^p = 2 sigma^2 / (ell^2 +
-     2 sigma^2); the matched (pair_count) weighting recovers it.
-  C  on a non-homogeneous-mask synthetic (central, eccentric, linear), the
-     matched weighting tracks the ground-truth 1-alpha^p on the identity line;
-     the unmatched is systematically off.
+The truth 1-alpha^p is invariant under w_t in the unified rate field (the
+envelope cancels in the ratio), so both directions are unbiased; they differ
+in finite-sample efficiency.
+
+  A  variable n_t staircase + the two w_t weight curves.
+  B  histograms of 1-alpha for both directions on flat-mask synthetic with
+     staircase + envelope at ell=sigma. Both unbiased around the closed-form
+     truth; pair-count is tighter than uniform.
+  C  across-seed SD of 1-alpha vs ell/sigma sweep for both directions. The
+     efficiency gap of uniform vs pair-count persists across spatial scales.
 
 Run from this folder:  uv run python fig_time_bin_weighting.py
 """
@@ -35,23 +34,30 @@ from _style import configure, save, C_FULL, C_CLOSE, C_TRUTH
 
 NTR, NPH, SIG = 600, 100, 0.15
 NT_LO, NT_HI = 15, 360
-PROFILE_COLOR = {"central": "#8e44ad", "eccentric": "#e67e22", "linear": "#16a085"}
+
+# Panel B: histograms at ell=sigma.
+N_SEEDS_B = 25
+N_CELLS_B = 4  # 4 'flat' cells per seed -> 100 datapoints per direction
+
+# Panel C: continuous ell/sigma sweep.
+ELL_RATIOS = np.array([0.4, 0.6, 0.8, 1.0, 1.4, 2.0, 2.8, 4.0])
+N_SEEDS_C = 12
 
 
 def staircase_nt():
     return np.linspace(NT_HI, NT_LO, NPH).round().astype(int)
 
 
-def run_homogeneous(seeds=range(8)):
-    """Flat-mask + variable n_t + onset-transient envelope -> truth = analytic
-    1-alpha^p (closed form for the flat mask). Deterministic rates isolate the
-    weighting effect from Poisson noise."""
+def run_histograms(seeds=range(N_SEEDS_B)):
+    """Flat-mask + variable n_t + onset-transient envelope, ell=sigma.
+    Returns dict[direction] -> flattened 1-alpha across (seed, cell)."""
     nt = staircase_nt()
     env = np.linspace(1.0, 0.05, NPH)
     out = {"uniform": [], "pair_count": []}
     for s in seeds:
-        sess = make_session(["flat"] * 4, n_trials=NTR, n_time_bins=NPH, sigma_eye=SIG,
-                            seed=s, n_trials_per_time_bin=nt, psth_envelope=env)
+        sess = make_session(["flat"] * N_CELLS_B, n_trials=NTR, n_time_bins=NPH,
+                            sigma_eye=SIG, seed=s, n_trials_per_time_bin=nt,
+                            psth_envelope=env)
         for pw in out:
             d = decompose(sess["rate"], sess["eye"], target="full",
                           density="gaussian", time_bin_weighting=pw)
@@ -61,29 +67,36 @@ def run_homogeneous(seeds=range(8)):
     return out
 
 
-def run_recovery(seeds=range(6)):
-    """Non-homogeneous masks + variable n_t. The closed-form 1-alpha^p is
-    invariant under time-bin weighting in the unified model (the envelope
-    cancels in the ratio); the bias is entirely in the ESTIMATOR's choice
-    of Cpsth time-bin weighting against Crate's intrinsic pair-count weighting."""
+def run_ell_sweep(ratios=ELL_RATIOS, seeds=range(N_SEEDS_C)):
+    """Flat-mask + variable n_t + envelope across an ell/sigma sweep.
+    Returns dict with ratio array and per-ratio mean/SD for each direction."""
     nt = staircase_nt()
     env = np.linspace(1.0, 0.05, NPH)
-    kinds = ["central", "eccentric", "linear"] * 4
-    out = {"uniform": [], "pair_count": [], "truth": [], "kind": []}
-    for s in seeds:
-        sess = make_session(kinds, n_trials=NTR, n_time_bins=NPH, sigma_eye=SIG,
-                            seed=s, n_trials_per_time_bin=nt, psth_envelope=env)
-        truth = np.array([sess["truth"][c]["p"]["one_minus_alpha"]
-                          for c in range(len(kinds))])
-        out["truth"].append(truth)
-        out["kind"].append(np.array(kinds))
-        for pw in ("uniform", "pair_count"):
-            d = decompose(sess["rate"], sess["eye"], target="full",
-                          density="gaussian", time_bin_weighting=pw)
-            out[pw].append(d["one_minus_alpha"])
-    for k in out:
-        out[k] = np.concatenate(out[k])
-    return out
+    means = {"uniform": [], "pair_count": []}
+    sds = {"uniform": [], "pair_count": []}
+    truths = []
+    for r in ratios:
+        ell = float(r) * SIG
+        per_pw = {"uniform": [], "pair_count": []}
+        for s in seeds:
+            sess = make_session(["flat"], n_trials=NTR, n_time_bins=NPH,
+                                sigma_eye=SIG, ell=ell, seed=s,
+                                n_trials_per_time_bin=nt, psth_envelope=env)
+            for pw in per_pw:
+                d = decompose(sess["rate"], sess["eye"], target="full",
+                              density="gaussian", time_bin_weighting=pw)
+                per_pw[pw].append(float(d["one_minus_alpha"][0]))
+        truths.append(ground_truth("flat", SIG, ell=ell)["p"]["one_minus_alpha"])
+        for pw in per_pw:
+            arr = np.array(per_pw[pw])
+            means[pw].append(float(np.nanmean(arr)))
+            sds[pw].append(float(np.nanstd(arr, ddof=1)))
+    return {
+        "ratios": np.asarray(ratios, float),
+        "truths": np.asarray(truths, float),
+        "mean": {k: np.asarray(v, float) for k, v in means.items()},
+        "sd": {k: np.asarray(v, float) for k, v in sds.items()},
+    }
 
 
 def main():
@@ -92,7 +105,7 @@ def main():
     pair_w = nt * (nt - 1) / 2.0
     fig, axes = plt.subplots(1, 3, figsize=(11.5, 3.3))
 
-    # --- A: staircase n_t and pair-count weights ---
+    # --- A: staircase n_t and the two w_t weight curves ---
     ax = axes[0]
     t = np.arange(NPH)
     ax.bar(t, nt, color="0.75", width=1.0, label=r"$n_t$ (trials/bin)")
@@ -101,9 +114,9 @@ def main():
     ax.tick_params(axis="y", labelcolor="0.3")
     ax2 = ax.twinx()
     ax2.plot(t, pair_w / pair_w.sum(), color=C_FULL, lw=1.4,
-             label=r"pair-count weight $w_t \propto n_t(n_t{-}1)/2$")
+             label=r"pair-count $w_t \propto n_t(n_t{-}1)/2$")
     ax2.plot(t, np.full(NPH, 1.0 / NPH), color=C_CLOSE, lw=1.4, ls="--",
-             label=r"uniform weight $w_t = 1/T$")
+             label=r"uniform $w_t = 1/T$")
     ax2.set_ylabel("time-bin weight (normalized)")
     ax2.spines["top"].set_visible(False)
     ax.set_title(rf"A  variable $n_t$  (range {NT_LO}–{NT_HI})")
@@ -111,38 +124,44 @@ def main():
     lns_b, lbl_b = ax2.get_legend_handles_labels()
     ax2.legend(lns_a + lns_b, lbl_a + lbl_b, loc="upper right", fontsize=7)
 
-    # --- B: homogeneous mask -- closed-form truth; unmatched biased away ---
+    # --- B: histograms around closed-form truth on flat mask ---
     ax = axes[1]
-    out = run_homogeneous()
+    out = run_histograms()
     truth_flat = ground_truth("flat", SIG, ell=SIG)["p"]["one_minus_alpha"]
-    bins = np.linspace(0.2, 1.0, 41)
+    bins = np.linspace(0.4, 0.95, 36)
     ax.hist(out["uniform"], bins=bins, color=C_CLOSE, alpha=0.55,
-            label=f"uniform (med={np.nanmedian(out['uniform']):.2f})")
+            label=f"uniform (sd={np.nanstd(out['uniform'], ddof=1):.3f})")
     ax.hist(out["pair_count"], bins=bins, color=C_FULL, alpha=0.55,
-            label=f"pair_count (med={np.nanmedian(out['pair_count']):.2f})")
+            label=f"pair-count (sd={np.nanstd(out['pair_count'], ddof=1):.3f})")
     ax.axvline(truth_flat, color=C_TRUTH, lw=1.0, ls="--",
-               label=f"truth = {truth_flat:.2f}")
-    ax.set_xlabel(r"$1-\alpha$  (flat mask, truth = closed form)")
-    ax.set_ylabel("cell count")
-    ax.set_title("B  homogeneous mask: uniform biased away from truth")
+               label=f"closed-form truth = {truth_flat:.3f}")
+    ax.set_xlabel(r"$1-\hat\alpha$  (flat mask, $\ell=\sigma$)")
+    ax.set_ylabel("count")
+    ax.set_title("B  both directions unbiased; pair-count tighter")
     ax.legend(fontsize=7, loc="upper right")
 
-    # --- C: non-homogeneous masks -- matched on identity, unmatched off ---
+    # --- C: across-seed SD vs ell/sigma sweep ---
     ax = axes[2]
-    out = run_recovery()
-    ax.plot([0, 1], [0, 1], color=C_TRUTH, lw=0.8, ls="--", zorder=0)
-    for kind in ("central", "eccentric", "linear"):
-        m = out["kind"] == kind
-        ax.scatter(out["truth"][m], out["uniform"][m], s=20,
-                   color=PROFILE_COLOR[kind], marker="x", alpha=0.7,
-                   label=f"{kind} (uniform)")
-        ax.scatter(out["truth"][m], out["pair_count"][m], s=18,
-                   facecolors="none", edgecolors=PROFILE_COLOR[kind], alpha=0.9)
-    ax.set_xlabel(r"true $1-\alpha^p$  (closed form)")
-    ax.set_ylabel(r"estimated $1-\alpha$")
-    ax.set_title("C  non-homogeneous masks: matched (○) on truth, uniform (×) off")
-    ax.set_xlim(-0.02, 1.02); ax.set_ylim(-0.05, 1.05)
-    ax.legend(fontsize=6, loc="upper left")
+    sweep = run_ell_sweep()
+    rs = sweep["ratios"]
+    sd_uni = sweep["sd"]["uniform"]
+    sd_pair = sweep["sd"]["pair_count"]
+    # Closed-form across-bin SD floor (§A.6, derived under constant n_t; included
+    # as a reference scale, not a perfect predictor for variable n_t).
+    truths = sweep["truths"]                          # 1 - alpha^p
+    alpha_star = 1.0 - truths                         # alpha^p
+    floor = alpha_star * np.sqrt(2.0 / (NPH - 1))
+    ax.plot(rs, sd_uni, "o-", color=C_CLOSE, lw=1.4, ms=4,
+            label="uniform")
+    ax.plot(rs, sd_pair, "o-", color=C_FULL, lw=1.4, ms=4,
+            label="pair-count")
+    ax.plot(rs, floor, color="0.5", lw=1.0, ls=":",
+            label=r"const-$n_t$ floor $\alpha^*\sqrt{2/(T-1)}$")
+    ax.set_xlabel(r"$\ell / \sigma$")
+    ax.set_ylabel(r"across-seed SD of $1-\hat\alpha$")
+    ax.set_title(r"C  efficiency across spatial scale")
+    ax.set_xscale("log")
+    ax.legend(fontsize=7, loc="upper right")
 
     fig.tight_layout()
     save(fig, "fig_time_bin_weighting.png")

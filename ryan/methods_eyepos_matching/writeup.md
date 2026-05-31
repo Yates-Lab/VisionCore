@@ -173,28 +173,44 @@ give an analytical form for $\alpha$ via the Fourier transform of $p$ (their
 Eq. 9), in which $\alpha$ weights the rate spectrum $|R(k)|^2$ by the
 eye-distribution spectrum $|P(k)|^2$.
 
-## 1.5 Two assumptions, made explicit
+## 1.5 Three estimators on two weighting axes
 
-Two assumptions are baked into the estimators above and into McFarland's
-analytical $\alpha$:
+Each estimator above averages distinct-trial products in a different way.
+Reading directly off (5)–(8) and the LOTC LHS of (1), each lives on an
+implicit weighting in two dimensions — across analysis time bins ($w_t$) and
+across eye positions ($q$):
 
-- **(A1) Uniform trial/time-bin structure.** Equations (5)–(8) and the LOTC (1)
-  presume that *the same across-time-bin weighting applies to every term*. The
-  close-pair estimator (7) intrinsically uses pair-count weighting: each time bin t
-  $t$ contributes $n_t(n_t{-}1)/2$ same-time-bin pairs. The PSTH estimator (5)
-  is, in McFarland's formulation, also pair-count weighted; in implementation
-  it is sometimes computed as a split-half cross-covariance with a different
-  across-time-bin weighting (e.g. uniform $1/T$). When $n_t$ is constant the
-  weightings agree; when $n_t$ varies they need not, and the LOTC fails
-  term-by-term.
-- **(A2) Statistically stationary stimulus.** The across-time-bin distribution
-  of $r(t,e)$ at a fixed eye position is the same at every $e$, i.e.
-  $\mathbb{E}_t[r^k(t,e)]$ is independent of $e$ for the moments used. Then
-  $\mathbb{E}_{e\sim D}\!\big[\mathbb E_t[r^k(t,e)]\big]$ is the same for
-  every distribution $D$ over $e$, so the close-pair restriction in (7)–(8)
-  — which silently sets $D=p^2$ — gives the same answer as the actual
-  viewing target $D=p$. McFarland et al. state the assumption at the level
-  of the stimulus (their text around Eqs. M7–M10):
+| Estimator | implicit $w_t$ (across-bin) | implicit $q$ (across-eye) |
+|---|---|---|
+| $C_\text{total}$ — LHS of (1); sample variance over all $(i,t)$ | $\propto n_t$ (trial-count) | $p$ |
+| $C_\text{psth}$ — Eq. (6): $\langle\langle Y^i Y^j\rangle_{i\ne j}\rangle_t - \bar Y\bar Y^\top$ | $1/T$ for MM; $\propto n_t$ for $\bar Y\bar Y^\top$ | $p$ |
+| $C_\text{rate}$ — Eq. (8): $\langle\langle Y^i Y^j \mid \Delta e<\varepsilon\rangle_{i\ne j}\rangle_t - \bar Y\bar Y^\top$ | $1/T$ for MM; $\propto n_t$ for $\bar Y\bar Y^\top$ | $p^2$ for MM; $p$ for $\bar Y\bar Y^\top$ |
+
+The LOTC (1) holds term-by-term **only when all three estimators land on a
+single $(w_t, q)$**. The literal McFarland forms do not: even inside one
+estimator the second-moment and the mean-square subtractor disagree.
+McFarland's nested-bracket notation $\langle\langle\,\cdot\,\rangle_{i\ne
+j}\rangle_t$ averages within bin $t$ first and then averages bins
+uniformly, putting MM at $w_t = 1/T$; the $\bar Y$ that enters
+$\bar Y\bar Y^\top$ is the global mean over $(i, t)$ and pools samples
+uniformly, putting that term at $w_t \propto n_t$. And $C_\text{rate}$'s
+MM is the only cell at $q = p^2$ (the close-pair conditional density,
+§4.1); every other cell is at $q = p$.
+
+Two assumptions in McFarland's regime make these inconsistencies invisible:
+
+- **(A1) Uniform trial/time-bin structure.** When $n_t$ is constant,
+  $\propto n_t$ and $1/T$ coincide up to a global scaling, so the $w_t$
+  column collapses to a single value across all three estimators (and across
+  the MM / $\bar Y$ split within each).
+- **(A2) Statistically stationary stimulus.** The across-time-bin
+  distribution of $r(t,e)$ at a fixed eye position is the same at every $e$,
+  i.e. $\mathbb{E}_t[r^k(t,e)]$ is independent of $e$ for the moments used.
+  Then $\mathbb{E}_{e\sim D}\!\big[\mathbb E_t[r^k(t,e)]\big]$ is the same
+  for every distribution $D$, so the $q$ column collapses: the close-pair
+  restriction in (7)–(8) — which silently sets $D = p^2$ — gives the same
+  answer as the actual viewing target $D = p$. McFarland et al. state the
+  assumption at the level of the stimulus (their text around Eqs. M7–M10):
 
   > "by restricting analysis to trial pairs where $\Delta e_{ij}\approx 0$,
   > [the estimator] gives an estimate of $\mathbb{E}[r^2(e,t)]$ under the
@@ -203,16 +219,21 @@ analytical $\alpha$:
   > spatial translations (such as used in our study), the expectation of
   > $r^2(e,t)$ with respect to any distribution over $e$ will be the same."
 
-  Stimulus stationarity is a sufficient condition: when each frame is a
-  sample from a translation-invariant random field, the rate distribution
-  at one eye position is, in distribution, the rate distribution at any
-  other, so the across-time-bin moments at fixed $e$ do not depend on $e$.
-  McFarland's ternary bar noise has this property; the structured `fixRSVP`
-  images used here do not.
+  Stimulus stationarity is sufficient: when each frame is a sample from a
+  translation-invariant random field, the rate distribution at one eye
+  position is, in distribution, the rate distribution at any other, so the
+  across-time-bin moments at fixed $e$ do not depend on $e$. McFarland's
+  ternary bar noise has this property; the structured `fixRSVP` images used
+  here do not.
 
-Both assumptions fail in the structured `fixRSVP` paradigm used here. §2
-states the violations and the synthetic model that captures them; §3 and §4
-develop a methodological extension for each.
+In McFarland's regime — (A1) ∩ (A2) — every cell of the table collapses to a
+single $(w_t, q)$, the three estimators agree, and (1) reduces to the
+textbook LOTC. Outside that regime each axis fails on its own and the LOTC
+fails term-by-term. §3 develops two consistent choices on the $w_t$ axis
+under (A1) failure; §4 develops two consistent choices on the $q$ axis
+under (A2) failure. The two extensions are orthogonal — each fills one
+column of the table — and §2 makes both failures concrete on the `fixRSVP`
+stimulus.
 
 ---
 
@@ -367,9 +388,9 @@ $$
 
 with $I_{M,K,D}=\iint M(e_1) M(e_2)\,K(e_1{-}e_2)\,D(e_1)\,D(e_2)\,de_1\,de_2$.
 The ratio $1-\alpha^{D,w} = 1 - I_{M,K,D}/(\tau^2\,\mathbb E_D[M^2])$ is
-**invariant under time-bin weighting**: the envelope factor cancels. The
-Extension-1 bias is therefore a property of the *estimator* (finite-sample
-inconsistency under a mismatched $w$), not of the ground truth.
+**invariant under time-bin weighting**: the envelope factor cancels. Both
+$w_t$ directions of Extension 1 therefore target the same truth on the ratio;
+they differ only in finite-sample efficiency (§3.3).
 
 For the `flat` mask and Gaussian $D, K$, the integral closes analytically:
 
@@ -431,108 +452,156 @@ it peaks at $\ell/\sigma\approx 1.18$.](figures/fig_sanity_check.png)
 
 ---
 
-# 3. Extension 1: consistent time-bin weighting under variable $n_t$
+# 3. Extension 1: pinning the $w_t$ column
 
-## 3.1 The time-bin-weighting mismatch, derived from the close-pair estimator
+## 3.1 The $w_t$ cells of McFarland's literal estimators
 
-The close-pair rate estimator (7) averages products $Y_c^i(t)\,Y_c^j(t)$ over
-distinct same-time-bin pairs at $\Delta e_{ij}<\varepsilon$. With $n_t$ trials at
-time bin $t$, the number of available pairs is $n_t(n_t{-}1)/2$. Averaging
-uniformly over pairs is therefore averaging over time bins with the **pair-count
-weight**
+The $w_t$ column of the §1.5 table reads directly off the literal forms.
 
-$$
-w_t \;\propto\; n_t(n_t-1)/2.
-\tag{11}
-$$
+$C_\text{total}$, the LHS of the LOTC (1), is the sample variance of $Y^i(t)$
+pooled over all $(i,t)$. With each sample contributing one unit of weight, bin
+$t$ contributes $n_t$ units; the implicit across-bin weighting is **trial-count
+$w_t \propto n_t$**.
 
-Under constant $n_t$ this is a global constant and the choice is invisible;
-under variable $n_t$ it concentrates weight on high-$n_t$ time bins. **This is
-the time-bin weighting at which the close-pair second moment in (7) lives.** For
-the LOTC (1) to hold term-by-term the PSTH variance (5) and the mean $\bar Y$
-that enters (7) must use the same $w_t$.
+$C_\text{psth}$ uses (6) — the cross-trial average of distinct-pair products at
+the same time bin. McFarland's nested bracket $\langle\langle\,\cdot\,\rangle_{i\ne
+j}\rangle_t$ averages within $t$ first and then averages bins uniformly: every
+bin contributes **$w_t = 1/T$** regardless of how many pairs it contains. The
+$\bar Y\bar Y^\top$ subtractor is the global mean over $(i, t)$ — trial-count
+$w_t \propto n_t$.
 
-Two historical mismatches against (11) are the focus here:
+$C_\text{rate}$ uses (8) — the same nested bracket restricted to close pairs
+$\Delta e_{ij} < \varepsilon$. Same reading: MM at $w_t = 1/T$, $\bar Y\bar Y^\top$
+subtractor at trial-count.
 
-- **Mismatch 1 (mean in $C_{\text{rate}}$).** A trial-count-weighted global
-  mean $\bar Y = \mathrm{mean}_i Y_c^i$ weights time bins by $n_t$, not by
-  $n_t(n_t{-}1)/2$. Then
-  $C_{\text{rate}} = \mathbb E_{\text{pair}}[YY^\top] - \bar Y\,\bar Y^\top$
-  is not a covariance under any single time-bin weighting.
-- **Mismatch 2 (PSTH estimator).** A split-half PSTH cross-covariance with
-  uniform across-time-bin weighting (every bin weighted $1/T$) estimates
-  $\mathrm{Cov}_{w_{\text{uni}}}[\bar P(t)]$, while $C_{\text{rate}}$ estimates
-  $\mathrm{Var}_{w_{\text{pair}}}[\bar P(t)]$. Even when both target only the
-  PSTH (i.e. under a homogeneous stimulus, where the close-pair restriction
-  is free), they differ by the asymmetric-amplitude bias
-  $\mathrm{Var}_{w_{\text{pair}}}[\bar P] - \mathrm{Var}_{w_{\text{uni}}}[\bar P]$.
+Three different across-bin weightings across the three estimators, and an
+additional MM-vs-$\bar Y$ split inside each of $C_\text{psth}$ and
+$C_\text{rate}$. Under (A1) constant $n_t$ all four cells coincide (trial-count
+and $1/T$ collapse to a constant under scaling) and the inconsistency is
+invisible. Under variable $n_t$ they do not: the LOTC (1) fails term-by-term
+because the three estimators no longer measure variance/covariance under the
+same across-bin distribution.
 
-The fix is to use $w_t = n_t(n_t{-}1)/2$ for $\bar Y$ and for the PSTH
-cross-covariance, matching the close-pair estimator's intrinsic weighting.
+## 3.2 Two consistent directions: uniform $1/T$ and pair-count $\propto n_t(n_t{-}1)/2$
 
-## 3.2 The shuffle null is positive under the mismatch
+Restoring term-by-term consistency means pinning the entire $w_t$ column — every
+MM and every $\bar Y$ subtractor in every estimator — to a single across-bin
+weighting. Two principled choices are available.
 
-A useful diagnostic: under a *shuffle null* that destroys the eye–spike
-coupling (random eye trajectories), the close-pair estimator has no
-real eye dependence to exploit and $C_{\text{rate}}^{\text{shuf}}$ should
-converge to the (pair-count-weighted) PSTH covariance. If $C_{\text{psth}}$
-is computed with a *different* weighting, then $D_z = f_z(C_{\text{noise}}^{\text{corr}})
-- f_z(C_{\text{noise}}^{\text{uncorr}})$ deviates from zero under the null *purely* because
-of the weighting mismatch, with no eye-position dependence on which the (A2)
-violation could act. This is exactly the shuffle-null bias diagnosed and
-fixed in `ryan/fig2/bias_diagnosis/` ($D_z^{\text{shuf}}: -0.0068
-\to +0.0010$, $p$: $<10^{-4}\to 0.44$, after consistent pair-count weighting).
+**Uniform direction** ($w_t = 1/T$). Match McFarland's literal MM reading: each
+fixation-aligned bin contributes equally regardless of $n_t$. The
+$\bar Y\bar Y^\top$ subtractor (and $C_\text{total}$) are recomputed as
+$\frac{1}{T}\sum_t \frac{1}{n_t}\sum_i Y^i(t)$ — within-bin mean first, then
+uniform across bins. The resulting estimator answers "how does the variance
+behave averaged equally over the analysis time bins" — the natural reading of
+the LOTC LHS for a fixation-aligned analysis.
 
-## 3.3 Validation on the synthetic with variable $n_t$ and a `flat` mask
+**Pair-count direction** ($w_t \propto n_t(n_t{-}1)/2$). Pool all distinct same-bin
+pairs across $t$ into a single flat list and average uniformly per pair. Under
+uniform eye sampling, bin $t$ contributes $n_t(n_t{-}1)/2$ close pairs, so its
+implicit across-bin weight is $\propto n_t(n_t{-}1)/2$. The
+$\bar Y\bar Y^\top$ subtractor and $C_\text{total}$ are recomputed with the
+same per-bin total weight $\propto n_t(n_t{-}1)/2$.
 
-Synthetic ground truth makes the same point in closed form. Take the `flat`
-mask, so (A2) holds and the truth is the analytical $1-\alpha^p =
-2\sigma^2/(\ell^2 + 2\sigma^2)$, **invariant under time-bin weighting** (the
-envelope cancels in the ratio; §2.3). Pair a staircase $n_t$
-($15\to360$ across $T=100$ time bins) with an envelope $\alpha(t)$ that
-concentrates amplitude in early, high-$n_t$ time bins (Fig. 1A) — this matches
-`fixRSVP`'s onset transients. Apply `decompose` with the matched
-(`time_bin_weighting='pair_count'`) and unmatched (`time_bin_weighting='uniform'`)
-variants to deterministic rates (so any deviation is a weighting artifact,
-not Poisson sampling).
+Both directions are consistent — every cell of the $w_t$ column lands on a
+single value, and the LOTC (1) holds term-by-term. They differ in efficiency.
+The per-bin close-pair second-moment estimator has sampling variance
+$\propto 1/|P_t|$ where $|P_t| \approx n_t(n_t{-}1)/2 \cdot \Pr[\Delta e<\varepsilon]$;
+the inverse-variance-optimal across-bin combination weights bin $t$ by $|P_t|$
+— exactly pair-count. The uniform direction gives every bin equal voice, the
+natural reading of "average across analysis time bins", but pays a variance
+penalty when $n_t$ varies sharply because low-$n_t$ bins enter with the same
+weight as high-$n_t$ bins despite their much noisier per-bin estimates.
 
-![**Figure 1 — Consistent time-bin weighting validated against the unified-
-architecture ground truth.** **(A)** The variable-$n_t$ staircase across
-time bins and the two time-bin-weight curves: pair-count
-$w_t\propto n_t(n_t{-}1)/2$ (matched, blue) and uniform $w_t=1/T$ (unmatched,
-red). Under constant $n_t$ both are flat; under variable $n_t$ the
-pair-count weight strongly emphasizes early high-$n_t$ time bins. **(B)**
-Homogeneous (`flat`-mask, (A2)-respecting) synthetic + envelope: closed-form
-truth is $1-\alpha^p\approx 0.667$ at $\ell=\sigma$, invariant under time-bin
-weighting. The unmatched (uniform) time-bin weighting biases the estimate
-above the closed form; the matched (pair-count) weighting recovers it.
-**(C)** Non-homogeneous-mask synthetic (`central`, `eccentric`, `linear`)
-under the same staircase + envelope: the matched estimator (○) lies on the
-closed-form identity line; the unmatched (×) deviates in a mask-dependent
-way.](figures/fig_time_bin_weighting.png)
+The same bias/variance tradeoff appears on the $q$ axis in §4.5: Direction 1
+(full $p$) is the natural target but its unbounded $1/p$ close-pair weights
+are noisy in the periphery; Direction 2 (central $p^2$) uses bounded weights
+but reports a value shifted toward the close-pair density.
 
-Panel B is the synthetic analogue of the bias_diagnosis shuffle-null bias.
-The truth $1-\alpha$ is invariant under time-bin weighting, so a deviation
-between matched and unmatched estimates is *purely* the Cpsth/Crate
-time-bin-weighting mismatch: pair-count-weighted $\mathbb E_w[\alpha^2]$
-differs from uniform-weighted $\mathbb E_w[\alpha^2]$ when $\alpha(t)$ and
-$n_t$ correlate, and that mismatch propagates into the estimator's ratio.
-Panel C adds a spatial mask and confirms that the matched estimator tracks
-ground truth while the unmatched is mask-dependent.
+## 3.3 Synthetic validation and headline choice
 
-## 3.4 What the correction does and does not address
+The truth $1-\alpha$ is **invariant under time-bin weighting** in the unified
+rate field (10): the envelope factor $\mathbb E_w[\alpha^2]$ cancels in the
+ratio. Both consistent directions therefore target the same closed-form
+$1-\alpha^p$. Pair the staircase $n_t$ ($15\to360$ across $T=100$ bins) with a
+decaying envelope $\alpha(t)$ that concentrates amplitude in early high-$n_t$
+bins (Fig. 1A) — the case that maximally separates the two directions in
+finite samples.
 
-Extension 1 is *only* about the weighting *across* time bins. It is a no-op for
-constant $n_t$ and operates at the level of the LOTC's term-by-term
-consistency. It does not address Extension 2's eye-position distribution
-mismatch, which acts *within* time bins on the choice of $e$ used to average the
-rate variance. The two are orthogonal: Extension 1 fixes the consistency of
-the LOTC under variable $n_t$; Extension 2 fixes the consistency of the LOTC
-under a non-homogeneous stimulus.
+![**Figure 1 — Two consistent $w_t$ directions on the (A2)-respecting flat
+mask under variable $n_t$.** **(A)** The variable-$n_t$ staircase and the two
+across-bin weight curves: uniform $w_t = 1/T$ (red) and pair-count $w_t\propto
+n_t(n_t{-}1)/2$ (blue). Under constant $n_t$ both are flat; under variable
+$n_t$ the pair-count weight strongly emphasizes early high-$n_t$ bins.
+**(B)** Histograms of $1-\hat\alpha$ across seeds for both directions at
+$\ell=\sigma$, on flat-mask synthetic with the staircase + envelope.
+Closed-form truth $1-\alpha^p\approx 0.667$ (dashed). **Both directions are
+unbiased**; pair-count has a tighter distribution than uniform. **(C)**
+Continuous $\ell/\sigma$ sweep: across-seed SD of $1-\hat\alpha$ for the two
+directions, with the closed-form $T$-floor $\alpha^*\sqrt{2/(T-1)}$
+overlaid. The efficiency gap of uniform vs pair-count persists across spatial
+scales.](figures/fig_time_bin_weighting.png)
+
+Panel B confirms that the truth is $w_t$-invariant and that both directions
+hit it — the difference between the two histograms is variance, not bias.
+Panel C extends to a continuous $\ell/\sigma$ sweep: at every spatial scale,
+uniform's across-seed SD exceeds pair-count's. The gap is driven by low-$n_t$
+late bins entering uniform with the same weight as high-$n_t$ early bins
+despite their noisier per-bin contribution.
+
+**We headline the pair-count direction** for all reported $1-\alpha$ values,
+with one explicit caveat: pair-count concentrates the close-pair signal on
+early high-$n_t$ bins, so the reported value leans on the early-trial portion
+of each fixation. The uniform direction is the more natural reading of
+"average over fixation-aligned time", but its finite-sample variance under
+variable $n_t$ is too high to use as the primary report. The same asymmetry
+appears on the $q$ axis (§4.5): Direction 1 (full $p$) is headlined because
+the population bias relative to the actual-viewing target is small, accepting
+modest variance cost.
+
+## 3.4 The shuffle-null fix in production
+
+A useful diagnostic for any $w_t$ mismatch: under a *shuffle null* that
+destroys the eye–spike coupling (random eye trajectories), the close-pair
+estimator has no real eye dependence to exploit and $C_\text{rate}^{\text{shuf}}$
+should converge to $C_\text{psth}$ at the same $w_t$. If $C_\text{rate}$ and
+$C_\text{psth}$ are computed with *different* $w_t$, then
+$D_z = f_z(C_\text{noise}^{\text{corr}}) - f_z(C_\text{noise}^{\text{uncorr}})$
+deviates from zero under the null *purely* because of the weighting mismatch
+— independent of any (A2) violation, and independent of which direction is
+chosen as long as $C_\text{rate}$ and $C_\text{psth}$ both use it.
+
+This is the bias diagnosed and fixed in `ryan/fig2/bias_diagnosis/`
+($D_z^{\text{shuf}}: -0.0068 \to +0.0010$, $p: <10^{-4}\to 0.44$, after consistent
+pair-count weighting). The pre-fix production pipeline lived in a
+partially-pinned state — close-pair MM at pair-count (pool-then-average),
+$C_\text{psth}$ at uniform $1/T$, $\bar Y$ at trial-count — that the
+post-fix pipeline cleaned by pinning all three to the pair-count direction.
+§6.1 records the production state.
+
+## 3.5 What the correction does and does not address
+
+Extension 1 is *only* about the weighting *across* time bins. It is a no-op
+when the two directions coincide — either by constant $n_t$ (the
+intersection with (A1); §A.4) or by an envelope $\alpha(t)$ uncorrelated with
+$n_t$. It does not address Extension 2's eye-position distribution mismatch,
+which acts *within* time bins on the choice of $e$ used to average the rate
+variance. The two are orthogonal: Extension 1 fills the $w_t$ column of the
+§1.5 table; Extension 2 fills the $q$ column.
 
 ---
 
-# 4. Extension 2: eye-position-distribution matching under a non-homogeneous stimulus
+# 4. Extension 2: pinning the $q$ column
+
+Section 3 filled the $w_t$ column of the §1.5 table by pinning all three
+estimators to a single across-bin weighting. This section fills the $q$
+column by pinning all three to a single across-eye distribution. The two
+extensions are independent — §3 addressed (A1) failure (variable $n_t$); §4
+addresses (A2) failure (non-homogeneous stimulus) — and the same
+natural-vs-stable tradeoff appears on this axis: McFarland's literal MM is
+pinned to the close-pair conditional density $p^2$, the actual viewing
+distribution is $p$, and §4.5 develops both consistent directions and their
+bias/variance tradeoff.
 
 ## 4.1 Close pairs are sampled from $p(e)^2$
 
@@ -844,9 +913,14 @@ Consistent pair-count time-bin weighting has been integrated into the production
 pipeline (`VisionCore/covariance.py`):
 
 - `estimate_rate_covariance` — pair-count-weighted $\bar Y$ matching the
-  close-pair second moment, fixing Mismatch 1 of §3.1.
+  close-pair second moment, pinning the $\bar Y$ cell of the §1.5 table to
+  the pair-count direction (§3.2).
 - `bagged_split_half_psth_covariance` — `weighting` parameter, default
-  `'pair_count'`, fixing Mismatch 2 of §3.1.
+  `'pair_count'`, pinning $C_\text{psth}$ to the pair-count direction.
+
+Together with the trial-count $C_\text{total}$ already being recomputed at
+the same per-sample weight inside the production estimator, this pins the
+full $w_t$ column to the pair-count direction (§3.2).
 
 On the Allen 2022-04-13 session (49 cells, 3667 windows) the fix moved the
 shuffle-null $D_z$ from $-0.0068$ ($p<10^{-4}$) to $+0.0010$ ($p=0.44$); the
@@ -911,24 +985,35 @@ decomposition in which all of $C_{\text{total}}$, $C_{\text{psth}}$ and
 $C_{\text{rate}}$ are taken over the single distribution $q$, restoring
 term-by-term consistency of (1).
 
-## A.3 Pair-count weighting from the close-pair second moment
+## A.3 Two readings of the nested-bracket close-pair estimator
 
-The close-pair second-moment estimator (7) averages products
-$Y_c^iY_c^j$ over distinct same-time-bin pairs at $\Delta e<\varepsilon$.
-With $n_t$ trials at time bin $t$, the number of available pairs is
-$n_t(n_t{-}1)/2$. Taking the uniform average over pairs is therefore taking
-the across-time-bin average with weight $w_t\propto n_t(n_t{-}1)/2$. For the
-LOTC (1) to hold term-by-term, the PSTH variance estimator (5) and the
-mean $\bar Y$ must use the same $w_t$. Under constant $n_t$ this $w_t$
-becomes a constant and the choice is invisible; under variable $n_t$ it is
-the unique weighting that makes $C_{\text{total}}$, $C_{\text{psth}}$ and
-$C_{\text{rate}}$ consistent.
+The close-pair second-moment estimator (7) is written
+$\langle\langle Y_c^iY_c^j \mid \Delta e<\varepsilon\rangle_{i\ne j}\rangle_t$.
+Two readings of the nested bracket give two consistent across-bin weightings.
+
+**Inner-then-outer (uniform $1/T$).** Read the brackets literally as
+two stages: at each bin $t$, average the close-pair products to get a
+per-bin mean $\bar m_t = |P_t|^{-1}\sum_{(i,j)\in P_t} Y^iY^j$; then average
+the $\{\bar m_t\}$ uniformly across the $T$ bins. Each bin contributes
+$w_t = 1/T$ regardless of $|P_t|$. This is the natural reading of
+"averaging across time points" — McFarland's text on p.6228.
+
+**Pool-then-average (pair-count $\propto n_t(n_t{-}1)/2$).** Pool all close
+pairs from all bins into a single flat list and average uniformly per pair.
+Bin $t$ then contributes $|P_t|/\sum_{t'}|P_{t'}|$, which under uniform eye
+sampling is $\approx n_t(n_t{-}1)/2$ normalized.
+
+Under constant $n_t$ the two readings coincide ($|P_t|$ is the same for every
+$t$). Under variable $n_t$ they differ — the bin with the most close pairs
+either gets the same voice as every other (uniform) or dominates the average
+(pair-count). Both are consistent across-bin weightings for the LOTC, and §3
+develops the bias/variance tradeoff between them.
 
 ## A.4 When the corrections are a no-op
 
-- **Extension 1.** If $n_t$ is constant across time bins, $w_t$ becomes a
-  constant and the pair-count and uniform weightings coincide; the
-  correction is the identity.
+- **Extension 1.** If $n_t$ is constant across time bins, the uniform and
+  pair-count directions coincide (the two readings of §A.3 give the same
+  weight per bin), and Extension 1 reduces to the identity.
 - **Extension 2.** The correction is the identity whenever (A2) holds at
   the second moment: $\mathbb E_t[r^2(t,e)]$ independent of $e$ makes
   $\mathbb E_{e\sim D}\!\big[\mathbb E_t[r^2]\big]$ the same for every $D$,
@@ -1023,8 +1108,9 @@ well below the test tolerances.
 The ratio $1-\alpha^{D,w} = 1 - I_{M,K,D}/(\tau^2 \mathbb E_D[M^2])$ is
 invariant under time-bin weighting and the envelope $\alpha(t)$: both
 $\mathrm{Var}_\text{PSTH}$ and $\mathrm{Var}_\text{total}$ are proportional
-to $\mathbb E_w[\alpha^2]$, which cancels. The Extension-1 bias is in the
-estimator's $w$-mismatch, not in any bin-weighted ground truth.
+to $\mathbb E_w[\alpha^2]$, which cancels. Both Extension-1 directions
+therefore target the same closed-form ratio; the choice between them is a
+finite-sample efficiency question, not a bias question.
 
 ## A.6 Consistency: how $\mathrm{sd}[1-\hat\alpha]$ depends on $N$ and $T$, and the $[0,1]$ clipping bias
 

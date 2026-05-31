@@ -117,17 +117,28 @@ def _split_half_psth_cov(S, T, sw, n_boot, seed, min_tpp,
     return C / n_boot
 
 
-def _close_pair_second_moment(S, E, T, phat, target, threshold, weight_clip):
+def _close_pair_second_moment(S, E, T, phat, target, threshold, weight_clip,
+                              time_bin_weighting="pair_count"):
     """Importance-reweighted close-pair second moment MM (C, C).
 
-    All distinct same-time-bin trial pairs with |e_i - e_j| < threshold are pooled
-    globally (matching the empirical ``below_threshold`` intercept). Pair (i,j) at
-    midpoint m gets weight pw:
-        target in {'naive','central'}: pw = 1            (p^2 sampling kept)
-        target == 'full'             : pw = 1/phat(m)    (reweight p^2 -> p), clipped
+    All distinct same-time-bin trial pairs with |e_i - e_j| < threshold are
+    collected. Pair (i,j) at midpoint m gets weight pw combining a target-
+    distribution importance weight and an across-bin combination scheme:
+
+      target in {'naive','central'}: pw_q = 1            (p^2 sampling kept)
+      target == 'full'             : pw_q = 1/phat(m)    (reweight p^2 -> p), clipped
+
+      time_bin_weighting == 'pair_count': pw_t = 1 -- pool all close pairs and
+        average uniformly per pair; bin t contributes ~|P_t| ≈ n_t(n_t-1)/2.
+      time_bin_weighting == 'uniform':    pw_t = 1/|P_t| -- per-bin mean of pair
+        products first, then uniform across bins; bin t contributes 1/T regardless
+        of |P_t|. This is the literal reading of McFarland's nested bracket
+        <<.>_{i≠j}>_t in Eq. M8.
+
+    Under constant n_t the two time_bin_weighting choices coincide.
     """
     C = S.shape[1]
-    Si_acc, Sj_acc, mid_acc = [], [], []
+    Si_acc, Sj_acc, mid_acc, t_acc = [], [], [], []
     for t in np.unique(T):
         ix = np.where(T == t)[0]
         if len(ix) < 2:
@@ -141,15 +152,29 @@ def _close_pair_second_moment(S, E, T, phat, target, threshold, weight_clip):
         gi, gj = ix[i[close]], ix[j[close]]
         Si_acc.append(gi); Sj_acc.append(gj)
         mid_acc.append(0.5 * (E[gi] + E[gj]))
+        t_acc.append(np.full(int(close.sum()), t))
     if not Si_acc:
         return np.full((C, C), np.nan)
     gi = np.concatenate(Si_acc); gj = np.concatenate(Sj_acc)
     mid = np.concatenate(mid_acc)
+    tpair = np.concatenate(t_acc)
+
     if target == "full":
-        pw = 1.0 / np.clip(phat(mid), 1e-12, None)
-        pw = np.clip(pw, None, weight_clip * np.median(pw))
+        pw_q = 1.0 / np.clip(phat(mid), 1e-12, None)
+        pw_q = np.clip(pw_q, None, weight_clip * np.median(pw_q))
     else:
-        pw = np.ones(len(gi))
+        pw_q = np.ones(len(gi))
+
+    if time_bin_weighting == "pair_count":
+        pw_t = np.ones(len(gi))
+    elif time_bin_weighting == "uniform":
+        _, inv = np.unique(tpair, return_inverse=True)
+        nP_t = np.bincount(inv)
+        pw_t = 1.0 / nP_t[inv]
+    else:
+        raise ValueError(f"unknown time_bin_weighting: {time_bin_weighting!r}")
+
+    pw = pw_q * pw_t
     pw = pw / pw.sum()
     prod = (S[gi].T * pw) @ S[gj]               # (C,C) = sum_k pw_k S_i,k outer S_j,k
     return 0.5 * (prod + prod.T)
@@ -187,11 +212,17 @@ def decompose(counts, eye, target="full", valid=None, threshold=0.05,
         This unbounded-weight cost is precisely why target='central' (bounded
         weights, prop to p) is the more stable choice.
     time_bin_weighting : {'pair_count', 'uniform'}
-        How Cpsth weights time bins (see ``_split_half_psth_cov``). 'pair_count' is
-        the matched / post-fix default; 'uniform' is the pre-fix historical
-        Cpsth weighting, exposed so the Extension-1 bias under variable n_t can
-        be demonstrated against the matched case. Under constant n_t the two
-        coincide.
+        Across-bin combination used by ALL three estimators (Ctotal, Cpsth,
+        Crate's close-pair MM and Ybar^2 subtractor). Both are consistent
+        directions for the LOTC under variable n_t (see writeup §3.2):
+          * 'pair_count' (default): bin t weighted ∝ n_t(n_t-1)/2 -- pool close
+            pairs and average uniformly per pair; inverse-variance optimal on
+            the close-pair pool but concentrates on high-n_t bins.
+          * 'uniform': bin t weighted 1/T regardless of n_t -- per-bin mean of
+            pair products first, then uniform across bins; matches McFarland's
+            literal nested-bracket reading of Eqs. M8/Eq.6 but pays a variance
+            penalty under sharply variable n_t.
+        Under constant n_t the two coincide.
     n_boot, seed, min_trials_per_time_bin : see helpers.
 
     Returns
@@ -242,7 +273,8 @@ def decompose(counts, eye, target="full", valid=None, threshold=0.05,
     Ctotal = _weighted_cov(S, sw)
     Cpsth = _split_half_psth_cov(S, T, sw, n_boot, seed, min_trials_per_time_bin,
                                  time_bin_weighting=time_bin_weighting)
-    MM = _close_pair_second_moment(S, E, T, phat, target, threshold, weight_clip)
+    MM = _close_pair_second_moment(S, E, T, phat, target, threshold, weight_clip,
+                                   time_bin_weighting=time_bin_weighting)
     Crate = MM - np.outer(Erate, Erate)
 
     CnoiseC = 0.5 * ((Ctotal - Crate) + (Ctotal - Crate).T)
