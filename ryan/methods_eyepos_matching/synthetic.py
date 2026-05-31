@@ -5,22 +5,23 @@ violations (A1) and (A2) are parameter switches on top of one architecture.
 
 Generative model
 ----------------
-For neuron c, stimulus phase t (a frozen-stimulus time bin), and absolute eye
+For neuron c, analysis time bin t (one frozen-stimulus draw of the field; see
+the caveat in writeup §2.3), and absolute eye
 position e in R^2,
 
     r_c(t, e) = mu_0 + M_c(e) * alpha(t) * s_t(e)        (deterministic rate)
 
-  * s_t(.):  per-phase iid draw of a STATIONARY 2-D zero-mean Gaussian random
+  * s_t(.):  per-time-bin iid draw of a STATIONARY 2-D zero-mean Gaussian random
              field with covariance K(delta) = tau^2 * exp(-||delta||^2 / (2*ell^2)).
-             This is the rate map at phase t. Different phases are independent
+             This is the rate map at time bin t. Different bins are independent
              draws of the field. The field is (A2)-respecting by construction:
-             at any fixed e, s_t(e) is N(0, tau^2) across phases, so the
-             across-phase distribution does not depend on e.
+             at any fixed e, s_t(e) is N(0, tau^2) across time bins, so the
+             across-time-bin distribution does not depend on e.
 
-  * alpha(t): per-phase amplitude envelope. Default 1. Used in the Extension-1
+  * alpha(t): per-time-bin amplitude envelope. Default 1. Used in the Extension-1
               demo, where a decreasing alpha(t) co-varying with n_t (high
-              amplitude in early, high-n_t phases) mirrors fixRSVP onset
-              transients and drives the variable-n_t phase-weighting bias.
+              amplitude in early, high-n_t bins) mirrors fixRSVP onset
+              transients and drives the variable-n_t time-bin-weighting bias.
 
   * M_c(e):  per-cell deterministic SPATIAL MASK in [0, 1]. The (A2) switch.
              Physically: the fraction of the stimulus the cell sees at eye
@@ -38,7 +39,7 @@ property the close-pair estimator exploits to cancel it):
 
     Y_c(trial, t) ~ Poisson( max( r_c(t, e_{trial,t}) + u_c(trial,t), 0 ) )
 
-with an optional shared latent u ~ N(0, Sigma_u) per (trial, phase) giving a KNOWN
+with an optional shared latent u ~ N(0, Sigma_u) per (trial, time-bin) giving a KNOWN
 stimulus-independent ("noise") covariance across cells. Default Sigma_u = 0
 (pure Poisson, true noise correlation 0, true Fano 1).
 
@@ -50,12 +51,12 @@ depend on e (the first moment stays mu_0). This matches McFarland's specific
 statement that his estimator's correctness hinges on E[r^2(e,t)] being the
 same under any distribution over e (their text around Eqs. M7-M10).
 
-(A1) violation. n_trials_per_phase = staircase => different number of trials
-per phase. Combined with a non-constant alpha(t) envelope, this makes the
-pair-count-weighted vs uniform-weighted average over phases differ, biasing
+(A1) violation. n_trials_per_time_bin = staircase => different number of trials
+per time bin. Combined with a non-constant alpha(t) envelope, this makes the
+pair-count-weighted vs uniform-weighted average over time bins differ, biasing
 the unmatched estimator.
 
-Closed-form decomposition under any (eye distribution D, phase weighting w_t)
+Closed-form decomposition under any (eye distribution D, time-bin weighting w_t)
 ----------------------------------------------------------------------------
     Var_total^{D,w} = E_w[alpha^2] * tau^2 * E_D[M^2]                       (1)
     Var_PSTH^{D,w}  = E_w[alpha^2] * \iint M(e1) M(e2) K(e1-e2) D(e1) D(e2)  (2)
@@ -63,7 +64,7 @@ Closed-form decomposition under any (eye distribution D, phase weighting w_t)
     1-alpha^{D,w}   = 1 - (2)/(E_w[alpha^2] * tau^2 * E_D[M^2])              (3)
 
 Equation (3) is independent of E_w[alpha^2] -- the envelope cancels in the
-ratio. So the GROUND TRUTH 1-alpha is invariant under phase weighting. The
+ratio. So the GROUND TRUTH 1-alpha is invariant under time-bin weighting. The
 Extension-1 bias is therefore a property of the ESTIMATOR (finite-sample
 inconsistency under w-mismatch), not of the ground truth.
 
@@ -150,23 +151,23 @@ def _flat_one_minus_alpha_closed_form(sigma_eye, ell, distribution):
     raise ValueError(f"unknown distribution: {distribution!r}")
 
 
-def _phase_amp_sq_mean(psth_envelope, phase_weights):
-    """Mean of alpha(t)^2 under the given phase weighting (default uniform)."""
+def _time_bin_amp_sq_mean(psth_envelope, time_bin_weights):
+    """Mean of alpha(t)^2 under the given time-bin weighting (default uniform)."""
     if psth_envelope is None:
         return 1.0
     a = np.asarray(psth_envelope, dtype=float)
-    if phase_weights is None:
+    if time_bin_weights is None:
         return float((a ** 2).mean())
-    w = np.asarray(phase_weights, dtype=float)
+    w = np.asarray(time_bin_weights, dtype=float)
     if w.shape != a.shape:
         raise ValueError(
-            f"phase_weights shape {w.shape} != psth_envelope shape {a.shape}")
+            f"time_bin_weights shape {w.shape} != psth_envelope shape {a.shape}")
     w = w / w.sum()
     return float((w * a ** 2).sum())
 
 
 def ground_truth(kind, sigma_eye, ell, tau=1.0, ell_M=None,
-                 psth_envelope=None, phase_weights=None,
+                 psth_envelope=None, time_bin_weights=None,
                  n=_GT_N, seed=12345):
     """Closed-form / MC ground truth for the LOTC decomposition of one cell.
 
@@ -174,12 +175,12 @@ def ground_truth(kind, sigma_eye, ell, tau=1.0, ell_M=None,
     (close-pair / central), each with:
         var_psth, var_fem, var_total, one_minus_alpha.
 
-    The ``one_minus_alpha`` ratio is invariant under (phase_weights, psth_envelope)
+    The ``one_minus_alpha`` ratio is invariant under (time_bin_weights, psth_envelope)
     -- those only scale var_psth, var_fem, var_total by E_w[alpha^2]. Pass them
     when the absolute variances matter (e.g. Extension-1 bias diagnosis on
     var_psth alone).
     """
-    a2_mean = _phase_amp_sq_mean(psth_envelope, phase_weights)
+    a2_mean = _time_bin_amp_sq_mean(psth_envelope, time_bin_weights)
     rng = np.random.default_rng(seed)
     tau2 = float(tau) ** 2
 
@@ -219,27 +220,27 @@ def ground_truth(kind, sigma_eye, ell, tau=1.0, ell_M=None,
 # Session generator
 # ---------------------------------------------------------------------------
 
-def _resolve_n_t(n_trials_per_phase, n_trials, n_phases):
-    """Build the per-phase trial-count array n_t of length n_phases."""
-    if n_trials_per_phase is None:
-        return np.full(n_phases, int(n_trials), dtype=int)
-    if callable(n_trials_per_phase):
-        return np.array([int(n_trials_per_phase(i)) for i in range(n_phases)],
+def _resolve_n_t(n_trials_per_time_bin, n_trials, n_time_bins):
+    """Build the per-time-bin trial-count array n_t of length n_time_bins."""
+    if n_trials_per_time_bin is None:
+        return np.full(n_time_bins, int(n_trials), dtype=int)
+    if callable(n_trials_per_time_bin):
+        return np.array([int(n_trials_per_time_bin(i)) for i in range(n_time_bins)],
                         dtype=int)
-    if np.isscalar(n_trials_per_phase):
-        return np.full(n_phases, int(n_trials_per_phase), dtype=int)
-    arr = np.asarray(n_trials_per_phase, dtype=int).ravel()
-    if arr.size != n_phases:
+    if np.isscalar(n_trials_per_time_bin):
+        return np.full(n_time_bins, int(n_trials_per_time_bin), dtype=int)
+    arr = np.asarray(n_trials_per_time_bin, dtype=int).ravel()
+    if arr.size != n_time_bins:
         raise ValueError(
-            f"n_trials_per_phase length {arr.size} != n_phases {n_phases}")
+            f"n_trials_per_time_bin length {arr.size} != n_time_bins {n_time_bins}")
     return arr
 
 
 def _draw_field_at(eyes, ell, tau, rng, n_cells, jitter=1e-8):
-    """Sample one phase's stationary GP field at `n` observed eye positions for
+    """Sample one time bin's stationary GP field at `n` observed eye positions for
     each of `n_cells` cells.
 
-    Per-phase covariance Sigma[i,j] = tau^2 * exp(-||e_i - e_j||^2 / (2 ell^2));
+    Per-time-bin covariance Sigma[i,j] = tau^2 * exp(-||e_i - e_j||^2 / (2 ell^2));
     sample s = L @ z with z iid N(0, I_n) per cell, retry Cholesky with
     growing jitter on the (rare) near-singular case.
     """
@@ -264,10 +265,10 @@ def _draw_field_at(eyes, ell, tau, rng, n_cells, jitter=1e-8):
     return L @ z  # (n, n_cells)
 
 
-def make_session(kinds, n_trials=600, n_phases=100, sigma_eye=0.15,
+def make_session(kinds, n_trials=600, n_time_bins=100, sigma_eye=0.15,
                  ell=None, tau=1.0, mu_0=6.0, ell_M=None,
                  noise_cov=None, seed=0,
-                 return_rate=True, n_trials_per_phase=None,
+                 return_rate=True, n_trials_per_time_bin=None,
                  psth_envelope=None):
     """Generate a unified multi-cell synthetic session.
 
@@ -275,10 +276,10 @@ def make_session(kinds, n_trials=600, n_phases=100, sigma_eye=0.15,
     ----------
     kinds : sequence of str
         Per-cell mask kind (see PROFILE_KINDS).
-    n_trials, n_phases : int
-        Maximum trials per phase and number of frozen-stimulus phases.
+    n_trials, n_time_bins : int
+        Maximum trials per time bin and number of analysis time bins.
     sigma_eye : float
-        Fixational spread (deg); eyes ~ N(0, sigma_eye^2 I), iid per (trial, phase).
+        Fixational spread (deg); eyes ~ N(0, sigma_eye^2 I), iid per (trial, time-bin).
     ell : float or None
         Field length scale (deg). None defaults to sigma_eye (puts 1-alpha^p
         ~ 2/3 -- non-trivial but not at the extremes of (0,1)).
@@ -289,25 +290,25 @@ def make_session(kinds, n_trials=600, n_phases=100, sigma_eye=0.15,
     ell_M : float or None
         Mask length scale (deg); see ``profile_M``.
     noise_cov : ndarray (n_cells, n_cells), optional
-        Per-(trial, phase) shared latent covariance Sigma_u; None -> pure Poisson.
+        Per-(trial, time-bin) shared latent covariance Sigma_u; None -> pure Poisson.
     seed : int
     return_rate : bool
-        If True include the deterministic rate field (trials, phases, cells).
-    n_trials_per_phase : None, int, length-n_phases array, or callable(i)->int
-        Per-phase trial count. Variable -> breaks (A1). Invalid (trial >= n_t)
+        If True include the deterministic rate field (trials, time bins, cells).
+    n_trials_per_time_bin : None, int, length-n_time_bins array, or callable(i)->int
+        Per-time-bin trial count. Variable -> breaks (A1). Invalid (trial >= n_t)
         entries in spikes / rate / eye are filled with NaN; ``valid`` mask is
         True for the real trials.
-    psth_envelope : None or length-n_phases array
-        Per-phase amplitude envelope alpha(t). Default 1 (no envelope).
+    psth_envelope : None or length-n_time_bins array
+        Per-time-bin amplitude envelope alpha(t). Default 1 (no envelope).
 
     Returns
     -------
     dict with:
-        rate    : (n_rows, n_phases, n_cells) deterministic r(t,e)  [if return_rate]
-        spikes  : (n_rows, n_phases, n_cells) Poisson observations
-        eye     : (n_rows, n_phases, 2) eye positions (deg)
-        valid   : (n_rows, n_phases) bool
-        n_t     : (n_phases,) per-phase trial count
+        rate    : (n_rows, n_time_bins, n_cells) deterministic r(t,e)  [if return_rate]
+        spikes  : (n_rows, n_time_bins, n_cells) Poisson observations
+        eye     : (n_rows, n_time_bins, 2) eye positions (deg)
+        valid   : (n_rows, n_time_bins) bool
+        n_t     : (n_time_bins,) per-time-bin trial count
         truth   : list[dict] per-cell ground_truth(...) over 'p' and 'p2'
         noise_cov : Sigma_u used (or None)
         kinds   : the profile list
@@ -320,38 +321,38 @@ def make_session(kinds, n_trials=600, n_phases=100, sigma_eye=0.15,
 
     rng = np.random.default_rng(seed)
     n_cells = len(kinds)
-    n_t = _resolve_n_t(n_trials_per_phase, n_trials, n_phases)
+    n_t = _resolve_n_t(n_trials_per_time_bin, n_trials, n_time_bins)
     n_rows = max(int(n_t.max()), 1)
-    valid = (np.arange(n_rows)[:, None] < n_t[None, :])  # (n_rows, n_phases)
+    valid = (np.arange(n_rows)[:, None] < n_t[None, :])  # (n_rows, n_time_bins)
 
     if psth_envelope is None:
-        alpha = np.ones(n_phases)
+        alpha = np.ones(n_time_bins)
     else:
-        alpha = np.asarray(psth_envelope, dtype=float).reshape(n_phases)
+        alpha = np.asarray(psth_envelope, dtype=float).reshape(n_time_bins)
 
-    eye = rng.normal(0.0, float(sigma_eye), size=(n_rows, n_phases, 2))
+    eye = rng.normal(0.0, float(sigma_eye), size=(n_rows, n_time_bins, 2))
 
-    # Field s_t(e_i) evaluated at observed eyes, independent across phases,
+    # Field s_t(e_i) evaluated at observed eyes, independent across time bins,
     # shared spatial covariance across cells via the same Cholesky factor (each
     # cell gets its own N(0,I) draw).
-    s = np.zeros((n_rows, n_phases, n_cells))
-    for t in range(n_phases):
+    s = np.zeros((n_rows, n_time_bins, n_cells))
+    for t in range(n_time_bins):
         nt = int(n_t[t])
         if nt < 1:
             continue
         s[:nt, t, :] = _draw_field_at(eye[:nt, t, :], ell, tau, rng, n_cells)
 
     # Per-cell mask M(e); then r = mu_0 + M(e) * alpha(t) * s_t(e).
-    rate = np.empty((n_rows, n_phases, n_cells))
+    rate = np.empty((n_rows, n_time_bins, n_cells))
     for c, kind in enumerate(kinds):
-        M = profile_M(eye, kind, sigma_eye, ell_M)              # (n_rows, n_phases)
+        M = profile_M(eye, kind, sigma_eye, ell_M)              # (n_rows, n_time_bins)
         rate[:, :, c] = mu_0 + M * alpha[None, :] * s[:, :, c]
     rate = np.clip(rate, 1e-6, None)
 
     lam = rate
     if noise_cov is not None:
         u = rng.multivariate_normal(np.zeros(n_cells), noise_cov,
-                                    size=(n_rows, n_phases))
+                                    size=(n_rows, n_time_bins))
         lam = np.clip(rate + u, 1e-6, None)
     spikes = rng.poisson(lam).astype(np.float64)
 

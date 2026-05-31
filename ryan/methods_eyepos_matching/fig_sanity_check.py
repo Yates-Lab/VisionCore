@@ -20,7 +20,7 @@ So we can sweep ell/sigma to cover (0, 1) and verify that:
      is non-zero for finite ell, vanishing only as ell -> 0 (all FEM) or
      ell -> infty (no FEM). This is the load-bearing reframe of section 4.5.
 
-Consistency (how SEM depends on n_trials AND n_phases, the T-floor at
+Consistency (how SEM depends on n_trials AND n_time_bins (T), the T-floor at
 sqrt(2 alpha^2 / (T-1)), and the boundary-clipping bias at high SEM) is
 explored separately in writeup Appendix A.6, with its own figure.
 
@@ -67,7 +67,7 @@ def panel_A(ax, ratios=(0.25, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0),
     for ell in ells:
         vals = []
         for s in seeds:
-            sess = make_session(["flat"], n_trials=NTR_DEF, n_phases=NPH,
+            sess = make_session(["flat"], n_trials=NTR_DEF, n_time_bins=NPH,
                                 sigma_eye=SIG, ell=ell, seed=s)
             d = decompose(sess["rate"], sess["eye"], target="naive",
                           density="gaussian", threshold=THR_DEF)
@@ -94,7 +94,7 @@ def panel_B(ax, thresholds=(0.02, 0.035, 0.05, 0.08, 0.12), seeds=range(8),
     for thr in thresholds:
         vals = []
         for s in seeds:
-            sess = make_session(["flat"], n_trials=NTR_DEF, n_phases=NPH,
+            sess = make_session(["flat"], n_trials=NTR_DEF, n_time_bins=NPH,
                                 sigma_eye=SIG, ell=ell, seed=s)
             d = decompose(sess["rate"], sess["eye"], target="naive",
                           density="gaussian", threshold=thr)

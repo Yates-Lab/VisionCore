@@ -1,7 +1,7 @@
 r"""Real-data quantification of the eye-position-matching correction (cache-only).
 
 Uses the fig4 cache (real V1 spikes + model-twin rates on the REAL fixational eye
-trajectories, trial-aligned by stimulus phase). No GPU, no model inference.
+trajectories, trial-aligned by analysis time bin). No GPU, no model inference.
 
   * 1-alpha and Fano are computed on the real SPIKES (robs), per cell, with each
     cell's own validity mask (dfs != 0 & eye-finite) -- this reproduces fig2's
@@ -40,7 +40,7 @@ MIN_TPP = 10
 def _percell_session(robs, eye, vm, dfs, thr=THR, weight_clip=1e6):
     """Per-cell naive/full/central 1-alpha and Fano for one session.
 
-    Close pairs (same phase, |de|<thr) are enumerated once; each cell uses only the
+    Close pairs (same bin, |de|<thr) are enumerated once; each cell uses only the
     pairs and samples where it is valid (dfs!=0). Returns dict of (C,) arrays.
     """
     n_tr, n_ph, C = robs.shape
@@ -57,7 +57,7 @@ def _percell_session(robs, eye, vm, dfs, thr=THR, weight_clip=1e6):
     kde = gaussian_kde(Ef.T)
     p_samp = np.clip(kde(Ef.T), 1e-12, None)
 
-    # enumerate close pairs once (per phase)
+    # enumerate close pairs once (per time bin)
     pi, pj = [], []
     for t in np.unique(Tf):
         ix = np.where(Tf == t)[0]
@@ -84,7 +84,7 @@ def _percell_session(robs, eye, vm, dfs, thr=THR, weight_clip=1e6):
         if vpc.sum() < MIN_TPP:
             continue
         sc = Sf[vc, c]
-        # phase pair-count weighting for PSTH split-half (per cell, c-valid)
+        # time-bin pair-count weighting for PSTH split-half (per cell, c-valid)
         oma, fano, erate = {}, {}, {}
         for tgt in ("naive", "full", "central"):
             sw = p_samp[vc] if tgt == "central" else np.ones(vc.sum())
@@ -112,19 +112,19 @@ def _wvar(x, w, mu):
 
 
 def _psth_diag(s, t, sw, n_boot=20, seed=0):
-    """Split-half PSTH variance (one cell) with sample weights sw, pair-count phases."""
+    """Split-half PSTH variance (one cell) with sample weights sw, pair-count time bins."""
     rng = np.random.default_rng(seed)
-    phases = [u for u in np.unique(t) if (t == u).sum() >= MIN_TPP]
-    if len(phases) < 2:
+    time_bins = [u for u in np.unique(t) if (t == u).sum() >= MIN_TPP]
+    if len(time_bins) < 2:
         return np.nan
-    idx = {u: np.where(t == u)[0] for u in phases}
-    nt = np.array([len(idx[u]) for u in phases], float)
+    idx = {u: np.where(t == u)[0] for u in time_bins}
+    nt = np.array([len(idx[u]) for u in time_bins], float)
     wph = nt * (nt - 1) / 2
     wph /= wph.sum()
     acc = 0.0
     for _ in range(n_boot):
         A, B = [], []
-        for u in phases:
+        for u in time_bins:
             ix = rng.permutation(idx[u]); m = len(ix) // 2
             wa, wb = sw[ix[:m]], sw[ix[m:]]
             A.append(np.average(s[ix[:m]], weights=wa))

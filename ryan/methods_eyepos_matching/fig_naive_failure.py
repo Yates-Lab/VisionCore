@@ -33,7 +33,7 @@ def run(seeds=range(4)):
     ncorr = {"naive": [], "full": []}
     fano = {"naive": [], "full": []}
     for s in seeds:
-        sess = make_session(PROFILES, n_trials=N, n_phases=NPH, sigma_eye=SIG,
+        sess = make_session(PROFILES, n_trials=N, n_time_bins=NPH, sigma_eye=SIG,
                             seed=s)  # pure Poisson: true ncorr 0, Fano 1
         dn = decompose(sess["spikes"], sess["eye"], target="naive",
                        density="gaussian", threshold=THR)

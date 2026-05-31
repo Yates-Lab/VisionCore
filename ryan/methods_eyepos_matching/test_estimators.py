@@ -36,7 +36,7 @@ def _seed_stats(kinds, target, key, seeds=range(6), deterministic=True,
     """Per-cell mean and std of a decompose() field across seeds."""
     vals = []
     for s in seeds:
-        sess = make_session(kinds, n_trials=NTR, n_phases=NPH, sigma_eye=SIG,
+        sess = make_session(kinds, n_trials=NTR, n_time_bins=NPH, sigma_eye=SIG,
                             seed=s, **mk)
         counts = sess["rate"] if deterministic else sess["spikes"]
         d = decompose(counts, sess["eye"], target=target, density=density,
@@ -119,7 +119,7 @@ def test_naive_is_grossly_biased_where_corrected_is_not():
     naive_vals, full_vals = [], []
     gt = None
     for s in range(12):
-        sess = make_session(["central"], n_trials=NTR, n_phases=NPH,
+        sess = make_session(["central"], n_trials=NTR, n_time_bins=NPH,
                             sigma_eye=SIG, seed=s)
         if gt is None:
             gt = sess["truth"][0]["p"]["one_minus_alpha"]
@@ -167,9 +167,11 @@ def test_naive_path_matches_existing_pipeline():
     (pipeline_one_minus_alpha) on the same deterministic rates."""
     from VisionCore.covariance import pipeline_one_minus_alpha
     sess = make_session(["central", "eccentric", "linear"], n_trials=200,
-                        n_phases=100, sigma_eye=SIG, seed=3)
+                        n_time_bins=100, sigma_eye=SIG, seed=3)
     rate, eye = sess["rate"], sess["eye"]
     d = decompose(rate, eye, target="naive", density="gaussian")
+    # NB: production pipeline (VisionCore/covariance.py) still uses the
+    # original 'min_trials_per_phase' kwarg name; do not touch that here.
     ref = pipeline_one_minus_alpha(rate, eye, threshold=0.05,
                                    min_trials_per_phase=10, device="cpu")
     a, b = d["one_minus_alpha"], ref["one_minus_alpha"]
@@ -178,33 +180,33 @@ def test_naive_path_matches_existing_pipeline():
 
 
 # ---------------------------------------------------------------------------
-# Extension 1: consistent phase weighting under variable n_t
+# Extension 1: consistent time-bin weighting under variable n_t
 # ---------------------------------------------------------------------------
 
-def _staircase_n_t(n_phases, lo=20, hi=80):
-    """Monotone-decaying phase trial counts mimicking fixRSVP fixation
+def _staircase_n_t(n_time_bins, lo=20, hi=80):
+    """Monotone-decaying per-bin trial counts mimicking fixRSVP fixation
     durations."""
-    return np.linspace(hi, lo, n_phases).round().astype(int)
+    return np.linspace(hi, lo, n_time_bins).round().astype(int)
 
 
 def test_variable_n_t_session_masks_correctly():
-    """Sanity: passing n_trials_per_phase produces a valid-mask whose row sums
-    equal the requested per-phase counts and whose invalid entries are NaN."""
+    """Sanity: passing n_trials_per_time_bin produces a valid-mask whose row sums
+    equal the requested per-time-bin counts and whose invalid entries are NaN."""
     nt = _staircase_n_t(20, lo=10, hi=40)
-    sess = make_session(["flat"], n_trials=int(nt.max()), n_phases=20,
-                        sigma_eye=SIG, seed=0, n_trials_per_phase=nt)
+    sess = make_session(["flat"], n_trials=int(nt.max()), n_time_bins=20,
+                        sigma_eye=SIG, seed=0, n_trials_per_time_bin=nt)
     assert sess["valid"].shape == (int(nt.max()), 20)
     assert np.array_equal(sess["valid"].sum(0), nt)
     assert np.all(np.isnan(sess["spikes"][~sess["valid"]]))
     assert np.all(np.isfinite(sess["spikes"][sess["valid"]]))
 
 
-def test_pair_count_phase_weighting_recovers_truth_under_variable_nt():
+def test_pair_count_time_bin_weighting_recovers_truth_under_variable_nt():
     """Under variable n_t with a decaying alpha(t) envelope concentrating
-    amplitude in high-n_t phases, the matched (pair_count) phase weighting
+    amplitude in high-n_t bins, the matched (pair_count) time-bin weighting
     recovers the closed-form 1-alpha^p; uniform weighting is biased.
 
-    The truth 1-alpha is invariant under phase weighting in the unified model
+    The truth 1-alpha is invariant under time-bin weighting in the unified model
     (the envelope cancels in the ratio); the bias is in the ESTIMATOR, which
     mismatches Cpsth's weighting against Crate's intrinsic pair-count weighting.
     """
@@ -214,15 +216,15 @@ def test_pair_count_phase_weighting_recovers_truth_under_variable_nt():
     truth = None
     oma_pair, oma_uni = [], []
     for s in range(6):
-        sess = make_session(kinds, n_trials=NTR, n_phases=NPH, sigma_eye=SIG,
-                            seed=s, n_trials_per_phase=nt, psth_envelope=env)
+        sess = make_session(kinds, n_trials=NTR, n_time_bins=NPH, sigma_eye=SIG,
+                            seed=s, n_trials_per_time_bin=nt, psth_envelope=env)
         if truth is None:
             truth = np.array([sess["truth"][c]["p"]["one_minus_alpha"]
                               for c in range(len(kinds))])
         d_pair = decompose(sess["rate"], sess["eye"], target="full",
-                           density="gaussian", phase_weighting="pair_count")
+                           density="gaussian", time_bin_weighting="pair_count")
         d_uni = decompose(sess["rate"], sess["eye"], target="full",
-                          density="gaussian", phase_weighting="uniform")
+                          density="gaussian", time_bin_weighting="uniform")
         oma_pair.append(d_pair["one_minus_alpha"])
         oma_uni.append(d_uni["one_minus_alpha"])
     oma_pair = np.nanmean(oma_pair, 0)
@@ -235,9 +237,9 @@ def test_pair_count_phase_weighting_recovers_truth_under_variable_nt():
         f"uniform not more biased: pair_err {err_pair} vs uni_err {err_uni}"
 
 
-def test_uniform_phase_weighting_biased_under_variable_nt_on_homogeneous():
+def test_uniform_time_bin_weighting_biased_under_variable_nt_on_homogeneous():
     """Even with a homogeneous (flat) mask -- where (A2) holds -- the unmatched
-    (uniform) phase weighting biases 1-alpha away from the closed-form 1-alpha^p
+    (uniform) time-bin weighting biases 1-alpha away from the closed-form 1-alpha^p
     when n_t varies and alpha(t) is correlated with n_t. The bias is purely
     the Cpsth/Crate weighting mismatch, not an (A2) violation.
     """
@@ -247,11 +249,11 @@ def test_uniform_phase_weighting_biased_under_variable_nt_on_homogeneous():
     omas = {"uniform": [], "pair_count": []}
     for s in range(6):
         sess = make_session(["flat", "flat", "flat"], n_trials=NTR,
-                            n_phases=NPH, sigma_eye=SIG, seed=s,
-                            n_trials_per_phase=nt, psth_envelope=env)
+                            n_time_bins=NPH, sigma_eye=SIG, seed=s,
+                            n_trials_per_time_bin=nt, psth_envelope=env)
         for pw in omas:
             d = decompose(sess["rate"], sess["eye"], target="full",
-                          density="gaussian", phase_weighting=pw)
+                          density="gaussian", time_bin_weighting=pw)
             omas[pw].append(d["one_minus_alpha"])
     med_uni = float(np.nanmedian(np.array(omas["uniform"])))
     med_pair = float(np.nanmedian(np.array(omas["pair_count"])))
@@ -271,7 +273,7 @@ def _seed_stats_sweep(target, key, ell, sigma_eye=SIG, n_trials=NTR,
     ell. Returns (mean, std, gt_p, gt_p2) over the seeds."""
     vals = []
     for s in seeds:
-        sess = make_session(["flat"], n_trials=n_trials, n_phases=NPH,
+        sess = make_session(["flat"], n_trials=n_trials, n_time_bins=NPH,
                             sigma_eye=sigma_eye, ell=ell, seed=s)
         d = decompose(sess["rate"], sess["eye"], target=target,
                       density="gaussian", threshold=threshold)
@@ -303,7 +305,7 @@ def test_random_field_var_total_is_K_zero_under_A2():
     D-invariance the rest of the closed form relies on. Verify empirically
     on the synthesized rates."""
     sig, ell, tau = SIG, SIG, 1.0
-    sess = make_session(["flat"], n_trials=NTR, n_phases=NPH, sigma_eye=sig,
+    sess = make_session(["flat"], n_trials=NTR, n_time_bins=NPH, sigma_eye=sig,
                         ell=ell, tau=tau, seed=0)
     r = sess["rate"][..., 0]
     var_total = float(np.nanvar(r))
@@ -325,12 +327,12 @@ def test_mcfarland_recovers_one_minus_alpha_p_under_A2():
 
 
 def test_t_floor_on_sd_one_minus_alpha():
-    """Appendix A.6: the across-phase floor on sd[1-alpha-hat] is
+    """Appendix A.6: the across-time-bin floor on sd[1-alpha-hat] is
 
         sd_floor = alpha* * sqrt(2 / (T - 1))
 
     where alpha* = ell^2 / (ell^2 + 2 sigma^2) under the flat-mask synthetic.
-    Derivation: under (A2) and constant n_t, the per-phase projection
+    Derivation: under (A2) and constant n_t, the per-time-bin projection
     G_t = integral M(e) s_t(e) p(e) de is iid N(0, V_p) with V_p = alpha*tau^2,
     so the sample-variance estimator of V_p has std 2 V_p^2 / (T-1), giving
     sd[alpha-hat] = sd[V_p-hat]/tau^2 = alpha* sqrt(2/(T-1)) in the large-N
@@ -338,7 +340,7 @@ def test_t_floor_on_sd_one_minus_alpha():
 
     Test at (N=400, T=200, ell=sigma): the analytical floor is ~0.033;
     empirical sd[1-alpha-hat] over 10 seeds sits in [0.5 floor, 4 floor].
-    The upper bound is generous so within-phase noise (which adds
+    The upper bound is generous so within-bin noise (which adds
     quadratically) does not trip the test; the lower bound guards against
     a formula sign / 2x error in the derivation. Catches a 10x regression.
     """
@@ -348,7 +350,7 @@ def test_t_floor_on_sd_one_minus_alpha():
     floor = a_star * np.sqrt(2.0 / (T - 1))
     vals = []
     for s in range(10):
-        sess = make_session(["flat"], n_trials=N, n_phases=T, sigma_eye=sig,
+        sess = make_session(["flat"], n_trials=N, n_time_bins=T, sigma_eye=sig,
                             ell=ell, seed=s)
         d = decompose(sess["rate"], sess["eye"], target="naive",
                       density="gaussian", threshold=0.05)

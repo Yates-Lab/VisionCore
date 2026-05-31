@@ -4,8 +4,8 @@ This folder (`VisionCore/ryan/methods_eyepos_matching/`) holds a
 self-contained methodological note extending McFarland & Butts (2016) for
 two assumption violations in `fixRSVP`:
 
-- **(A1)** uniform trials-per-phase — fixRSVP has variable fixation
-  durations, so n_t decays across phases.
+- **(A1)** uniform trials-per-time-bin — fixRSVP has variable fixation
+  durations, so n_t decays across analysis time bins.
 - **(A2)** statistically stationary stimulus — fixRSVP is windowed and
   non-stationary in absolute eye position.
 
@@ -15,7 +15,7 @@ sentence the §4.5 reframe targets).
 
 ## Status
 
-- All 14 tests pass (`uv run --with pytest pytest test_estimators.py -q`,
+- All 15 tests pass (`uv run --with pytest pytest test_estimators.py -q`,
   ~7 min).
 - Writeup builds cleanly to a self-contained HTML (`pandoc writeup.md -s
   --mathml --self-contained -o writeup.html`).
@@ -33,11 +33,13 @@ sentence the §4.5 reframe targets).
 |---|---|
 | `synthetic.py` | Unified rate-field generator + closed-form / MC ground truth. |
 | `estimators.py` | `decompose(target=…)` — the matched LOTC estimator (Direction 1 / 2 / naive). |
-| `test_estimators.py` | 14 tests: 11 reframed Ext-2 tests + 3 sanity-check tests. |
+| `test_estimators.py` | 15 tests: 11 Ext-2 tests + 3 sanity-check tests + Appendix §A.6 T-floor test. |
 | `_style.py` | Shared matplotlib style + `figures/` save helper. |
 | `fig_mechanism.py` | Geometric origin of p vs p² mismatch (Fig. 2). |
 | `fig_sanity_check.py` | McFarland recovers analytical 1-α^p under (A1)+(A2) (Fig. 0). |
-| `fig_phase_weighting.py` | Ext-1 validation on the unified synthetic (Fig. 1). |
+| `fig_time_bin_weighting.py` | Ext-1 validation on the unified synthetic (Fig. 1). |
+| `fig_consistency.py` | Appendix §A.6: parallel sweep over (N, T); SEM heatmap, clipping bias, T-floor. |
+| `consistency_sweep.npz` | Cached sweep results for fig_consistency (not committed). |
 | `fig_naive_failure.py` | Naive vs matched on three quantities (Fig. 3). |
 | `fig_correction.py` | Recovery + Direction-1/2 tradeoff + gap (Fig. 4). |
 | `generate_realdata.py` | Cache-only real-data driver (do NOT recompute). |
@@ -48,13 +50,15 @@ sentence the §4.5 reframe targets).
 
 ## Unified generative model
 
-For neuron c, phase t, eye position e:
+For neuron c, analysis time bin t, eye position e:
 
     r_c(t, e) = mu_0 + M_c(e) * alpha(t) * s_t(e)
 
-- **s_t(.)** — per-phase i.i.d. draw of a stationary 2-D zero-mean Gaussian
+- **s_t(.)** — per-time-bin i.i.d. draw of a stationary 2-D zero-mean Gaussian
   random field with covariance `K(δ) = tau^2 * exp(-||δ||^2 / (2 ell^2))`.
-- **alpha(t)** — per-phase amplitude (default 1; envelope demo for Ext-1
+  (Idealization — see writeup §2.3 caveat: real fixRSVP has multiple analysis
+  bins inside a single 20 Hz stimulus frame, which share the rate draw.)
+- **alpha(t)** — per-time-bin amplitude (default 1; envelope demo for Ext-1
   uses a decaying alpha correlated with n_t).
 - **M_c(e) ∈ [0, 1]** — spatial mask (the (A2) switch):
   - `flat`: M ≡ 1; (A2) holds.
@@ -64,14 +68,14 @@ For neuron c, phase t, eye position e:
   - `linear`: ½(1 + tanh(x / ell_M)); smooth x-gradient.
 - **mu_0** — baseline rate (default 6); marginal `r ~ N(mu_0, M(e)² τ²)`,
   Pr[r < 0] ~ 1e-9 with default params.
-- **n_trials_per_phase** — array of length n_phases; variable → breaks (A1).
+- **n_trials_per_time_bin** — array of length n_time_bins; variable → breaks (A1).
 
 Eye distribution: `e ~ p = N(0, sigma^2 I)`, `sigma = 0.15°`. Close-pair
 density `p² = N(0, sigma²/2 · I)` exactly.
 
 ## Closed-form decomposition
 
-For phase weighting `w_t` and eye distribution `D`:
+For time-bin weighting `w_t` and eye distribution `D`:
 
     Var_total^{D,w} = E_w[alpha^2] * tau^2 * E_D[M^2]
     Var_PSTH^{D,w}  = E_w[alpha^2] * I_{M,K,D}
@@ -79,7 +83,7 @@ For phase weighting `w_t` and eye distribution `D`:
 where `I_{M,K,D} = ∫∫ M(e1) M(e2) K(e1 - e2) D(e1) D(e2) de1 de2`.
 
 The ratio **1-α^{D,w} = 1 - I_{M,K,D} / (τ² · E_D[M²])** is invariant
-under phase weighting (the envelope cancels). The Ext-1 bias is in the
+under time-bin weighting (the envelope cancels). The Ext-1 bias is in the
 *estimator*, not the truth.
 
 For the `flat` mask + Gaussian D, K:
@@ -111,14 +115,14 @@ Three targets:
 Both consistent targets restore term-by-term LOTC consistency. Their gap
 is the fixation-scale spatial-structure measure.
 
-`phase_weighting` ∈ {`pair_count`, `uniform`} — the Ext-1 axis. Under
+`time_bin_weighting` ∈ {`pair_count`, `uniform`} — the Ext-1 axis. Under
 constant n_t the two coincide; under variable n_t with envelope correlated
 to n_t they differ, and only `pair_count` matches `Crate`'s intrinsic
 weighting.
 
 ## Key empirical findings
 
-- **Sanity check.** `decompose(target='naive', phase_weighting='pair_count')`
+- **Sanity check.** `decompose(target='naive', time_bin_weighting='pair_count')`
   with constant n_t recovers analytical `1-α^p` across an ell/σ sweep
   covering (0,1) — Fig. 0A.
 - **Naive bias (synthetic).** On `central`-mask cells: naive over-states
@@ -139,28 +143,19 @@ weighting.
 
 ## Open items (active)
 
-1. **Appendix §A.6 (next-session task).** Explore SEM(N, T):
-   - Theoretical floor `sd[1-α̂] ≈ sqrt(2 α² / (T - 1))` from the empirical
-     variance of T i.i.d. phase-projections; matches the observed
-     leveling-off at ≈ 0.047 for ℓ = σ (α = 1/3, T = 100).
-   - Boundary-clipping bias: when SEM is large enough that the estimator
-     hits the [0, 1] clipping (the `np.clip(α, 0, 1)` in `estimators.py:252`),
-     the mean estimate gets pulled toward the interior. Needs careful
-     framing (clipping is a feature, not a bug — it prevents
-     non-physical values — but its effect on bias-variance tradeoff is
-     real). Probably wants a Fig. A6 with a 2-D SEM(N, T) heatmap and
-     a 1-D bias vs SEM curve.
-   - Figure-0 panel B was previously the SEM-vs-N plot; it was removed
-     because the lack-of-1/√N shrinkage is misleading without the T
-     context. §2.4 now references this appendix.
+1. **Appendix §A.6 — DONE.** Explored SEM(N, T) via the parallel
+   `fig_consistency.py` sweep + closed-form derivation. The across-time-bin
+   floor `sd[1-α̂] = α√(2/(T−1))` is derived and matches empirics; the [0,1]
+   clipping bias is characterised against the truncated-Gaussian formula.
 
-2. **Terminology — "phases".** McFarland calls them "stimulus phases t",
-   but in fixRSVP each "phase" is a stimulus FRAME indexed from fixation
-   onset (variable fixation duration → variable max-frame-index → variable
-   n_t at later frames). Candidates for renaming: `frame`, `frame_index`,
-   `post_fix_frame`, `t_bin`. Touches: writeup prose, code parameter
-   names (n_phases, n_trials_per_phase, etc.), figure labels. Decide first,
-   then a careful global rename.
+2. **Terminology — RESOLVED.** "phase" (the McFarland term, overloaded with
+   the fixRSVP 20 Hz stimulus frame) has been globally renamed to
+   `time_bin` (analysis time bin, the 60/120 Hz unit the pipeline iterates
+   over). Writeup §2.3 carries the caveat that the synthetic models each
+   bin as i.i.d. — a stimulus-frame idealization — so the effective T for
+   the floor in real data is closer to `(#fixations × #stim-frames-per-fixation)`
+   than the raw bin count. The within-stimulus-frame reliability question is
+   a future direction.
 
 3. **Production pipeline change for Ext-2 (gated).** Add target-distribution
    weights to `estimate_rate_covariance` / `bagged_split_half_psth_covariance`
@@ -177,15 +172,16 @@ Run from this folder. Workspace `.venv` is at the v1-fovea repo root;
     # Generator self-check
     uv run python synthetic.py
 
-    # Tests (14 tests, ~7 minutes -- random field Cholesky per phase)
+    # Tests (15 tests, ~7 minutes -- random field Cholesky per time bin)
     uv run --with pytest pytest test_estimators.py -q
 
     # Figures
     uv run python fig_mechanism.py
     uv run python fig_sanity_check.py
-    uv run python fig_phase_weighting.py
+    uv run python fig_time_bin_weighting.py
     uv run python fig_naive_failure.py
     uv run python fig_correction.py
+    uv run python fig_consistency.py            # parallel sweep, cached
 
     # Writeup
     pandoc writeup.md -s --mathml --self-contained -o writeup.html

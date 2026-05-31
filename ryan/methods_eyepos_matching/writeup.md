@@ -14,10 +14,10 @@ eye movements (FEMs). It is now the standard estimator for the FEM fraction
 $1-\alpha$, the corrected noise covariance $C_{\text{noise}}^{\text{corr}}$, and the
 Fano factor under FEMs. Two assumptions sit inside it:
 
-- **(A1) Uniform trial/phase structure** — every stimulus phase $t$ has the
-  same number of trials $n_t$, so the across-phase weighting is the same for
+- **(A1) Uniform trial/time-bin structure** — every analysis time bin $t$ has the
+  same number of trials $n_t$, so the across-time-bin weighting is the same for
   every term in the law-of-total-(co)variance (LOTC).
-- **(A2) Statistically stationary stimulus** — the across-phase distribution
+- **(A2) Statistically stationary stimulus** — the across-time-bin distribution
   of $r(t,e)$ at a fixed eye position is the same at every $e$
   (equivalently, $\mathbb{E}_t[r^k(t,e)]$ is independent of $e$ for the
   moments used). It then does not matter *which* eye-position distribution
@@ -25,18 +25,18 @@ Fano factor under FEMs. Two assumptions sit inside it:
   is free.
 
 Both assumptions fail in the structured `fixRSVP` stimulus used here.
-Fixation durations vary across trials, so the per-phase trial count $n_t$ drops
-across phases; and the windowed natural-image stimulus is far from
+Fixation durations vary across trials, so the per-time-bin trial count $n_t$ drops
+across time bins; and the windowed natural-image stimulus is far from
 translation-invariant, so the rate $r(t,e)$ depends on absolute eye position.
 This note develops, validates, and discusses a methodological extension of
 McFarland et al. for each assumption violation:
 
-1. **Consistent phase weighting** under variable $n_t$. The close-pair rate
+1. **Consistent time-bin weighting** under variable $n_t$. The close-pair rate
    estimator is intrinsically pair-count weighted ($\propto n_t(n_t{-}1)/2$)
-   across phases; for the LOTC to hold term-by-term, the PSTH covariance and
+   across time bins; for the LOTC to hold term-by-term, the PSTH covariance and
    the mean entering the rate-variance subtraction must use the same
    pair-count weighting. Validated against closed-form synthetic ground truth
-   with variable per-phase trial counts.
+   with variable per-time-bin trial counts.
 2. **Eye-position-distribution matching** under a non-homogeneous stimulus.
    Close pairs at threshold $\Delta e<\varepsilon$ are sampled in proportion
    to the *squared* eye-position density $p(e)^2$, while the total covariance
@@ -58,7 +58,7 @@ already been integrated; Extension 2 is implemented in this folder and gated.
 
 ## 1.1 The law of total (co)variance
 
-Let $Y_c^i(t)$ be the spike count of neuron $c$ on trial $i$ at stimulus phase
+Let $Y_c^i(t)$ be the spike count of neuron $c$ on trial $i$ at analysis time bin
 $t$ (a frozen-stimulus time bin). Each trial samples an absolute eye position
 $e$ from the fixational distribution $p(e)$; we treat $e$ as approximately
 constant over the short counting window and approximately independent of $t$.
@@ -108,7 +108,7 @@ that the rest of this note is about.
 
 We never observe $r_c(t,e)$ directly — only the noisy counts $Y_c$. The engine
 of the whole method is that the observation noise is independent across
-**distinct** trials, so for two different trials $i\neq j$ at the same phase
+**distinct** trials, so for two different trials $i\neq j$ at the same time bin
 $t$,
 
 $$
@@ -125,7 +125,7 @@ eye-position distribution**.
 ## 1.3 Two families of estimator
 
 **Signal (PSTH) variance and covariance — all distinct pairs.** Averaging (4)
-over *all* distinct pairs at the same phase, then over phases, estimates the
+over *all* distinct pairs at the same time bin, then over time bins, estimates the
 PSTH (stimulus-locked) second moment (McFarland's Eq. 6):
 
 $$
@@ -139,7 +139,7 @@ $$
 \tag{6}
 $$
 
-Because *all* same-phase pairs are used, the phase mean averages over the
+Because *all* same-time-bin pairs are used, the per-bin mean averages over the
 **full** fixational distribution $p(e)$: these terms live on $p(e)$.
 
 **Eye-conditioned rate variance and covariance — close pairs only.** Restrict
@@ -178,16 +178,16 @@ eye-distribution spectrum $|P(k)|^2$.
 Two assumptions are baked into the estimators above and into McFarland's
 analytical $\alpha$:
 
-- **(A1) Uniform trial/phase structure.** Equations (5)–(8) and the LOTC (1)
-  presume that *the same across-phase weighting applies to every term*. The
-  close-pair estimator (7) intrinsically uses pair-count weighting: each phase
-  $t$ contributes $n_t(n_t{-}1)/2$ same-phase pairs. The PSTH estimator (5)
+- **(A1) Uniform trial/time-bin structure.** Equations (5)–(8) and the LOTC (1)
+  presume that *the same across-time-bin weighting applies to every term*. The
+  close-pair estimator (7) intrinsically uses pair-count weighting: each time bin t
+  $t$ contributes $n_t(n_t{-}1)/2$ same-time-bin pairs. The PSTH estimator (5)
   is, in McFarland's formulation, also pair-count weighted; in implementation
   it is sometimes computed as a split-half cross-covariance with a different
-  across-phase weighting (e.g. uniform $1/T$). When $n_t$ is constant the
+  across-time-bin weighting (e.g. uniform $1/T$). When $n_t$ is constant the
   weightings agree; when $n_t$ varies they need not, and the LOTC fails
   term-by-term.
-- **(A2) Statistically stationary stimulus.** The across-phase distribution
+- **(A2) Statistically stationary stimulus.** The across-time-bin distribution
   of $r(t,e)$ at a fixed eye position is the same at every $e$, i.e.
   $\mathbb{E}_t[r^k(t,e)]$ is independent of $e$ for the moments used. Then
   $\mathbb{E}_{e\sim D}\!\big[\mathbb E_t[r^k(t,e)]\big]$ is the same for
@@ -206,7 +206,7 @@ analytical $\alpha$:
   Stimulus stationarity is a sufficient condition: when each frame is a
   sample from a translation-invariant random field, the rate distribution
   at one eye position is, in distribution, the rate distribution at any
-  other, so the across-phase moments at fixed $e$ do not depend on $e$.
+  other, so the across-time-bin moments at fixed $e$ do not depend on $e$.
   McFarland's ternary bar noise has this property; the structured `fixRSVP`
   images used here do not.
 
@@ -221,14 +221,14 @@ develop a methodological extension for each.
 ## 2.1 Violation of (A1): uneven fixation durations $\Rightarrow$ variable $n_t$
 
 `fixRSVP` trials are organized around fixational fixation periods of variable
-duration. Aligned to fixation onset and binned into stimulus phases, this
-gives a monotonically decreasing per-phase trial count: every trial is
+duration. Aligned to fixation onset and binned into analysis time bins, this
+gives a monotonically decreasing per-time-bin trial count: every trial is
 fixating in early bins, but only long-fixation trials contribute to late bins.
 On a representative session (Allen 2022-04-13, 49 cells) $n_t$ ranged from 42
-to 78 across phases (CV $\approx 0.19$); on our broader set of cells the
+to 78 across time bins (CV $\approx 0.19$); on our broader set of cells the
 spread is larger. Under this $n_t$ variation, the close-pair rate estimator
-weights each phase by $n_t(n_t{-}1)/2$ pairs while a uniform split-half PSTH
-estimator weights each phase by $1/T$ — these only coincide if $n_t$ is
+weights each time bin by $n_t(n_t{-}1)/2$ pairs while a uniform split-half PSTH
+estimator weights each time bin by $1/T$ — these only coincide if $n_t$ is
 constant.
 
 ## 2.2 Violation of (A2): the windowed `fixRSVP` stimulus
@@ -236,20 +236,20 @@ constant.
 `fixRSVP` presents a natural image at a fixed location on the screen, behind a
 spatial **window** (aperture). The neuron's receptive field (RF) is fixed in
 retinotopic coordinates, so in screen coordinates it moves with the eye. Two
-mechanisms make the **across-phase distribution** of $r_c(t,e)$ at fixed eye
+mechanisms make the **across-time-bin distribution** of $r_c(t,e)$ at fixed eye
 position depend on absolute eye position — directly violating (A2):
 
 1. **Windowing — a hard non-stationarity.** Once the fixation offset is large
    enough to carry the RF off the windowed image, the RF samples only the
    uniform gray background and the rate collapses to the gray-screen baseline
-   **regardless of stimulus phase $t$**. So at peripheral $e$ the across-phase
+   **regardless of analysis time bin $t$**. So at peripheral $e$ the across-time-bin
    distribution of $r$ is concentrated at baseline; at central $e$ it is
-   strongly stimulus-modulated. The across-phase moments at fixed $e$ are
+   strongly stimulus-modulated. The across-time-bin moments at fixed $e$ are
    therefore strongly $e$-dependent — *before any image content is
    considered*.
 2. **Image structure.** Within the window, drift slides the structured image
    across the RF, so which feature drives the cell — and how strongly —
-   depends on absolute eye position. The across-phase distribution of $r$ at
+   depends on absolute eye position. The across-time-bin distribution of $r$ at
    each $e$ samples a different patch of a fixed image, not different draws
    from a translation-invariant ensemble; the per-$e$ moments differ
    accordingly.
@@ -263,7 +263,7 @@ McFarland's regime, with a closed-form $1-\alpha^p$ that depends on a single
 ratio — the rate's spatial scale relative to the fixation scale — and covers
 $(0,1)$ as that ratio is swept.
 
-**Rate field.** For neuron $c$, stimulus phase $t$, and absolute eye position
+**Rate field.** For neuron $c$, analysis time bin $t$, and absolute eye position
 $e\in\mathbb R^2$,
 
 $$
@@ -273,23 +273,23 @@ $$
 
 with three separable ingredients:
 
-- $s_t(\cdot)$ — a per-phase i.i.d. draw of a **stationary 2-D zero-mean
+- $s_t(\cdot)$ — a per-time-bin i.i.d. draw of a **stationary 2-D zero-mean
   Gaussian random field** with covariance
   $K(\delta) = \tau^2\exp\!\big(-\lVert\delta\rVert^2/(2\ell^2)\big)$. This
-  is the rate map at phase $t$. Independent phases give the standard
+  is the rate map at time bin $t$. Independent time bins give the standard
   cross-trial cancellation of observation noise. At any fixed $e$,
-  $s_t(e)\sim\mathcal N(0,\tau^2)$ across phases — the across-phase
+  $s_t(e)\sim\mathcal N(0,\tau^2)$ across time bins — the across-time-bin
   distribution is independent of $e$, so the *field component* is (A2) by
   construction.
-- $\alpha(t)$ — a per-phase amplitude envelope. Default $\alpha\equiv 1$.
+- $\alpha(t)$ — a per-time-bin amplitude envelope. Default $\alpha\equiv 1$.
   When the synthetic targets Extension 1 (§3) we set $\alpha(t)$ to decay
-  across phases, mirroring `fixRSVP`'s onset transients (high amplitude in
-  early, high-$n_t$ phases). Without correlation between $\alpha$ and
+  across time bins, mirroring `fixRSVP`'s onset transients (high amplitude in
+  early, high-$n_t$ time bins). Without correlation between $\alpha$ and
   $n_t$, the Extension-1 bias washes out.
 - $M_c(e)$ — the per-cell **spatial mask** in $[0,1]$, the (A2) switch.
   Physically, $M_c(e)$ is the fraction of the windowed stimulus the cell
   sees at eye position $e$: when the RF leaves the window, $M(e)\to 0$ and
-  the rate collapses to baseline regardless of phase, which is precisely
+  the rate collapses to baseline regardless of time bin, which is precisely
   §2.2's "hard windowing" mechanism. $M\equiv 1$ recovers a fully
   homogeneous stimulus; any non-constant $M$ breaks (A2) at the second
   moment: $\mathbb E_t[r^2(t,e)]=\mu_0^2 + M(e)^2\,\mathbb
@@ -315,17 +315,17 @@ $1-\alpha^p$ that the additive model could not provide. `eccentric` and
 where close pairs are rare or biased.
 
 **Eye distribution.** Eyes are drawn i.i.d. $e\sim p=\mathcal N(0,\sigma^2 I)$
-per (trial, phase), $\sigma=0.15^\circ$ (realistic fixational drift). For an
+per (trial, time-bin), $\sigma=0.15^\circ$ (realistic fixational drift). For an
 isotropic Gaussian $p$, the close-pair density $p(e)^2$ is *exactly*
 $\mathcal N(0,\sigma^2/2\,I)$ — a tighter Gaussian with half the variance —
 so the LOTC under $p$ or $p^2$ has a closed form (Appendix §A.5).
 
-**Trial structure.** The (trial, phase) array has shape $(N_{\text{tr}}, T)$.
-With $n_{\text{tr/phase}}=\text{None}$ every phase has $N_{\text{tr}}$
+**Trial structure.** The (trial, time-bin) array has shape $(N_{\text{tr}}, T)$.
+With $n_{\text{tr/bin}}=\text{None}$ every time bin has $N_{\text{tr}}$
 trials, recovering McFarland's uniform-trial regime. To violate (A1) we set
-$n_{\text{tr/phase}}=(n_t)_{t=1}^{T}$ — a monotonically decaying staircase
+$n_{\text{tr/bin}}=(n_t)_{t=1}^{T}$ — a monotonically decaying staircase
 (default lo $15$, hi $\sim N_{\text{tr}}$, see Fig. 1A) that mimics the
-fixation-duration distribution. Entries beyond $n_t$ in each phase are
+fixation-duration distribution. Entries beyond $n_t$ in each time bin are
 masked invalid.
 
 **Observation noise.** Spikes are drawn
@@ -336,9 +336,26 @@ $\Pr[r<0]\sim 10^{-9}$ and the clip to $r\geq 10^{-6}$ effectively never
 triggers. An exponential link is the standard alternative but obscures the
 closed form.
 
+**Stimulus-frame caveat.** The synthetic treats each analysis time bin $t$
+as an independent fresh draw of the field $s_t$, mirroring McFarland's
+"stimulus phase" abstraction. In real `fixRSVP` this is an idealization:
+the natural-image stimulus refreshes at $20$ Hz while the analysis
+typically operates at $60$ or $120$ Hz, so several consecutive analysis
+time bins fall within the *same* $50$ ms stimulus-frame interval and
+share the same underlying $s_t$ — they are highly correlated, not i.i.d.
+Across stimulus-frame boundaries the rate is genuinely refreshed. The
+practical consequence (developed in §A.6) is that the effective $T$
+controlling the across-bin SEM floor is closer to
+$\#\text{fixations}\times\#\text{stim-frames per fixation}$ than the raw
+bin count $\#\text{fixations}\times\#\text{bins per fixation}$. Within-
+stimulus-frame reliability — how the cell's response varies across the
+several analysis bins of one frame — is a future direction; the
+analyses below treat this as out-of-scope and use the i.i.d.-bin
+synthetic as a clean reference for the McFarland-style estimator.
+
 **Closed-form ground truth.** With $M$ depending only on $e$ and $\alpha$
 only on $t$, and the field zero-mean, the LOTC decomposition admits a closed
-form under any distribution $D$ over $e$ and any phase weighting $w_t$
+form under any distribution $D$ over $e$ and any time-bin weighting $w_t$
 (derivation in Appendix §A.5):
 
 $$
@@ -350,7 +367,7 @@ $$
 
 with $I_{M,K,D}=\iint M(e_1) M(e_2)\,K(e_1{-}e_2)\,D(e_1)\,D(e_2)\,de_1\,de_2$.
 The ratio $1-\alpha^{D,w} = 1 - I_{M,K,D}/(\tau^2\,\mathbb E_D[M^2])$ is
-**invariant under phase weighting**: the envelope factor cancels. The
+**invariant under time-bin weighting**: the envelope factor cancels. The
 Extension-1 bias is therefore a property of the *estimator* (finite-sample
 inconsistency under a mismatched $w$), not of the ground truth.
 
@@ -377,7 +394,7 @@ purely additive synthetic could not do, because there the only
 $1-\alpha=0$. Setting `kinds=['flat']` and varying $\ell/\sigma$ traces the
 full $1-\alpha^p$ axis.
 
-The empirical estimator is `decompose(target='naive', phase_weighting='pair_count')`
+The empirical estimator is `decompose(target='naive', time_bin_weighting='pair_count')`
 with constant $n_t$ — the same shape of close-pair estimator McFarland's
 paper specifies. Under (A2), $\mathbb E_t[r^2(t,e)]$ is independent of $e$
 (the field component is stationary, and the mask is constant), so
@@ -397,9 +414,9 @@ reframing §4.5 builds on: the gap is a fixation-scale spatial-structure
 measure, not an (A2) test.
 
 The estimator's *consistency* (how the seed-to-seed SEM depends on the
-trials-per-phase $n$ **and** the number of phases $T$) is more subtle than
-$1/\sqrt{n}$: an across-phase noise floor at
-$\sqrt{2\alpha^2/(T{-}1)}$ kicks in once within-phase sampling is
+trials-per-time-bin $n$ **and** the number of time bins $T$) is more subtle than
+$1/\sqrt{n}$: an across-time-bin noise floor at
+$\sqrt{2\alpha^2/(T{-}1)}$ kicks in once within-bin sampling is
 adequate, and at high SEM the $[0,1]$ clipping of $\alpha$ introduces a
 mean bias. This is treated separately in Appendix §A.6.
 
@@ -414,14 +431,14 @@ it peaks at $\ell/\sigma\approx 1.18$.](figures/fig_sanity_check.png)
 
 ---
 
-# 3. Extension 1: consistent phase weighting under variable $n_t$
+# 3. Extension 1: consistent time-bin weighting under variable $n_t$
 
-## 3.1 The phase-weighting mismatch, derived from the close-pair estimator
+## 3.1 The time-bin-weighting mismatch, derived from the close-pair estimator
 
 The close-pair rate estimator (7) averages products $Y_c^i(t)\,Y_c^j(t)$ over
-distinct same-phase pairs at $\Delta e_{ij}<\varepsilon$. With $n_t$ trials at
-phase $t$, the number of available pairs is $n_t(n_t{-}1)/2$. Averaging
-uniformly over pairs is therefore averaging over phases with the **pair-count
+distinct same-time-bin pairs at $\Delta e_{ij}<\varepsilon$. With $n_t$ trials at
+time bin $t$, the number of available pairs is $n_t(n_t{-}1)/2$. Averaging
+uniformly over pairs is therefore averaging over time bins with the **pair-count
 weight**
 
 $$
@@ -430,20 +447,20 @@ w_t \;\propto\; n_t(n_t-1)/2.
 $$
 
 Under constant $n_t$ this is a global constant and the choice is invisible;
-under variable $n_t$ it concentrates weight on high-$n_t$ phases. **This is
-the phase weighting at which the close-pair second moment in (7) lives.** For
+under variable $n_t$ it concentrates weight on high-$n_t$ time bins. **This is
+the time-bin weighting at which the close-pair second moment in (7) lives.** For
 the LOTC (1) to hold term-by-term the PSTH variance (5) and the mean $\bar Y$
 that enters (7) must use the same $w_t$.
 
 Two historical mismatches against (11) are the focus here:
 
 - **Mismatch 1 (mean in $C_{\text{rate}}$).** A trial-count-weighted global
-  mean $\bar Y = \mathrm{mean}_i Y_c^i$ weights phases by $n_t$, not by
+  mean $\bar Y = \mathrm{mean}_i Y_c^i$ weights time bins by $n_t$, not by
   $n_t(n_t{-}1)/2$. Then
   $C_{\text{rate}} = \mathbb E_{\text{pair}}[YY^\top] - \bar Y\,\bar Y^\top$
-  is not a covariance under any single phase weighting.
+  is not a covariance under any single time-bin weighting.
 - **Mismatch 2 (PSTH estimator).** A split-half PSTH cross-covariance with
-  uniform across-phase weighting (every phase weighted $1/T$) estimates
+  uniform across-time-bin weighting (every bin weighted $1/T$) estimates
   $\mathrm{Cov}_{w_{\text{uni}}}[\bar P(t)]$, while $C_{\text{rate}}$ estimates
   $\mathrm{Var}_{w_{\text{pair}}}[\bar P(t)]$. Even when both target only the
   PSTH (i.e. under a homogeneous stimulus, where the close-pair restriction
@@ -470,34 +487,34 @@ fixed in `ryan/fig2/bias_diagnosis/` ($D_z^{\text{shuf}}: -0.0068
 
 Synthetic ground truth makes the same point in closed form. Take the `flat`
 mask, so (A2) holds and the truth is the analytical $1-\alpha^p =
-2\sigma^2/(\ell^2 + 2\sigma^2)$, **invariant under phase weighting** (the
+2\sigma^2/(\ell^2 + 2\sigma^2)$, **invariant under time-bin weighting** (the
 envelope cancels in the ratio; §2.3). Pair a staircase $n_t$
-($15\to360$ across $T=100$ phases) with an envelope $\alpha(t)$ that
-concentrates amplitude in early, high-$n_t$ phases (Fig. 1A) — this matches
+($15\to360$ across $T=100$ time bins) with an envelope $\alpha(t)$ that
+concentrates amplitude in early, high-$n_t$ time bins (Fig. 1A) — this matches
 `fixRSVP`'s onset transients. Apply `decompose` with the matched
-(`phase_weighting='pair_count'`) and unmatched (`phase_weighting='uniform'`)
+(`time_bin_weighting='pair_count'`) and unmatched (`time_bin_weighting='uniform'`)
 variants to deterministic rates (so any deviation is a weighting artifact,
 not Poisson sampling).
 
-![**Figure 1 — Consistent phase weighting validated against the unified-
+![**Figure 1 — Consistent time-bin weighting validated against the unified-
 architecture ground truth.** **(A)** The variable-$n_t$ staircase across
-phases and the two phase-weight curves: pair-count
+time bins and the two time-bin-weight curves: pair-count
 $w_t\propto n_t(n_t{-}1)/2$ (matched, blue) and uniform $w_t=1/T$ (unmatched,
 red). Under constant $n_t$ both are flat; under variable $n_t$ the
-pair-count weight strongly emphasizes early high-$n_t$ phases. **(B)**
+pair-count weight strongly emphasizes early high-$n_t$ time bins. **(B)**
 Homogeneous (`flat`-mask, (A2)-respecting) synthetic + envelope: closed-form
-truth is $1-\alpha^p\approx 0.667$ at $\ell=\sigma$, invariant under phase
-weighting. The unmatched (uniform) phase weighting biases the estimate
+truth is $1-\alpha^p\approx 0.667$ at $\ell=\sigma$, invariant under time-bin
+weighting. The unmatched (uniform) time-bin weighting biases the estimate
 above the closed form; the matched (pair-count) weighting recovers it.
 **(C)** Non-homogeneous-mask synthetic (`central`, `eccentric`, `linear`)
 under the same staircase + envelope: the matched estimator (○) lies on the
 closed-form identity line; the unmatched (×) deviates in a mask-dependent
-way.](figures/fig_phase_weighting.png)
+way.](figures/fig_time_bin_weighting.png)
 
 Panel B is the synthetic analogue of the bias_diagnosis shuffle-null bias.
-The truth $1-\alpha$ is invariant under phase weighting, so a deviation
+The truth $1-\alpha$ is invariant under time-bin weighting, so a deviation
 between matched and unmatched estimates is *purely* the Cpsth/Crate
-phase-weighting mismatch: pair-count-weighted $\mathbb E_w[\alpha^2]$
+time-bin-weighting mismatch: pair-count-weighted $\mathbb E_w[\alpha^2]$
 differs from uniform-weighted $\mathbb E_w[\alpha^2]$ when $\alpha(t)$ and
 $n_t$ correlate, and that mismatch propagates into the estimator's ratio.
 Panel C adds a spatial mask and confirms that the matched estimator tracks
@@ -505,10 +522,10 @@ ground truth while the unmatched is mask-dependent.
 
 ## 3.4 What the correction does and does not address
 
-Extension 1 is *only* about the weighting *across* phases. It is a no-op for
+Extension 1 is *only* about the weighting *across* time bins. It is a no-op for
 constant $n_t$ and operates at the level of the LOTC's term-by-term
 consistency. It does not address Extension 2's eye-position distribution
-mismatch, which acts *within* phases on the choice of $e$ used to average the
+mismatch, which acts *within* time bins on the choice of $e$ used to average the
 rate variance. The two are orthogonal: Extension 1 fixes the consistency of
 the LOTC under variable $n_t$; Extension 2 fixes the consistency of the LOTC
 under a non-homogeneous stimulus.
@@ -646,7 +663,7 @@ for $\mathbb E[r^2\mid s]$), then aggregate strata with weights equal to the
 target occupancy $q(s)$. As the strata shrink this is exactly (15); with
 finite strata it pools pairs before weighting, trading a little resolution for
 lower variance. This is the natural generalization of McFarland et al.: their
-estimator conditions on phase $t$ and on $\Delta e\approx0$; the correction
+estimator conditions on time bin $t$ and on $\Delta e\approx0$; the correction
 conditions *additionally* on absolute eye position.
 
 ## 4.5 Direction 1 vs Direction 2: tradeoff and fixation-scale spatial-structure measure
@@ -823,7 +840,7 @@ production-pipeline state for each extension.
 
 ## 6.1 Extension 1 — already integrated
 
-Consistent pair-count phase weighting has been integrated into the production
+Consistent pair-count time-bin weighting has been integrated into the production
 pipeline (`VisionCore/covariance.py`):
 
 - `estimate_rate_covariance` — pair-count-weighted $\bar Y$ matching the
@@ -897,10 +914,10 @@ term-by-term consistency of (1).
 ## A.3 Pair-count weighting from the close-pair second moment
 
 The close-pair second-moment estimator (7) averages products
-$Y_c^iY_c^j$ over distinct same-phase pairs at $\Delta e<\varepsilon$.
-With $n_t$ trials at phase $t$, the number of available pairs is
+$Y_c^iY_c^j$ over distinct same-time-bin pairs at $\Delta e<\varepsilon$.
+With $n_t$ trials at time bin $t$, the number of available pairs is
 $n_t(n_t{-}1)/2$. Taking the uniform average over pairs is therefore taking
-the across-phase average with weight $w_t\propto n_t(n_t{-}1)/2$. For the
+the across-time-bin average with weight $w_t\propto n_t(n_t{-}1)/2$. For the
 LOTC (1) to hold term-by-term, the PSTH variance estimator (5) and the
 mean $\bar Y$ must use the same $w_t$. Under constant $n_t$ this $w_t$
 becomes a constant and the choice is invisible; under variable $n_t$ it is
@@ -909,7 +926,7 @@ $C_{\text{rate}}$ consistent.
 
 ## A.4 When the corrections are a no-op
 
-- **Extension 1.** If $n_t$ is constant across phases, $w_t$ becomes a
+- **Extension 1.** If $n_t$ is constant across time bins, $w_t$ becomes a
   constant and the pair-count and uniform weightings coincide; the
   correction is the identity.
 - **Extension 2.** The correction is the identity whenever (A2) holds at
@@ -928,11 +945,11 @@ $C_{\text{rate}}$ consistent.
 
 ## A.5 Closed-form decomposition for the unified rate field
 
-With the unified rate equation (9), the across-phase and across-eye
+With the unified rate equation (9), the across-time-bin and across-eye
 distributions decouple by linearity. Write $X_t(e) = M(e)\,\alpha(t)\,
 s_t(e)$, so $r = \mu_0 + X$. The field is zero-mean, $\mathbb E[s_t(e)] = 0$,
 with covariance $K(\delta) = \tau^2\exp(-\lVert\delta\rVert^2/(2\ell^2))$
-and independent draws across phases.
+and independent draws across time bins.
 
 **Mean.** $\mathbb E_{t,e\sim D}[r] = \mu_0$ for any $w, D$ (the field is
 zero-mean and the mean is constant in $e$).
@@ -944,7 +961,7 @@ zero-mean and the mean is constant in $e$).
 **PSTH variance.** Let $G_t^D = \mathbb E_{e\sim D}[M(e)\,s_t(e)]$. Then
 $\mathbb E_{e\sim D}[r_t(e)] = \mu_0 + \alpha(t)\,G_t^D$ and
 
-$G_t^D$ is i.i.d. across phases with $\mathbb E[G_t^D] = 0$ and
+$G_t^D$ is i.i.d. across time bins with $\mathbb E[G_t^D] = 0$ and
 $\mathbb E[(G_t^D)^2] = I_{M,K,D}$ (see below). In the large-$T$ limit
 
 $$
@@ -1004,33 +1021,33 @@ and we use Monte Carlo (4M-sample default) via
 well below the test tolerances.
 
 The ratio $1-\alpha^{D,w} = 1 - I_{M,K,D}/(\tau^2 \mathbb E_D[M^2])$ is
-invariant under phase weighting and the envelope $\alpha(t)$: both
+invariant under time-bin weighting and the envelope $\alpha(t)$: both
 $\mathrm{Var}_\text{PSTH}$ and $\mathrm{Var}_\text{total}$ are proportional
 to $\mathbb E_w[\alpha^2]$, which cancels. The Extension-1 bias is in the
-estimator's $w$-mismatch, not in any phase-weighted ground truth.
+estimator's $w$-mismatch, not in any bin-weighted ground truth.
 
 ## A.6 Consistency: how $\mathrm{sd}[1-\hat\alpha]$ depends on $N$ and $T$, and the $[0,1]$ clipping bias
 
 Section 2.4 noted that the seed-to-seed SEM of McFarland's estimator does
-**not** shrink as $1/\sqrt{N}$ alone — an across-phase noise floor in $T$
-kicks in once within-phase sampling is adequate, and at high SEM the
+**not** shrink as $1/\sqrt{N}$ alone — an across-time-bin noise floor in $T$
+kicks in once within-bin sampling is adequate, and at high SEM the
 $[0,1]$ clipping of $\hat\alpha$ introduces a mean bias. This appendix
 derives both effects on the unified flat-mask synthetic under (A1)+(A2)
 and calibrates them empirically against the closed form. The code is
 `fig_consistency.py`; the empirical sweep is cached to
 `consistency_sweep.npz`.
 
-### A.6.1 The across-phase floor
+### A.6.1 The across-time-bin floor
 
 Take the flat mask ($M\equiv 1$), constant $n_t = N$, and deterministic
-rates (no observation noise). The per-phase PSTH is
+rates (no observation noise). The per-time-bin PSTH is
 $\mathbb E_{e\sim p}[r(t,e)] = \mu_0 + G_t$ with
 
 $$
 G_t = \int s_t(e)\,p(e)\,de.
 $$
 
-By (A2) the $\{G_t\}_{t=1}^{T}$ are i.i.d. zero-mean across phases with
+By (A2) the $\{G_t\}_{t=1}^{T}$ are i.i.d. zero-mean across time bins with
 
 $$
 V_p \;\equiv\; \mathbb E\,G_t^2
@@ -1058,7 +1075,7 @@ $$
  \;=\; \frac{2\,{\alpha^*}^2}{T-1},
 $$
 
-giving the **across-phase SEM floor**
+giving the **across-time-bin SEM floor**
 
 $$
 \lim_{N\to\infty} \mathrm{sd}[1-\hat\alpha]
@@ -1070,12 +1087,12 @@ a finite limit in $T$ alone. At $\ell=\sigma$ (so $\alpha^*=1/3$) and
 $T=100$, (A6.1) gives $\mathrm{sd}\approx 0.0474$, in agreement with the
 leveling-off observed in §2.4.
 
-### A.6.2 Within-phase contribution and the empirical decomposition
+### A.6.2 Within-bin contribution and the empirical decomposition
 
 At finite $N$, the close-pair estimator's local fluctuations and the
-finite-trial sampling of $G_t$ each contribute a within-phase noise term
-that scales as $1/\sqrt N$ at fixed $T$. Treating the across-phase and
-within-phase contributions as approximately independent,
+finite-trial sampling of $G_t$ each contribute a within-bin noise term
+that scales as $1/\sqrt N$ at fixed $T$. Treating the across-time-bin and
+within-bin contributions as approximately independent,
 
 $$
 \mathrm{sd}[1-\hat\alpha]
@@ -1091,14 +1108,27 @@ over $(N,T)$ at $\ell=\sigma$: the right edge (large $T$, $\mathrm{sd}\approx
 by the floor as well — across the whole grid the floor sets the bottom
 of the achievable SD. Fig. A6C shows the same data sliced at fixed $N$:
 the $N=800$ points sit on the analytical floor curve $\alpha^*\sqrt{2/(T-1)}$
-at large $T$ and rise above it at small $T$ where within-phase noise
+at large $T$ and rise above it at small $T$ where within-bin noise
 becomes significant relative to the floor.
 
 The practical implication is that **for a target SEM on $1-\hat\alpha$,
-more phases is the only binding knob** once trials/phase is large enough
-to drop within-phase noise below the floor. In `fixRSVP` with $T\sim 100$
+more time bins is the only binding knob** once trials/bin is large enough
+to drop within-bin noise below the floor. In `fixRSVP` with $T\sim 100$
 post-fix bins, $\alpha^*=1/3$ gives a floor of $\approx 0.047$, comparable
 to the cross-cell variability of the population $1-\alpha$ estimate.
+
+The §2.3 stimulus-frame caveat applies here: in real `fixRSVP` adjacent
+analysis bins inside a single $20$ Hz stimulus-frame interval share the
+same field draw, so the effective $T$ for (A6.1) is
+$\#\text{fixations}\times\#\text{stim-frames per fixation}$ rather than
+the raw bin count. With a $50$ ms stimulus-frame period and
+$\sim 6$–$12$ post-fix bins per fixation (depending on bin width), the
+effective $T$ is reduced by the bins-per-frame multiplicity and the floor
+correspondingly rises. We do not propagate this correction through the
+real-data numbers in §5.2 — those are robust to it at the population
+median (Δ $1-\alpha = -0.022$) — but it matters for per-cell SEM and is
+the operative reason the within-stimulus-frame reliability question is
+flagged as a future direction (§2.3).
 
 ### A.6.3 Boundary-clipping bias
 
@@ -1162,7 +1192,7 @@ on it.](figures/fig_consistency.png)
 ```bash
 uv run python fig_mechanism.py
 uv run python fig_sanity_check.py
-uv run python fig_phase_weighting.py
+uv run python fig_time_bin_weighting.py
 uv run python fig_naive_failure.py
 uv run python fig_correction.py
 uv run python fig_consistency.py            # parallel sweep; cached to .npz

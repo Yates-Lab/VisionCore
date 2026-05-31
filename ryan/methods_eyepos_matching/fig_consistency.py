@@ -1,7 +1,7 @@
 r"""Figure: estimator consistency under (A1)+(A2). Appendix A.6.
 
 Sweeps the empirical seed-to-seed sd[1-alpha-hat] over a 2-D grid of
-(n_trials_per_phase, n_phases) on the `flat`-mask synthetic, with constant n_t
+(n_trials_per_time_bin, n_time_bins) on the `flat`-mask synthetic, with constant n_t
 and deterministic rates. Two regimes:
 
   * ell = sigma   (alpha* = 1/3, 1-alpha* = 2/3) -- the SEM panels.
@@ -12,7 +12,7 @@ and deterministic rates. Two regimes:
 Panels:
 
   A  sd[1-alpha-hat] heatmap over (N, T) at ell=sigma. Overlaid contour is
-     the analytical across-phase floor  alpha * sqrt(2/(T-1))  (T-only).
+     the analytical across-time-bin floor  alpha * sqrt(2/(T-1))  (T-only).
      Empirical sd plateaus on the floor as N grows.
   B  bias-vs-sd scatter at ell=0.3 sigma (one point per (N, T) cell).
      Overlaid curve is the truncated-Gaussian prediction E[clip(X)] - alpha*
@@ -70,7 +70,7 @@ def alpha_star(ell, sigma=SIG):
 
 
 def t_floor(ell, T, sigma=SIG):
-    """Analytical across-phase floor on sd[1-alpha-hat]:
+    """Analytical across-time-bin floor on sd[1-alpha-hat]:
     sqrt( 2 alpha*^2 / (T-1) ).  Depends on T (and ell) only."""
     a = alpha_star(ell, sigma)
     return a * np.sqrt(2.0 / np.maximum(T - 1, 1))
@@ -105,19 +105,19 @@ def truncated_mean(alpha, sd):
 # ---------------------------------------------------------------------------
 
 def _worker(spec):
-    """Run a single (n_trials, n_phases, ell, seed) cell and return 1-alpha-hat.
+    """Run a single (n_trials, n_time_bins, ell, seed) cell and return 1-alpha-hat.
 
     Module-level so it pickles cleanly across processes. Wrapped in
     threadpool_limits(1) to prevent BLAS oversubscription on the 32-core box.
     """
     from threadpoolctl import threadpool_limits
-    n_trials, n_phases, ell, seed = spec
+    n_trials, n_time_bins, ell, seed = spec
     with threadpool_limits(1):
         # Lazy import inside the worker so a forked numpy stays clean.
         from synthetic import make_session
         from estimators import decompose
         sess = make_session(["flat"], n_trials=int(n_trials),
-                            n_phases=int(n_phases), sigma_eye=SIG,
+                            n_time_bins=int(n_time_bins), sigma_eye=SIG,
                             ell=float(ell), seed=int(seed))
         d = decompose(sess["rate"], sess["eye"], target="naive",
                       density="gaussian", threshold=THR)
@@ -186,8 +186,8 @@ def panel_A_sd_heatmap(ax, data):
     ax.set_xticklabels([str(t) for t in T_VALUES])
     ax.set_yticks(np.arange(len(N_VALUES)))
     ax.set_yticklabels([str(n) for n in N_VALUES])
-    ax.set_xlabel(r"phases $T$")
-    ax.set_ylabel(r"trials/phase $N$")
+    ax.set_xlabel(r"time bins $T$")
+    ax.set_ylabel(r"trials/bin $N$")
     ax.set_title(r"A  empirical sd$[1-\hat\alpha]$  ($\ell=\sigma$)")
     # numeric annotations
     for i in range(len(N_VALUES)):
@@ -222,7 +222,7 @@ def panel_B_bias_vs_sd(ax, data):
     clip_pred = truncated_mean(alpha, sd_grid)
     bias_pred = alpha - clip_pred
 
-    # one marker per (N, T) cell; color by T (across-phase term dominates)
+    # one marker per (N, T) cell; color by T (across-time-bin term dominates)
     colors = plt.cm.viridis(np.linspace(0.15, 0.95, len(T_VALUES)))
     for j, T in enumerate(T_VALUES):
         ax.scatter(sd[:, j], bias[:, j], color=colors[j], s=42,
@@ -248,7 +248,7 @@ def panel_C_sd_vs_T(ax, data):
             label=r"analytical floor  $\alpha^*\sqrt{2/(T-1)}$")
     ax.errorbar(T_VALUES, sd, fmt="o", color=C_CLOSE, capsize=3,
                 ms=6, label=f"empirical (N={N_VALUES[i_N]}, 10 seeds)")
-    # Also show the smaller-N curves to expose the within-phase term.
+    # Also show the smaller-N curves to expose the within-bin term.
     for ii, N in enumerate(N_VALUES):
         if N == N_VALUES[i_N]:
             continue
@@ -257,7 +257,7 @@ def panel_C_sd_vs_T(ax, data):
                 lw=1.0, ms=4, label=f"N={N}")
     ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.set_xlabel(r"phases $T$")
+    ax.set_xlabel(r"time bins $T$")
     ax.set_ylabel(r"sd$[1-\hat\alpha]$")
     ax.set_title(r"C  sd vs $T$  ($\ell=\sigma$)")
     ax.legend(fontsize=7, loc="upper right")

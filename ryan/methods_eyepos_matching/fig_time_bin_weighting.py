@@ -1,10 +1,10 @@
-r"""Figure: Extension 1 -- consistent phase weighting under variable n_t.
+r"""Figure: Extension 1 -- consistent time-bin weighting under variable n_t.
 
-McFarland's cross-trial decomposition assumes a uniform trial/phase structure: the
-same number of trials in every phase. In fixRSVP and similar paradigms with
-variable fixation durations, the number of trials per phase n_t drops across
-phases. The close-pair rate estimator is intrinsically pair-count weighted across
-phases (~n_t^2). If Cpsth uses a different across-phase weighting -- as in the
+McFarland's cross-trial decomposition assumes a uniform trial/time-bin structure: the
+same number of trials in every time bin. In fixRSVP and similar paradigms with
+variable fixation durations, the number of trials per time bin n_t drops across
+time bins. The close-pair rate estimator is intrinsically pair-count weighted across
+time bins (~n_t^2). If Cpsth uses a different across-time-bin weighting -- as in the
 pre-fix pipeline, where Cpsth was uniform (1/T) -- the decomposition does not
 hold term-by-term and the estimator deviates from the closed-form 1-alpha^p,
 even on a homogeneous (flat) mask under (A2) where the closed-form truth is
@@ -14,17 +14,17 @@ This figure validates Extension 1 against the unified-architecture ground truth
 (stationary GP rate field + multiplicative mask; the (A1) violation is variable
 n_t, the (A2) violation is a non-flat mask):
 
-  A  the variable-n_t staircase across phases (lo=15, hi=360) and the matched
-     pair-count phase weights ~ n_t(n_t-1)/2.
+  A  the variable-n_t staircase across time bins (lo=15, hi=360) and the matched
+     pair-count time-bin weights ~ n_t(n_t-1)/2.
   B  on a homogeneous (flat-mask) synthetic with the staircase and an
-     onset-transient envelope alpha(t), the unmatched (uniform) phase weighting
+     onset-transient envelope alpha(t), the unmatched (uniform) time-bin weighting
      biases 1-alpha away from the closed-form 1-alpha^p = 2 sigma^2 / (ell^2 +
      2 sigma^2); the matched (pair_count) weighting recovers it.
   C  on a non-homogeneous-mask synthetic (central, eccentric, linear), the
      matched weighting tracks the ground-truth 1-alpha^p on the identity line;
      the unmatched is systematically off.
 
-Run from this folder:  uv run python fig_phase_weighting.py
+Run from this folder:  uv run python fig_time_bin_weighting.py
 """
 import numpy as np
 import matplotlib.pyplot as plt
@@ -50,11 +50,11 @@ def run_homogeneous(seeds=range(8)):
     env = np.linspace(1.0, 0.05, NPH)
     out = {"uniform": [], "pair_count": []}
     for s in seeds:
-        sess = make_session(["flat"] * 4, n_trials=NTR, n_phases=NPH, sigma_eye=SIG,
-                            seed=s, n_trials_per_phase=nt, psth_envelope=env)
+        sess = make_session(["flat"] * 4, n_trials=NTR, n_time_bins=NPH, sigma_eye=SIG,
+                            seed=s, n_trials_per_time_bin=nt, psth_envelope=env)
         for pw in out:
             d = decompose(sess["rate"], sess["eye"], target="full",
-                          density="gaussian", phase_weighting=pw)
+                          density="gaussian", time_bin_weighting=pw)
             out[pw].append(d["one_minus_alpha"])
     for k in out:
         out[k] = np.concatenate(out[k])
@@ -63,23 +63,23 @@ def run_homogeneous(seeds=range(8)):
 
 def run_recovery(seeds=range(6)):
     """Non-homogeneous masks + variable n_t. The closed-form 1-alpha^p is
-    invariant under phase weighting in the unified model (the envelope
+    invariant under time-bin weighting in the unified model (the envelope
     cancels in the ratio); the bias is entirely in the ESTIMATOR's choice
-    of Cpsth phase weighting against Crate's intrinsic pair-count weighting."""
+    of Cpsth time-bin weighting against Crate's intrinsic pair-count weighting."""
     nt = staircase_nt()
     env = np.linspace(1.0, 0.05, NPH)
     kinds = ["central", "eccentric", "linear"] * 4
     out = {"uniform": [], "pair_count": [], "truth": [], "kind": []}
     for s in seeds:
-        sess = make_session(kinds, n_trials=NTR, n_phases=NPH, sigma_eye=SIG,
-                            seed=s, n_trials_per_phase=nt, psth_envelope=env)
+        sess = make_session(kinds, n_trials=NTR, n_time_bins=NPH, sigma_eye=SIG,
+                            seed=s, n_trials_per_time_bin=nt, psth_envelope=env)
         truth = np.array([sess["truth"][c]["p"]["one_minus_alpha"]
                           for c in range(len(kinds))])
         out["truth"].append(truth)
         out["kind"].append(np.array(kinds))
         for pw in ("uniform", "pair_count"):
             d = decompose(sess["rate"], sess["eye"], target="full",
-                          density="gaussian", phase_weighting=pw)
+                          density="gaussian", time_bin_weighting=pw)
             out[pw].append(d["one_minus_alpha"])
     for k in out:
         out[k] = np.concatenate(out[k])
@@ -95,8 +95,8 @@ def main():
     # --- A: staircase n_t and pair-count weights ---
     ax = axes[0]
     t = np.arange(NPH)
-    ax.bar(t, nt, color="0.75", width=1.0, label=r"$n_t$ (trials/phase)")
-    ax.set_xlabel("phase index t")
+    ax.bar(t, nt, color="0.75", width=1.0, label=r"$n_t$ (trials/bin)")
+    ax.set_xlabel("time-bin index t")
     ax.set_ylabel(r"$n_t$", color="0.3")
     ax.tick_params(axis="y", labelcolor="0.3")
     ax2 = ax.twinx()
@@ -104,7 +104,7 @@ def main():
              label=r"pair-count weight $w_t \propto n_t(n_t{-}1)/2$")
     ax2.plot(t, np.full(NPH, 1.0 / NPH), color=C_CLOSE, lw=1.4, ls="--",
              label=r"uniform weight $w_t = 1/T$")
-    ax2.set_ylabel("phase weight (normalized)")
+    ax2.set_ylabel("time-bin weight (normalized)")
     ax2.spines["top"].set_visible(False)
     ax.set_title(rf"A  variable $n_t$  (range {NT_LO}–{NT_HI})")
     lns_a, lbl_a = ax.get_legend_handles_labels()
@@ -145,7 +145,7 @@ def main():
     ax.legend(fontsize=6, loc="upper left")
 
     fig.tight_layout()
-    save(fig, "fig_phase_weighting.png")
+    save(fig, "fig_time_bin_weighting.png")
 
 
 if __name__ == "__main__":

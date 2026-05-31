@@ -69,40 +69,40 @@ def _weighted_cov(S, w):
 
 
 def _split_half_psth_cov(S, T, sw, n_boot, seed, min_tpp,
-                         phase_weighting="pair_count"):
+                         time_bin_weighting="pair_count"):
     """Split-half PSTH covariance with per-sample target weights sw.
 
-    The phase mean at phase t is the sw-weighted mean of its trials (=> E_q[r|t]).
-    Phases are combined across-phase with one of two weightings:
+    The per-time-bin mean at bin t is the sw-weighted mean of its trials
+    (=> E_q[r|t]). Time bins are combined with one of two weightings:
 
       * ``'pair_count'`` (default, matched): w_t = n_t(n_t-1)/2, the same weight
         the close-pair rate estimator implicitly uses (its pool ~ n_t pairs per
-        phase). This is the post-fix pipeline (covariance.py).
+        time bin). This is the post-fix pipeline (covariance.py).
       * ``'uniform'``: w_t = 1, the pre-fix historical Cpsth weighting (1/T per
-        phase). Provided so the Extension-1 bias under variable n_t can be
+        time bin). Provided so the Extension-1 bias under variable n_t can be
         exhibited against the matched case.
 
     The cross-covariance of disjoint trial halves cancels Poisson regardless of
     the weighting.
     """
     rng = np.random.default_rng(seed)
-    phases = [t for t in np.unique(T) if (T == t).sum() >= min_tpp]
-    if len(phases) < 2:
+    time_bins = [t for t in np.unique(T) if (T == t).sum() >= min_tpp]
+    if len(time_bins) < 2:
         return np.full((S.shape[1], S.shape[1]), np.nan)
-    idx_by_t = {t: np.where(T == t)[0] for t in phases}
-    nt = np.array([len(idx_by_t[t]) for t in phases], float)
-    if phase_weighting == "pair_count":
+    idx_by_t = {t: np.where(T == t)[0] for t in time_bins}
+    nt = np.array([len(idx_by_t[t]) for t in time_bins], float)
+    if time_bin_weighting == "pair_count":
         wph = nt * (nt - 1) / 2
-    elif phase_weighting == "uniform":
+    elif time_bin_weighting == "uniform":
         wph = np.ones_like(nt)
     else:
-        raise ValueError(f"unknown phase_weighting: {phase_weighting!r}")
+        raise ValueError(f"unknown time_bin_weighting: {time_bin_weighting!r}")
     wph = wph / wph.sum()
 
     C = np.zeros((S.shape[1], S.shape[1]))
     for _ in range(n_boot):
         A, B = [], []
-        for t in phases:
+        for t in time_bins:
             ix = rng.permutation(idx_by_t[t])
             mid = len(ix) // 2
             ia, ib = ix[:mid], ix[mid:]
@@ -120,7 +120,7 @@ def _split_half_psth_cov(S, T, sw, n_boot, seed, min_tpp,
 def _close_pair_second_moment(S, E, T, phat, target, threshold, weight_clip):
     """Importance-reweighted close-pair second moment MM (C, C).
 
-    All distinct same-phase trial pairs with |e_i - e_j| < threshold are pooled
+    All distinct same-time-bin trial pairs with |e_i - e_j| < threshold are pooled
     globally (matching the empirical ``below_threshold`` intercept). Pair (i,j) at
     midpoint m gets weight pw:
         target in {'naive','central'}: pw = 1            (p^2 sampling kept)
@@ -161,20 +161,20 @@ def _close_pair_second_moment(S, E, T, phat, target, threshold, weight_clip):
 
 def decompose(counts, eye, target="full", valid=None, threshold=0.05,
               density="kde", weight_clip=1e6, n_boot=20, seed=42,
-              min_trials_per_phase=10, phase_weighting="pair_count"):
+              min_trials_per_time_bin=10, time_bin_weighting="pair_count"):
     """Distribution-matched LOTC decomposition of a multi-cell session.
 
     Parameters
     ----------
-    counts : ndarray (n_trials, n_phases, n_cells)
-        Spike counts (or deterministic rates) per trial and stimulus phase.
-    eye : ndarray (n_trials, n_phases, 2)
-        Per-(trial, phase) eye position in degrees.
+    counts : ndarray (n_trials, n_time_bins, n_cells)
+        Spike counts (or deterministic rates) per trial and analysis time bin.
+    eye : ndarray (n_trials, n_time_bins, 2)
+        Per-(trial, time-bin) eye position in degrees.
     target : {'naive', 'full', 'central'}
         Eye distribution to match all terms to (see module docstring).
-    valid : ndarray (n_trials, n_phases) of bool, optional
-        Usable-sample mask; combined with finiteness. Phases with fewer than
-        ``min_trials_per_phase`` valid trials are dropped.
+    valid : ndarray (n_trials, n_time_bins) of bool, optional
+        Usable-sample mask; combined with finiteness. Time bins with fewer than
+        ``min_trials_per_time_bin`` valid trials are dropped.
     threshold : float
         Close-pair eye-distance threshold (deg).
     density : {'kde', 'gaussian'} or callable
@@ -186,32 +186,32 @@ def decompose(counts, eye, target="full", valid=None, threshold=0.05,
         upweighted by 1/p, so capping trades the resulting tail variance for bias.
         This unbounded-weight cost is precisely why target='central' (bounded
         weights, prop to p) is the more stable choice.
-    phase_weighting : {'pair_count', 'uniform'}
-        How Cpsth weights phases (see ``_split_half_psth_cov``). 'pair_count' is
+    time_bin_weighting : {'pair_count', 'uniform'}
+        How Cpsth weights time bins (see ``_split_half_psth_cov``). 'pair_count' is
         the matched / post-fix default; 'uniform' is the pre-fix historical
         Cpsth weighting, exposed so the Extension-1 bias under variable n_t can
         be demonstrated against the matched case. Under constant n_t the two
         coincide.
-    n_boot, seed, min_trials_per_phase : see helpers.
+    n_boot, seed, min_trials_per_time_bin : see helpers.
 
     Returns
     -------
     dict: Ctotal, Cpsth, Crate, CnoiseC (C,C); one_minus_alpha, fano, Erate (C,);
-          noise_corr (C,C); n_phases, n_samples.
+          noise_corr (C,C); n_time_bins, n_samples.
     """
     counts = np.asarray(counts, float)
     eye = np.asarray(eye, float)
-    n_trials, n_phases, n_cells = counts.shape
+    n_trials, n_time_bins, n_cells = counts.shape
 
     finite = np.isfinite(counts).all(2) & np.isfinite(eye).all(2)
     valid = finite if valid is None else (np.asarray(valid, bool) & finite)
-    keep_phase = valid.sum(0) >= min_trials_per_phase
-    mask = valid & keep_phase[None, :]
+    keep_time_bin = valid.sum(0) >= min_trials_per_time_bin
+    mask = valid & keep_time_bin[None, :]
 
     tr, ph = np.where(mask)
     S = counts[tr, ph, :]            # (N, C)
     E = eye[tr, ph, :]               # (N, 2)
-    T = ph                           # phase label per sample
+    T = ph                           # time-bin label per sample
 
     phat = _density_fn(E, density)
     p_samp = np.clip(phat(E), 1e-12, None)
@@ -222,26 +222,26 @@ def decompose(counts, eye, target="full", valid=None, threshold=0.05,
     else:                            # 'naive' and 'full' keep full-p sampling
         tw = np.ones(len(S))
 
-    # per-sample phase compensation so total weight at phase t matches the chosen
-    # cross-phase scheme. 'pair_count' (matched): n_t * pw_t = n_t(n_t-1)/2 (the
-    # pair count, identical to MM's intrinsic phase weighting). 'uniform': n_t *
+    # per-sample time-bin compensation so total weight at bin t matches the chosen
+    # across-bin scheme. 'pair_count' (matched): n_t * pw_t = n_t(n_t-1)/2 (the
+    # pair count, identical to MM's intrinsic time-bin weighting). 'uniform': n_t *
     # pw_t = 1 (the pre-fix historical Cpsth weighting). Under constant n_t both
     # collapse to a constant and cancel in normalization, preserving every
     # constant-n_t behavior (including ``test_naive_path_matches_existing_pipeline``).
     nt_by_t = {t: int((T == t).sum()) for t in np.unique(T)}
-    if phase_weighting == "pair_count":
+    if time_bin_weighting == "pair_count":
         pw_t = {t: max(nt_by_t[t] - 1, 0) / 2.0 for t in nt_by_t}
-    elif phase_weighting == "uniform":
+    elif time_bin_weighting == "uniform":
         pw_t = {t: (1.0 / nt_by_t[t]) if nt_by_t[t] > 0 else 0.0 for t in nt_by_t}
     else:
-        raise ValueError(f"unknown phase_weighting: {phase_weighting!r}")
-    phase_w = np.array([pw_t[t] for t in T], dtype=float)
-    sw = tw * phase_w
+        raise ValueError(f"unknown time_bin_weighting: {time_bin_weighting!r}")
+    time_bin_w = np.array([pw_t[t] for t in T], dtype=float)
+    sw = tw * time_bin_w
 
     Erate = _weighted_mean(S, sw)
     Ctotal = _weighted_cov(S, sw)
-    Cpsth = _split_half_psth_cov(S, T, sw, n_boot, seed, min_trials_per_phase,
-                                 phase_weighting=phase_weighting)
+    Cpsth = _split_half_psth_cov(S, T, sw, n_boot, seed, min_trials_per_time_bin,
+                                 time_bin_weighting=time_bin_weighting)
     MM = _close_pair_second_moment(S, E, T, phat, target, threshold, weight_clip)
     Crate = MM - np.outer(Erate, Erate)
 
@@ -257,5 +257,5 @@ def decompose(counts, eye, target="full", valid=None, threshold=0.05,
         "Ctotal": Ctotal, "Cpsth": Cpsth, "Crate": Crate, "CnoiseC": CnoiseC,
         "noise_corr": noise_corr, "fano": fano, "Erate": Erate,
         "one_minus_alpha": one_minus_alpha,
-        "n_phases": int(keep_phase.sum()), "n_samples": int(mask.sum()),
+        "n_time_bins": int(keep_time_bin.sum()), "n_samples": int(mask.sum()),
     }

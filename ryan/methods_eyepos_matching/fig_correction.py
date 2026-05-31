@@ -31,7 +31,7 @@ def recovery(seeds=range(6), N=400):
     kinds = ["central", "eccentric", "linear"] * 3
     full_gt, full_es, cent_gt, cent_es, col = [], [], [], [], []
     for s in seeds:
-        sess = make_session(kinds, n_trials=N, n_phases=100, sigma_eye=SIG, seed=s)
+        sess = make_session(kinds, n_trials=N, n_time_bins=100, sigma_eye=SIG, seed=s)
         df = decompose(sess["rate"], sess["eye"], target="full", density="gaussian")
         dc = decompose(sess["rate"], sess["eye"], target="central", density="gaussian")
         for c, k in enumerate(kinds):
@@ -48,7 +48,7 @@ def stability(thresholds=(0.08, 0.05, 0.03, 0.02, 0.012), seeds=range(8), N=500)
     for thr in thresholds:
         f, c = [], []
         for s in seeds:
-            sess = make_session(["eccentric"], n_trials=N, n_phases=100,
+            sess = make_session(["eccentric"], n_trials=N, n_time_bins=100,
                                 sigma_eye=SIG, seed=s)
             f.append(decompose(sess["rate"], sess["eye"], target="full",
                                density="gaussian", threshold=thr)["one_minus_alpha"][0])
@@ -62,7 +62,7 @@ def gap(seeds=range(6), N=400):
     kinds = ["flat", "linear", "eccentric", "central"]
     g = {k: [] for k in kinds}
     for s in seeds:
-        sess = make_session(kinds, n_trials=N, n_phases=100, sigma_eye=SIG, seed=s)
+        sess = make_session(kinds, n_trials=N, n_time_bins=100, sigma_eye=SIG, seed=s)
         df = decompose(sess["rate"], sess["eye"], target="full", density="gaussian")
         dc = decompose(sess["rate"], sess["eye"], target="central", density="gaussian")
         for c, k in enumerate(kinds):
