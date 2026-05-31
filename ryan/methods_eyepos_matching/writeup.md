@@ -42,8 +42,9 @@ McFarland et al. for each assumption violation:
    to the *squared* eye-position density $p(e)^2$, while the total covariance
    and the PSTH covariance are over $p(e)$. We restore consistency with an
    importance-reweighted estimator that has the target eye distribution as a
-   parameter, with two principled choices ($p$ and $p^2$) whose gap is a
-   model-free measure of stimulus non-homogeneity.
+   parameter, with two principled choices ($p$ and $p^2$). Their gap measures
+   whether the rate has spatial structure on the fixation scale — non-zero
+   even under (A2) when $\ell\sim\sigma$.
 
 Sections 1 and 2 set up McFarland's estimator and the synthetic model that
 breaks both assumptions. Sections 3 and 4 develop and validate one extension
@@ -253,59 +254,71 @@ position depend on absolute eye position — directly violating (A2):
    from a translation-invariant ensemble; the per-$e$ moments differ
    accordingly.
 
-## 2.3 A minimal generative model that breaks both assumptions
+## 2.3 A unified generative model that breaks both assumptions
 
-We validate every estimator claim below against a synthetic generator
-(`synthetic.py`) chosen as the *smallest* abstraction that captures both
-violations and admits a closed-form LOTC decomposition. The reader should be
-able to evaluate whether each ingredient is a faithful minimal model of the
-corresponding real-data feature before reading the estimator validations in
-§3 and §4.
+We validate every estimator claim below against a single synthetic generator
+(`synthetic.py`) chosen so that (A1) and (A2) are switches on top of one
+architecture. With both switches off, the generator sits squarely in
+McFarland's regime, with a closed-form $1-\alpha^p$ that depends on a single
+ratio — the rate's spatial scale relative to the fixation scale — and covers
+$(0,1)$ as that ratio is swept.
 
 **Rate field.** For neuron $c$, stimulus phase $t$, and absolute eye position
 $e\in\mathbb R^2$,
 
 $$
-r_c(t,e) \;=\; \mathrm{base} \;+\; a\,\bar P_c(t)\,\eta(t) \;+\; b\,F_c(e),
+r_c(t,e) \;=\; \mu_0 \;+\; M_c(e)\,\alpha(t)\,s_t(e),
 \tag{9}
 $$
 
-with three deliberately separable ingredients:
+with three separable ingredients:
 
-- $\bar P_c(t)$ — a zero-mean phase-locked drive (the stimulus-locked "PSTH").
-  This is the part of the rate that the cross-trial trick recovers via
-  same-phase pairing (5).
-- $\eta(t)$ — an optional per-phase amplitude envelope. By default $\eta\equiv 1$.
-  When the synthetic targets Extension 1 (§3), we set $\eta(t)$ to decay across
-  phases. This mirrors `fixRSVP`'s onset transients, which concentrate
-  stimulus-locked amplitude in early — and high-$n_t$ — phases; without that
-  correlation, pair-count and uniform phase weights give the same
-  $\mathrm{Var}_t[\bar P]$ in expectation and the Extension-1 bias washes out.
-- $F_c(e)$ — the **eye-position-sensitivity profile**. A constant $F$ recovers
-  McFarland's homogeneous stimulus; any non-constant $F$ breaks (A2).
+- $s_t(\cdot)$ — a per-phase i.i.d. draw of a **stationary 2-D zero-mean
+  Gaussian random field** with covariance
+  $K(\delta) = \tau^2\exp\!\big(-\lVert\delta\rVert^2/(2\ell^2)\big)$. This
+  is the rate map at phase $t$. Independent phases give the standard
+  cross-trial cancellation of observation noise. At any fixed $e$,
+  $s_t(e)\sim\mathcal N(0,\tau^2)$ across phases — the across-phase
+  distribution is independent of $e$, so the *field component* is (A2) by
+  construction.
+- $\alpha(t)$ — a per-phase amplitude envelope. Default $\alpha\equiv 1$.
+  When the synthetic targets Extension 1 (§3) we set $\alpha(t)$ to decay
+  across phases, mirroring `fixRSVP`'s onset transients (high amplitude in
+  early, high-$n_t$ phases). Without correlation between $\alpha$ and
+  $n_t$, the Extension-1 bias washes out.
+- $M_c(e)$ — the per-cell **spatial mask** in $[0,1]$, the (A2) switch.
+  Physically, $M_c(e)$ is the fraction of the windowed stimulus the cell
+  sees at eye position $e$: when the RF leaves the window, $M(e)\to 0$ and
+  the rate collapses to baseline regardless of phase, which is precisely
+  §2.2's "hard windowing" mechanism. $M\equiv 1$ recovers a fully
+  homogeneous stimulus; any non-constant $M$ breaks (A2) at the second
+  moment: $\mathbb E_t[r^2(t,e)]=\mu_0^2 + M(e)^2\,\mathbb
+  E_t[\alpha^2]\,\tau^2$, which depends on $e$ through $M(e)^2$ —
+  the exact form McFarland's caveat is about (their text around Eqs.
+  M7–M10). The first moment $\mathbb E_t[r(t,e)] = \mu_0$ stays
+  $e$-independent.
 
-Four profile shapes span the relevant cases:
+Four mask shapes span the relevant cases:
 
-| profile | $F_c(e)$ | abstracts |
+| mask kind | $M_c(e)$ | physical role |
 |---|---|---|
-| `flat` | constant | the homogeneous stimulus — McFarland's working regime |
-| `central` | Gaussian peaked at $e=0$ | a windowed stimulus that drives the cell strongly near fixation and weakly in the periphery |
-| `eccentric` | $\propto \lVert e\rVert^2$ | the *complement* — a cell that becomes more sensitive as the eye moves off center |
-| `linear` | $\propto x$ | the simplest spatial gradient |
+| `flat` | $1$ | homogeneous stimulus — (A2) holds |
+| `central` | $\exp\!\big(-\lVert e\rVert^2/(2\ell_M^2)\big)$ | windowed stimulus: cell sees the stimulus near fixation, only baseline in periphery |
+| `eccentric` | $1 - \exp\!\big(-\lVert e\rVert^2/(2\ell_M^2)\big)$ | the bounded complement — cell suppressed at fixation, sees the stimulus when eye drifts |
+| `linear` | $\tfrac12\big(1+\tanh(x/\ell_M)\big)$ | smooth bounded $x$-gradient — the simplest unidirectional non-homogeneity |
 
-`central` is the workhorse stand-in for the windowed `fixRSVP` regime. `flat`
-isolates Extension 1: with no eye dependence the truth $1-\alpha=0$ is
-independent of the eye-position distribution, so any deviation is purely a
-phase-weighting artifact. `eccentric` and `linear` stress-test the corrected
-estimator on profiles whose variance lives in the periphery, where close
-pairs are rarest.
+`central` is the workhorse stand-in for the windowed `fixRSVP` mechanism.
+`flat` is the regime in which McFarland's estimator is unbiased; we use it
+in §2.4 to sanity-check the estimator against a non-trivial analytical
+$1-\alpha^p$ that the additive model could not provide. `eccentric` and
+`linear` stress-test the corrected estimator on masks whose variance lives
+where close pairs are rare or biased.
 
 **Eye distribution.** Eyes are drawn i.i.d. $e\sim p=\mathcal N(0,\sigma^2 I)$
-per (trial, phase), $\sigma=0.15^\circ$ (realistic fixational drift). This
-choice is deliberate: for an isotropic Gaussian $p$, the close-pair density
-$p(e)^2$ is *exactly* $\mathcal N(0,\sigma^2/2\,I)$ — a tighter Gaussian with
-half the variance — so the LOTC under either $p$ or $p^2$ has a closed form
-by direct sampling (§A.1).
+per (trial, phase), $\sigma=0.15^\circ$ (realistic fixational drift). For an
+isotropic Gaussian $p$, the close-pair density $p(e)^2$ is *exactly*
+$\mathcal N(0,\sigma^2/2\,I)$ — a tighter Gaussian with half the variance —
+so the LOTC under $p$ or $p^2$ has a closed form (Appendix §A.5).
 
 **Trial structure.** The (trial, phase) array has shape $(N_{\text{tr}}, T)$.
 With $n_{\text{tr/phase}}=\text{None}$ every phase has $N_{\text{tr}}$
@@ -316,32 +329,88 @@ fixation-duration distribution. Entries beyond $n_t$ in each phase are
 masked invalid.
 
 **Observation noise.** Spikes are drawn
-$Y_c \sim \mathrm{Poisson}(r_c(t,e))$ (optionally with a shared latent giving
-a known stimulus-independent noise covariance). Independent Poisson noise
-across distinct trials is exactly the property the close-pair estimator
-exploits.
+$Y_c \sim \mathrm{Poisson}(r_c(t,e))$ (optionally with a shared latent
+giving a known stimulus-independent noise covariance). The rate is
+marginally $\mathcal N(\mu_0, M(e)^2\tau^2)$; with $\mu_0=6,\,\tau\leq 1$,
+$\Pr[r<0]\sim 10^{-9}$ and the clip to $r\geq 10^{-6}$ effectively never
+triggers. An exponential link is the standard alternative but obscures the
+closed form.
 
-**Closed-form ground truth.** Because $F$ depends only on $e$ and $\bar P$
-only on $t$, the LOTC decomposition admits a closed form under any
-distribution $D$ over $e$ and any phase weighting $w_t$:
+**Closed-form ground truth.** With $M$ depending only on $e$ and $\alpha$
+only on $t$, and the field zero-mean, the LOTC decomposition admits a closed
+form under any distribution $D$ over $e$ and any phase weighting $w_t$
+(derivation in Appendix §A.5):
 
 $$
-\mathrm{Var}_{\text{psth}}^c(w) = a^2\,\mathrm{Var}_w\!\big[\bar P_c(t)\,\eta(t)\big],
+\mathrm{Var}_{\text{total}}^{D,w} = \mathbb E_w[\alpha^2]\,\tau^2\,\mathbb E_D[M^2],
 \qquad
-\mathrm{Var}_{\text{fem}}^c(D) = b^2\,\mathrm{Var}_{e\sim D}\![F_c(e)],
+\mathrm{Var}_{\text{psth}}^{D,w} = \mathbb E_w[\alpha^2]\,I_{M,K,D},
 \tag{10}
 $$
 
-and $(1-\alpha)^c(D,w) = \mathrm{Var}_{\text{fem}}^c(D) /
-(\mathrm{Var}_{\text{psth}}^c(w) + \mathrm{Var}_{\text{fem}}^c(D))$. The
-matched-estimator targets for §3 are the pair-count phase weighting
-$w_t\propto n_t(n_t{-}1)/2$ on the full distribution $D=p$; for §4 the targets
-are $D\in\{p, p^2\}$ with pair-count $w_t$ throughout. Both are obtainable to
-arbitrary precision by direct sampling (`synthetic.ground_truth`).
+with $I_{M,K,D}=\iint M(e_1) M(e_2)\,K(e_1{-}e_2)\,D(e_1)\,D(e_2)\,de_1\,de_2$.
+The ratio $1-\alpha^{D,w} = 1 - I_{M,K,D}/(\tau^2\,\mathbb E_D[M^2])$ is
+**invariant under phase weighting**: the envelope factor cancels. The
+Extension-1 bias is therefore a property of the *estimator* (finite-sample
+inconsistency under a mismatched $w$), not of the ground truth.
 
-This is the model used throughout. It is the minimal one for which McFarland's
-LOTC has a closed form, both assumptions can be broken independently, and
-each fix can be verified against truth.
+For the `flat` mask and Gaussian $D, K$, the integral closes analytically:
+
+$$
+1-\alpha^p = \frac{2\sigma^2}{\ell^2 + 2\sigma^2},
+\qquad
+1-\alpha^{p^2} = \frac{\sigma^2}{\ell^2 + \sigma^2},
+\tag{11}
+$$
+
+a single-parameter family in $\ell/\sigma$ that covers $(0,1)$. For
+`central` (Gaussian) the closed form is also available; for `eccentric`
+and `linear` we use Monte Carlo (4M-sample default, sampling noise
+$\lesssim 10^{-3}$).
+
+## 2.4 McFarland's estimator recovers analytical $1-\alpha^p$ under (A1)+(A2)
+
+The unified model lets us test McFarland's estimator *in his native regime*
+against a closed-form $1-\alpha^p$ that covers $(0,1)$ — something the
+purely additive synthetic could not do, because there the only
+(A2)-respecting profile was $F\equiv\mathrm{const}$, which forced
+$1-\alpha=0$. Setting `kinds=['flat']` and varying $\ell/\sigma$ traces the
+full $1-\alpha^p$ axis.
+
+The empirical estimator is `decompose(target='naive', phase_weighting='pair_count')`
+with constant $n_t$ — the same shape of close-pair estimator McFarland's
+paper specifies. Under (A2), $\mathbb E_t[r^2(t,e)]$ is independent of $e$
+(the field component is stationary, and the mask is constant), so
+the close-pair second moment converges to $\mathbb E_t[r^2(t,e)]$ at *any*
+$e$ — and in particular to the same value $\tau^2 + \mu_0^2$ regardless of
+which density samples the close-pair midpoints. With $\bar Y \to \mu_0$,
+$C_\text{rate}\to\tau^2 = \mathrm{Var}_\text{total}^p$ and $C_\text{psth}$
+(split-half over $p$) $\to\tau^2\ell^2/(\ell^2+2\sigma^2)$, giving
+$1-\alpha\to 2\sigma^2/(\ell^2+2\sigma^2) = 1-\alpha^p$. So McFarland is
+unbiased for $1-\alpha^p$ — even though the close-pair density itself is
+intrinsically $p^2$, not $p$.
+
+Figure 0 confirms this empirically across an $\ell/\sigma$ sweep and shows
+the analytical closed-form gap as a function of $\ell/\sigma$; the gap is
+**non-zero** under (A2), peaking at $\ell\approx\sigma$. This is the
+reframing §4.5 builds on: the gap is a fixation-scale spatial-structure
+measure, not an (A2) test.
+
+The estimator's *consistency* (how the seed-to-seed SEM depends on the
+trials-per-phase $n$ **and** the number of phases $T$) is more subtle than
+$1/\sqrt{n}$: an across-phase noise floor at
+$\sqrt{2\alpha^2/(T{-}1)}$ kicks in once within-phase sampling is
+adequate, and at high SEM the $[0,1]$ clipping of $\alpha$ introduces a
+mean bias. This is treated separately in Appendix §A.6.
+
+![**Figure 0 — McFarland's estimator under (A1)+(A2).** **(A)** Empirical
+`decompose(target='naive')` (red, mean$\pm$sd across 6 seeds) sits on the
+analytical $1-\alpha^p$ curve (blue) across an $\ell/\sigma$ sweep covering
+$(0,1)$. **(B)** Threshold robustness over a useful range. **(C)**
+Closed-form $1-\alpha^p$, $1-\alpha^{p^2}$, and their gap vs $\ell/\sigma$.
+**The gap is non-zero under (A2)**, vanishing only as $\ell\to 0$
+(decorrelated rates, all FEM) or $\ell\to\infty$ (uniform field, no FEM);
+it peaks at $\ell/\sigma\approx 1.18$.](figures/fig_sanity_check.png)
 
 ---
 
@@ -397,38 +466,42 @@ violation could act. This is exactly the shuffle-null bias diagnosed and
 fixed in `ryan/fig2/bias_diagnosis/` ($D_z^{\text{shuf}}: -0.0068
 \to +0.0010$, $p$: $<10^{-4}\to 0.44$, after consistent pair-count weighting).
 
-## 3.3 Validation on the synthetic with variable $n_t$ and a `flat` profile
+## 3.3 Validation on the synthetic with variable $n_t$ and a `flat` mask
 
 Synthetic ground truth makes the same point in closed form. Take the `flat`
-profile, so $F=0$ and the truth is $1-\alpha=0$ under every eye distribution
-and every phase weighting (Var$_{\text{fem}}=0$). Pair a staircase $n_t$
-($15\to360$ across $T=100$ phases) with an envelope $\eta(t)$ that
-concentrates PSTH amplitude in early, high-$n_t$ phases (Fig. 1A); this
-matches `fixRSVP`'s onset transients. Apply `decompose` with the matched
+mask, so (A2) holds and the truth is the analytical $1-\alpha^p =
+2\sigma^2/(\ell^2 + 2\sigma^2)$, **invariant under phase weighting** (the
+envelope cancels in the ratio; §2.3). Pair a staircase $n_t$
+($15\to360$ across $T=100$ phases) with an envelope $\alpha(t)$ that
+concentrates amplitude in early, high-$n_t$ phases (Fig. 1A) — this matches
+`fixRSVP`'s onset transients. Apply `decompose` with the matched
 (`phase_weighting='pair_count'`) and unmatched (`phase_weighting='uniform'`)
 variants to deterministic rates (so any deviation is a weighting artifact,
 not Poisson sampling).
 
-![**Figure 1 — Consistent phase weighting validated against synthetic ground
-truth.** **(A)** The variable-$n_t$ staircase across phases and the two
-phase-weight curves: pair-count $w_t\propto n_t(n_t{-}1)/2$ (matched, blue)
-and uniform $w_t=1/T$ (unmatched, red). Under constant $n_t$ both are flat;
-under variable $n_t$ the pair-count weight strongly emphasizes early
-high-$n_t$ phases. **(B)** Homogeneous (`flat`) profile + envelope: the truth
-is $1-\alpha=0$ for every weighting. The unmatched (uniform) phase weighting
-biases $1-\alpha$ well above 0 (median 0.39); the matched (pair-count)
-weighting recovers the truth (median $\sim 0$). **(C)** Structured profiles
-(`central`, `eccentric`, `linear`) under the same staircase + envelope: the
-matched estimator (○) lies on the pair-count-weighted ground-truth identity
-line for the actual viewing distribution $p$; the unmatched (×) is off in a
-profile-dependent way.](figures/fig_phase_weighting.png)
+![**Figure 1 — Consistent phase weighting validated against the unified-
+architecture ground truth.** **(A)** The variable-$n_t$ staircase across
+phases and the two phase-weight curves: pair-count
+$w_t\propto n_t(n_t{-}1)/2$ (matched, blue) and uniform $w_t=1/T$ (unmatched,
+red). Under constant $n_t$ both are flat; under variable $n_t$ the
+pair-count weight strongly emphasizes early high-$n_t$ phases. **(B)**
+Homogeneous (`flat`-mask, (A2)-respecting) synthetic + envelope: closed-form
+truth is $1-\alpha^p\approx 0.667$ at $\ell=\sigma$, invariant under phase
+weighting. The unmatched (uniform) phase weighting biases the estimate
+above the closed form; the matched (pair-count) weighting recovers it.
+**(C)** Non-homogeneous-mask synthetic (`central`, `eccentric`, `linear`)
+under the same staircase + envelope: the matched estimator (○) lies on the
+closed-form identity line; the unmatched (×) deviates in a mask-dependent
+way.](figures/fig_phase_weighting.png)
 
-Panel B is the synthetic analogue of the bias_diagnosis shuffle-null bias:
-the eye trajectories are real, the rate has no eye dependence, so the bias is
-*purely* the Cpsth/Crate phase-weighting mismatch. Panel C adds a spatial
-profile and confirms that the matched estimator tracks the ground-truth
-$1-\alpha$ under the actual viewing distribution while the unmatched is
-biased in a profile-dependent way.
+Panel B is the synthetic analogue of the bias_diagnosis shuffle-null bias.
+The truth $1-\alpha$ is invariant under phase weighting, so a deviation
+between matched and unmatched estimates is *purely* the Cpsth/Crate
+phase-weighting mismatch: pair-count-weighted $\mathbb E_w[\alpha^2]$
+differs from uniform-weighted $\mathbb E_w[\alpha^2]$ when $\alpha(t)$ and
+$n_t$ correlate, and that mismatch propagates into the estimator's ratio.
+Panel C adds a spatial mask and confirms that the matched estimator tracks
+ground truth while the unmatched is mask-dependent.
 
 ## 3.4 What the correction does and does not address
 
@@ -576,11 +649,11 @@ lower variance. This is the natural generalization of McFarland et al.: their
 estimator conditions on phase $t$ and on $\Delta e\approx0$; the correction
 conditions *additionally* on absolute eye position.
 
-## 4.5 Direction 1 vs Direction 2: tradeoff and non-homogeneity diagnostic
+## 4.5 Direction 1 vs Direction 2: tradeoff and fixation-scale spatial-structure measure
 
 The two consistent directions are not equally easy to estimate. Direction 1
 (target $p$) requires the unbounded weight $1/p$, largest in the periphery —
-exactly where close pairs are rarest. For an eccentric-sensitive cell whose
+exactly where close pairs are rarest. For an eccentric-modulated cell whose
 variance lives in the periphery, this makes the estimate noisy; its
 across-seed standard deviation grows as the threshold shrinks. Direction 2
 (target $p^2$) uses bounded weights $\propto p$, largest at the center where
@@ -597,43 +670,71 @@ close pairs are abundant, and is markedly more stable.
   bounded weights give a reliable, if differently-targeted, estimate.
 
 The **gap** $\lvert(1-\alpha)_{\text{full}} - (1-\alpha)_{\text{central}}\rvert$
-is itself informative: it is $\approx 0$ for a homogeneous (`flat`) cell and
-grows with the spatial structure of the eye-sensitivity profile. Since the
-two consistent targets coincide *iff* the stimulus is homogeneous, the gap
-is a direct, model-free **measure of stimulus non-homogeneity**.
+is itself informative — but what it measures is *not* whether (A2) holds. The
+unified random-field model under (A2) (`flat` mask) gives a closed-form gap
+
+$$
+(1{-}\alpha^p) - (1{-}\alpha^{p^2})
+ = \frac{\sigma^2\,\ell^2}{(\ell^2 + 2\sigma^2)(\ell^2 + \sigma^2)},
+\tag{16}
+$$
+
+which is **non-zero for finite $\ell$**, vanishing only as $\ell\to 0$
+(decorrelated rates, all FEM under every $D$) or $\ell\to\infty$ (uniform
+field, no FEM). The maximum is $\approx 0.17$ at $\ell/\sigma\approx 1.18$
+(Fig. 0D). The gap therefore measures whether the cell's **rate has spatial
+structure on the fixation scale**: small gap when the rate is essentially
+constant within a fixation ($\ell\gg\sigma$) or essentially decorrelated
+within a fixation ($\ell\ll\sigma$); large gap when the rate's spatial
+scale and the fixation scale are comparable. Non-homogeneous masks
+(`central`, `eccentric`, `linear`) **add** to this baseline; Fig. 4C plots
+the empirical gap across mask kinds with the (A2) baseline overlaid.
+
+The gap is still a useful empirical signal — it tells you that the *choice*
+of eye-position distribution $D$ matters for the reported $1-\alpha$ — but
+it is not a clean test of (A2).
 
 ---
 
 # 5. Consequences on synthetic and real data
 
-## 5.1 The naive estimator fails; the matched estimator recovers truth (synthetic)
+## 5.1 The naive estimator's $1-\alpha$ failure (synthetic)
 
 Pure-Poisson synthetic data (true noise correlation $0$, true Fano $1$) under
-the §2 generator, with the three structured profiles, breaks the naive
-estimator on all three reported quantities (Fig. 3):
+the §2 unified generator, with the three non-homogeneous masks, exposes the
+naive estimator's bias most clearly on $1-\alpha$ (Fig. 3A):
 
-- **$1-\alpha$** (panel A): the naive estimator **over-states** the FEM
-  fraction for central cells and **under-states** it — to the point of an
-  undefined, negative $C_{\text{rate}}$ (NaN) — for eccentric cells. The
-  matched estimator (target $p$) lands on the truth.
-- **Noise correlation** (panel B): the rate-variance distribution mismatch
-  leaks into $C_{\text{total}}-C_{\text{rate}}$, producing **spurious**
-  stimulus-independent correlations (median $\lvert r\rvert$ far from $0$)
-  where the truth is exactly $0$.
-- **Fano factor** (panel C): the same leak biases the Fano factor away from
-  $1$, with a population that splits off toward inflated values.
+- **$1-\alpha$** (panel A): the naive estimator **over-states** for central
+  masks (close pairs over-represent the center, where $M^2$ is large) and
+  **under-states** for eccentric masks — occasionally producing
+  $C_\text{rate} \approx 0$ that clips $1-\alpha$ to $0$. The matched
+  estimator (target $p$) lands on the identity line within seed noise.
 
-The sign rule is set by where each cell's eye-sensitivity lives: conditioning
-on $\Delta e<\varepsilon$ weights the FEM by $p(e)^2$, so a profile whose
-sensitivity is **central** is *over*-weighted (since $p^2$ emphasizes the
-center) and one whose sensitivity is **eccentric** is *under*-weighted.
+The sign rule is set by where each cell's stimulus visibility lives: the
+close-pair density $p^2(e)$ emphasizes the center, so a mask whose
+$E_{p^2}[M^2]/E_p[M^2]>1$ (a **central** mask) over-states $C_\text{rate}$
+and a mask whose ratio is $<1$ (an **eccentric** mask) under-states it.
 
-![**Figure 3 — The naive (distribution-unmatched) estimator fails on all
-three reported quantities**, with a sign set by each cell's eye-sensitivity
-profile. Pure-Poisson synthetic (true noise correlation $0$, true Fano $1$);
-"matched" is the $p$-target corrected estimator. **(A)** $1-\alpha$ vs ground
-truth: naive (×) biased, matched (○) on the identity line. **(B)** spurious
-noise correlation. **(C)** biased Fano factor.](figures/fig_naive_failure.png)
+The leak of this $1-\alpha$ bias into the **noise correlation** and **Fano
+factor** is qualitatively present but quantitatively mild under the unified
+model (Fig. 3B–C: naive median $|r|=0.015$ vs matched $0.010$; both Fano
+medians $\approx 1.01$). The additive model in earlier drafts predicted much
+larger leaks because the additive $bF(e)$ term shifted the *mean* of $r$
+with $e$, generating a large cross-term in $\bar Y^2$. In the unified
+multiplicative model the mean $\mathbb E_t[r(t,e)] = \mu_0$ stays
+$e$-independent, so the cross-term vanishes in expectation and only the
+$M^2$-ratio bias survives. The real-data findings in §5.2 (small population
+shifts on Fano, $0.846\to 0.875$) are consistent with this milder regime.
+
+![**Figure 3 — The naive (distribution-unmatched) estimator is biased on
+$1-\alpha$ in a mask-dependent direction; its leak into noise correlation
+and Fano is mild under the unified model.** Pure-Poisson synthetic (true
+noise correlation $0$, true Fano $1$); "matched" is the $p$-target corrected
+estimator. **(A)** $1-\alpha$ vs ground truth: naive (×) biased centrally
+(low values) or oversaturated; matched (○) on identity. **(B)** Noise
+correlation: both estimators close to $0$ (truth); naive slightly wider.
+**(C)** Fano: both estimators near $1$ (truth); naive slightly biased
+high.](figures/fig_naive_failure.png)
 
 The matched estimator recovers each target's own closed-form decomposition
 (`test_estimators.py::test_full_target_recovers_p_decomposition` and
@@ -644,10 +745,15 @@ illustrates the recovery and the Direction-1/Direction-2 tradeoff.
 ![**Figure 4 — The matched estimator recovers ground truth and exposes the
 Direction-1/Direction-2 tradeoff.** **(A)** `full` recovers the $p$
 decomposition and `central` the $p^2$ decomposition (identity line). **(B)**
-For an eccentric cell, Direction 1's unbounded $1/p$ weights make $1-\alpha$
-noisy as the threshold shrinks; Direction 2 is stable. **(C)** The
-full-vs-central gap is $\approx 0$ for a homogeneous cell and grows with
-non-homogeneity — a model-free diagnostic.](figures/fig_correction.png)
+For an eccentric-modulated cell, Direction 1's unbounded $1/p$ weights
+make $1-\alpha$ noisy as the threshold shrinks; Direction 2 is stable.
+**(C)** The full-vs-central gap across mask kinds (unified random-field
+synthetic, $\ell=\sigma$). The dashed line is the closed-form (A2)
+baseline ($\approx 0.17$) — the gap is non-zero even for `flat` because
+the field has spatial structure on the fixation scale. Non-homogeneous
+masks (`central`, `eccentric`, `linear`) shift the gap relative to the
+baseline; the gap is a measure of *fixation-scale spatial structure*, not
+an (A2) test.](figures/fig_correction.png)
 
 ## 5.2 Real-data consequences (`fixRSVP`, cache-only)
 
@@ -672,14 +778,19 @@ sessions):
   therefore **robust** to the (A2) distribution mismatch at the population
   level — real V1 cells do not behave like the extreme synthetic
   `central`/`eccentric` profiles, which suffer large biases.
-- **But there is measurable non-homogeneity.** The gap between the two
-  consistent targets, $\lvert(1-\alpha)_{\text{full}} -
-  (1-\alpha)_{\text{central}}\rvert$, has a population **median of 0.089**
-  with a tail beyond $0.3$ (Fig. 5B). Since the two targets would coincide
-  for a homogeneous stimulus, this gap is direct evidence that the `fixRSVP`
-  stimulus is non-homogeneous for a substantial fraction of cells, and it
-  sets the scale at which the *choice* of eye-position distribution matters
-  for $1-\alpha$.
+- **The gap measures fixation-scale spatial structure, and it is
+  measurable.** The gap between the two consistent targets,
+  $\lvert(1-\alpha)_{\text{full}} - (1-\alpha)_{\text{central}}\rvert$, has
+  a population **median of 0.089** with a tail beyond $0.3$ (Fig. 5B).
+  Under the unified random-field model the gap is non-zero under (A2)
+  itself when $\ell\sim\sigma$ (Eq. 16) — peaking at $\approx 0.17$ — so
+  gap $= 0.089$ is evidence that the cells' rate maps have spatial
+  structure on the fixation scale, which is *expected* for any cell with a
+  finite spatial RF, not necessarily that (A2) is violated. What the gap
+  *does* say is that the **choice** of eye-position distribution $D$
+  matters for the reported $1-\alpha$ at this scale: a $\pm 0.09$ swing
+  between Direction 1 and Direction 2 is the order of the
+  Direction-1-vs-naive bias we found above ($-0.022$).
 - **The Fano factor shifts modestly** under matching (median
   $0.846\to0.875$, $+3\%$), consistent with the synthetic prediction that
   the Fano factor inherits the rate-variance distribution mismatch
@@ -688,18 +799,19 @@ sessions):
 ![**Figure 5 — The correction on real data (397 good cells, cache-only).**
 **(A)** $1-\alpha$ on real spikes: Direction 1 (blue) tracks the naive
 estimate closely (median shift $-0.022$), while Direction 2 (red) is
-systematically lower. **(B)** The full-vs-central gap — a model-free
-non-homogeneity measure — has median $0.089$ with a heavy tail. **(C)** Fano
+systematically lower. **(B)** The full-vs-central gap — a measure of the
+rate's spatial structure on the fixation scale — has median $0.089$ with a
+heavy tail. **(C)** Fano
 factor: naive vs matched, a modest median shift with larger per-cell
 changes.](figures/fig_realdata.png)
 
-The **noise-correlation** consequence on real spikes is established on
-synthetic ground truth (Fig. 3B), where the truth is exactly zero and the
-naive estimator produces large spurious correlations that the matched
-estimator removes. Quantifying it on real spike pairs requires either the
-full windowed pipeline or careful joint-pair validity masking; because it
-shares the same pipeline change, it is folded into the gated Figure-2 fix
-(§6) rather than approximated here.
+The **noise-correlation** consequence on real spikes is small at the
+population level — both on the unified synthetic (Fig. 3B: naive vs matched
+median $|r|$ differ by $\approx 0.005$) and consistent with the modest Fano
+shift here ($0.846\to 0.875$). Quantifying it directly on real spike pairs
+requires either the full windowed pipeline or careful joint-pair validity
+masking; because it shares the same pipeline change, it is folded into the
+gated Figure-2 fix (§6) rather than approximated here.
 
 ---
 
@@ -800,13 +912,248 @@ $C_{\text{rate}}$ consistent.
 - **Extension 1.** If $n_t$ is constant across phases, $w_t$ becomes a
   constant and the pair-count and uniform weightings coincide; the
   correction is the identity.
-- **Extension 2.** The correction is the identity whenever (A2) holds:
-  $\mathbb E_t[r^k(t,e)]$ independent of $e$ makes $\mathbb E_{e\sim D}\!
-  \big[\mathbb E_t[r^k]\big]$ the same for every $D$, so the importance
-  weights cancel. The `flat`-profile test
-  (`test_homogeneous_stimulus_correction_is_noop`) satisfies (A2) by the
-  stronger property that the rate itself is independent of $e$ on every
-  trial.
+- **Extension 2.** The correction is the identity whenever (A2) holds at
+  the second moment: $\mathbb E_t[r^2(t,e)]$ independent of $e$ makes
+  $\mathbb E_{e\sim D}\!\big[\mathbb E_t[r^2]\big]$ the same for every $D$,
+  so the close-pair second moment converges to the right
+  $\mathrm{Var}_\text{total}$ regardless of its $p^2$ sampling. This
+  reproduces McFarland's stated regime. Note however that even under (A2),
+  $\mathrm{Var}_\text{PSTH}^D$ *does* depend on $D$ through the eye-
+  distribution-spread of the PSTH integrand, so the Direction-1 and
+  Direction-2 targets do not coincide in $1-\alpha$; their gap is the
+  fixation-scale spatial-structure measure of §4.5. The
+  `test_homogeneous_mask_correction_is_noop_for_full_target` test confirms
+  that under (A2) (`flat` mask), `target='naive'` and `target='full'` agree
+  on $1-\alpha^p$ while `target='central'` recovers $1-\alpha^{p^2}$.
+
+## A.5 Closed-form decomposition for the unified rate field
+
+With the unified rate equation (9), the across-phase and across-eye
+distributions decouple by linearity. Write $X_t(e) = M(e)\,\alpha(t)\,
+s_t(e)$, so $r = \mu_0 + X$. The field is zero-mean, $\mathbb E[s_t(e)] = 0$,
+with covariance $K(\delta) = \tau^2\exp(-\lVert\delta\rVert^2/(2\ell^2))$
+and independent draws across phases.
+
+**Mean.** $\mathbb E_{t,e\sim D}[r] = \mu_0$ for any $w, D$ (the field is
+zero-mean and the mean is constant in $e$).
+
+**Total variance.** $\mathrm{Var}_\text{total}^{D,w} = \mathbb E[X^2]
+= \mathbb E_w[\alpha^2]\,\mathbb E_D[M^2]\,\mathbb E_s[s_t(e)^2]
+= \mathbb E_w[\alpha^2]\,\tau^2\,\mathbb E_D[M^2]$.
+
+**PSTH variance.** Let $G_t^D = \mathbb E_{e\sim D}[M(e)\,s_t(e)]$. Then
+$\mathbb E_{e\sim D}[r_t(e)] = \mu_0 + \alpha(t)\,G_t^D$ and
+
+$G_t^D$ is i.i.d. across phases with $\mathbb E[G_t^D] = 0$ and
+$\mathbb E[(G_t^D)^2] = I_{M,K,D}$ (see below). In the large-$T$ limit
+
+$$
+\mathrm{Var}_\text{PSTH}^{D,w}
+ = \mathbb E_w[\alpha^2]\,I_{M,K,D},
+$$
+
+where
+
+$$
+I_{M,K,D} = \iint M(e_1)\,M(e_2)\,K(e_1{-}e_2)\,D(e_1)\,D(e_2)\,de_1\,de_2.
+$$
+
+For the `flat` mask ($M \equiv 1$) the integral reduces to
+$\mathbb E_u[K(u)]$ with $u = e_1 - e_2$. If $D = \mathcal N(0,\sigma^2 I)$
+in $\mathbb R^2$, then $u \sim \mathcal N(0, 2\sigma^2 I)$ and the
+Gaussian-Gaussian integral evaluates to
+
+$$
+\mathbb E_{u\sim\mathcal N(0, 2\sigma^2 I)}\!\big[\tau^2 e^{-\|u\|^2/(2\ell^2)}\big]
+ = \tau^2 \cdot \frac{\ell^2}{\ell^2 + 2\sigma^2}.
+$$
+
+giving the `flat` mask closed forms
+
+$$
+1-\alpha^p = \frac{2\sigma^2}{\ell^2 + 2\sigma^2},
+\qquad
+1-\alpha^{p^2} = \frac{\sigma^2}{\ell^2 + \sigma^2},
+$$
+
+and the (A2)-respecting gap
+
+$$
+(1{-}\alpha^p) - (1{-}\alpha^{p^2})
+ = \frac{\sigma^2\,\ell^2}{(\ell^2 + 2\sigma^2)(\ell^2 + \sigma^2)}.
+$$
+
+The maximum is at $\ell/\sigma = \sqrt{2}^{1/2} \approx 1.19$ (taking the
+derivative in $\ell^2$ and setting to zero).
+
+For the **central** mask $M(e) = \exp(-\lVert e\rVert^2/(2\ell_M^2))$,
+the products $M(e_1)M(e_2)D(e_1)D(e_2)$ are still Gaussian; the integral
+reduces to a Gaussian-Gaussian convolution with effective $\sigma_M^2 =
+\sigma^2\ell_M^2/(\sigma^2 + \ell_M^2)$:
+
+$$
+I_{M,K,p}
+ = \tau^2 \cdot \left(\frac{\ell_M^2}{\sigma^2 + \ell_M^2}\right)^{2}
+ \cdot \frac{\ell^2}{\ell^2 + 2\sigma_M^2}.
+$$
+
+For **eccentric** and **linear** masks the integrands are
+Gaussian-times-bounded-functions; the closed forms exist but are tedious,
+and we use Monte Carlo (4M-sample default) via
+`synthetic.ground_truth(...)`, with sampling noise $\lesssim 10^{-3}$ —
+well below the test tolerances.
+
+The ratio $1-\alpha^{D,w} = 1 - I_{M,K,D}/(\tau^2 \mathbb E_D[M^2])$ is
+invariant under phase weighting and the envelope $\alpha(t)$: both
+$\mathrm{Var}_\text{PSTH}$ and $\mathrm{Var}_\text{total}$ are proportional
+to $\mathbb E_w[\alpha^2]$, which cancels. The Extension-1 bias is in the
+estimator's $w$-mismatch, not in any phase-weighted ground truth.
+
+## A.6 Consistency: how $\mathrm{sd}[1-\hat\alpha]$ depends on $N$ and $T$, and the $[0,1]$ clipping bias
+
+Section 2.4 noted that the seed-to-seed SEM of McFarland's estimator does
+**not** shrink as $1/\sqrt{N}$ alone — an across-phase noise floor in $T$
+kicks in once within-phase sampling is adequate, and at high SEM the
+$[0,1]$ clipping of $\hat\alpha$ introduces a mean bias. This appendix
+derives both effects on the unified flat-mask synthetic under (A1)+(A2)
+and calibrates them empirically against the closed form. The code is
+`fig_consistency.py`; the empirical sweep is cached to
+`consistency_sweep.npz`.
+
+### A.6.1 The across-phase floor
+
+Take the flat mask ($M\equiv 1$), constant $n_t = N$, and deterministic
+rates (no observation noise). The per-phase PSTH is
+$\mathbb E_{e\sim p}[r(t,e)] = \mu_0 + G_t$ with
+
+$$
+G_t = \int s_t(e)\,p(e)\,de.
+$$
+
+By (A2) the $\{G_t\}_{t=1}^{T}$ are i.i.d. zero-mean across phases with
+
+$$
+V_p \;\equiv\; \mathbb E\,G_t^2
+ \;=\; \iint K(e_1-e_2)\,p(e_1)\,p(e_2)\,de_1\,de_2
+ \;=\; \frac{\tau^2\,\ell^2}{\ell^2+2\sigma^2}
+ \;=\; \alpha^*\,\tau^2,
+\qquad
+\alpha^* \equiv \frac{\ell^2}{\ell^2+2\sigma^2}.
+$$
+
+In the large-$N$ limit the close-pair pool ($\sim T\cdot N(N{-}1)/2$ pairs)
+makes $\widehat C_{\text{rate}}\to \tau^2$ deterministically, so the
+estimator collapses to
+
+$$
+\hat\alpha \;\approx\; \frac{1}{\tau^2}\cdot\frac{1}{T-1}\sum_t\!(G_t-\bar G)^2,
+$$
+
+the sample variance of $T$ i.i.d. Gaussians divided by their (assumed
+known) population variance scaling. Its sampling variance is
+
+$$
+\mathrm{Var}[\hat\alpha]
+ \;=\; \frac{1}{\tau^4}\cdot\frac{2\,V_p^2}{T-1}
+ \;=\; \frac{2\,{\alpha^*}^2}{T-1},
+$$
+
+giving the **across-phase SEM floor**
+
+$$
+\lim_{N\to\infty} \mathrm{sd}[1-\hat\alpha]
+ \;=\; \alpha^*\,\sqrt{\frac{2}{T-1}},
+\tag{A6.1}
+$$
+
+a finite limit in $T$ alone. At $\ell=\sigma$ (so $\alpha^*=1/3$) and
+$T=100$, (A6.1) gives $\mathrm{sd}\approx 0.0474$, in agreement with the
+leveling-off observed in §2.4.
+
+### A.6.2 Within-phase contribution and the empirical decomposition
+
+At finite $N$, the close-pair estimator's local fluctuations and the
+finite-trial sampling of $G_t$ each contribute a within-phase noise term
+that scales as $1/\sqrt N$ at fixed $T$. Treating the across-phase and
+within-phase contributions as approximately independent,
+
+$$
+\mathrm{sd}[1-\hat\alpha]
+ \;\approx\;
+ \sqrt{\;\mathrm{sd}_{\text{within}}^2(N) \;+\; \mathrm{sd}_{\text{floor}}^2(T)\;},
+\tag{A6.2}
+$$
+
+so adding trials drives the SD down toward the floor but does not pierce
+it. Fig. A6A shows the heatmap of empirical $\mathrm{sd}[1-\hat\alpha]$
+over $(N,T)$ at $\ell=\sigma$: the right edge (large $T$, $\mathrm{sd}\approx
+0.04$) is dominated by the floor; the left edge (small $T$) is dominated
+by the floor as well — across the whole grid the floor sets the bottom
+of the achievable SD. Fig. A6C shows the same data sliced at fixed $N$:
+the $N=800$ points sit on the analytical floor curve $\alpha^*\sqrt{2/(T-1)}$
+at large $T$ and rise above it at small $T$ where within-phase noise
+becomes significant relative to the floor.
+
+The practical implication is that **for a target SEM on $1-\hat\alpha$,
+more phases is the only binding knob** once trials/phase is large enough
+to drop within-phase noise below the floor. In `fixRSVP` with $T\sim 100$
+post-fix bins, $\alpha^*=1/3$ gives a floor of $\approx 0.047$, comparable
+to the cross-cell variability of the population $1-\alpha$ estimate.
+
+### A.6.3 Boundary-clipping bias
+
+`estimators.py:252` clips $\hat\alpha$ to $[0,1]$ before reporting
+$1-\hat\alpha$. The clip is sensible — $\alpha$ is a fraction and the
+ratio of two variance estimates can excursion outside — but it
+introduces a bias on the mean whenever the sampling SD $\sigma_\alpha$ is
+comparable to the distance from $\alpha^*$ to the nearest boundary.
+
+Treating $\hat\alpha\sim\mathcal N(\alpha^*, \sigma_\alpha^2)$ and clipping
+to $[0,1]$, the post-clip mean is the truncated-Gaussian moment
+
+$$
+\mathbb E\!\left[\mathrm{clip}(\hat\alpha)\right]
+ = \alpha^*\bigl[\Phi(z_1)-\Phi(z_0)\bigr]
+ \;+\; \sigma_\alpha\bigl[\varphi(z_0)-\varphi(z_1)\bigr]
+ \;+\; \bigl[1-\Phi(z_1)\bigr],
+\tag{A6.3}
+$$
+
+with $z_0 = -\alpha^*/\sigma_\alpha$, $z_1 = (1-\alpha^*)/\sigma_\alpha$, and
+$\varphi,\Phi$ the standard normal pdf/cdf. The sign of the bias on
+$1-\hat\alpha$ is set by which boundary is closer:
+
+- **Small $\ell$** ($\alpha^*\to 0$, $1-\alpha^*\to 1$): the lower tail of
+  $\hat\alpha$ is clipped up to $0$, so $\mathbb E[\mathrm{clip}(\hat\alpha)]>\alpha^*$
+  and $1-\hat\alpha$ is biased **down**.
+- **Large $\ell$** ($\alpha^*\to 1$, $1-\alpha^*\to 0$): the upper tail of
+  $\hat\alpha$ is clipped down to $1$, so $\mathbb E[\mathrm{clip}(\hat\alpha)]<\alpha^*$
+  and $1-\hat\alpha$ is biased **up**.
+
+Both pull $1-\hat\alpha$ toward the interior $1/2$. Fig. A6B verifies
+(A6.3) on the small-$\ell$ side: at $\ell=0.3\sigma$ ($\alpha^*=0.043$),
+each $(N,T)$ cell produces an $(\mathrm{sd},\mathrm{bias})$ pair, and the
+empirical points sit on the analytical curve as $\sigma_\alpha$ is varied.
+The bias reaches $\sim -0.08$ at $\sigma_\alpha\approx 0.3$ — small in
+absolute terms, but a $9\%$ shift relative to the true $1-\alpha^*=0.957$.
+The same effect explains the saturation of $1-\hat\alpha$ at $0$ for
+eccentric-mask cells in §5.1, where the unclipped close-pair $\hat\alpha$
+excursions above $1$ from the inflated-$C_\text{rate}$ side of the naive
+inconsistency.
+
+![**Figure A6 — SEM and $[0,1]$ clipping of $1-\hat\alpha$ on the
+flat-mask synthetic.** **(A)** Empirical seed-to-seed $\mathrm{sd}[1-\hat\alpha]$
+over a 4×4 $(N,T)$ grid at $\ell=\sigma$ (10 seeds per cell, deterministic
+rates, `target='naive'`, threshold 0.05). The T-floor
+$\alpha^*\sqrt{2/(T-1)}$ is printed below the panel; empirical SD shrinks
+toward it as $N$ grows and is bounded below by it as $T$ shrinks. **(B)**
+Boundary clipping at $\ell=0.3\sigma$ ($\alpha^*=0.043$,
+$1-\alpha^*=0.957$): bias of $1-\hat\alpha$ from truth, one marker per
+$(N,T)$ cell, coloured by $T$. The dashed curve is the analytical
+truncated-Gaussian prediction (A6.3). **(C)** $\mathrm{sd}[1-\hat\alpha]$
+vs $T$ at $\ell=\sigma$ for $N\in\{100,200,400,800\}$. The dashed line is
+the closed-form floor $\alpha^*\sqrt{2/(T-1)}$; the large-$N$ points sit
+on it.](figures/fig_consistency.png)
 
 ---
 
@@ -814,9 +1161,11 @@ $C_{\text{rate}}$ consistent.
 
 ```bash
 uv run python fig_mechanism.py
+uv run python fig_sanity_check.py
 uv run python fig_phase_weighting.py
 uv run python fig_naive_failure.py
 uv run python fig_correction.py
+uv run python fig_consistency.py            # parallel sweep; cached to .npz
 uv run python generate_realdata.py          # cache-only; --recompute to rebuild
 uv run --with pytest pytest test_estimators.py -q
 ```

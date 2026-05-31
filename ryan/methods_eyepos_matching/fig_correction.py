@@ -3,13 +3,15 @@ Direction-1 vs Direction-2 tradeoff.
 
   A  recovery: target='full' recovers the p decomposition and target='central'
      recovers the p^2 decomposition (points on the identity line), across profiles.
-  B  stability tradeoff: for an eccentric-sensitive cell the variance lives in the
+  B  stability tradeoff: for an eccentric-modulated cell the variance lives in the
      periphery, where Direction 1's unbounded 1/p weights are noisy; the across-seed
      SD of 1-alpha grows as the close-pair threshold shrinks for 'full' but stays
      low for 'central' (bounded weights).
-  C  the gap |1-alpha(full) - 1-alpha(central)| is a direct measure of stimulus
-     non-homogeneity: it is ~0 for a homogeneous (flat) cell and grows with the
-     spatial structure of the eye-sensitivity profile.
+  C  the gap |1-alpha(full) - 1-alpha(central)| measures whether the cell's rate
+     has spatial structure on the fixation scale (ell ~ sigma). Even a homogeneous
+     (flat) cell under (A2) has a non-zero gap from the random field's spatial
+     correlation length; non-homogeneous masks (central, eccentric, linear) add to
+     it. The closed-form (A2) baseline is shown as a reference line.
 
 Run from this folder:  uv run python fig_correction.py
 """
@@ -41,7 +43,7 @@ def recovery(seeds=range(6), N=400):
     return map(np.array, (full_gt, full_es, cent_gt, cent_es, np.array(col)))
 
 
-def stability(thresholds=(0.10, 0.07, 0.05, 0.035), seeds=range(8), N=500):
+def stability(thresholds=(0.08, 0.05, 0.03, 0.02, 0.012), seeds=range(8), N=500):
     sd_full, sd_cent = [], []
     for thr in thresholds:
         f, c = [], []
@@ -75,14 +77,14 @@ def main():
     # --- A: recovery ---
     fg, fe, cg, ce, col = recovery()
     ax = axes[0]
-    ax.plot([0, 0.6], [0, 0.6], color=C_TRUTH, lw=0.8, ls="--", zorder=0)
+    ax.plot([0, 1], [0, 1], color=C_TRUTH, lw=0.8, ls="--", zorder=0)
     ax.scatter(fg, fe, s=16, color=C_FULL, alpha=0.7,
                label=r"'full' vs GT$(p)$")
     ax.scatter(cg, ce, s=16, color=C_CLOSE, alpha=0.7, marker="s",
                label=r"'central' vs GT$(p^2)$")
     ax.set_xlabel(r"true $1-\alpha$"); ax.set_ylabel(r"estimated $1-\alpha$")
     ax.set_title("A  each target recovers its decomposition")
-    ax.set_xlim(0, 0.6); ax.set_ylim(0, 0.6); ax.set_aspect("equal")
+    ax.set_xlim(0.3, 1.0); ax.set_ylim(0.3, 1.0); ax.set_aspect("equal")
     ax.legend(fontsize=7, loc="upper left")
 
     # --- B: stability vs threshold ---
@@ -96,7 +98,7 @@ def main():
     ax.invert_xaxis()
     ax.legend(fontsize=7)
 
-    # --- C: non-homogeneity gap ---
+    # --- C: fixation-scale spatial-structure gap ---
     gm, gs = gap()
     ax = axes[2]
     order = ["flat", "linear", "eccentric", "central"]
@@ -105,8 +107,16 @@ def main():
            color=[PCOLOR[k] for k in order], alpha=0.8, capsize=3)
     ax.set_xticks(xs); ax.set_xticklabels(order)
     ax.set_ylabel(r"$|\,(1-\alpha)_{\rm full} - (1-\alpha)_{\rm central}\,|$")
-    ax.set_title("C  gap = non-homogeneity diagnostic")
+    ax.set_title("C  gap = fixation-scale spatial-structure measure")
+    # Analytical (A2) baseline for `flat` at ell = sigma:
+    # gap = sigma^2 ell^2 / [(ell^2 + 2 sigma^2)(ell^2 + sigma^2)] = 1/6.
+    sig = SIG
+    ell = sig
+    gap_a2 = sig**2 * ell**2 / ((ell**2 + 2 * sig**2) * (ell**2 + sig**2))
+    ax.axhline(gap_a2, color=C_TRUTH, lw=0.8, ls="--",
+               label=rf"(A2) baseline (flat, $\ell=\sigma$): {gap_a2:.2f}")
     ax.axhline(0, color=C_TRUTH, lw=0.6)
+    ax.legend(fontsize=7, loc="upper left")
 
     fig.tight_layout()
     save(fig, "fig_correction.png")

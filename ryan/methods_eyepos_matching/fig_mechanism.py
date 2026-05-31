@@ -15,7 +15,7 @@ Run from this folder:  uv run python fig_mechanism.py
 import numpy as np
 import matplotlib.pyplot as plt
 
-from synthetic import profile_F
+from synthetic import profile_M
 from _style import configure, save, C_FULL, C_CLOSE
 
 SIGMA = 0.15
@@ -76,7 +76,10 @@ def main():
     ax.set_title(f"B  variance halves  (obs ratio {var_ratio:.2f})")
     ax.legend(loc="upper right")
 
-    # --- Panel C: consequence -- E[F] and Var[F] differ across distributions ---
+    # --- Panel C: consequence -- E_D[M^2] differs across distributions ---
+    # In the unified (multiplicative-mask) model the naive Crate bias source
+    # is the ratio E_{p^2}[M^2] / E_p[M^2]: bias > 1 (central) -> over-state
+    # rate variance; < 1 (eccentric) -> under-state.
     ax = axes[2]
     rng = np.random.default_rng(1)
     M = 1_000_000
@@ -84,19 +87,19 @@ def main():
     ep2 = rng.normal(0, SIGMA / np.sqrt(2), size=(M, 2))
     kinds = ["central", "eccentric", "linear"]
     xpos = np.arange(len(kinds))
-    vp = [profile_F(ep, k, SIGMA).var() for k in kinds]
-    vp2 = [profile_F(ep2, k, SIGMA).var() for k in kinds]
+    EM2p = [(profile_M(ep, k, SIGMA) ** 2).mean() for k in kinds]
+    EM2p2 = [(profile_M(ep2, k, SIGMA) ** 2).mean() for k in kinds]
     w = 0.38
-    ax.bar(xpos - w / 2, vp, w, color=C_FULL, label=r"$\mathrm{Var}_{p}[F]$")
-    ax.bar(xpos + w / 2, vp2, w, color=C_CLOSE, label=r"$\mathrm{Var}_{p^2}[F]$")
+    ax.bar(xpos - w / 2, EM2p, w, color=C_FULL, label=r"$\mathbb{E}_{p}[M^2]$")
+    ax.bar(xpos + w / 2, EM2p2, w, color=C_CLOSE, label=r"$\mathbb{E}_{p^2}[M^2]$")
     ax.set_xticks(xpos); ax.set_xticklabels(kinds)
-    ax.set_ylabel("FEM variance (a.u.)")
-    ax.set_title("C  FEM variance is distribution-dependent")
+    ax.set_ylabel(r"$\mathbb{E}_D[M^2]$")
+    ax.set_title(r"C  the close-pair / full ratio sets the Crate bias")
     ax.legend(loc="upper right")
     for x in xpos:
-        # the close-pair (p^2) estimator over/under-states FEM relative to p
-        sign = "+" if vp2[x] > vp[x] else "−"
-        ax.annotate(rf"$1{{-}}\alpha$ bias {sign}", (x, max(vp[x], vp2[x])),
+        # the close-pair (p^2) estimator over/under-states Crate relative to p
+        sign = "+" if EM2p2[x] > EM2p[x] else "−"
+        ax.annotate(rf"$1{{-}}\alpha$ bias {sign}", (x, max(EM2p[x], EM2p2[x])),
                     ha="center", va="bottom", fontsize=7)
 
     fig.tight_layout()

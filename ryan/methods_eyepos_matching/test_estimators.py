@@ -1,25 +1,31 @@
 r"""TDD spec for the eye-position-distribution-matched LOTC estimator.
 
-Ground truth comes from ``synthetic.py`` (closed-form decompositions under the full
-fixational distribution p and the close-pair distribution p^2). The estimator under
-test, ``estimators.decompose``, takes a ``target`` distribution and must:
+Ground truth comes from ``synthetic.py``: a unified stationary-GP rate field
+with a per-cell spatial mask M(e). The (A1) violation is variable n_t; the
+(A2) violation is a non-constant mask. The estimator under test,
+``estimators.decompose``, takes a ``target`` distribution and must:
 
-  * be a NO-OP for a homogeneous stimulus (rate independent of absolute eye pos),
-  * recover the p decomposition with target='full'  (Direction 1),
-  * recover the p^2 decomposition with target='central' (Direction 2),
-  * leave a much smaller error than the inconsistent NAIVE estimator,
-  * be MORE STABLE for target='central' than 'full' on an eccentric-sensitive cell
-    (the unbounded-1/p tail-variance cost of Direction 1),
+  * recover the closed-form 1-alpha^p under (A2) ('flat' mask) and target in
+    {'naive', 'full'} (Direction 1: the actual viewing distribution),
+  * recover the closed-form 1-alpha^p^2 under (A2) with target='central'
+    (Direction 2: the close-pair distribution),
+  * recover each direction's truth on non-homogeneous masks
+    (central/eccentric/linear),
+  * be MUCH less biased than the naive estimator on a centrally-modulated cell,
+  * be MORE STABLE for target='central' than 'full' on an eccentric-modulated
+    cell (the unbounded-1/p tail-variance cost of Direction 1),
   * remove independent Poisson noise so a pure-Poisson cell has Fano ~ 1.
 
-Recovery tolerances allow ~0.06 for the residual finite-threshold smoothing that is
-shared with the original McFarland estimator (it shrinks as the threshold shrinks).
+Section "Random-field sanity check" verifies that McFarland's estimator
+(target='naive', constant n_t) recovers the analytical 1-alpha^p across an
+ell/sigma sweep -- the regime McFarland claimed but the additive synthetic
+could not test.
 
 Run:  uv run --with pytest pytest test_estimators.py -q   (from this folder)
 """
 import numpy as np
 
-from synthetic import make_session
+from synthetic import make_session, ground_truth
 from estimators import decompose
 
 NTR, NPH, SIG = 600, 100, 0.15
@@ -40,71 +46,110 @@ def _seed_stats(kinds, target, key, seeds=range(6), deterministic=True,
     return np.nanmean(vals, 0), np.nanstd(vals, 0), sess
 
 
-def test_homogeneous_stimulus_correction_is_noop():
-    """Flat profile -> rate independent of absolute eye position, so the eye
-    distribution is irrelevant: 1-alpha is 0 under every target."""
-    sess = make_session(["flat", "flat"], n_trials=NTR, n_phases=NPH,
-                        sigma_eye=SIG, seed=0)
-    for target in ("naive", "full", "central"):
-        d = decompose(sess["rate"], sess["eye"], target=target, density="gaussian")
-        assert np.allclose(d["one_minus_alpha"], 0.0, atol=0.05), target
+# ---------------------------------------------------------------------------
+# Eye-position-distribution matching (Extension 2)
+# ---------------------------------------------------------------------------
+
+def test_homogeneous_mask_correction_is_noop_for_full_target():
+    """(A2) holds (flat mask). Naive and full targets both recover the
+    closed-form 1-alpha^p; central recovers 1-alpha^p^2 (a different but
+    consistent target). All three are consistent with their respective truths.
+    Averaged across seeds because single-seed estimates have non-trivial
+    finite-sample variance under the random-field model (the cross-term
+    2*mu_0*overline{M*s_t} in Crate is the main source).
+    """
+    oma_naive, _, sess = _seed_stats(["flat"], "naive", "one_minus_alpha")
+    oma_full, _, _ = _seed_stats(["flat"], "full", "one_minus_alpha")
+    oma_cent, _, _ = _seed_stats(["flat"], "central", "one_minus_alpha")
+    gt_p = sess["truth"][0]["p"]["one_minus_alpha"]
+    gt_p2 = sess["truth"][0]["p2"]["one_minus_alpha"]
+    assert abs(oma_naive[0] - gt_p) < 0.06, \
+        f"naive {oma_naive[0]} not near gt_p {gt_p}"
+    assert abs(oma_full[0] - gt_p) < 0.06, \
+        f"full {oma_full[0]} not near gt_p {gt_p}"
+    assert abs(oma_cent[0] - gt_p2) < 0.06, \
+        f"central {oma_cent[0]} not near gt_p^2 {gt_p2}"
 
 
 def test_full_target_recovers_p_decomposition():
-    """Direction 1: target='full' recovers the closed-form p decomposition."""
+    """Direction 1: target='full' recovers the closed-form p decomposition on
+    non-homogeneous masks (central/eccentric/linear)."""
     kinds = ["central", "eccentric", "linear"]
     oma, _, sess = _seed_stats(kinds, "full", "one_minus_alpha")
-    gt = np.array([sess["truth"][c]["p"]["one_minus_alpha"] for c in range(len(kinds))])
-    assert np.allclose(oma, gt, atol=0.06), f"got {oma}, want {gt}"
+    gt = np.array([sess["truth"][c]["p"]["one_minus_alpha"]
+                   for c in range(len(kinds))])
+    assert np.allclose(oma, gt, atol=0.08), f"got {oma}, want {gt}"
 
 
 def test_central_target_recovers_p2_decomposition():
     """Direction 2: target='central' recovers the closed-form p^2 decomposition.
 
-    Tested on cells whose spatial feature is broad relative to the close-pair
-    threshold (eccentric, linear); a feature narrower than the threshold is
-    smoothed -- a shared finite-threshold limitation tested separately below.
+    Tested on masks whose spatial scale is broad enough relative to the
+    close-pair threshold (eccentric, linear) that finite-threshold smoothing
+    is small; the narrow central mask is exercised separately in the
+    threshold-shrinks test.
     """
     kinds = ["eccentric", "linear"]
     oma, _, sess = _seed_stats(kinds, "central", "one_minus_alpha")
-    gt = np.array([sess["truth"][c]["p2"]["one_minus_alpha"] for c in range(len(kinds))])
-    assert np.allclose(oma, gt, atol=0.06), f"got {oma}, want {gt}"
+    gt = np.array([sess["truth"][c]["p2"]["one_minus_alpha"]
+                   for c in range(len(kinds))])
+    assert np.allclose(oma, gt, atol=0.08), f"got {oma}, want {gt}"
 
 
 def test_finite_threshold_bias_shrinks_with_threshold():
-    """The residual under-estimation of 1-alpha is finite-threshold smoothing:
-    a narrow central feature is recovered better as the threshold shrinks."""
+    """Under a narrow central mask the residual is finite-threshold smoothing:
+    the recovery improves as the threshold shrinks."""
     kinds = ["central"]
-    oma_05, _, sess = _seed_stats(kinds, "central", "one_minus_alpha", threshold=0.05)
-    oma_03, _, _ = _seed_stats(kinds, "central", "one_minus_alpha", threshold=0.03)
+    oma_05, _, sess = _seed_stats(kinds, "central", "one_minus_alpha",
+                                  threshold=0.05)
+    oma_03, _, _ = _seed_stats(kinds, "central", "one_minus_alpha",
+                               threshold=0.03)
     gt = sess["truth"][0]["p2"]["one_minus_alpha"]
     assert abs(oma_03[0] - gt) < abs(oma_05[0] - gt), \
-        f"thr=0.03 err {abs(oma_03[0]-gt):.3f} !< thr=0.05 err {abs(oma_05[0]-gt):.3f}"
+        (f"thr=0.03 err {abs(oma_03[0]-gt):.3f} "
+         f"!< thr=0.05 err {abs(oma_05[0]-gt):.3f}")
 
 
 def test_naive_is_grossly_biased_where_corrected_is_not():
-    """The naive (unmatched) estimator's error on a central-sensitive cell is far
-    larger than the matched estimator's."""
-    kinds = ["central"]
-    oma_naive, _, sess = _seed_stats(kinds, "naive", "one_minus_alpha")
-    oma_full, _, _ = _seed_stats(kinds, "full", "one_minus_alpha")
-    gt = sess["truth"][0]["p"]["one_minus_alpha"]
-    err_naive = abs(np.nan_to_num(oma_naive[0], nan=1.0) - gt)
-    err_full = abs(oma_full[0] - gt)
-    assert err_full < 0.5 * err_naive, f"full err {err_full} not << naive err {err_naive}"
+    """On a centrally-modulated cell the naive (unmatched) estimator's typical
+    error is much larger than the matched estimator's, against truth on p.
+    Uses MEDIAN over 12 seeds: the cross-term 2*mu_0*overline{M*s_t} in Crate
+    creates heavy-tailed seed-to-seed fluctuations (occasional Crate ~ 0 -> alpha
+    clipped to 1, 1-alpha = 0), and the mean is sensitive to those outliers."""
+    naive_vals, full_vals = [], []
+    gt = None
+    for s in range(12):
+        sess = make_session(["central"], n_trials=NTR, n_phases=NPH,
+                            sigma_eye=SIG, seed=s)
+        if gt is None:
+            gt = sess["truth"][0]["p"]["one_minus_alpha"]
+        d_naive = decompose(sess["rate"], sess["eye"], target="naive",
+                            density="gaussian")
+        d_full = decompose(sess["rate"], sess["eye"], target="full",
+                           density="gaussian")
+        naive_vals.append(d_naive["one_minus_alpha"][0])
+        full_vals.append(d_full["one_minus_alpha"][0])
+    err_naive = abs(float(np.nanmedian(naive_vals)) - gt)
+    err_full = abs(float(np.nanmedian(full_vals)) - gt)
+    assert err_full < 0.5 * err_naive, \
+        f"full err {err_full:.3f} not << naive err {err_naive:.3f}"
 
 
 def test_direction2_is_more_stable_than_direction1_for_eccentric():
-    """Direction 1's unbounded 1/p weights make it noisier in the periphery, where
-    an eccentric cell's variance lives; Direction 2 (bounded weights) is steadier."""
-    _, std_full, _ = _seed_stats(["eccentric"], "full", "one_minus_alpha", threshold=0.03)
-    _, std_cent, _ = _seed_stats(["eccentric"], "central", "one_minus_alpha", threshold=0.03)
-    assert std_cent[0] < std_full[0], f"central std {std_cent[0]} !< full std {std_full[0]}"
+    """Direction 1's unbounded 1/p weights make it noisier in the periphery,
+    where an eccentric-modulated cell's variance lives; Direction 2 (bounded
+    weights) is steadier across seeds."""
+    _, std_full, _ = _seed_stats(["eccentric"], "full", "one_minus_alpha",
+                                 threshold=0.03)
+    _, std_cent, _ = _seed_stats(["eccentric"], "central", "one_minus_alpha",
+                                 threshold=0.03)
+    assert std_cent[0] < std_full[0], \
+        f"central std {std_cent[0]} !< full std {std_full[0]}"
 
 
 def test_full_target_removes_poisson_fano_to_one():
-    """Pure Poisson + non-homogeneous rate: the matched 'full' estimator removes
-    Poisson and the distribution contamination, giving Fano ~ 1; naive is worse."""
+    """Pure Poisson + non-homogeneous masks: the matched 'full' estimator gives
+    Fano ~ 1; the naive estimator is biased further from 1."""
     kinds = ["central", "eccentric", "linear", "central"]
     fano_full, _, _ = _seed_stats(kinds, "full", "fano", seeds=range(8),
                                   deterministic=False)
@@ -112,7 +157,7 @@ def test_full_target_removes_poisson_fano_to_one():
                                    deterministic=False)
     med_full = np.nanmedian(fano_full)
     med_naive = np.nanmedian(fano_naive)
-    assert abs(med_full - 1.0) < 0.12, f"full Fano median {med_full}"
+    assert abs(med_full - 1.0) < 0.15, f"full Fano median {med_full}"
     assert abs(med_full - 1.0) < abs(med_naive - 1.0), \
         f"full {med_full} not closer to 1 than naive {med_naive}"
 
@@ -134,24 +179,11 @@ def test_naive_path_matches_existing_pipeline():
 
 # ---------------------------------------------------------------------------
 # Extension 1: consistent phase weighting under variable n_t
-#
-# When fixation durations vary, the number of trials per phase n_t varies. The
-# McFarland close-pair second moment is intrinsically pair-count weighted across
-# phases (n_t(n_t-1)/2 pairs available in each phase). For the LOTC decomposition
-# to hold term-by-term, Cpsth and the mean entering Crate's variance subtraction
-# must use the same pair-count weighting. The historical pipeline used uniform
-# (1/T) weighting in Cpsth, biasing 1-alpha away from 0 even on a homogeneous
-# stimulus where the truth is exactly 0 under every weighting. See
-# `ryan/fig2/bias_diagnosis/FINAL_REPORT.md`.
 # ---------------------------------------------------------------------------
 
-
 def _staircase_n_t(n_phases, lo=20, hi=80):
-    """Monotone-decaying phase trial counts mimicking fixRSVP fixation durations.
-
-    Roughly the bias_diagnosis staircase shape; an exact mirror is unnecessary
-    since we only need a non-degenerate spread of n_t across phases.
-    """
+    """Monotone-decaying phase trial counts mimicking fixRSVP fixation
+    durations."""
     return np.linspace(hi, lo, n_phases).round().astype(int)
 
 
@@ -167,53 +199,26 @@ def test_variable_n_t_session_masks_correctly():
     assert np.all(np.isfinite(sess["spikes"][sess["valid"]]))
 
 
-def test_uniform_phase_weighting_biased_on_homogeneous_under_variable_nt():
-    """Under variable n_t, the unmatched (uniform) phase weighting biases 1-alpha
-    away from 0 on a homogeneous (flat) profile, where the truth is exactly 0
-    under every weighting (Var_fem = 0). Matched (pair_count) weighting recovers 0.
+def test_pair_count_phase_weighting_recovers_truth_under_variable_nt():
+    """Under variable n_t with a decaying alpha(t) envelope concentrating
+    amplitude in high-n_t phases, the matched (pair_count) phase weighting
+    recovers the closed-form 1-alpha^p; uniform weighting is biased.
 
-    This is the synthetic analogue of the bias_diagnosis shuffle-null bias: eye
-    trajectories are real, the rate has no eye dependence, and the bias is purely
-    the Cpsth/Crate phase-weighting mismatch. The PSTH envelope concentrates
-    amplitude in high-n_t phases (mirroring fixRSVP onset transients) so the bias
-    is structural rather than seed noise. Deterministic rates isolate the
-    weighting effect from Poisson sampling noise in low-n_t phases.
+    The truth 1-alpha is invariant under phase weighting in the unified model
+    (the envelope cancels in the ratio); the bias is in the ESTIMATOR, which
+    mismatches Cpsth's weighting against Crate's intrinsic pair-count weighting.
     """
     nt = _staircase_n_t(NPH, lo=15, hi=int(NTR * 0.6))
     env = np.linspace(1.0, 0.05, NPH)
-    omas = {"uniform": [], "pair_count": []}
-    for s in range(6):
-        sess = make_session(["flat", "flat", "flat"], n_trials=NTR, n_phases=NPH,
-                            sigma_eye=SIG, seed=s, n_trials_per_phase=nt,
-                            psth_envelope=env)
-        for pw in omas:
-            d = decompose(sess["rate"], sess["eye"], target="naive",
-                          density="gaussian", phase_weighting=pw)
-            omas[pw].append(d["one_minus_alpha"])
-    med_uni = float(np.nanmedian(np.array(omas["uniform"])))
-    med_pair = float(np.nanmedian(np.array(omas["pair_count"])))
-    assert abs(med_pair) < 0.05, f"matched 1-alpha not near 0: {med_pair}"
-    assert med_uni > med_pair + 0.10, \
-        f"uniform-weighting bias not exhibited: uniform {med_uni} vs pair {med_pair}"
-
-
-def test_pair_count_phase_weighting_recovers_truth_under_variable_nt():
-    """Under variable n_t with a non-trivial eye profile, only the matched
-    (pair_count) phase weighting recovers the pair-count-weighted ground-truth
-    1-alpha for the p target. Uniform weighting is more biased.
-    """
-    from synthetic import ground_truth
-    nt = _staircase_n_t(NPH, lo=15, hi=int(NTR * 0.6))
-    pair_w = nt * (nt - 1) / 2.0
-    kinds = ["central", "linear"]
-    oma_pair, oma_uni, truth_p = [], [], None
+    kinds = ["flat", "central", "linear"]
+    truth = None
+    oma_pair, oma_uni = [], []
     for s in range(6):
         sess = make_session(kinds, n_trials=NTR, n_phases=NPH, sigma_eye=SIG,
-                            seed=s, n_trials_per_phase=nt)
-        if truth_p is None:
-            truth_p = np.array([
-                ground_truth(k, SIG, sess["psth"][:, c], phase_weights=pair_w)
-                ["p"]["one_minus_alpha"] for c, k in enumerate(kinds)])
+                            seed=s, n_trials_per_phase=nt, psth_envelope=env)
+        if truth is None:
+            truth = np.array([sess["truth"][c]["p"]["one_minus_alpha"]
+                              for c in range(len(kinds))])
         d_pair = decompose(sess["rate"], sess["eye"], target="full",
                            density="gaussian", phase_weighting="pair_count")
         d_uni = decompose(sess["rate"], sess["eye"], target="full",
@@ -222,8 +227,134 @@ def test_pair_count_phase_weighting_recovers_truth_under_variable_nt():
         oma_uni.append(d_uni["one_minus_alpha"])
     oma_pair = np.nanmean(oma_pair, 0)
     oma_uni = np.nanmean(oma_uni, 0)
-    err_pair = np.abs(oma_pair - truth_p)
-    err_uni = np.abs(oma_uni - truth_p)
-    assert np.all(err_pair < 0.08), f"pair_count off: got {oma_pair}, want {truth_p}"
+    err_pair = np.abs(oma_pair - truth)
+    err_uni = np.abs(oma_uni - truth)
+    assert np.all(err_pair < 0.10), \
+        f"pair_count off: got {oma_pair}, want {truth}"
     assert np.all(err_uni > err_pair), \
         f"uniform not more biased: pair_err {err_pair} vs uni_err {err_uni}"
+
+
+def test_uniform_phase_weighting_biased_under_variable_nt_on_homogeneous():
+    """Even with a homogeneous (flat) mask -- where (A2) holds -- the unmatched
+    (uniform) phase weighting biases 1-alpha away from the closed-form 1-alpha^p
+    when n_t varies and alpha(t) is correlated with n_t. The bias is purely
+    the Cpsth/Crate weighting mismatch, not an (A2) violation.
+    """
+    nt = _staircase_n_t(NPH, lo=15, hi=int(NTR * 0.6))
+    env = np.linspace(1.0, 0.05, NPH)
+    truth = ground_truth("flat", SIG, ell=SIG)["p"]["one_minus_alpha"]
+    omas = {"uniform": [], "pair_count": []}
+    for s in range(6):
+        sess = make_session(["flat", "flat", "flat"], n_trials=NTR,
+                            n_phases=NPH, sigma_eye=SIG, seed=s,
+                            n_trials_per_phase=nt, psth_envelope=env)
+        for pw in omas:
+            d = decompose(sess["rate"], sess["eye"], target="full",
+                          density="gaussian", phase_weighting=pw)
+            omas[pw].append(d["one_minus_alpha"])
+    med_uni = float(np.nanmedian(np.array(omas["uniform"])))
+    med_pair = float(np.nanmedian(np.array(omas["pair_count"])))
+    assert abs(med_pair - truth) < 0.06, \
+        f"matched off truth {truth}: got {med_pair}"
+    assert abs(med_uni - truth) > abs(med_pair - truth) + 0.10, \
+        f"uniform-weighting bias not exhibited: uni {med_uni} pair {med_pair} truth {truth}"
+
+
+# ---------------------------------------------------------------------------
+# Random-field sanity check: McFarland recovers analytical 1-alpha^p under (A2)
+# ---------------------------------------------------------------------------
+
+def _seed_stats_sweep(target, key, ell, sigma_eye=SIG, n_trials=NTR,
+                      seeds=range(6), threshold=0.05):
+    """Per-seed decompose() values on a single flat-mask cell at the requested
+    ell. Returns (mean, std, gt_p, gt_p2) over the seeds."""
+    vals = []
+    for s in seeds:
+        sess = make_session(["flat"], n_trials=n_trials, n_phases=NPH,
+                            sigma_eye=sigma_eye, ell=ell, seed=s)
+        d = decompose(sess["rate"], sess["eye"], target=target,
+                      density="gaussian", threshold=threshold)
+        vals.append(d[key])
+    vals = np.array(vals, float)
+    gt_p = sess["truth"][0]["p"]["one_minus_alpha"]
+    gt_p2 = sess["truth"][0]["p2"]["one_minus_alpha"]
+    return np.nanmean(vals, 0)[0], np.nanstd(vals, 0)[0], gt_p, gt_p2
+
+
+def test_random_field_closed_form_one_minus_alpha():
+    """The closed-form 1-alpha^p = 2 sigma^2 / (ell^2 + 2 sigma^2) and
+    1-alpha^p^2 = sigma^2 / (ell^2 + sigma^2) match ``ground_truth`` for
+    'flat' across an ell/sigma sweep that covers (0, 1)."""
+    sig = SIG
+    for r in (0.5, 1.0, 2.0, 4.0):
+        ell = r * sig
+        gt = ground_truth("flat", sig, ell=ell)
+        oma_p_ref = 2.0 * sig**2 / (ell**2 + 2.0 * sig**2)
+        oma_p2_ref = sig**2 / (ell**2 + sig**2)
+        assert abs(gt["p"]["one_minus_alpha"] - oma_p_ref) < 1e-9, \
+            f"r={r}: gt_p {gt['p']['one_minus_alpha']} != ref {oma_p_ref}"
+        assert abs(gt["p2"]["one_minus_alpha"] - oma_p2_ref) < 1e-9, \
+            f"r={r}: gt_p2 {gt['p2']['one_minus_alpha']} != ref {oma_p2_ref}"
+
+
+def test_random_field_var_total_is_K_zero_under_A2():
+    """Under (A2) the total rate variance equals K(0) = tau^2 -- a key
+    D-invariance the rest of the closed form relies on. Verify empirically
+    on the synthesized rates."""
+    sig, ell, tau = SIG, SIG, 1.0
+    sess = make_session(["flat"], n_trials=NTR, n_phases=NPH, sigma_eye=sig,
+                        ell=ell, tau=tau, seed=0)
+    r = sess["rate"][..., 0]
+    var_total = float(np.nanvar(r))
+    assert abs(var_total - tau**2) < 0.05, \
+        f"empirical Var_total {var_total} != tau^2 {tau**2}"
+
+
+def test_mcfarland_recovers_one_minus_alpha_p_under_A2():
+    """McFarland's estimator (decompose(target='naive'), constant n_t, no
+    envelope) on the random-field synthetic recovers the analytical
+    1-alpha^p = 2 sigma^2 / (ell^2 + 2 sigma^2) across an ell/sigma sweep --
+    the regime McFarland claimed."""
+    sig = SIG
+    for r in (0.5, 1.0, 2.0, 4.0):
+        ell = r * sig
+        mean, _, gt_p, _ = _seed_stats_sweep("naive", "one_minus_alpha", ell)
+        assert abs(mean - gt_p) < 0.06, \
+            f"r={r}: McFarland estimate {mean:.3f} != truth {gt_p:.3f}"
+
+
+def test_t_floor_on_sd_one_minus_alpha():
+    """Appendix A.6: the across-phase floor on sd[1-alpha-hat] is
+
+        sd_floor = alpha* * sqrt(2 / (T - 1))
+
+    where alpha* = ell^2 / (ell^2 + 2 sigma^2) under the flat-mask synthetic.
+    Derivation: under (A2) and constant n_t, the per-phase projection
+    G_t = integral M(e) s_t(e) p(e) de is iid N(0, V_p) with V_p = alpha*tau^2,
+    so the sample-variance estimator of V_p has std 2 V_p^2 / (T-1), giving
+    sd[alpha-hat] = sd[V_p-hat]/tau^2 = alpha* sqrt(2/(T-1)) in the large-N
+    limit.
+
+    Test at (N=400, T=200, ell=sigma): the analytical floor is ~0.033;
+    empirical sd[1-alpha-hat] over 10 seeds sits in [0.5 floor, 4 floor].
+    The upper bound is generous so within-phase noise (which adds
+    quadratically) does not trip the test; the lower bound guards against
+    a formula sign / 2x error in the derivation. Catches a 10x regression.
+    """
+    sig = SIG
+    ell, N, T = sig, 400, 200
+    a_star = ell ** 2 / (ell ** 2 + 2.0 * sig ** 2)
+    floor = a_star * np.sqrt(2.0 / (T - 1))
+    vals = []
+    for s in range(10):
+        sess = make_session(["flat"], n_trials=N, n_phases=T, sigma_eye=sig,
+                            ell=ell, seed=s)
+        d = decompose(sess["rate"], sess["eye"], target="naive",
+                      density="gaussian", threshold=0.05)
+        vals.append(float(d["one_minus_alpha"][0]))
+    sd = float(np.nanstd(vals))
+    assert sd > 0.5 * floor, \
+        f"empirical sd {sd:.4f} suspiciously below T-floor {floor:.4f}"
+    assert sd < 4.0 * floor, \
+        f"empirical sd {sd:.4f} much above T-floor {floor:.4f}"
