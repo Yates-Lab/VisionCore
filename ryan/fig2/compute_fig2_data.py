@@ -241,8 +241,143 @@ def _load_or_compute_session_results(refresh=False):
 # Stage 2: derive per-window metrics
 # ---------------------------------------------------------------------------
 
-def _compute_metrics(session_results, windows_ms, windows_bins):
+def _metrics_one(sr, w_idx):
+    """Per-(window, session) contribution to the metrics dict for w_idx.
+    Returns None if the session has too few valid neurons in this window."""
+    if w_idx >= len(sr["results"]):
+        return None
+    res = sr["results"][w_idx]
+    mats = sr["mats"][w_idx]
+
+    Ctotal = mats["Total"]
+    Cpsth = mats["PSTH"]
+    Crate = mats["Intercept"]
+    Cfem = mats["FEM"]
+
+    CnoiseU = 0.5 * ((Ctotal - Cpsth) + (Ctotal - Cpsth).T)
+    CnoiseC = 0.5 * ((Ctotal - Crate) + (Ctotal - Crate).T)
+
+    erate = res["Erates"]
+    rate_hz_ds = sr["rate_hz"]
+    psth_r2_ds = sr["psth_r2"]
+    valid = (
+        np.isfinite(erate)
+        & np.isfinite(rate_hz_ds)
+        & (rate_hz_ds > MIN_RATE_HZ)
+        & np.isfinite(psth_r2_ds)
+        & (psth_r2_ds > MIN_PSTH_R2)
+        & (np.diag(Ctotal) > MIN_VAR)
+        & np.isfinite(np.diag(Crate))
+        & np.isfinite(np.diag(Cpsth))
+    )
+    if valid.sum() < 3:
+        return None
+
+    diag_psth = np.diag(Cpsth)[valid]
+    diag_rate = np.diag(Crate)[valid]
+    alpha = diag_psth / diag_rate
+
+    ff_u = np.diag(CnoiseU)[valid] / erate[valid]
+    ff_c = np.diag(CnoiseC)[valid] / erate[valid]
+
+    NoiseCorrU = cov_to_corr(
+        project_to_psd(CnoiseU[np.ix_(valid, valid)]), min_var=MIN_VAR
+    )
+    NoiseCorrC = cov_to_corr(
+        project_to_psd(CnoiseC[np.ix_(valid, valid)]), min_var=MIN_VAR
+    )
+    rho_u_full = get_upper_triangle(NoiseCorrU)
+    rho_c_full = get_upper_triangle(NoiseCorrC)
+    pair_ok = np.isfinite(rho_u_full) & np.isfinite(rho_c_full)
+    rho_u = rho_u_full[pair_ok]
+    rho_c = rho_c_full[pair_ok]
+
+    if len(rho_u) > 0:
+        rho_u_meanz = fisher_z_mean(rho_u, eps=EPS_RHO)
+        rho_c_meanz = fisher_z_mean(rho_c, eps=EPS_RHO)
+        rho_delta_meanz = rho_c_meanz - rho_u_meanz
+    else:
+        rho_u_meanz = rho_c_meanz = rho_delta_meanz = np.nan
+
+    n_valid_ds = int(valid.sum())
+    shuff_alphas = []
+    ds_shuff_var_c = []
+    shuff_rho_c_meanz_list, shuff_rho_delta_meanz_list = [], []
+    shuff_rho_subject_list = []
+    if "Shuffled_Intercepts" in mats and len(mats["Shuffled_Intercepts"]) > 0:
+        for Crate_shuf in mats["Shuffled_Intercepts"]:
+            diag_rate_shuf = np.diag(Crate_shuf)[valid]
+            alpha_shuf = diag_psth / diag_rate_shuf
+            shuff_alphas.append(1 - alpha_shuf)
+
+            CnoiseC_shuf = Ctotal - Crate_shuf
+            CnoiseC_shuf = 0.5 * (CnoiseC_shuf + CnoiseC_shuf.T)
+            ds_shuff_var_c.append(np.diag(CnoiseC_shuf)[valid])
+            NC_shuf = cov_to_corr(
+                project_to_psd(CnoiseC_shuf[np.ix_(valid, valid)]),
+                min_var=MIN_VAR,
+            )
+            rho_c_shuf = get_upper_triangle(NC_shuf)
+            ok = np.isfinite(rho_c_shuf) & pair_ok
+            if ok.sum() > 0:
+                shuff_rho_c_meanz_list.append(
+                    fisher_z_mean(rho_c_shuf[ok], eps=EPS_RHO)
+                )
+                shuff_rho_delta_meanz_list.append(
+                    fisher_z_mean(rho_c_shuf[ok], eps=EPS_RHO)
+                    - fisher_z_mean(rho_u_full[ok[:len(rho_u_full)]], eps=EPS_RHO)
+                )
+                shuff_rho_subject_list.append(sr["subject"])
+
+    return dict(
+        subject=sr["subject"],
+        session=sr["session"],
+        n_valid=n_valid_ds,
+        alpha=alpha,
+        ff_uncorr=ff_u,
+        ff_corr=ff_c,
+        erate=erate[valid],
+        rho_uncorr=rho_u,
+        rho_corr=rho_c,
+        rho_u_meanz=rho_u_meanz,
+        rho_c_meanz=rho_c_meanz,
+        rho_delta_meanz=rho_delta_meanz,
+        Ctotal=Ctotal[np.ix_(valid, valid)],
+        Cpsth=Cpsth[np.ix_(valid, valid)],
+        Crate=Crate[np.ix_(valid, valid)],
+        CnoiseU=CnoiseU[np.ix_(valid, valid)],
+        CnoiseC=CnoiseC[np.ix_(valid, valid)],
+        Cfem=Cfem[np.ix_(valid, valid)],
+        shuff_alphas=shuff_alphas,
+        ds_shuff_var_c=np.asarray(ds_shuff_var_c) if ds_shuff_var_c else None,
+        shuff_rho_c_meanz=shuff_rho_c_meanz_list,
+        shuff_rho_delta_meanz=shuff_rho_delta_meanz_list,
+        shuff_rho_subject=shuff_rho_subject_list,
+    )
+
+
+def _compute_metrics(session_results, windows_ms, windows_bins, n_jobs=-1):
+    """Parallelized across (window, session) pairs.
+
+    The original loop body was pure numpy and per-session-independent — the
+    only cross-session step is final concatenation, which we do after the
+    parallel fan-out below. joblib preserves input order, so session order is
+    preserved exactly.
+    """
+    from joblib import Parallel, delayed
+
     n_windows = len(windows_ms)
+    tasks = [(w_idx, sr_i) for w_idx in range(n_windows)
+             for sr_i in range(len(session_results))]
+    flat = Parallel(n_jobs=n_jobs, prefer="threads")(
+        delayed(_metrics_one)(session_results[sr_i], w_idx)
+        for (w_idx, sr_i) in tasks
+    )
+
+    by_w = [[] for _ in range(n_windows)]
+    for (w_idx, _), r in zip(tasks, flat):
+        by_w[w_idx].append(r)
+
     metrics = []
     for w_idx in range(n_windows):
         all_alpha, all_ff_uncorr, all_ff_corr, all_erate = [], [], [], []
@@ -255,124 +390,41 @@ def _compute_metrics(session_results, windows_ms, windows_bins):
         shuff_rho_delta_meanz, shuff_rho_c_meanz, shuff_rho_subject = [], [], []
         subject_by_ds, subject_per_neuron, subject_per_pair = [], [], []
         session_per_neuron = []
-        # Per-session blocks of shuffle-null corrected noise variance, used to
-        # build a pooled [N_neurons, S] matrix for the Fano-slope shuffle null.
         shuff_var_c_blocks, shuff_var_c_nvalid = [], []
 
-        for sr in session_results:
-            if w_idx >= len(sr["results"]):
+        for r in by_w[w_idx]:
+            if r is None:
                 continue
-            res = sr["results"][w_idx]
-            mats = sr["mats"][w_idx]
+            subject_by_ds.append(r["subject"])
+            all_alpha.append(r["alpha"])
+            subject_per_neuron.extend([r["subject"]] * r["n_valid"])
+            session_per_neuron.extend([r["session"]] * r["n_valid"])
+            all_ff_uncorr.append(r["ff_uncorr"])
+            all_ff_corr.append(r["ff_corr"])
+            all_erate.append(r["erate"])
+            all_rho_uncorr.append(r["rho_uncorr"])
+            all_rho_corr.append(r["rho_corr"])
+            subject_per_pair.extend([r["subject"]] * len(r["rho_uncorr"]))
 
-            Ctotal = mats["Total"]
-            Cpsth = mats["PSTH"]
-            Crate = mats["Intercept"]
-            Cfem = mats["FEM"]
+            if len(r["rho_uncorr"]) > 0:
+                rho_u_meanz_by_ds.append(r["rho_u_meanz"])
+                rho_c_meanz_by_ds.append(r["rho_c_meanz"])
+                rho_delta_meanz_by_ds.append(r["rho_delta_meanz"])
 
-            CnoiseU = 0.5 * ((Ctotal - Cpsth) + (Ctotal - Cpsth).T)
-            CnoiseC = 0.5 * ((Ctotal - Crate) + (Ctotal - Crate).T)
+            all_Ctotal.append(r["Ctotal"])
+            all_Cpsth.append(r["Cpsth"])
+            all_Crate.append(r["Crate"])
+            all_CnoiseU.append(r["CnoiseU"])
+            all_CnoiseC.append(r["CnoiseC"])
+            all_Cfem.append(r["Cfem"])
 
-            erate = res["Erates"]
-            rate_hz_ds = sr["rate_hz"]
-            psth_r2_ds = sr["psth_r2"]
-            valid = (
-                np.isfinite(erate)
-                & np.isfinite(rate_hz_ds)
-                & (rate_hz_ds > MIN_RATE_HZ)
-                & np.isfinite(psth_r2_ds)
-                & (psth_r2_ds > MIN_PSTH_R2)
-                & (np.diag(Ctotal) > MIN_VAR)
-                & np.isfinite(np.diag(Crate))
-                & np.isfinite(np.diag(Cpsth))
-            )
-            if valid.sum() < 3:
-                continue
+            shuff_alphas.extend(r["shuff_alphas"])
+            shuff_rho_c_meanz.extend(r["shuff_rho_c_meanz"])
+            shuff_rho_delta_meanz.extend(r["shuff_rho_delta_meanz"])
+            shuff_rho_subject.extend(r["shuff_rho_subject"])
 
-            subject_by_ds.append(sr["subject"])
-
-            diag_psth = np.diag(Cpsth)[valid]
-            diag_rate = np.diag(Crate)[valid]
-            alpha = diag_psth / diag_rate
-            all_alpha.append(alpha)
-            subject_per_neuron.extend([sr["subject"]] * valid.sum())
-            session_per_neuron.extend([sr["session"]] * valid.sum())
-
-            ff_u = np.diag(CnoiseU)[valid] / erate[valid]
-            ff_c = np.diag(CnoiseC)[valid] / erate[valid]
-            all_ff_uncorr.append(ff_u)
-            all_ff_corr.append(ff_c)
-            all_erate.append(erate[valid])
-
-            NoiseCorrU = cov_to_corr(
-                project_to_psd(CnoiseU[np.ix_(valid, valid)]), min_var=MIN_VAR
-            )
-            NoiseCorrC = cov_to_corr(
-                project_to_psd(CnoiseC[np.ix_(valid, valid)]), min_var=MIN_VAR
-            )
-            rho_u = get_upper_triangle(NoiseCorrU)
-            rho_c = get_upper_triangle(NoiseCorrC)
-
-            pair_ok = np.isfinite(rho_u) & np.isfinite(rho_c)
-            rho_u = rho_u[pair_ok]
-            rho_c = rho_c[pair_ok]
-
-            all_rho_uncorr.append(rho_u)
-            all_rho_corr.append(rho_c)
-            subject_per_pair.extend([sr["subject"]] * len(rho_u))
-
-            if len(rho_u) > 0:
-                rho_u_meanz_by_ds.append(fisher_z_mean(rho_u, eps=EPS_RHO))
-                rho_c_meanz_by_ds.append(fisher_z_mean(rho_c, eps=EPS_RHO))
-                rho_delta_meanz_by_ds.append(
-                    fisher_z_mean(rho_c, eps=EPS_RHO)
-                    - fisher_z_mean(rho_u, eps=EPS_RHO)
-                )
-
-            all_Ctotal.append(Ctotal[np.ix_(valid, valid)])
-            all_Cpsth.append(Cpsth[np.ix_(valid, valid)])
-            all_Crate.append(Crate[np.ix_(valid, valid)])
-            all_CnoiseU.append(CnoiseU[np.ix_(valid, valid)])
-            all_CnoiseC.append(CnoiseC[np.ix_(valid, valid)])
-            all_Cfem.append(Cfem[np.ix_(valid, valid)])
-
-            n_valid_ds = int(valid.sum())
-            ds_shuff_var_c = []  # one entry per shuffle: corrected var per valid neuron
-            if "Shuffled_Intercepts" in mats and len(mats["Shuffled_Intercepts"]) > 0:
-                for Crate_shuf in mats["Shuffled_Intercepts"]:
-                    diag_rate_shuf = np.diag(Crate_shuf)[valid]
-                    alpha_shuf = diag_psth / diag_rate_shuf
-                    shuff_alphas.append(1 - alpha_shuf)
-
-                    CnoiseC_shuf = Ctotal - Crate_shuf
-                    CnoiseC_shuf = 0.5 * (CnoiseC_shuf + CnoiseC_shuf.T)
-                    # Shuffle-null corrected noise variance: the same FEM correction
-                    # (Total - Intercept), but with eye positions shuffled so the
-                    # intercept covariance carries no real eye-movement structure.
-                    # This is the variance the correction strips off by chance.
-                    ds_shuff_var_c.append(np.diag(CnoiseC_shuf)[valid])
-                    NC_shuf = cov_to_corr(
-                        project_to_psd(CnoiseC_shuf[np.ix_(valid, valid)]),
-                        min_var=MIN_VAR,
-                    )
-                    rho_c_shuf = get_upper_triangle(NC_shuf)
-                    ok = np.isfinite(rho_c_shuf) & pair_ok
-                    if ok.sum() > 0:
-                        shuff_rho_c_meanz.append(
-                            fisher_z_mean(rho_c_shuf[ok], eps=EPS_RHO)
-                        )
-                        shuff_rho_delta_meanz.append(
-                            fisher_z_mean(rho_c_shuf[ok], eps=EPS_RHO)
-                            - fisher_z_mean(rho_u[ok[:len(rho_u)]], eps=EPS_RHO)
-                        )
-                        shuff_rho_subject.append(sr["subject"])
-
-            # Stash this session's shuffle block as [S, n_valid] (or a None marker
-            # if shuffles are missing), keeping neuron order aligned with `erate`.
-            shuff_var_c_blocks.append(
-                np.asarray(ds_shuff_var_c) if ds_shuff_var_c else None
-            )
-            shuff_var_c_nvalid.append(n_valid_ds)
+            shuff_var_c_blocks.append(r["ds_shuff_var_c"])
+            shuff_var_c_nvalid.append(r["n_valid"])
 
         # Pool shuffle-null corrected variances across sessions into [N_total, S_min].
         # Sessions are truncated to the smallest shuffle count so each column b is one
@@ -507,26 +559,61 @@ def _clustered_slope_bootstrap(erate, var_u, var_c, sessions, nboot=5000, seed=0
     Returns dict with 95% CIs for the uncorrected slope, corrected slope, and
     their difference (uncorrected - corrected), plus a one-sided bootstrap p for
     H0: corrected slope >= uncorrected slope (i.e. no FEM-driven inflation).
+
+    Vectorized: per-session sufficient statistics (sum e*v and sum e^2) are
+    precomputed, then bootstrap draws are gathered+summed in a single matrix
+    op. Equivalent to the per-iteration Python loop but ~100x faster.
     """
+    erate = np.asarray(erate, dtype=float)
+    var_u = np.asarray(var_u, dtype=float)
+    var_c = np.asarray(var_c, dtype=float)
     sessions = np.asarray(sessions)
     uniq = np.unique(sessions)
     rng = np.random.default_rng(seed)
     n = len(erate)
-    su = np.full(nboot, np.nan)
-    sc = np.full(nboot, np.nan)
 
     if uniq.size >= 2:
-        sess_idx = {s: np.where(sessions == s)[0] for s in uniq}
-        for b in range(nboot):
-            draw = rng.choice(uniq.size, size=uniq.size, replace=True)
-            idx = np.concatenate([sess_idx[uniq[d]] for d in draw])
-            su[b] = _slope_through_origin(erate[idx], var_u[idx])
-            sc[b] = _slope_through_origin(erate[idx], var_c[idx])
+        # Sufficient statistics per session: slope = sum(e*v) / sum(e^2). The
+        # cluster bootstrap concatenates whole sessions, so a session draw is
+        # just a sum over the per-session sufficient statistics.
+        K = uniq.size
+        sum_ee = np.zeros(K)
+        sum_eu = np.zeros(K)
+        sum_ec = np.zeros(K)
+        for i, s in enumerate(uniq):
+            m = sessions == s
+            e = erate[m]; vu = var_u[m]; vc = var_c[m]
+            ok = np.isfinite(e) & np.isfinite(vu) & np.isfinite(vc)
+            e, vu, vc = e[ok], vu[ok], vc[ok]
+            sum_ee[i] = np.sum(e * e)
+            sum_eu[i] = np.sum(e * vu)
+            sum_ec[i] = np.sum(e * vc)
+
+        # draws: [nboot, K] session indices, with replacement
+        draws = rng.integers(0, K, size=(nboot, K))
+        D_ee = sum_ee[draws].sum(axis=1)
+        D_eu = sum_eu[draws].sum(axis=1)
+        D_ec = sum_ec[draws].sum(axis=1)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            su = np.where(D_ee > 0, D_eu / D_ee, np.nan)
+            sc = np.where(D_ee > 0, D_ec / D_ee, np.nan)
     else:
-        for b in range(nboot):
-            idx = rng.integers(0, n, size=n)
-            su[b] = _slope_through_origin(erate[idx], var_u[idx])
-            sc[b] = _slope_through_origin(erate[idx], var_c[idx])
+        # Neuron-level bootstrap (single-session fallback). Same vectorized
+        # gather pattern.
+        ok = np.isfinite(erate) & np.isfinite(var_u) & np.isfinite(var_c)
+        e_v = erate[ok]; vu_v = var_u[ok]; vc_v = var_c[ok]
+        if e_v.size == 0:
+            su = np.full(nboot, np.nan)
+            sc = np.full(nboot, np.nan)
+        else:
+            idx = rng.integers(0, e_v.size, size=(nboot, e_v.size))
+            E = e_v[idx]
+            D_ee = np.sum(E * E, axis=1)
+            D_eu = np.sum(E * vu_v[idx], axis=1)
+            D_ec = np.sum(E * vc_v[idx], axis=1)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                su = np.where(D_ee > 0, D_eu / D_ee, np.nan)
+                sc = np.where(D_ee > 0, D_ec / D_ee, np.nan)
 
     diff = su - sc
 
@@ -701,71 +788,128 @@ def _compute_nc_stats(metrics, windows_ms):
     return nc_stats
 
 
-def _compute_subspace(session_results, session_names, subjects):
+def _subspace_one_session(sr, session_name, subject):
+    """Pure per-session subspace computation. Returns None if the session
+    has too few valid neurons to participate in panel G."""
     w_idx = SUBSPACE_WINDOW_IDX
+    if w_idx >= len(sr["mats"]):
+        return None
+    mats = sr["mats"][w_idx]
+    Cpsth = mats["PSTH"]
+    Crate = mats["Intercept"]
+    Ctotal = mats["Total"]
+    Cfem = Crate - Cpsth
+
+    erate = sr["results"][w_idx]["Erates"]
+    rate_hz_ds = sr["rate_hz"]
+    psth_r2_ds = sr["psth_r2"]
+    valid = (
+        np.isfinite(erate)
+        & np.isfinite(rate_hz_ds)
+        & (rate_hz_ds > MIN_RATE_HZ)
+        & np.isfinite(psth_r2_ds)
+        & (psth_r2_ds > MIN_PSTH_R2)
+        & (np.diag(Ctotal) > MIN_VAR)
+        & np.isfinite(np.diag(Crate))
+        & np.isfinite(np.diag(Cpsth))
+    )
+    if valid.sum() < SUBSPACE_K + 1:
+        return None
+
+    Cpsth_v = Cpsth[np.ix_(valid, valid)]
+    Cfem_v = Cfem[np.ix_(valid, valid)]
+    Ctotal_v = Ctotal[np.ix_(valid, valid)]
+
+    Cpsth_psd = project_to_psd(Cpsth_v)
+    Cfem_psd = project_to_psd(Cfem_v)
+
+    w_psth, V_psth = np.linalg.eigh(Cpsth_psd)
+    w_fem, V_fem = np.linalg.eigh(Cfem_psd)
+    w_psth, V_psth = w_psth[::-1], V_psth[:, ::-1]
+    w_fem, V_fem = w_fem[::-1], V_fem[:, ::-1]
+
+    k = min(SUBSPACE_K, int(valid.sum()) - 1)
+    U_psth = V_psth[:, :k]
+    U_fem = V_fem[:, :k]
+    tr_total = np.trace(Ctotal_v)
+
+    # Shuffle null on Cfem only: same Cpsth (and its subspace) as real, but
+    # FEM rebuilt from eye-shuffled Intercepts.
+    null_x, null_y, null_ok, null_ok1 = [], [], [], []
+    shuff_intercepts = mats.get("Shuffled_Intercepts", []) or []
+    for Crate_shuf in shuff_intercepts:
+        Crate_shuf = np.asarray(Crate_shuf, dtype=np.float64)
+        Cfem_shuf = Crate_shuf[np.ix_(valid, valid)] - Cpsth_v
+        Cfem_shuf_psd = project_to_psd(Cfem_shuf)
+        w_shuf, V_shuf = np.linalg.eigh(Cfem_shuf_psd)
+        V_shuf = V_shuf[:, ::-1]
+        U_fem_shuf = V_shuf[:, :k]
+        null_x.append(directional_variance_capture(Cpsth_psd, U_fem_shuf))
+        null_y.append(directional_variance_capture(Cfem_shuf_psd, U_psth))
+        null_ok.append(symmetric_subspace_overlap(U_psth, U_fem_shuf))
+        null_ok1.append(symmetric_subspace_overlap(V_psth[:, :1], V_shuf[:, :1]))
+
+    return dict(
+        session_name=session_name,
+        subject=subject,
+        pr_psth=participation_ratio(Cpsth_psd),
+        pr_fem=participation_ratio(Cfem_psd),
+        overlap_k=symmetric_subspace_overlap(U_psth, U_fem),
+        overlap_k1=symmetric_subspace_overlap(V_psth[:, :1], V_fem[:, :1]),
+        var_p_given_f=directional_variance_capture(Cpsth_psd, U_fem),
+        var_f_given_p=directional_variance_capture(Cfem_psd, U_psth),
+        spectrum_psth=w_psth / tr_total,
+        spectrum_fem=w_fem / tr_total,
+        null_var_p_given_f=null_x,
+        null_var_f_given_p=null_y,
+        null_overlap_k=null_ok,
+        null_overlap_k1=null_ok1,
+    )
+
+
+def _compute_subspace(session_results, session_names, subjects, n_jobs=-1):
+    """Per-session work runs in parallel across CPU cores (joblib).
+
+    Stage 2 only — pure numpy, no torch/CUDA, safe to fan out.
+    """
+    from joblib import Parallel, delayed
+
+    per_session = Parallel(n_jobs=n_jobs, prefer="threads")(
+        delayed(_subspace_one_session)(sr, session_names[i], subjects[i])
+        for i, sr in enumerate(session_results)
+    )
+
     sub_names, sub_subjects = [], []
     pr_fem_list, pr_psth_list = [], []
     overlap_k1_list, overlap_k_list = [], []
     var_p_given_f, var_f_given_p = [], []
     spectra_psth, spectra_fem = [], []
+    null_var_p_given_f, null_var_f_given_p = [], []
+    null_overlap_k, null_overlap_k1 = [], []
+    null_session_idx, null_subjects = [], []
 
-    for ds_idx, sr in enumerate(session_results):
-        if w_idx >= len(sr["mats"]):
+    for r in per_session:
+        if r is None:
             continue
-        mats = sr["mats"][w_idx]
-        Cpsth = mats["PSTH"]
-        Crate = mats["Intercept"]
-        Ctotal = mats["Total"]
-        Cfem = Crate - Cpsth
+        sub_names.append(r["session_name"])
+        sub_subjects.append(r["subject"])
+        pr_psth_list.append(r["pr_psth"])
+        pr_fem_list.append(r["pr_fem"])
+        overlap_k_list.append(r["overlap_k"])
+        overlap_k1_list.append(r["overlap_k1"])
+        var_p_given_f.append(r["var_p_given_f"])
+        var_f_given_p.append(r["var_f_given_p"])
+        spectra_psth.append(r["spectrum_psth"])
+        spectra_fem.append(r["spectrum_fem"])
 
-        erate = sr["results"][w_idx]["Erates"]
-        rate_hz_ds = sr["rate_hz"]
-        psth_r2_ds = sr["psth_r2"]
-        valid = (
-            np.isfinite(erate)
-            & np.isfinite(rate_hz_ds)
-            & (rate_hz_ds > MIN_RATE_HZ)
-            & np.isfinite(psth_r2_ds)
-            & (psth_r2_ds > MIN_PSTH_R2)
-            & (np.diag(Ctotal) > MIN_VAR)
-            & np.isfinite(np.diag(Crate))
-            & np.isfinite(np.diag(Cpsth))
-        )
-        if valid.sum() < SUBSPACE_K + 1:
-            continue
-
-        Cpsth_v = Cpsth[np.ix_(valid, valid)]
-        Cfem_v = Cfem[np.ix_(valid, valid)]
-        Ctotal_v = Ctotal[np.ix_(valid, valid)]
-
-        Cpsth_psd = project_to_psd(Cpsth_v)
-        Cfem_psd = project_to_psd(Cfem_v)
-
-        w_psth, V_psth = np.linalg.eigh(Cpsth_psd)
-        w_fem, V_fem = np.linalg.eigh(Cfem_psd)
-        w_psth, V_psth = w_psth[::-1], V_psth[:, ::-1]
-        w_fem, V_fem = w_fem[::-1], V_fem[:, ::-1]
-
-        pr_psth_list.append(participation_ratio(Cpsth_psd))
-        pr_fem_list.append(participation_ratio(Cfem_psd))
-
-        k = min(SUBSPACE_K, valid.sum() - 1)
-        U_psth = V_psth[:, :k]
-        U_fem = V_fem[:, :k]
-        overlap_k_list.append(symmetric_subspace_overlap(U_psth, U_fem))
-        overlap_k1_list.append(
-            symmetric_subspace_overlap(V_psth[:, :1], V_fem[:, :1])
-        )
-
-        var_p_given_f.append(directional_variance_capture(Cpsth_psd, U_fem))
-        var_f_given_p.append(directional_variance_capture(Cfem_psd, U_psth))
-
-        tr_total = np.trace(Ctotal_v)
-        spectra_psth.append(w_psth / tr_total)
-        spectra_fem.append(w_fem / tr_total)
-
-        sub_names.append(session_names[ds_idx])
-        sub_subjects.append(subjects[ds_idx])
+        sess_pos = len(sub_names) - 1
+        n_draws = len(r["null_var_p_given_f"])
+        null_var_p_given_f.extend(r["null_var_p_given_f"])
+        null_var_f_given_p.extend(r["null_var_f_given_p"])
+        null_overlap_k.extend(r["null_overlap_k"])
+        null_overlap_k1.extend(r["null_overlap_k1"])
+        null_session_idx.extend([sess_pos] * n_draws)
+        null_subjects.extend([r["subject"]] * n_draws)
 
     return dict(
         sub_names=sub_names,
@@ -778,6 +922,12 @@ def _compute_subspace(session_results, session_names, subjects):
         var_f_given_p=var_f_given_p,
         spectra_psth=spectra_psth,
         spectra_fem=spectra_fem,
+        null_var_p_given_f=null_var_p_given_f,
+        null_var_f_given_p=null_var_f_given_p,
+        null_overlap_k=null_overlap_k,
+        null_overlap_k1=null_overlap_k1,
+        null_session_idx=null_session_idx,
+        null_subjects=null_subjects,
     )
 
 
@@ -785,15 +935,20 @@ def _compute_subspace(session_results, session_names, subjects):
 # Public entry point
 # ---------------------------------------------------------------------------
 
-def load_fig2_data(refresh=False):
-    """Load the derived fig2 bundle, recomputing if needed."""
+def load_fig2_data(refresh=False, refresh_decomposition=False):
+    """Load the derived fig2 bundle, recomputing if needed.
+
+    ``refresh`` rebuilds only the derived bundle (stage 2). The expensive
+    per-session decomposition (stage 1, GPU) is preserved unless
+    ``refresh_decomposition=True``.
+    """
     refresh = refresh or REFRESH
     if DERIVED_CACHE.exists() and not refresh:
         print(f"Loading cached fig2 derived bundle from {DERIVED_CACHE}")
         with open(DERIVED_CACHE, "rb") as f:
             return dill.load(f)
 
-    session_results = _load_or_compute_session_results(refresh=refresh)
+    session_results = _load_or_compute_session_results(refresh=refresh_decomposition)
 
     windows_ms = [r["window_ms"] for r in session_results[0]["results"]]
     windows_bins = [r["window_bins"] for r in session_results[0]["results"]]
@@ -854,6 +1009,7 @@ if __name__ == "__main__":
                    help="Also drop decomposition cache and rerun raw decomposition.")
     args, _ = p.parse_known_args()
 
-    if args.recompute_decomposition and DECOMP_CACHE.exists():
-        DECOMP_CACHE.unlink()
-    load_fig2_data(refresh=args.refresh or args.recompute_decomposition)
+    load_fig2_data(
+        refresh=args.refresh or args.recompute_decomposition,
+        refresh_decomposition=args.recompute_decomposition,
+    )

@@ -27,8 +27,8 @@ from generate_fig3g import plot_panel_g
 def compose(refresh=False):
     data = load_fig2_data(refresh=refresh)
 
-    fig = plt.figure(figsize=(14, 12))
-    gs = GridSpec(3, 3, height_ratios=[1.0, 1.0, 1.0], hspace=0.35, wspace=0.30,
+    fig = plt.figure(figsize=(14, 15))
+    gs = GridSpec(3, 3, height_ratios=[2.0, 1.0, 1.0], hspace=0.35, wspace=0.30,
                   figure=fig)
 
     # --- Panel A: top row, equation + 4 matrices ---
