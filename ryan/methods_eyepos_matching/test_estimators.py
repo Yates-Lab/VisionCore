@@ -254,6 +254,89 @@ def test_pair_count_and_uniform_directions_both_recover_truth_under_variable_nt(
         f"uniform off truth: got {m_uni}, want {truth}"
 
 
+def test_trial_count_targets_same_population_as_other_directions():
+    """Under constant n_t the three time_bin_weighting directions
+    (pair_count, uniform, trial_count) target the SAME population
+    1-alpha^p (§A.5 invariance), so their mean across seeds agrees within
+    sampling noise.
+
+    The bin-weight ratios are pair_count : uniform : trial_count
+    = n_t(n_t-1)/2 : 1 : n_t. Under constant n_t each is constant across
+    bins for the all-pair and per-sample second moments and they collapse
+    exactly there. For the close-pair Crate, however, the actual close-pair
+    count m_t fluctuates bin-to-bin even at constant n_t, so the three
+    branches reweight bins differently and differ at the ~1% level on a
+    single seed -- the §A.4 "no-op under constant n_t" claim is a
+    population statement (expected m_t identical across bins), not an
+    exact-numerics one. Across seeds the means must agree to seed-SEM, and
+    each must match the analytical 1-alpha^p.
+    """
+    kinds = ["flat", "central", "linear"]
+    truth = None
+    pair_vals, uni_vals, trial_vals = [], [], []
+    for s in range(6):
+        sess = make_session(kinds, n_trials=NTR, n_time_bins=NPH,
+                            sigma_eye=SIG, seed=s)
+        if truth is None:
+            truth = np.array([sess["truth"][c]["p"]["one_minus_alpha"]
+                              for c in range(len(kinds))])
+        d_pair = decompose(sess["rate"], sess["eye"], target="full",
+                           density="gaussian",
+                           time_bin_weighting="pair_count")
+        d_uni = decompose(sess["rate"], sess["eye"], target="full",
+                          density="gaussian",
+                          time_bin_weighting="uniform")
+        d_trial = decompose(sess["rate"], sess["eye"], target="full",
+                            density="gaussian",
+                            time_bin_weighting="trial_count")
+        pair_vals.append(d_pair["one_minus_alpha"])
+        uni_vals.append(d_uni["one_minus_alpha"])
+        trial_vals.append(d_trial["one_minus_alpha"])
+    m_pair = np.nanmean(pair_vals, axis=0)
+    m_uni = np.nanmean(uni_vals, axis=0)
+    m_trial = np.nanmean(trial_vals, axis=0)
+    # All three target the analytical 1-alpha^p.
+    for name, m in [("pair_count", m_pair), ("uniform", m_uni),
+                    ("trial_count", m_trial)]:
+        err = np.abs(m - truth)
+        assert np.all(err < 0.05), \
+            f"{name} off truth (constant n_t): got {m}, want {truth}"
+    # The three means agree across seeds within their seed SEM (all three are
+    # consistent estimators of the same population quantity).
+    assert np.all(np.abs(m_pair - m_trial) < 0.03), \
+        f"pair_count vs trial_count seed-mean disagree: {m_pair} vs {m_trial}"
+    assert np.all(np.abs(m_uni - m_trial) < 0.03), \
+        f"uniform vs trial_count seed-mean disagree: {m_uni} vs {m_trial}"
+
+
+def test_trial_count_recovers_truth_under_variable_nt():
+    """Trial-count weighting recovers the closed-form 1-alpha^p under variable
+    n_t + envelope, like pair_count and uniform. The three directions all
+    target the same population quantity (§A.5 invariance) but differ in
+    finite-sample efficiency; trial_count's role is to MATCH the ANOVA's
+    effective bin weighting for the §A.8.6 panel-D comparison.
+    """
+    nt = _staircase_n_t(NPH, lo=15, hi=int(NTR * 0.6))
+    env = np.linspace(1.0, 0.05, NPH)
+    kinds = ["flat", "central", "linear"]
+    truth = None
+    oma_trial = []
+    for s in range(6):
+        sess = make_session(kinds, n_trials=NTR, n_time_bins=NPH, sigma_eye=SIG,
+                            seed=s, n_trials_per_time_bin=nt, psth_envelope=env)
+        if truth is None:
+            truth = np.array([sess["truth"][c]["p"]["one_minus_alpha"]
+                              for c in range(len(kinds))])
+        d_trial = decompose(sess["rate"], sess["eye"], target="full",
+                            density="gaussian",
+                            time_bin_weighting="trial_count")
+        oma_trial.append(d_trial["one_minus_alpha"])
+    m_trial = np.nanmean(oma_trial, 0)
+    err_trial = np.abs(m_trial - truth)
+    assert np.all(err_trial < 0.10), \
+        f"trial_count off truth: got {m_trial}, want {truth}"
+
+
 def test_estimator_diagonals_recover_closed_form_under_variable_nt():
     """All three estimators (Ctotal, Cpsth, Crate) on flat-mask diagonals
     recover the closed-form values for BOTH consistent w_t directions under

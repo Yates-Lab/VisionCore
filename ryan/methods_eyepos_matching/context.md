@@ -15,12 +15,13 @@ sentence the §4.5 reframe targets).
 
 ## Status
 
-- All 15 tests pass (`uv run --with pytest pytest test_estimators.py -q`,
+- All 21 tests pass (`uv run --with pytest pytest test_estimators.py -q`,
   ~10 min after the M6/split-half switch — the `direction2_is_more_stable`
   test runs at 12 seeds instead of 6 because M6's removal of bootstrap
   noise makes the residual stability gap small).
 - Writeup builds cleanly to a self-contained HTML (`pandoc writeup.md -s
-  --mathml --self-contained -o writeup.html`).
+  --mathml --self-contained -o writeup.html`); the ANOVA side note builds
+  with the same command swapping `writeup.md` for `note_anova.md`.
 - Extension 1 is **already in production** (`VisionCore/covariance.py`:
   `estimate_rate_covariance`, `bagged_split_half_psth_covariance` with
   `weighting='pair_count'`).
@@ -35,7 +36,7 @@ sentence the §4.5 reframe targets).
 |---|---|
 | `synthetic.py` | Unified rate-field generator + closed-form / MC ground truth. `make_trajectory_session` is the §4.6 multi-bin extension (centroid + per-bin drift). |
 | `estimators.py` | `decompose(target=…)` — single-bin §4.4 matched estimator. `decompose_trajectory(target=…)` — §4.6 multi-bin extension with RMS-trajectory close-pair filter and pooled-per-bin KDE reweighting. |
-| `test_estimators.py` | 19 tests: 11 single-bin Ext-2 + 3 sanity + Appendix §A.6 T-floor + 4 §4.6 trajectory-mode tests (flat-limit recovery, moderate-drift recovery, strong-drift bias, naive bias on central). |
+| `test_estimators.py` | 21 tests: 11 single-bin Ext-2 + 3 sanity + Appendix §A.6 T-floor + 4 §4.6 trajectory-mode tests + 2 trial_count direction tests (target / variable-$n_t$ truth recovery). |
 | `_style.py` | Shared matplotlib style + `figures/` save helper. |
 | `fig_model.py` | Visual schematic of the unified generative model components (eye dist, GP field, masks, envelope, resulting rate). Inserted at top of writeup §2.3. |
 | `fig_mechanism.py` | Geometric origin of p vs p² mismatch (Fig. 2). |
@@ -49,8 +50,13 @@ sentence the §4.5 reframe targets).
 | `generate_realdata.py` | Cache-only real-data driver (do NOT recompute). Single-bin close-pair filter (see §5.2 caveat re: §4.6). |
 | `realdata_results.pkl` | 397-cell cache; reused as-is by `fig_realdata.png` reference (now Fig. 6). |
 | `figures/` | All generated PNGs. |
-| `writeup.md` | Source. |
+| `writeup.md` | Main methods writeup source (Ext-1, Ext-2, multi-bin trajectory, consistency, M6 vs split-half). |
 | `writeup.html` | Build output (committed; pandoc --mathml --self-contained). |
+| `note_anova.md` | Side note: one-way ANOVA on known rates + fig4 panel D investigation. Tangential to main writeup. |
+| `note_anova.html` | Build output (committed; pandoc --mathml --self-contained). |
+| `fig_anova.py` | Synthetic validation for `note_anova.md` §5 (ANOVA recovers $1-\alpha^p$ across all four masks). |
+| `fig_panel_d_anova.py` | Real-data panel D: cell-side matched close-pair (naive / D1 pair / D1 trial) vs twin ANOVA. |
+| `fig_panel_d_closepair.py` | Real-data panel D: matched close-pair D1 on BOTH cells and twin. Figure 2 of `note_anova.md`. |
 
 ## Unified generative model
 
@@ -208,10 +214,10 @@ Run from this folder. Workspace `.venv` is at the v1-fovea repo root;
     # Generator self-check
     uv run python synthetic.py
 
-    # Tests (15 tests, ~7 minutes -- random field Cholesky per time bin)
+    # Tests (21 tests, ~7 minutes -- random field Cholesky per time bin)
     uv run --with pytest pytest test_estimators.py -q
 
-    # Figures
+    # Main writeup figures
     uv run python fig_model.py
     uv run python fig_mechanism.py
     uv run python fig_sanity_check.py
@@ -221,8 +227,14 @@ Run from this folder. Workspace `.venv` is at the v1-fovea repo root;
     uv run python fig_trajectory.py             # §4.6 multi-bin extension
     uv run python fig_consistency.py            # parallel sweep, cached
 
+    # ANOVA side note figures (note_anova.md)
+    uv run python fig_anova.py                  # Fig. 1 of note_anova.md
+    uv run python fig_panel_d_anova.py          # cell-side matching, ANOVA on twin
+    uv run python fig_panel_d_closepair.py      # Fig. 2 of note_anova.md
+
     # Writeup
-    pandoc writeup.md -s --mathml --self-contained -o writeup.html
+    pandoc writeup.md   -s --mathml --self-contained -o writeup.html
+    pandoc note_anova.md -s --mathml --self-contained -o note_anova.html
 
 ## External pointers
 

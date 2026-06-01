@@ -96,8 +96,14 @@ def _all_pairs_second_moment(S, E, T, phat, target,
 
     Combined with the across-bin scheme (identical to ``_close_pair_second_moment``):
 
-        'pair_count': pw_t = 1               -- pool pairs, average per pair.
-        'uniform'   : pw_t = 1/|P_t|         -- per-bin mean first, uniform across bins.
+        'pair_count' : pw_t = 1               -- pool pairs, average per pair (bin
+                                                 contributes ~n_t(n_t-1)/2).
+        'uniform'    : pw_t = 1/|P_t|         -- per-bin mean first, uniform across
+                                                 bins (bin contributes 1).
+        'trial_count': pw_t = n_t/|P_t|       -- per-bin mean, then weight by n_t
+                                                 across bins (bin contributes n_t).
+                                                 The ANOVA-matched direction; see
+                                                 §A.8.4.
 
     Computed efficiently per bin using the identity
 
@@ -144,6 +150,10 @@ def _all_pairs_second_moment(S, E, T, phat, target,
         elif time_bin_weighting == "uniform":
             num += pair_sum_t / n_pair_weight_t
             denom += 1.0
+        elif time_bin_weighting == "trial_count":
+            nt_for_bin = float(len(ix))
+            num += pair_sum_t / n_pair_weight_t * nt_for_bin
+            denom += nt_for_bin
         else:
             raise ValueError(f"unknown time_bin_weighting: {time_bin_weighting!r}")
 
@@ -189,6 +199,8 @@ def _split_half_psth_cov(S, T, sw, n_boot, seed, min_tpp,
         wph = nt * (nt - 1) / 2
     elif time_bin_weighting == "uniform":
         wph = np.ones_like(nt)
+    elif time_bin_weighting == "trial_count":
+        wph = nt
     else:
         raise ValueError(f"unknown time_bin_weighting: {time_bin_weighting!r}")
     wph = wph / wph.sum()
@@ -228,8 +240,13 @@ def _close_pair_second_moment(S, E, T, phat, target, threshold, weight_clip,
         products first, then uniform across bins; bin t contributes 1/T regardless
         of |P_t|. This is the literal reading of McFarland's nested bracket
         <<.>_{i≠j}>_t in Eq. M8.
+      time_bin_weighting == 'trial_count': pw_t = n_t/|P_t| -- per-bin mean,
+        then weight by n_t across bins; bin t contributes n_t, matching the
+        ANOVA's effective bin weighting (§A.8.4). Used to compare the matched
+        close-pair estimator against `rate_variance_components` on a digital
+        twin.
 
-    Under constant n_t the two time_bin_weighting choices coincide.
+    Under constant n_t the three time_bin_weighting choices coincide.
     """
     C = S.shape[1]
     Si_acc, Sj_acc, mid_acc, t_acc = [], [], [], []
@@ -265,6 +282,12 @@ def _close_pair_second_moment(S, E, T, phat, target, threshold, weight_clip,
         _, inv = np.unique(tpair, return_inverse=True)
         nP_t = np.bincount(inv)
         pw_t = 1.0 / nP_t[inv]
+    elif time_bin_weighting == "trial_count":
+        _, inv = np.unique(tpair, return_inverse=True)
+        nP_t = np.bincount(inv).astype(float)
+        nt_by_bin = {int(u): int((T == u).sum()) for u in np.unique(T)}
+        nt_per_pair = np.array([nt_by_bin[int(u)] for u in tpair], dtype=float)
+        pw_t = nt_per_pair / nP_t[inv]
     else:
         raise ValueError(f"unknown time_bin_weighting: {time_bin_weighting!r}")
 
@@ -306,9 +329,9 @@ def decompose(counts, eye, target="full", valid=None, threshold=0.05,
         upweighted by 1/p, so capping trades the resulting tail variance for bias.
         This unbounded-weight cost is precisely why target='central' (bounded
         weights, prop to p) is the more stable choice.
-    time_bin_weighting : {'pair_count', 'uniform'}
+    time_bin_weighting : {'pair_count', 'uniform', 'trial_count'}
         Across-bin combination used by ALL three estimators (Ctotal, Cpsth,
-        Crate's close-pair MM and Ybar^2 subtractor). Both are consistent
+        Crate's close-pair MM and Ybar^2 subtractor). All three are consistent
         directions for the LOTC under variable n_t (see writeup §3.2):
           * 'pair_count' (default): bin t weighted ∝ n_t(n_t-1)/2 -- pool close
             pairs and average uniformly per pair; inverse-variance optimal on
@@ -317,7 +340,12 @@ def decompose(counts, eye, target="full", valid=None, threshold=0.05,
             pair products first, then uniform across bins; matches McFarland's
             literal nested-bracket reading of Eqs. M8/Eq.6 but pays a variance
             penalty under sharply variable n_t.
-        Under constant n_t the two coincide.
+          * 'trial_count': bin t weighted ∝ n_t -- per-bin mean, then weight by
+            trial count across bins; matches the ANOVA's effective bin weighting
+            (§A.8.4). Used when comparing the matched close-pair estimator
+            cell-by-cell against `VisionCore.covariance.rate_variance_components`
+            on a digital twin (the §A.8.6 panel-D figure).
+        Under constant n_t all three coincide.
     cpsth_method : {'mcfarland', 'split_half'}
         How to debias the PSTH covariance against same-time-bin observation
         noise (single-cell Poisson plus simultaneous cross-cell noise
@@ -373,6 +401,8 @@ def decompose(counts, eye, target="full", valid=None, threshold=0.05,
         pw_t = {t: max(nt_by_t[t] - 1, 0) / 2.0 for t in nt_by_t}
     elif time_bin_weighting == "uniform":
         pw_t = {t: (1.0 / nt_by_t[t]) if nt_by_t[t] > 0 else 0.0 for t in nt_by_t}
+    elif time_bin_weighting == "trial_count":
+        pw_t = {t: 1.0 for t in nt_by_t}                       # bin total = n_t
     else:
         raise ValueError(f"unknown time_bin_weighting: {time_bin_weighting!r}")
     time_bin_w = np.array([pw_t[t] for t in T], dtype=float)
@@ -584,6 +614,8 @@ def decompose_trajectory(counts, trajectories, T_idx, target="full",
     elif time_bin_weighting == "uniform":
         pw_t_by_T = {t: (1.0 / nt_by_T[t]) if nt_by_T[t] > 0 else 0.0
                      for t in nt_by_T}
+    elif time_bin_weighting == "trial_count":
+        pw_t_by_T = {t: 1.0 for t in nt_by_T}                  # bin total = n_t
     else:
         raise ValueError(f"unknown time_bin_weighting: {time_bin_weighting!r}")
     tb_w = np.array([pw_t_by_T[int(t)] for t in T], dtype=float)
@@ -634,10 +666,17 @@ def decompose_trajectory(counts, trajectories, T_idx, target="full",
             pw_q = np.ones(n_pairs)
         if time_bin_weighting == "pair_count":
             pw_tt = np.ones(n_pairs)
-        else:                                                        # uniform
+        elif time_bin_weighting == "uniform":
             _, inv = np.unique(tpair, return_inverse=True)
             nP_t = np.bincount(inv)
             pw_tt = 1.0 / nP_t[inv]
+        elif time_bin_weighting == "trial_count":
+            _, inv = np.unique(tpair, return_inverse=True)
+            nP_t = np.bincount(inv).astype(float)
+            nt_per_pair = np.array([nt_by_T[int(u)] for u in tpair], dtype=float)
+            pw_tt = nt_per_pair / nP_t[inv]
+        else:
+            raise ValueError(f"unknown time_bin_weighting: {time_bin_weighting!r}")
         pw = pw_q * pw_tt
         pw = pw / pw.sum()
         prod = (S_c[gi].T * pw) @ S_c[gj]
@@ -692,6 +731,10 @@ def _all_pairs_second_moment_with_weights(S, w_trial, T,
         elif time_bin_weighting == "uniform":
             num += pair_sum_t / n_pair_weight_t
             denom += 1.0
+        elif time_bin_weighting == "trial_count":
+            nt_for_bin = float(len(ix))
+            num += pair_sum_t / n_pair_weight_t * nt_for_bin
+            denom += nt_for_bin
         else:
             raise ValueError(f"unknown time_bin_weighting: {time_bin_weighting!r}")
     if denom <= 0:
