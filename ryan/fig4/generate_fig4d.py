@@ -1,15 +1,14 @@
-r"""Figure 4 panel D: does the digital twin recapitulate each cell's 1-alpha?
+r"""Figure 4 panel D: does the digital twin recapitulate the population's 1-alpha?
 
 Usage:
-    uv run ryan/fig4/generate_fig4d.py
+    uv run ryan/fig4/generate_fig4d.py [--recompute]
 
 Scientific question
 -------------------
-1-alpha is the fraction of a cell's total *rate* variance that is driven by
-fixational eye movements (FEM), as opposed to the stimulus-locked (PSTH)
-fraction alpha. It is measured empirically from the neural data in Figure 2.
-This panel asks whether the digital twin reproduces each cell's 1-alpha *in its
-own predictions* -- i.e. whether the model gets the proportion of
+1-alpha is the fraction of a cell's total *rate* variance driven by fixational
+eye movements (FEM), as opposed to the stimulus-locked (PSTH) fraction alpha.
+This panel asks whether the digital twin reproduces each cell's 1-alpha in its
+own predictions -- i.e. whether the model gets the proportion of
 eye-movement-driven variance right, not merely the mean response. The twin has
 no extraretinal channel for eye movements (the bottom-row ablation, panels
 H-J, shows zeroing the behavior input changes nothing), so any FEM-driven
@@ -17,179 +16,228 @@ variance it produces arrives through the *retinal* consequence of drift: the
 stimulus shifting on the retina. Matching 1-alpha is therefore a strong test of
 that retinal mechanism.
 
-The decomposition (Law of Total Variance)
------------------------------------------
-For one neuron, let the rate depend on stimulus phase t (time bin within the
-frozen RSVP sequence, shared across repeats) and the within-trial eye
-trajectory e. Conditioning the rate on phase t splits its variance into a
-stimulus-locked part and an eye-movement part:
+Equal-footing estimator (close-pair on both axes)
+-------------------------------------------------
+Both axes use the SAME estimator -- the empirical close-pair decomposition that
+figure 2 runs on real spikes (``pipeline_one_minus_alpha``, "estimator B"):
 
-    Var_{t,e}(r) =   Var_t( E_e[r | t] )   +   E_t( Var_e[r | t] )
-                   \_______ PSTH ________/     \_______ FEM ______/
-                          (= Cpsth)                  (= Cfem)
+  * x-axis (empirical 1-alpha): close-pair estimator on the observed spike
+    counts ``robs_used``.
+  * y-axis (model 1-alpha):     close-pair estimator on the model rates
+    ``rhat_used``, evaluated at each trial's actual eye trajectory.
 
-    alpha     = Cpsth / Crate            (stimulus-locked fraction)
-    1 - alpha = Cfem  / Crate            (FEM fraction)        Crate = Cpsth + Cfem
+Both run in the same fig4 trial frame, with the same per-(trial, bin) eye
+trajectory, validity mask, close-pair threshold (Delta_e < 0.05 deg) and
+min_trials_per_phase = 10. Putting model and neurons on one estimator isolates
+the *signal* difference (twin vs neuron) from the *estimator* difference.
 
-At a fixed stimulus phase the only thing varying across repeats is the eye, so
-the within-phase term is the FEM-driven variance.
+Why not the analytic ANOVA on model rates
+------------------------------------------
+The previous version of this panel plotted estimator A (all-samples one-way
+ANOVA, ``rate_variance_components``) on the model rates against fig2's published
+close-pair alpha on the neurons. That mixes two estimators across the axes: A
+integrates FEM over the *full* fixational eye distribution while the close-pair
+estimator weights it by the squared eye density p(e)^2 (close pairs concentrate
+where the eye dwells). On identical model rates the two estimators correlate
+only weakly and A compresses 1-alpha, so the ANOVA-vs-close-pair mismatch -- not
+a real model property -- manufactured the apparent "twin is more eye-sensitive
+than the neurons." On equal footing (close-pair on both axes) the twin
+reproduces the cells (see VisionCore/ryan/methods_eyepos_matching writeup A.8).
 
-Why the model needs none of the empirical machinery
-----------------------------------------------------
-For real neurons, spike counts S are *noisy* observations of r(t, e). Every
-heavy step in VisionCore.covariance exists to strip Poisson observation noise
-out of S so the latent rate variance can be recovered:
-  * the eye-distance binning + intercept fit extrapolate distinct-trial
-    cross-products to delta_e -> 0, giving the Poisson-free rate variance Crate
-    (fig2 uses intercept_mode='below_threshold', 0.05 deg);
-  * bagged_split_half_psth_covariance debiases Cpsth against the same noise.
-
-The digital twin is *deterministic*: given its inputs it emits the rate
-rhat[i, t] directly, with no observation noise, evaluated at each trial's actual
-eye trajectory. There is no Poisson term to remove, the eye-distance apparatus
-is unnecessary, and the decomposition collapses to a textbook one-way
-random-effects ANOVA of rhat grouped by stimulus phase t.
-
-Estimator (analytic random-effects ANOVA -- primary)
-----------------------------------------------------
-Group rhat by phase t; phase t has n_t valid trials, T kept phases,
-N = sum_t n_t. With phase mean rhat_bar(t) and grand mean rhat_bar:
-
-    SS_within  = sum_t sum_i (rhat[i,t] - rhat_bar(t))^2 ,   df = N - T
-    SS_between = sum_t n_t (rhat_bar(t) - rhat_bar)^2     ,   df = T - 1
-    MS_within  = SS_within / (N - T) ,   MS_between = SS_between / (T - 1)
-
-The mean squares have exact expectations (method of moments, no Gaussian
-assumption) E[MS_within] = sigma2_W, E[MS_between] = sigma2_W + n0 * sigma2_B
-with the unbalanced effective group size n0 = (N - sum_t n_t^2 / N) / (T - 1)
-(= n when balanced). Hence the unbiased components
-
-    sigma2_within (FEM)  = MS_within
-    sigma2_between (PSTH) = max((MS_between - MS_within) / n0, 0)
-    1 - alpha            = clip(sigma2_within / (sigma2_within + sigma2_between), 0, 1)
-
-Even with exact rates, MS_between must be debiased: with finite n_t the naive
-between-phase variance Var_t(rhat_bar(t)) is inflated by E_t[Var_e(r|t)/n_t]
-(each phase mean averages only n_t eye draws). The subtraction removes exactly
-that term; skipping it would deflate 1-alpha by an alpha-dependent amount --
-worst precisely for the FEM-dominated cells this panel is about.
-
-Why analytic over split-half, and the cross-check
---------------------------------------------------
-The empirical PSTH variance uses bagged split-half. Both estimators target the
-same sigma2_between, but:
-  * Analytic ANOVA  -- closed-form, deterministic (seed-free), uses all data
-    once (minimum-variance under balance/Gaussianity). Cleanest "proper" choice
-    now that we hold the true rates. Caveat: its exact unbiasedness assumes
-    balanced/homoscedastic groups; under unbalanced n_t with phase-varying
-    within-variance the MS_between - MS_within subtraction leaves a small
-    residual bias.
-  * Split-half     -- Monte-Carlo (seed-dependent), less efficient (each split
-    discards half the trials, recovered by bagging), but cancels the per-phase
-    sampling noise across *disjoint* halves and so is robust to that
-    heteroscedasticity. It is what the empirical side literally uses.
-We take analytic as primary and report split-half agreement (psth_variance_splithalf)
-as an assumption-light cross-check; large divergence would flag real imbalance.
-
-Conventions and invariances
----------------------------
-  * Convention vs empirical: the empirical side estimates Crate directly and
-    takes FEM as the residual Crate - Cpsth; here both components are estimated
-    directly and Crate is their sum. Both target the same population ratio.
-  * 1-alpha is exactly invariant to the upstream affine rescale rhat -> a*rhat+b
-    (rescale_rhat): a shift leaves variances unchanged, a scale multiplies both
-    components by a^2 and cancels in the ratio. So rescaled vs raw rhat agree.
-  * Window/units: empirical alpha is mats[0] (1-bin counting window, 1/120 s);
-    rhat_used is per-bin at the same dt, so windows match, and the dimensionless
-    ratio is unaffected by rate-vs-count units.
+Population line: total least squares
+------------------------------------
+Both axes are noisy estimates of the same latent 1-alpha produced by the same
+estimator, so their error variances are comparable. Ordinary least squares would
+attenuate the slope toward 0 (regression dilution from x-noise), biasing us
+*against* the "model tracks the population" claim. We therefore fit the
+population line by equal-variance total least squares (orthogonal regression);
+OLS is retained in the exported JSON for reference.
 
 Matching conditions
 -------------------
-Good cells (data['good'], ccmax > 0.85) with finite empirical alpha; per-neuron
-valid mask = (dfs_used != 0); phases grouped on the rhat_used time axis (the
-psth_inds alignment, same notion as the empirical T_idx); min_trials_per_phase
-= 10 to mirror the empirical min_trials_per_time; 1-alpha clipped to [0, 1] as
-on the empirical side. The empirical T_idx drops a short per-segment history
-prefix and uses fixation *segments* rather than psth-phase, so the two samplings
-are near-identical but not bit-identical -- the per-cell ratio absorbs this.
+Good cells (ccmax > CCMAX_THRESHOLD) with finite 1-alpha on both axes. The
+close-pair threshold (0.05 deg) and min_trials_per_phase (10) mirror the
+empirical fig2 settings. 1-alpha is clipped to [0, 1] on both sides.
 """
-import numpy as np
-import matplotlib.pyplot as plt
-from scipy.stats import spearmanr, pearsonr, linregress
+import argparse
+import json
 
-from VisionCore.covariance import rate_variance_components, psth_variance_splithalf
+import numpy as np
+import dill
+import matplotlib.pyplot as plt
+from scipy.stats import spearmanr, pearsonr, linregress, wilcoxon
+
+from VisionCore.covariance import pipeline_one_minus_alpha
 from _fig4_data import (
-    FIG_DIR, SUBJECTS, SUBJECT_COLORS,
-    configure_matplotlib, load_fig4_data,
+    FIG_DIR, STAT_DIR, CACHE_DIR, SUBJECTS, SUBJECT_COLORS, CCMAX_THRESHOLD,
+    configure_matplotlib, load_fig4_data, annotate_corr,
 )
 
+THRESHOLD = 0.05            # close-pair eye-distance threshold (deg), mirrors fig2
 MIN_TRIALS_PER_PHASE = 10   # mirror empirical min_trials_per_time
-SPLITHALF_N_BOOT = 50       # bags for the split-half cross-check
-SPLITHALF_SEED = 0
+RESULT_CACHE = CACHE_DIR / "fig4d_panel.pkl"
+STATS_PATH = STAT_DIR / "panel_d_one_minus_alpha.json"
 
 
-def compute_model_one_minus_alpha(data, min_trials_per_phase=MIN_TRIALS_PER_PHASE,
-                                  n_boot=SPLITHALF_N_BOOT, seed=SPLITHALF_SEED):
-    """Per-cell model 1-alpha (analytic) vs empirical 1-alpha, aligned by neuron.
+def compute_panel_d(data, threshold=THRESHOLD,
+                    min_trials_per_phase=MIN_TRIALS_PER_PHASE, device="cuda"):
+    """Per-cell close-pair 1-alpha on model rates and observed spikes, by neuron.
 
-    Iterates over good cells with finite empirical alpha, decomposes each cell's
-    cached per-trial model rate rhat_used via the random-effects ANOVA, and
-    pairs the result with the empirical 1-alpha = 1 - data['alpha']. Also returns
-    the split-half model 1-alpha (reusing the analytic within-component) as a
-    cross-check. Returns a dict of equal-length arrays.
+    For each session runs ``pipeline_one_minus_alpha`` once on the model rates
+    ``rhat_used`` (-> model 1-alpha) and once on the observed spike counts
+    ``robs_used`` (-> empirical 1-alpha), sharing the same eye trajectory,
+    validity mask, threshold and min_trials_per_phase. Returns a dict of
+    equal-length per-cell arrays (all cells; goodness is applied at plot time).
     """
     session_results = data["session_results"]
-    valid_indices = data["valid_indices"]
-    ats = data["all_trace_neuron_session"]
-    alpha = data["alpha"]
-    good = data["good"]
-    subjects = data["subjects"]
+    emp, mod, subj_out, ccmax_out = [], [], [], []
+    for si, sr in enumerate(session_results):
+        rhat = sr["rhat_used"]                 # (trials, time, neurons), rescaled
+        robs = sr["robs_used"]                 # (trials, time, neurons)
+        eye = sr["eyepos_used"]                # (trials, time, 2)
+        vmask = sr["valid_mask"]               # (trials, time) eye-finite
+        ccmax = np.asarray(sr["ccmax"], float)
+        print(f"[{si + 1}/{len(session_results)}] {sr['session']} "
+              f"({sr['subject']}): {rhat.shape[0]} trials, {rhat.shape[2]} neurons")
 
-    emp, mod, mod_sh, subj_out = [], [], [], []
-    for k in range(len(alpha)):
-        if not good[k] or not np.isfinite(alpha[k]):
-            continue
-        si, ni = ats[valid_indices[k]]
-        sr = session_results[si]
-        rhat = sr["rhat_used"][:, :, ni]      # (trials, time) for this neuron
-        valid = sr["dfs_used"][:, :, ni] != 0
+        B_model = pipeline_one_minus_alpha(
+            rhat, eye, valid=vmask, threshold=threshold,
+            min_trials_per_phase=min_trials_per_phase, device=device)
+        B_obs = pipeline_one_minus_alpha(
+            robs, eye, valid=vmask, threshold=threshold,
+            min_trials_per_phase=min_trials_per_phase, device=device)
 
-        out = rate_variance_components(
-            rhat, valid=valid, min_trials_per_phase=min_trials_per_phase
-        )
-        m = out["one_minus_alpha"]
-        if not np.isfinite(m):
-            continue
-
-        sh_between = psth_variance_splithalf(
-            rhat, valid=valid, min_trials_per_phase=min_trials_per_phase,
-            n_boot=n_boot, seed=seed,
-        )
-        sw = out["sigma2_within"]
-        tot_sh = sw + sh_between
-        m_sh = float(np.clip(sw / tot_sh, 0.0, 1.0)) if tot_sh > 0 else np.nan
-
-        emp.append(1.0 - alpha[k])
-        mod.append(m)
-        mod_sh.append(m_sh)
-        subj_out.append(subjects[k])
+        for ni in range(rhat.shape[2]):
+            emp.append(float(B_obs["one_minus_alpha"][ni]))
+            mod.append(float(B_model["one_minus_alpha"][ni]))
+            subj_out.append(sr["subject"])
+            ccmax_out.append(float(ccmax[ni]))
 
     return {
         "emp": np.asarray(emp),
         "model": np.asarray(mod),
-        "model_splithalf": np.asarray(mod_sh),
         "subjects": np.asarray(subj_out),
+        "ccmax": np.asarray(ccmax_out),
     }
 
 
-def plot_panel_d(ax=None, data=None, legend_fontsize=8, print_stats=True):
-    """Scatter model 1-alpha vs empirical 1-alpha per cell. Returns (fig, ax)."""
+def load_panel_d_results(data=None, recompute=False, device="cuda"):
+    """Return cached per-cell panel-D results, computing + caching if needed."""
+    if RESULT_CACHE.exists() and not recompute:
+        print(f"Loading panel-D results from {RESULT_CACHE}")
+        with open(RESULT_CACHE, "rb") as f:
+            return dill.load(f)
     if data is None:
         data = load_fig4_data()
-    comp = compute_model_one_minus_alpha(data)
-    emp, mod, mod_sh, subjects = (
-        comp["emp"], comp["model"], comp["model_splithalf"], comp["subjects"]
-    )
+    comp = compute_panel_d(data, device=device)
+    with open(RESULT_CACHE, "wb") as f:
+        dill.dump(comp, f)
+    print(f"Cached panel-D results to {RESULT_CACHE}")
+    return comp
+
+
+def _good_mask(results):
+    return (results["ccmax"] > CCMAX_THRESHOLD) & \
+        np.isfinite(results["emp"]) & np.isfinite(results["model"])
+
+
+def _tls_fit(x, y):
+    """Equal-variance total least squares (orthogonal) line y = slope*x + intercept."""
+    mx, my = x.mean(), y.mean()
+    dx, dy = x - mx, y - my
+    Sxx = float(np.dot(dx, dx))
+    Syy = float(np.dot(dy, dy))
+    Sxy = float(np.dot(dx, dy))
+    slope = (Syy - Sxx + np.sqrt((Syy - Sxx) ** 2 + 4 * Sxy ** 2)) / (2 * Sxy)
+    intercept = my - slope * mx
+    return float(slope), float(intercept)
+
+
+def _tls_band(x, y, n_boot=1000, seed=0, xs=None):
+    """Bootstrap 95% confidence band for the TLS line (resample cells, refit)."""
+    if xs is None:
+        xs = np.linspace(0.0, 1.0, 101)
+    rng = np.random.default_rng(seed)
+    n = len(x)
+    preds = np.empty((n_boot, len(xs)))
+    for b in range(n_boot):
+        idx = rng.integers(0, n, n)
+        s, i = _tls_fit(x[idx], y[idx])
+        preds[b] = s * xs + i
+    lo = np.percentile(preds, 2.5, axis=0)
+    hi = np.percentile(preds, 97.5, axis=0)
+    return xs, lo, hi
+
+
+def _stats_for(x, y):
+    """Population statistics for the model(y)-vs-empirical(x) relationship."""
+    r_p, p_p = pearsonr(x, y)
+    rho, p_s = spearmanr(x, y)
+    slope_tls, intercept_tls = _tls_fit(x, y)
+    ols = linregress(x, y)
+    diff = y - x
+    try:
+        w_stat, w_p = wilcoxon(diff)
+    except ValueError:           # all-zero differences
+        w_stat, w_p = float("nan"), float("nan")
+    return {
+        "N": int(len(x)),
+        "tls_slope": slope_tls,
+        "tls_intercept": intercept_tls,
+        "ols_slope": float(ols.slope),
+        "ols_intercept": float(ols.intercept),
+        "pearson_r": float(r_p),
+        "pearson_r2": float(r_p ** 2),
+        "pearson_p": float(p_p),
+        "spearman_rho": float(rho),
+        "spearman_p": float(p_s),
+        "median_emp": float(np.median(x)),
+        "median_model": float(np.median(y)),
+        "median_diff_model_minus_emp": float(np.median(diff)),
+        "wilcoxon_stat": float(w_stat),
+        "wilcoxon_p": float(w_p),
+    }
+
+
+def export_panel_d_stats(results, out_path=STATS_PATH, verbose=True):
+    """Compute per-subject and pooled statistics and write them to JSON."""
+    good = _good_mask(results)
+    emp, mod, subjects = results["emp"], results["model"], results["subjects"]
+    stats = {}
+    for subj in SUBJECTS + ["All"]:
+        mask = good if subj == "All" else good & (subjects == subj)
+        if mask.sum() < 3:
+            stats[subj] = {"N": int(mask.sum())}
+            continue
+        stats[subj] = _stats_for(emp[mask], mod[mask])
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w") as f:
+        json.dump(stats, f, indent=2)
+
+    if verbose:
+        for subj in SUBJECTS + ["All"]:
+            s = stats[subj]
+            if s.get("N", 0) < 3:
+                print(f"Panel D — {subj}: N={s.get('N', 0)} (too few)")
+                continue
+            print(f"Panel D — {subj} (N={s['N']}): "
+                  f"TLS slope={s['tls_slope']:.3f}, intercept={s['tls_intercept']:+.3f}, "
+                  f"Pearson r={s['pearson_r']:.3f} (p={s['pearson_p']:.2g}), "
+                  f"Spearman ρ={s['spearman_rho']:.3f}, "
+                  f"median(model-emp)={s['median_diff_model_minus_emp']:+.3f} "
+                  f"(Wilcoxon p={s['wilcoxon_p']:.2g})")
+        print(f"Saved panel-D stats to {out_path}")
+    return stats
+
+
+def plot_panel_d(ax=None, data=None, results=None, legend_fontsize=8,
+                 print_stats=True, recompute=False, device="cuda"):
+    """Scatter model 1-alpha vs empirical 1-alpha per cell. Returns (fig, ax)."""
+    if results is None:
+        results = load_panel_d_results(data=data, recompute=recompute, device=device)
+    emp, mod, subjects = results["emp"], results["model"], results["subjects"]
+    good = _good_mask(results)
 
     if ax is None:
         fig, ax = plt.subplots(figsize=(3, 2.5))
@@ -198,55 +246,46 @@ def plot_panel_d(ax=None, data=None, legend_fontsize=8, print_stats=True):
 
     ax.plot([0, 1], [0, 1], "k--", linewidth=0.5, alpha=0.5)
     for subj in SUBJECTS:
-        mask = subjects == subj
+        mask = good & (subjects == subj)
         if not mask.any():
             continue
-        x, y = emp[mask], mod[mask]
-        rho = spearmanr(x, y).correlation
-        ax.scatter(x, y, s=5, alpha=0.5, color=SUBJECT_COLORS[subj],
-                   label=f"{subj}: ρ={rho:.2f}")
+        ax.scatter(emp[mask], mod[mask], s=5, alpha=0.5,
+                   color=SUBJECT_COLORS[subj])
+
+    # Population total-least-squares line + bootstrap 95% band over good cells.
+    x_all, y_all = emp[good], mod[good]
+    slope, intercept = _tls_fit(x_all, y_all)
+    xs, lo, hi = _tls_band(x_all, y_all)
+    ax.fill_between(xs, lo, hi, color="red", alpha=0.2, linewidth=0)
+    ax.plot(xs, slope * xs + intercept, color="red", linewidth=1.0)
+
+    rho_all, p_all = spearmanr(x_all, y_all)
+    annotate_corr(ax, rho_all, p_all, loc="upper left")
 
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.set_aspect("equal")
     ax.set_xlabel(r"Empirical $1-\alpha$")
     ax.set_ylabel(r"Model $1-\alpha$")
-    ax.legend(frameon=False, fontsize=legend_fontsize, loc="upper left")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
 
     if print_stats:
-        for subj in SUBJECTS + ["All"]:
-            mask = np.ones(len(emp), dtype=bool) if subj == "All" else subjects == subj
-            x, y = emp[mask], mod[mask]
-            ok = np.isfinite(x) & np.isfinite(y)
-            x, y = x[ok], y[ok]
-            if len(x) < 3:
-                print(f"Panel D — {subj}: N={len(x)} (too few)")
-                continue
-            rho = spearmanr(x, y).correlation
-            r = pearsonr(x, y)[0]
-            slope = linregress(x, y).slope
-            mse = float(np.median(y - x))  # signed: model - empirical
-            print(f"Panel D — {subj} (N={len(x)}): "
-                  f"Spearman ρ={rho:.3f}, Pearson r={r:.3f}, "
-                  f"slope={slope:.3f}, median(model-emp)={mse:+.3f}, "
-                  f"median emp={np.median(x):.3f}, median model={np.median(y):.3f}")
-        # split-half cross-check on the analytic estimator
-        ok = np.isfinite(mod) & np.isfinite(mod_sh)
-        if ok.sum() >= 3:
-            d = mod[ok] - mod_sh[ok]
-            r_sh = pearsonr(mod[ok], mod_sh[ok])[0]
-            print(f"Panel D — analytic vs split-half (N={ok.sum()}): "
-                  f"Pearson r={r_sh:.4f}, median|diff|={np.median(np.abs(d)):.4f}, "
-                  f"max|diff|={np.max(np.abs(d)):.4f}")
+        export_panel_d_stats(results)
 
     return fig, ax
 
 
 if __name__ == "__main__":
+    p = argparse.ArgumentParser(description="Figure 4 panel D.")
+    p.add_argument("--recompute", action="store_true",
+                   help="Force recomputation of the close-pair decomposition.")
+    args = p.parse_args()
+
     configure_matplotlib()
-    fig, ax = plot_panel_d()
+    data = load_fig4_data()
+    results = load_panel_d_results(data=data, recompute=args.recompute)
+    fig, ax = plot_panel_d(data=data, results=results)
     fig.tight_layout()
     out = FIG_DIR / "panel_d_one_minus_alpha.pdf"
     fig.savefig(out, bbox_inches="tight", dpi=300)

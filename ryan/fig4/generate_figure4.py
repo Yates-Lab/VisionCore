@@ -34,22 +34,13 @@ from _fig4a_data import load_panel_a_assets
 from generate_fig4a import render_panel_a, _plot_halves, _fit_two_axes_in_rect
 from generate_fig4b import plot_panel_b
 from generate_fig4c import plot_panel_c
+from generate_fig4d import plot_panel_d, load_panel_d_results, export_panel_d_stats
 from generate_fig4e import plot_panel_e
 from generate_fig4f import plot_panel_f
 from generate_fig4g import plot_panel_g
 from generate_fig4h import plot_panel_h
 from generate_fig4i import plot_panel_i
 from generate_fig4j import plot_panel_j
-
-
-def _placeholder_panel(ax, text):
-    """Reserve an empty slot for a panel that has not been built yet."""
-    ax.text(0.5, 0.5, text, transform=ax.transAxes, ha="center", va="center",
-            fontsize=8, color="0.6", style="italic")
-    ax.set_xticks([])
-    ax.set_yticks([])
-    for side in ("top", "right", "left", "bottom"):
-        ax.spines[side].set_visible(False)
 
 
 def _place_schematic(fig, rect, assets):
@@ -67,7 +58,7 @@ def _place_schematic(fig, rect, assets):
     return ax_stim, ax_arch
 
 
-def _save_standalone_panels(data, example, abl):
+def _save_standalone_panels(data, example, abl, panel_d):
     fig_a, _ = render_panel_a()
     fig_a.savefig(FIG_DIR / "panel_a_schematic.pdf", bbox_inches="tight", dpi=300)
     plt.close(fig_a)
@@ -81,6 +72,12 @@ def _save_standalone_panels(data, example, abl):
     fig_c.tight_layout()
     fig_c.savefig(FIG_DIR / "panel_c_ccnorm_hist.pdf", bbox_inches="tight", dpi=300)
     plt.close(fig_c)
+
+    fig_d, _ = plot_panel_d(data=data, results=panel_d)
+    fig_d.tight_layout()
+    fig_d.savefig(FIG_DIR / "panel_d_one_minus_alpha.pdf", bbox_inches="tight", dpi=300)
+    fig_d.savefig(FIG_DIR / "panel_d_one_minus_alpha.png", bbox_inches="tight", dpi=300)
+    plt.close(fig_d)
 
     fig_e, _, _, _ = plot_panel_e(data=data, example=example)
     fig_e.savefig(FIG_DIR / "panel_e_rasters.pdf", bbox_inches="tight", dpi=300)
@@ -116,7 +113,7 @@ def _save_standalone_panels(data, example, abl):
         plt.close(fig_j)
 
 
-def _build_composite(data, example, abl):
+def _build_composite(data, example, abl, panel_d):
     assets = load_panel_a_assets()
     fig = plt.figure(figsize=(8, 10.5), constrained_layout=True)
     gs_outer = fig.add_gridspec(4, 1, height_ratios=[2.7, 2.6, 2.6, 2.6])
@@ -142,7 +139,8 @@ def _build_composite(data, example, abl):
     ax_c.set_title("C", fontweight="bold", loc="left")
 
     ax_d = fig.add_subplot(gs_r1[0, 2])
-    _placeholder_panel(ax_d, "rate-fluctuation\ndecomposition\nvs 1−α\n(to add)")
+    plot_panel_d(ax=ax_d, data=data, results=panel_d, legend_fontsize=7,
+                 print_stats=False)
     ax_d.set_title("D", fontweight="bold", loc="left")
 
     # --- Row 2 — single-trial structure: E (rasters), F (scatter), G (improvement) ---
@@ -231,8 +229,11 @@ def main(recompute=False):
     abl = load_ablation_data(recompute=recompute)
     print_ablation_stats(abl)
 
-    _save_standalone_panels(data, example, abl)
-    _build_composite(data, example, abl)
+    panel_d = load_panel_d_results(data=data, recompute=recompute)
+    export_panel_d_stats(panel_d)
+
+    _save_standalone_panels(data, example, abl, panel_d)
+    _build_composite(data, example, abl, panel_d)
     _build_supplement_permuted(abl)
 
     print(f"\nAll panel figures saved to: {FIG_DIR}")

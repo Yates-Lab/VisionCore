@@ -1,9 +1,10 @@
-"""Figure 4 panel H: example-neuron rasters, Twin | Twin(ablated) | residual.
+"""Figure 4 panel H: example-neuron rasters, Twin(ablated) | residual.
 
-The first two strips share the rate colormap; the residual (intact - ablated)
-uses a diverging map on the SAME magnitude scale as the rates, so a near-empty
-residual panel honestly conveys how little the twin's prediction changes when
-the extraretinal behavior input is ablated.
+The intact twin raster is panel E, so it is not repeated here. The ablated-twin
+strip uses the rate colormap; the residual (intact - ablated) uses a diverging
+map on the SAME magnitude scale as the rates, so a near-empty residual panel
+honestly conveys how little the twin's prediction changes when the extraretinal
+behavior input is ablated.
 
 Usage:
     uv run ryan/fig4/generate_fig4h.py [--cond zeroed|permuted]
@@ -42,21 +43,20 @@ def plot_panel_h(ax=None, data=None, cond="zeroed", label_fontsize=8):
     vmax = np.nanpercentile(np.concatenate([intact, abl], axis=1), 97)
 
     im_rate = ax.imshow(
-        np.concatenate([intact, abl], axis=1), aspect="auto", origin="upper",
-        extent=[0, 2 * w, n, 0], vmin=0, vmax=vmax,
+        abl, aspect="auto", origin="upper",
+        extent=[0, w, n, 0], vmin=0, vmax=vmax,
         cmap="binary", interpolation="none",
     )
     im_resid = ax.imshow(
         resid, aspect="auto", origin="upper",
-        extent=[2 * w, 3 * w, n, 0], vmin=-vmax, vmax=vmax,
+        extent=[w, 2 * w, n, 0], vmin=-vmax, vmax=vmax,
         cmap="RdBu_r", interpolation="none",
     )
-    ax.set_xlim(0, 3 * w)
+    ax.set_xlim(0, 2 * w)
     ax.set_ylim(n, 0)
     ax.axvline(w, color="k", lw=0.8)
-    ax.axvline(2 * w, color="k", lw=0.8)
-    for frac, lab in [(1 / 6, "Twin"), (3 / 6, f"Twin\n({COND_LABEL[cond]})"),
-                      (5 / 6, "residual")]:
+    for frac, lab in [(1 / 4, f"Twin\n({COND_LABEL[cond]})"),
+                      (3 / 4, "residual")]:
         ax.text(frac, 1.02, lab, transform=ax.transAxes, ha="center",
                 va="bottom", fontsize=label_fontsize)
     ax.set_xticks([]); ax.set_yticks([])

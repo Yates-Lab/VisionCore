@@ -32,7 +32,7 @@ def plot_panel_f(ax=None, data=None, legend_fontsize=8, print_stats=True):
         if not mask.any():
             continue
         ax.scatter(ve_psth[mask], ve_model[mask], s=5, alpha=0.5,
-                   color=SUBJECT_COLORS[subj], label=subj)
+                   color=SUBJECT_COLORS[subj])
 
     lims = [0, max(0.4, np.nanmax(ve_model[good]) * 1.1)]
     ax.plot(lims, lims, 'k--', linewidth=0.5, alpha=0.5)
@@ -40,7 +40,6 @@ def plot_panel_f(ax=None, data=None, legend_fontsize=8, print_stats=True):
     ax.set_ylim(lims)
     ax.set_xlabel("Single-trial $r^2$ (PSTH)")
     ax.set_ylabel("Single-trial $r^2$ (Model)")
-    ax.legend(frameon=False, fontsize=legend_fontsize)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
 

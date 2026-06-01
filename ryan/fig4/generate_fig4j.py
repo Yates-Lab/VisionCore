@@ -12,7 +12,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy import stats as sp_stats
 
-from _fig4_data import FIG_DIR, SUBJECTS, SUBJECT_COLORS, configure_matplotlib
+from _fig4_data import (
+    FIG_DIR, SUBJECTS, SUBJECT_COLORS, configure_matplotlib, annotate_corr,
+)
 from _fig4_ablation_data import load_ablation_data, COND_LABEL
 
 
@@ -37,7 +39,9 @@ def plot_panel_j(ax=None, data=None, cond="zeroed", legend_fontsize=8,
         m = base & (subjects == subj)
         if m.any():
             ax.scatter(1 - alpha[m], x[m] - y[m], s=5, alpha=0.4,
-                       color=SUBJECT_COLORS[subj], label=subj)
+                       color=SUBJECT_COLORS[subj])
+
+    median_handle = None
 
     fem = 1 - alpha[base]
     cost = x[base] - y[base]
@@ -52,12 +56,10 @@ def plot_panel_j(ax=None, data=None, cond="zeroed", legend_fontsize=8,
                 bx.append(np.median(fem[sel]))
                 bm.append(np.median(cost[sel]))
         if bx:
-            ax.plot(bx, bm, "-o", color="k", lw=1.2, ms=4, zorder=5,
-                    label="binned median")
+            (median_handle,) = ax.plot(bx, bm, "-o", color="k", lw=1.2, ms=4,
+                                       zorder=5, label="binned median")
         r_s, p_s = sp_stats.spearmanr(fem, cost)
-        sig = "*" if p_s < 0.05 else " n.s."
-        ax.text(0.97, 0.97, f"ρ={r_s:+.2f}{sig}", transform=ax.transAxes,
-                ha="right", va="top", fontsize=7)
+        annotate_corr(ax, r_s, p_s, loc="upper left")
         if print_stats:
             print(f"Panel J ({cond}) — N={fem.size}: Spearman r={r_s:+.3f}, "
                   f"p={p_s:.3g}; median Δr²={np.median(cost):+.4f}")
@@ -65,7 +67,9 @@ def plot_panel_j(ax=None, data=None, cond="zeroed", legend_fontsize=8,
     ax.axhline(0, color="k", lw=0.5, alpha=0.5)
     ax.set_xlabel("FEM modulation (1 - α)")
     ax.set_ylabel(f"Δ$r^2$ (intact − {COND_LABEL[cond]})")
-    ax.legend(frameon=False, fontsize=legend_fontsize)
+    if median_handle is not None:
+        ax.legend([median_handle], ["binned median"], frameon=False,
+                  fontsize=legend_fontsize, loc="lower right")
     ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
     return fig, ax
 

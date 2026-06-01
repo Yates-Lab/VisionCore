@@ -34,7 +34,7 @@ def plot_panel_i(ax=None, data=None, cond="zeroed", legend_fontsize=8,
         m = good & (subjects == subj) & np.isfinite(x) & np.isfinite(y)
         if m.any():
             ax.scatter(x[m], y[m], s=5, alpha=0.5,
-                       color=SUBJECT_COLORS[subj], label=subj)
+                       color=SUBJECT_COLORS[subj])
 
     m = good & np.isfinite(x) & np.isfinite(y)
     hi = max(0.4, np.nanpercentile(np.r_[x[m], y[m]], 99) * 1.1)
@@ -43,7 +43,6 @@ def plot_panel_i(ax=None, data=None, cond="zeroed", legend_fontsize=8,
     ax.set_xlim(lims); ax.set_ylim(lims); ax.set_aspect("equal")
     ax.set_xlabel("Single-trial $r^2$ (intact)")
     ax.set_ylabel(f"Single-trial $r^2$ ({COND_LABEL[cond]})")
-    ax.legend(frameon=False, fontsize=legend_fontsize)
     ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
     d = (y[m] - x[m])
     ax.text(0.97, 0.06, f"median Δ$r^2$={np.median(d):+.3f}",

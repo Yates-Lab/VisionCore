@@ -55,6 +55,32 @@ def configure_matplotlib():
     mpl.rcParams["font.sans-serif"] = ["Arial", "Helvetica", "DejaVu Sans"]
 
 
+def pval_stars(p):
+    """Significance stars for a p-value (publication convention)."""
+    if not np.isfinite(p):
+        return ""
+    if p < 1e-3:
+        return "***"
+    if p < 1e-2:
+        return "**"
+    if p < 5e-2:
+        return "*"
+    return " n.s."
+
+
+def annotate_corr(ax, rho, p, loc="upper left", fontsize=8):
+    """Annotate a Spearman ρ with significance stars in a panel corner."""
+    label = rf"$\rho$ = {rho:.2f}{pval_stars(p)}"
+    positions = {
+        "upper left": (0.03, 0.97, "left", "top"),
+        "upper right": (0.97, 0.97, "right", "top"),
+        "lower left": (0.03, 0.03, "left", "bottom"),
+        "lower right": (0.97, 0.03, "right", "bottom"),
+    }
+    x, y, ha, va = positions[loc]
+    ax.text(x, y, label, transform=ax.transAxes, ha=ha, va=va, fontsize=fontsize)
+
+
 def subject_from_session(session_name):
     return session_name.split("_")[0]
 
