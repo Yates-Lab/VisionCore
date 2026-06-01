@@ -10,6 +10,7 @@ Usage:
     uv run ryan/fig3/generate_figure3.py --refresh
 """
 import argparse
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 
@@ -27,26 +28,30 @@ from generate_fig3g import plot_panel_g
 def compose(refresh=False):
     data = load_fig2_data(refresh=refresh)
 
-    fig = plt.figure(figsize=(14, 15))
-    gs = GridSpec(3, 3, height_ratios=[2.0, 1.0, 1.0], hspace=0.35, wspace=0.30,
-                  figure=fig)
+    # Publication-scale font sizes for an ~8" wide composite.
+    with mpl.rc_context({"font.size": 8, "axes.labelsize": 8,
+                         "axes.titlesize": 9, "xtick.labelsize": 7,
+                         "ytick.labelsize": 7, "legend.fontsize": 7}):
+        fig = plt.figure(figsize=(8, 8.5))
+        gs = GridSpec(3, 3, height_ratios=[1.5, 1.0, 1.0],
+                      hspace=0.30, wspace=0.45, figure=fig,
+                      left=0.07, right=0.98, top=0.97, bottom=0.07)
 
-    # --- Panel A: top row, equation + 4 matrices ---
-    axes_a = make_axes_a(fig, subplot_spec=gs[0, :])
-    plot_panel_a(axes=axes_a, data=data)
+        axes_a = make_axes_a(fig, subplot_spec=gs[0, :])
+        plot_panel_a(axes=axes_a, data=data, font_scale=0.5)
 
-    # --- Panels B–G: 2 × 3 grid below ---
-    for letter, plot_fn, spec in [
-        ("B", plot_panel_b, gs[1, 0]),
-        ("C", plot_panel_c, gs[1, 1]),
-        ("D", plot_panel_d, gs[1, 2]),
-        ("E", plot_panel_e, gs[2, 0]),
-        ("F", plot_panel_f, gs[2, 1]),
-        ("G", plot_panel_g, gs[2, 2]),
-    ]:
-        ax = fig.add_subplot(spec)
-        plot_fn(ax=ax, data=data)
-        ax.set_title(letter, loc="left", fontweight="bold")
+        for letter, plot_fn, spec in [
+            ("B", plot_panel_b, gs[1, 0]),
+            ("C", plot_panel_c, gs[1, 1]),
+            ("D", plot_panel_d, gs[1, 2]),
+            ("E", plot_panel_e, gs[2, 0]),
+            ("F", plot_panel_f, gs[2, 1]),
+            ("G", plot_panel_g, gs[2, 2]),
+        ]:
+            ax = fig.add_subplot(spec)
+            _, primary_ax = plot_fn(ax=ax, data=data)
+            primary_ax.set_title(letter, loc="left", fontweight="bold",
+                                 fontsize=10)
 
     out = FIG_DIR / "fig3_composite.pdf"
     fig.savefig(out, bbox_inches="tight", dpi=300)

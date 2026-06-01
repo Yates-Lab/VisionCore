@@ -82,7 +82,7 @@ def _style_matrix_axis(ax):
         ax.spines[side].set_linewidth(1.0)
 
 
-def plot_panel_a(axes=None, fig=None, refresh=False, data=None):
+def plot_panel_a(axes=None, fig=None, refresh=False, data=None, font_scale=1.0):
     if data is None:
         data = load_fig2_data(refresh=refresh)
     if axes is None:
@@ -111,6 +111,14 @@ def plot_panel_a(axes=None, fig=None, refresh=False, data=None):
     cmap = plt.get_cmap("seismic_r")
     cmax = float(np.nanmax(Ctotal))
 
+    s = font_scale
+    title_fs = max(8.0, 22.0 * s)
+    side_fs = max(7.0, 14.0 * s)
+    sep_fs = max(12.0, 36.0 * s)
+    panel_label_fs = max(8.0, 14.0 * s)
+    arrow_lw = max(1.0, 2.8 * s)
+    arrow_scale = max(10.0, 28.0 * s)
+
     # --- Top row (uncorrected) ---
     top_mats = [Ctotal, Cpsth, Cint_uncorr]
     for ax, mat, title, frac in zip(axes["mats_top"], top_mats,
@@ -118,13 +126,13 @@ def plot_panel_a(axes=None, fig=None, refresh=False, data=None):
         vlim = frac * cmax
         ax.imshow(mat, cmap=cmap, interpolation="nearest",
                   vmin=-vlim, vmax=vlim, aspect="equal")
-        ax.set_title(title, fontsize=22, pad=6)
+        ax.set_title(title, fontsize=title_fs, pad=6)
         _style_matrix_axis(ax)
-    axes["mats_top"][0].set_ylabel("Uncorrected", fontsize=14, labelpad=10)
+    axes["mats_top"][0].set_ylabel("Uncorrected", fontsize=side_fs, labelpad=10)
 
     for ax, sym in zip(axes["seps_top"], SEPARATORS_TOP):
         ax.text(0.5, 0.5, sym, ha="center", va="center",
-                fontsize=36, transform=ax.transAxes)
+                fontsize=sep_fs, transform=ax.transAxes)
 
     # --- Bottom row (FEM-corrected) ---
     bot_mats = [Ctotal, Cpsth, Cfem, Cint]
@@ -133,13 +141,13 @@ def plot_panel_a(axes=None, fig=None, refresh=False, data=None):
         vlim = frac * cmax
         ax.imshow(mat, cmap=cmap, interpolation="nearest",
                   vmin=-vlim, vmax=vlim, aspect="equal")
-        ax.set_title(title, fontsize=22, pad=6)
+        ax.set_title(title, fontsize=title_fs, pad=6)
         _style_matrix_axis(ax)
-    axes["mats_bot"][0].set_ylabel("FEM-corrected", fontsize=14, labelpad=10)
+    axes["mats_bot"][0].set_ylabel("FEM-corrected", fontsize=side_fs, labelpad=10)
 
     for ax, sym in zip(axes["seps_bot"], SEPARATORS_BOTTOM):
         ax.text(0.5, 0.5, sym, ha="center", va="center",
-                fontsize=36, transform=ax.transAxes)
+                fontsize=sep_fs, transform=ax.transAxes)
 
     # Decomposition arrows: top Σ_int splits into bottom Σ_FEM + Σ_int.
     N = Cint_uncorr.shape[0]
@@ -151,7 +159,7 @@ def plot_panel_a(axes=None, fig=None, refresh=False, data=None):
     inset_bot = 0.18  # fraction of N inward at the bottom-row endpoints
     shrink = 8    # points pulled back from each endpoint so arrows clear the boxes
 
-    arrow_kw = dict(arrowstyle="-|>", mutation_scale=28, lw=2.8,
+    arrow_kw = dict(arrowstyle="-|>", mutation_scale=arrow_scale, lw=arrow_lw,
                     color="black", shrinkA=shrink, shrinkB=shrink,
                     zorder=10)
     # Left arrow: top Σ_int bottom-left  →  bottom Σ_FEM top-right
@@ -168,7 +176,8 @@ def plot_panel_a(axes=None, fig=None, refresh=False, data=None):
     # "A" label above the top-left matrix
     axes["mats_top"][0].text(-0.15, 1.20, "A",
                              transform=axes["mats_top"][0].transAxes,
-                             fontweight="bold", fontsize=14, va="top", ha="left")
+                             fontweight="bold", fontsize=panel_label_fs,
+                             va="top", ha="left")
 
 
 if __name__ == "__main__":

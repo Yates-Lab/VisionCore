@@ -74,10 +74,8 @@ def plot_panel_e(ax=None, refresh=False, data=None, max_dims=10):
     ax.spines["right"].set_visible(False)
     ax.grid(True, alpha=0.3)
 
-    # Single legend: subjects by color, conditions by linestyle.
-    handles = [Line2D([0], [0], color=SUBJECT_COLORS[s], lw=2, label=s)
-               for s in present_subjects]
-    handles += [
+    # Legend keys conditions only; subject color is identified via panels B/F.
+    handles = [
         Line2D([0], [0], color="k", lw=2, ls="-", label="PSTH"),
         Line2D([0], [0], color="k", lw=2, ls="--", label="FEM"),
     ]
