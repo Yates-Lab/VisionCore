@@ -3,14 +3,22 @@ Figure 3 panel G: subspace alignment scatter — PSTH variance captured by
 the FEM subspace (X) vs FEM variance captured by the PSTH subspace (Y).
 
 Per-subject shuffle clouds (eye-shuffled Intercepts → shuffled FEM subspace,
-same PSTH subspace) provide chance-alignment baselines. Each animal is
-treated as an independent replicate of the experiment.
+same PSTH subspace) are drawn as 2D hexbin density per animal. Real
+sessions are overlaid as colored markers; sessions whose observed (X, Y)
+are jointly significant against that session's own shuffle cloud
+(one-sided p<α for both X and Y) are outlined in red.
 """
 import numpy as np
 import matplotlib.pyplot as plt
 
 from _panel_common import standalone_save
 from compute_fig2_data import load_fig2_data
+
+
+# Joint significance against each session's own shuffle cloud.
+SIG_ALPHA = 0.01
+EDGE_NS = ("black", 0.6)
+EDGE_SIG = ("crimson", 1.5)
 
 
 def _emp_p_greater(null_vals, observed):
@@ -36,18 +44,26 @@ def plot_panel_g(ax=None, refresh=False, data=None):
     var_f_given_p = np.asarray(data["var_f_given_p"], dtype=float)
 
     null_subjects = np.asarray(data.get("null_subjects", []))
+    null_session_idx = np.asarray(data.get("null_session_idx", []), dtype=int)
     null_x = np.asarray(data.get("null_var_p_given_f", []), dtype=float)
     null_y = np.asarray(data.get("null_var_f_given_p", []), dtype=float)
 
-    annotations = []
+    # Per-session one-sided empirical p-values vs that session's own cloud.
+    n_sessions = len(sub_subjects)
+    px_sess = np.full(n_sessions, np.nan)
+    py_sess = np.full(n_sessions, np.nan)
+    if null_session_idx.size:
+        for i in range(n_sessions):
+            m = null_session_idx == i
+            if not m.any():
+                continue
+            px_sess[i] = _emp_p_greater(null_x[m], var_p_given_f[i])
+            py_sess[i] = _emp_p_greater(null_y[m], var_f_given_p[i])
+    sig = (px_sess < SIG_ALPHA) & (py_sess < SIG_ALPHA)
 
+    # Per-subject shuffle scatter clouds + mean ×.
     for subj in sorted(set(sub_subjects.tolist())):
         color = SUBJECT_COLORS.get(subj, "gray")
-        s_mask = sub_subjects == subj
-        x_real = var_p_given_f[s_mask]
-        y_real = var_f_given_p[s_mask]
-
-        # Per-subject shuffle cloud
         if null_subjects.size:
             n_mask = null_subjects == subj
             xs = null_x[n_mask]
@@ -60,41 +76,44 @@ def plot_panel_g(ax=None, refresh=False, data=None):
                 ax.plot(np.mean(xs), np.mean(ys), marker="x",
                         color=color, ms=8, mew=2, zorder=3)
 
-                # Empirical p-values: observed = mean of this subject's real
-                # sessions, null = per-shuffle pooled across this subject's
-                # sessions (treating each shuffle draw as an independent
-                # chance realization for that animal).
-                if np.isfinite(x_real).any():
-                    mx = np.nanmean(x_real)
-                    my = np.nanmean(y_real)
-                    px = _emp_p_greater(xs, mx)
-                    py = _emp_p_greater(ys, my)
-                    annotations.append((subj, mx, my, px, py, color))
+    # Real sessions: red outline if jointly significant, else black.
+    # NS first so sig markers sit on top.
+    for subj in sorted(set(sub_subjects.tolist())):
+        color = SUBJECT_COLORS.get(subj, "gray")
+        s_mask = sub_subjects == subj
+        x = var_p_given_f[s_mask]
+        y = var_f_given_p[s_mask]
+        s = sig[s_mask]
+        if (~s).any():
+            ax.scatter(x[~s], y[~s], c=color, s=55,
+                       edgecolors=EDGE_NS[0], linewidths=EDGE_NS[1],
+                       zorder=5)
+        if s.any():
+            ax.scatter(x[s], y[s], c=color, s=55,
+                       edgecolors=EDGE_SIG[0], linewidths=EDGE_SIG[1],
+                       zorder=6)
 
-        ax.scatter(x_real, y_real, c=color, s=50,
-                   edgecolors="black", linewidths=0.6,
-                   label=subj, zorder=5)
-
-    ax.plot([0, 1], [0, 1], "k--", alpha=0.3)
+    ax.plot([0, 1], [0, 1], "k--", alpha=0.3, zorder=0)
     ax.set_xlabel("X: PSTH var in FEM subspace")
     ax.set_ylabel("Y: FEM var in PSTH subspace")
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.set_aspect("equal")
 
-    # Per-subject p-value annotation block
-    if annotations:
-        lines = []
-        for subj, mx, my, px, py, _ in annotations:
-            lines.append(
-                f"{subj}: X={mx:.2f} (p={px:.3f}), Y={my:.2f} (p={py:.3f})"
-            )
-        ax.text(0.02, 0.98, "\n".join(lines),
-                transform=ax.transAxes, va="top", ha="left", fontsize=6,
-                bbox=dict(boxstyle="round,pad=0.3", facecolor="white",
-                          edgecolor="none", alpha=0.8))
+    from matplotlib.lines import Line2D
+    sig_handles = [
+        Line2D([0], [0], marker="o", color="w",
+               markerfacecolor="lightgray",
+               markeredgecolor=EDGE_SIG[0], markeredgewidth=EDGE_SIG[1],
+               markersize=8, label=f"p<{SIG_ALPHA:g} (both)"),
+        Line2D([0], [0], marker="o", color="w",
+               markerfacecolor="lightgray",
+               markeredgecolor=EDGE_NS[0], markeredgewidth=EDGE_NS[1],
+               markersize=8, label="n.s."),
+    ]
+    ax.legend(handles=sig_handles, frameon=False, fontsize=7,
+              loc="upper left")
 
-    ax.legend(frameon=False, fontsize=7, loc="lower right")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.grid(True, alpha=0.3)

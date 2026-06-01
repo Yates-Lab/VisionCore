@@ -63,6 +63,8 @@ REFRESH = False              # set True to force recompute of derived bundle
 DT = 1 / 120                 # seconds per bin (native 240 Hz sampling)
 WINDOW_BINS = [1, 2, 3, 6]   # counting windows in bins (6 @ 120 Hz = 50 ms = stim refresh)
 N_SHUFFLES = 100             # shuffle null iterations
+N_STAGE1_WORKERS = 8         # parallel session decompositions (set >1 to fan out)
+N_STAGE1_GPUS = 2            # GPUs to distribute workers across (round-robin)
 MIN_RATE_HZ = 2.0            # firing-rate inclusion threshold
 MIN_PSTH_R2 = 0.05           # split-half PSTH R^2 inclusion threshold
 N_PSTH_SPLITS = 100          # random halvings for split-half PSTH reliability
@@ -110,117 +112,174 @@ def _load_contam_rate(session_name, subject, n_neurons_total):
     )
 
 
-def _compute_session_results():
-    """Run LOTC decomposition for every session listed in the dataset config."""
+def _compute_one_session(cfg):
+    """Per-session work: returns the result dict, or None to skip.
+
+    Module-level so it's picklable for multiprocessing. Imports its own
+    heavy modules so spawned workers initialize cleanly.
+    """
     if str(VISIONCORE_ROOT) not in sys.path:
         sys.path.insert(0, str(VISIONCORE_ROOT))
-
-    from models.config_loader import load_dataset_configs
     from models.data import prepare_data
 
-    device = get_free_device()
+    session_name = cfg["session"]
+    subject = session_name.split("_")[0]
+    if subject not in SUBJECTS:
+        return None
+
+    if "fixrsvp" not in cfg["types"]:
+        cfg["types"] = cfg["types"] + ["fixrsvp"]
+
+    print(f"\n--- {session_name} ({subject}) ---")
+    try:
+        train_data, val_data, cfg = prepare_data(cfg, strict=False)
+    except Exception as e:
+        print(f"  [{session_name}] Skipping: {e}")
+        return None
+
+    try:
+        dset_idx = train_data.get_dataset_index("fixrsvp")
+    except (ValueError, KeyError):
+        print(f"  [{session_name}] Skipping: no fixrsvp data")
+        return None
+    fixrsvp_dset = train_data.dsets[dset_idx]
+
+    robs, eyepos, valid_mask, neuron_mask, meta = align_fixrsvp_trials(
+        fixrsvp_dset,
+        valid_time_bins=120,
+        min_fix_dur=20,
+        min_total_spikes=0,
+    )
+    if robs is None or robs.shape[0] < 10:
+        print(f"  [{session_name}] Skipping: insufficient data ({meta})")
+        return None
+    print(f"  [{session_name}] Trials: {meta['n_trials_good']}/{meta['n_trials_total']}, "
+          f"Neurons: {meta['n_neurons_used']}/{meta['n_neurons_total']}")
+
+    n_units = robs.shape[2]
+    n_spikes_per_unit = np.nansum(robs, axis=(0, 1))
+    n_valid_bins_per_unit = np.sum(np.isfinite(robs), axis=(0, 1))
+    rate_hz = np.where(
+        n_valid_bins_per_unit > 0,
+        n_spikes_per_unit / np.maximum(n_valid_bins_per_unit, 1) / DT,
+        np.nan,
+    )
+
+    rng_r2 = np.random.default_rng(42)
+    r2_sum = np.zeros(n_units)
+    r2_cnt = np.zeros(n_units, dtype=int)
+    n_trials_r2 = robs.shape[0]
+    for _ in range(N_PSTH_SPLITS):
+        perm = rng_r2.permutation(n_trials_r2)
+        h = n_trials_r2 // 2
+        psth_a = np.nanmean(robs[perm[:h]], axis=0)
+        psth_b = np.nanmean(robs[perm[h:2 * h]], axis=0)
+        for j in range(n_units):
+            a, b = psth_a[:, j], psth_b[:, j]
+            ok_t = np.isfinite(a) & np.isfinite(b)
+            if ok_t.sum() < 3 or np.std(a[ok_t]) == 0 or np.std(b[ok_t]) == 0:
+                continue
+            r = np.corrcoef(a[ok_t], b[ok_t])[0, 1]
+            if np.isfinite(r):
+                r2_sum[j] += r * r
+                r2_cnt[j] += 1
+    psth_r2 = np.where(r2_cnt > 0, r2_sum / np.maximum(r2_cnt, 1), np.nan)
+
+    # If a worker pool pinned us to a single GPU via CUDA_VISIBLE_DEVICES,
+    # use cuda:0 directly. get_free_device queries nvidia-smi and may
+    # return a physical index that doesn't exist in this worker's CUDA view.
+    import os, torch
+    cvd = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+    if torch.cuda.is_available() and cvd and "," not in cvd:
+        device = torch.device("cuda:0")
+        print(f"  [{session_name}] using pinned device cuda:0 "
+              f"(CUDA_VISIBLE_DEVICES={cvd})")
+    else:
+        device = get_free_device()
+    results, mats = run_covariance_decomposition(
+        robs, eyepos, valid_mask,
+        window_sizes_bins=WINDOW_BINS,
+        dt=DT,
+        n_shuffles=N_SHUFFLES,
+        intercept_mode=INTERCEPT_MODE,
+        intercept_kwargs=INTERCEPT_KWARGS,
+        seed=42,
+        device=str(device),
+    )
+
+    psth = robs.mean(axis=0)
+
+    try:
+        contam_rate = _load_contam_rate(
+            session_name, subject, meta['n_neurons_total']
+        )
+    except NotImplementedError:
+        contam_rate = None
+        print(f"  [{session_name}] QC: contamination not available for {subject}")
+
+    return {
+        "session": session_name,
+        "subject": subject,
+        "results": results,
+        "mats": mats,
+        "neuron_mask": neuron_mask,
+        "meta": meta,
+        "psth": psth,
+        "rate_hz": rate_hz,
+        "psth_r2": psth_r2,
+        "qc": {"contam_rate": contam_rate},
+    }
+
+
+def _worker_init(gpu_queue):
+    """Pool initializer: claim a GPU and pin this worker to it.
+
+    Sets CUDA_VISIBLE_DEVICES BEFORE any CUDA op runs. Subsequent
+    `torch.cuda` queries in this process see exactly one GPU (renumbered 0).
+    """
+    import os
+    gpu_id = gpu_queue.get()
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+    print(f"[worker pid={os.getpid()}] pinned to physical GPU {gpu_id}", flush=True)
+
+
+def _run_session_pool(cfgs, n_workers, n_gpus=1):
+    """Run _compute_one_session over cfgs, returning results in input order.
+
+    n_workers=1 → in-process sequential (bit-identical to legacy path).
+    n_workers>1 → spawn-Pool with workers round-robin pinned to n_gpus GPUs.
+    """
+    if n_workers <= 1:
+        return [_compute_one_session(cfg) for cfg in cfgs]
+
+    import multiprocessing as mp
+    ctx = mp.get_context("spawn")
+    n_gpus = max(int(n_gpus), 1)
+    gpu_queue = ctx.Queue()
+    for i in range(n_workers):
+        gpu_queue.put(i % n_gpus)
+    with ctx.Pool(
+        processes=n_workers,
+        initializer=_worker_init,
+        initargs=(gpu_queue,),
+    ) as pool:
+        return pool.map(_compute_one_session, cfgs)
+
+
+def _compute_session_results(n_workers=None, n_gpus=None):
+    """Run LOTC decomposition for every session listed in the dataset config."""
+    if n_workers is None:
+        n_workers = N_STAGE1_WORKERS
+    if n_gpus is None:
+        n_gpus = N_STAGE1_GPUS
+
+    if str(VISIONCORE_ROOT) not in sys.path:
+        sys.path.insert(0, str(VISIONCORE_ROOT))
+    from models.config_loader import load_dataset_configs
+
     dataset_configs = load_dataset_configs(str(DATASET_CONFIGS_PATH))
-    session_results = []
-
-    for cfg in dataset_configs:
-        session_name = cfg["session"]
-        subject = session_name.split("_")[0]
-        if subject not in SUBJECTS:
-            continue
-
-        if "fixrsvp" not in cfg["types"]:
-            cfg["types"] = cfg["types"] + ["fixrsvp"]
-
-        print(f"\n--- {session_name} ({subject}) ---")
-        try:
-            train_data, val_data, cfg = prepare_data(cfg, strict=False)
-        except Exception as e:
-            print(f"  Skipping: {e}")
-            continue
-
-        try:
-            dset_idx = train_data.get_dataset_index("fixrsvp")
-        except (ValueError, KeyError):
-            print("  Skipping: no fixrsvp data")
-            continue
-        fixrsvp_dset = train_data.dsets[dset_idx]
-
-        robs, eyepos, valid_mask, neuron_mask, meta = align_fixrsvp_trials(
-            fixrsvp_dset,
-            valid_time_bins=120,
-            min_fix_dur=20,
-            min_total_spikes=0,
-        )
-        if robs is None or robs.shape[0] < 10:
-            print(f"  Skipping: insufficient data ({meta})")
-            continue
-        print(f"  Trials: {meta['n_trials_good']}/{meta['n_trials_total']}, "
-              f"Neurons: {meta['n_neurons_used']}/{meta['n_neurons_total']}")
-
-        # Per-unit firing rate (Hz) from valid (fixation) bins.
-        n_units = robs.shape[2]
-        n_spikes_per_unit = np.nansum(robs, axis=(0, 1))
-        n_valid_bins_per_unit = np.sum(np.isfinite(robs), axis=(0, 1))
-        rate_hz = np.where(
-            n_valid_bins_per_unit > 0,
-            n_spikes_per_unit / np.maximum(n_valid_bins_per_unit, 1) / DT,
-            np.nan,
-        )
-
-        # Per-unit split-half PSTH R^2 over N_PSTH_SPLITS random trial halvings.
-        rng_r2 = np.random.default_rng(42)
-        r2_sum = np.zeros(n_units)
-        r2_cnt = np.zeros(n_units, dtype=int)
-        n_trials_r2 = robs.shape[0]
-        for _ in range(N_PSTH_SPLITS):
-            perm = rng_r2.permutation(n_trials_r2)
-            h = n_trials_r2 // 2
-            psth_a = np.nanmean(robs[perm[:h]], axis=0)
-            psth_b = np.nanmean(robs[perm[h:2 * h]], axis=0)
-            for j in range(n_units):
-                a, b = psth_a[:, j], psth_b[:, j]
-                ok_t = np.isfinite(a) & np.isfinite(b)
-                if ok_t.sum() < 3 or np.std(a[ok_t]) == 0 or np.std(b[ok_t]) == 0:
-                    continue
-                r = np.corrcoef(a[ok_t], b[ok_t])[0, 1]
-                if np.isfinite(r):
-                    r2_sum[j] += r * r
-                    r2_cnt[j] += 1
-        psth_r2 = np.where(r2_cnt > 0, r2_sum / np.maximum(r2_cnt, 1), np.nan)
-
-        results, mats = run_covariance_decomposition(
-            robs, eyepos, valid_mask,
-            window_sizes_bins=WINDOW_BINS,
-            dt=DT,
-            n_shuffles=N_SHUFFLES,
-            intercept_mode=INTERCEPT_MODE,
-            intercept_kwargs=INTERCEPT_KWARGS,
-            seed=42,
-            device=str(device),
-        )
-
-        psth = robs.mean(axis=0)
-
-        try:
-            contam_rate = _load_contam_rate(
-                session_name, subject, meta['n_neurons_total']
-            )
-        except NotImplementedError:
-            contam_rate = None
-            print(f"  QC: contamination not available for {subject}")
-
-        session_results.append({
-            "session": session_name,
-            "subject": subject,
-            "results": results,
-            "mats": mats,
-            "neuron_mask": neuron_mask,
-            "meta": meta,
-            "psth": psth,
-            "rate_hz": rate_hz,
-            "psth_r2": psth_r2,
-            "qc": {"contam_rate": contam_rate},
-        })
+    per_session = _run_session_pool(dataset_configs, n_workers, n_gpus)
+    session_results = [r for r in per_session if r is not None]
 
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     with open(DECOMP_CACHE, "wb") as f:
