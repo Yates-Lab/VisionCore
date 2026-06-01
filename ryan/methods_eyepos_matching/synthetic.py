@@ -386,6 +386,159 @@ def make_session(kinds, n_trials=600, n_time_bins=100, sigma_eye=0.15,
     return out
 
 
+# ---------------------------------------------------------------------------
+# Trajectory-mode generator (§4.6: multi-bin eye trajectories)
+# ---------------------------------------------------------------------------
+
+def make_trajectory_session(kinds, n_samples_per_time_bin=30, n_time_bins=40,
+                            t_window=5, sigma_eye=0.15, sigma_drift=0.0,
+                            ell=None, tau=1.0, mu_0=6.0, ell_M=None,
+                            psth_envelope=None, seed=0, return_rate=True):
+    """Generate a trajectory-mode synthetic session for §4.6 validation.
+
+    Each sample is one window of ``t_window`` contiguous bins of eye trajectory,
+    assigned to one analysis time bin ``T_idx``. The trajectory is parameterised
+    as a centroid plus i.i.d. per-bin drift:
+
+        c_i           ~ N(0, sigma_eye^2 I)          (fixational position)
+        xi_{i,t}      ~ N(0, sigma_drift^2 I)         (within-window drift, t = 0..t_window-1)
+        e_{i,t}       = c_i + xi_{i,t}                (per-bin eye position)
+
+    All ``n_samples_per_time_bin`` samples assigned to a given T_idx see the
+    SAME field draw s_{T_idx, t}(.) at each within-window offset t (different
+    samples sample the same stimulus at the same absolute time). Field draws
+    across (T_idx, t) pairs are independent — t_window successive offsets each
+    give a fresh field, matching the McFarland "phase" abstraction extended to
+    a windowed analysis (writeup §2.3 caveat).
+
+    The deterministic per-bin rate is
+
+        r_c(T_idx, t, e_{i,t}) = mu_0 + M_c(e_{i,t}) * alpha(T_idx)
+                                 * s_{T_idx, t}(e_{i,t})
+
+    and the window count per sample is the rate summed across the t_window
+    within-window offsets (matching the production ``extract_windows`` /
+    ``SpikeCounts = S_raw.sum(dim=1)`` pattern in ``VisionCore/covariance.py``).
+
+    In the flat-trajectory limit (``sigma_drift = 0``) per-bin positions
+    coincide with the centroid, and the LOTC truth reduces to §4.4's
+    centroid-distribution decomposition exactly: the t_window factor cancels
+    in 1-alpha (it scales both Crate and Cpsth by the same t_window because
+    fields at different t's are independent). For ``sigma_drift > 0`` the
+    per-bin marginal density broadens to N(0, (sigma_eye^2 + sigma_drift^2) I);
+    the user's pooled-per-bin KDE estimator targets that broadened marginal by
+    construction, so the truth to compare against is
+
+        truth_traj = ground_truth(kind, sqrt(sigma_eye^2 + sigma_drift^2),
+                                  ell, ell_M=ell_M, psth_envelope=...)
+
+    (returned as ``traj_truth`` in the output). The standard
+    ``ground_truth(..., sigma_eye=sigma_eye, ...)`` is also returned as
+    ``centroid_truth`` for the centroid-distribution reference.
+
+    Parameters
+    ----------
+    kinds : sequence of str
+        Per-cell mask kind (see PROFILE_KINDS).
+    n_samples_per_time_bin : int
+        Number of trajectory samples per analysis time bin T_idx.
+    n_time_bins : int
+        Number of analysis time bins (T_idx range).
+    t_window : int
+        Number of within-window offsets per sample (trajectory length).
+    sigma_eye, sigma_drift : float
+        Centroid spread and within-window drift (deg).
+    ell, tau, mu_0, ell_M : as in make_session.
+    psth_envelope : None or length-n_time_bins array
+        Per-T_idx amplitude envelope alpha(T_idx). Default 1.
+    seed : int
+    return_rate : bool
+        If True, include the per-sample per-cell window-summed rate
+        (deterministic, no Poisson).
+
+    Returns
+    -------
+    dict with:
+        trajectories : (N, t_window, 2) per-sample per-bin eye positions
+        centroids    : (N, 2) per-sample trajectory centroid
+        counts       : (N, n_cells) per-sample window-summed deterministic rate
+        T_idx        : (N,) analysis time bin index
+        kinds, sigma_eye, sigma_drift, ell, tau, mu_0, ell_M, alpha, t_window
+        centroid_truth : per-cell ground_truth(kind, sigma_eye, ...) — flat-limit reference
+        traj_truth     : per-cell ground_truth(kind, sqrt(sigma_eye^2+sigma_drift^2), ...)
+                         — per-bin marginal target (what the pooled-per-bin KDE estimator
+                         targets; coincides with centroid_truth at sigma_drift = 0)
+    """
+    if ell is None:
+        ell = float(sigma_eye)
+    if ell_M is None:
+        ell_M = _default_ell_M(sigma_eye)
+    rng = np.random.default_rng(seed)
+    n_cells = len(kinds)
+    n_per = int(n_samples_per_time_bin)
+    N = n_per * int(n_time_bins)
+
+    if psth_envelope is None:
+        alpha = np.ones(int(n_time_bins))
+    else:
+        alpha = np.asarray(psth_envelope, dtype=float).reshape(int(n_time_bins))
+
+    centroids = rng.normal(0.0, float(sigma_eye), size=(N, 2))
+    if float(sigma_drift) > 0.0:
+        drift = rng.normal(0.0, float(sigma_drift), size=(N, int(t_window), 2))
+    else:
+        drift = np.zeros((N, int(t_window), 2))
+    trajectories = centroids[:, None, :] + drift            # (N, t_window, 2)
+    T_idx = np.repeat(np.arange(int(n_time_bins)), n_per)   # (N,)
+
+    # Per-bin rate. For each (T_idx, t) draw ONE field at the eye positions of
+    # the n_per samples that share that (T_idx, t); same field across the n_per
+    # samples, independent across (T_idx, t) pairs (and across cells via
+    # _draw_field_at's per-cell Cholesky right-side).
+    rate_traj = np.empty((N, int(t_window), n_cells))
+    for T in range(int(n_time_bins)):
+        ix = np.where(T_idx == T)[0]
+        if len(ix) == 0:
+            continue
+        for t in range(int(t_window)):
+            eyes_t = trajectories[ix, t, :]                                  # (n_T, 2)
+            s_field = _draw_field_at(eyes_t, ell, tau, rng, n_cells)         # (n_T, n_cells)
+            for c, kind in enumerate(kinds):
+                M_t = profile_M(eyes_t, kind, sigma_eye, ell_M)              # (n_T,)
+                rate_traj[ix, t, c] = mu_0 + M_t * alpha[T] * s_field[:, c]
+    rate_traj = np.clip(rate_traj, 1e-6, None)
+    counts = rate_traj.sum(axis=1)                          # (N, n_cells)
+
+    centroid_truth = [ground_truth(kind, sigma_eye, ell=ell, tau=tau,
+                                   ell_M=ell_M, psth_envelope=psth_envelope)
+                      for kind in kinds]
+    sigma_traj = float(np.sqrt(float(sigma_eye) ** 2 + float(sigma_drift) ** 2))
+    traj_truth = [ground_truth(kind, sigma_traj, ell=ell, tau=tau,
+                               ell_M=ell_M, psth_envelope=psth_envelope)
+                  for kind in kinds]
+
+    out = {
+        "trajectories": trajectories,
+        "centroids": centroids,
+        "counts": counts,
+        "T_idx": T_idx,
+        "kinds": list(kinds),
+        "sigma_eye": float(sigma_eye),
+        "sigma_drift": float(sigma_drift),
+        "ell": float(ell),
+        "tau": float(tau),
+        "mu_0": float(mu_0),
+        "ell_M": float(ell_M),
+        "alpha": alpha,
+        "t_window": int(t_window),
+        "centroid_truth": centroid_truth,
+        "traj_truth": traj_truth,
+    }
+    if return_rate:
+        out["rate_traj"] = rate_traj
+    return out
+
+
 def _self_check():
     """Sanity print: closed-form vs MC vs direct sampling under (A2)."""
     sig = 0.15
@@ -393,6 +546,18 @@ def _self_check():
         gt = ground_truth(kind, sig, ell=sig, tau=1.0)
         print(f"{kind:10s}  1-alpha^p = {gt['p']['one_minus_alpha']:.4f}   "
               f"1-alpha^p2 = {gt['p2']['one_minus_alpha']:.4f}")
+    # Trajectory-mode smoke check: a few samples, flat-limit truth match.
+    sess = make_trajectory_session(["flat", "central"], n_samples_per_time_bin=20,
+                                   n_time_bins=10, t_window=4,
+                                   sigma_eye=sig, sigma_drift=0.0, seed=0)
+    assert sess["counts"].shape == (200, 2)
+    assert sess["trajectories"].shape == (200, 4, 2)
+    # centroid_truth == traj_truth at sigma_drift = 0
+    for c, k in enumerate(sess["kinds"]):
+        a = sess["centroid_truth"][c]["p"]["one_minus_alpha"]
+        b = sess["traj_truth"][c]["p"]["one_minus_alpha"]
+        assert abs(a - b) < 1e-9, f"{k}: centroid {a} != traj {b} at sigma_drift=0"
+    print("trajectory-mode smoke check: ok")
 
 
 if __name__ == "__main__":

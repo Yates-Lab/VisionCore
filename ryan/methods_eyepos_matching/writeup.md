@@ -848,6 +848,136 @@ The gap is still a useful empirical signal — it tells you that the *choice*
 of eye-position distribution $D$ matters for the reported $1-\alpha$ — but
 it is not a clean test of (A2).
 
+## 4.6 Multi-bin eye trajectories: the production-setting extension
+
+§4.4 framed the close-pair filter as a single-bin condition
+$\lvert e_i-e_j\rvert<\varepsilon$ — and the §5.2 real-data analysis honours
+that framing by using the eye position at one analysis time bin per sample.
+The production covariance pipeline
+(`VisionCore/covariance.py::compute_eye_distances`) instead works on
+**$T$-bin trajectories**: each sample $i$ carries an eye trajectory
+$\tau_i = (e_{i,1},\ldots,e_{i,T})$ over a window of $T = t_{\mathrm{hist}}+t_{\mathrm{count}}$
+bins, and the close-pair filter is the *root-mean-square trajectory distance*
+
+$$
+\big\lVert\tau_i-\tau_j\big\rVert_{\mathrm{RMS}}
+ \;=\; \sqrt{\tfrac{1}{T}\sum_{t=1}^{T}\lVert e_{i,t}-e_{j,t}\rVert^2}
+ \;<\;\varepsilon
+\tag{17}
+$$
+
+so that two trials are "close" only when their *whole* trajectories — not just
+the spike-count bin — are similar. The motivation is that the neuron integrates
+over a temporal window, so the response context that a close pair has to share
+is the whole window, not the instantaneous eye position.
+
+This breaks the §4.4 importance-weight construction as written. The close-pair
+density now lives on $\mathbb R^{2T}$ — the trajectory density $p(\tau)$
+squared, restricted to $\lVert\tau_i-\tau_j\rVert_{\mathrm{RMS}}<\varepsilon$ — and
+fitting a density in $\mathbb R^{2T}$ for typical $T\in[10,30]$ is the curse of
+dimensionality. We *cannot* simply lift the §5.2 single-bin KDE to the
+trajectory and call it done.
+
+**Our extension.** Build the importance weight from two 2-D KDEs:
+
+$$
+\hat p_{\mathrm{marg}}(e)\,=\,\mathrm{KDE}\big(\{e_{i,t}\}_{i=1\dots N,\,t=1\dots T}\big),
+\qquad
+\hat p_{cp,\mathrm{marg}}(e)\,=\,\mathrm{KDE}\big(\{m_{k,t}\}_{k=1\dots P,\,t=1\dots T}\big)
+\tag{18}
+$$
+
+where $\hat p_{\mathrm{marg}}$ pools per-bin positions across *all* samples and
+$\hat p_{cp,\mathrm{marg}}$ pools per-bin positions of the *close-pair midpoint
+trajectories* $m_k=\tfrac12(\tau_i+\tau_j)$ (one midpoint trajectory per close
+pair $k$, contributing $T$ per-bin positions to the pool). The §4.4 importance
+weights are then evaluated at each trajectory's **centroid**
+$c_i=\tfrac1T\sum_t e_{i,t}$:
+
+| target | per-sample weight at $c_i$ | per-pair weight at $c_{\mathrm{mid}}=\tfrac12(c_i+c_j)$ |
+|---|---|---|
+| **Direction 1** (`full`) | $1$ | $\hat p_{\mathrm{marg}}(c_{\mathrm{mid}})\,/\,\hat p_{cp,\mathrm{marg}}(c_{\mathrm{mid}})$ |
+| **Direction 2** (`central`) | $\hat p_{cp,\mathrm{marg}}(c_i)\,/\,\hat p_{\mathrm{marg}}(c_i)$ | $1$ |
+| naive | $1$ | $1$ |
+
+(`estimators.decompose_trajectory`).
+
+**Why this works in the flat-trajectory limit.** Decompose
+$e_{i,t}=c_i+\xi_{i,t}$ with $\xi_{i,t}\sim\mathcal N(0,\sigma_{\mathrm{drift}}^2 I)$
+i.i.d. across $t$ and centroid $c_i\sim p_{\mathrm{centroid}}$. As
+$\sigma_{\mathrm{drift}}\to 0$ the trajectory collapses to its centroid, so
+
+$$
+\hat p_{\mathrm{marg}}(e) \;\to\; p_{\mathrm{centroid}}(e),
+\qquad
+\hat p_{cp,\mathrm{marg}}(e) \;\propto\; p_{\mathrm{centroid}}(e)^2
+\tag{19}
+$$
+
+(the latter because in the flat limit $p_{cp}(\tau)\propto p(\tau)^2$ is
+supported on constant trajectories with weight $p_{\mathrm{centroid}}(c)^2$, and
+pooling per-bin positions across midpoint trajectories collapses to a single
+$p_{\mathrm{centroid}}^2$ KDE). The ratio $\hat p_{cp,\mathrm{marg}}/\hat p_{\mathrm{marg}}$
+at the centroid then collapses to $p_{\mathrm{centroid}}(c)$ up to a normalising
+constant, and the table above recovers §4.4's Direction 1 pair weight
+$1/p_{\mathrm{centroid}}(c)$ and Direction 2 sample weight $\propto p_{\mathrm{centroid}}(c)$
+exactly. Self-normalisation absorbs the normalising constant in numerator and
+denominator.
+
+**The flat-trajectory approximation.** For $\sigma_{\mathrm{drift}}>0$ the
+estimator targets the *per-bin marginal* $p_{\mathrm{pb}}(e)=p_{\mathrm{centroid}}*\phi_{\sigma_{\mathrm{drift}}}(e)$
+— a Gaussian-smoothed version of the centroid distribution. The "actual viewing
+distribution" the estimator aims at is therefore $\mathcal N(0,\sigma_{\mathrm{traj}}^2 I)$
+with $\sigma_{\mathrm{traj}}^2=\sigma^2+\sigma_{\mathrm{drift}}^2$, and the truth to
+compare against is §4.4's closed form at $\sigma_{\mathrm{traj}}$
+(`synthetic.ground_truth(kind, sqrt(sigma^2+sigma_drift^2), ell, ell_M)`). The
+construction is *exact* in expectation in the flat limit; for non-zero drift
+the residual comes from two sources:
+
+1. **Centroid-vs-per-bin smoothing.** Evaluating the ratio at the trajectory
+   centroid (a single 2-D point) discards within-window drift; the ratio at
+   $c_i$ is biased by an amount that scales with $\sigma_{\mathrm{drift}}/\sigma$.
+2. **Threshold inflation.** Because $E[\lVert\tau_i-\tau_j\rVert^2_{\mathrm{RMS}}]
+   \approx d_{\mathrm{centroid}}^2 + 4\sigma_{\mathrm{drift}}^2$, the RMS-trajectory
+   threshold $\varepsilon$ must grow with $\sigma_{\mathrm{drift}}$ to admit any
+   close pairs at all; at large $\sigma_{\mathrm{drift}}$ the close-pair filter
+   loses selectivity and the central-region concentration of the close-pair
+   midpoint density weakens.
+
+**Validation (Fig. 5).** A controlled synthetic with explicit
+$\sigma_{\mathrm{drift}}$ knob (`synthetic.make_trajectory_session`) shows the
+flat-limit recovery is sharp and the bias grows smoothly with
+$\sigma_{\mathrm{drift}}/\sigma$. At $\sigma_{\mathrm{drift}}/\sigma=0$ the corrected
+Directions 1 and 2 sit on their respective truths within seed noise (panel
+E); at $\sigma_{\mathrm{drift}}/\sigma\sim 0.2$ — comparable to the operating
+regime for fixational drift over a typical $t_{\mathrm{hist}}+t_{\mathrm{count}}$
+window — the bias is small; at $\sigma_{\mathrm{drift}}/\sigma\sim 1$ the
+trajectories are no longer "essentially flat" and the bias is visible but
+bounded. Panels B–D show the §4.1 mechanism reappearing in the multi-bin
+setting: $\hat p_{cp,\mathrm{marg}}$ is narrower than $\hat p_{\mathrm{marg}}$, and
+their ratio peaks at the centre — the close pairs over-represent the
+high-density region exactly as the single-bin §4.1 picture predicts.
+
+![**Figure 5 — The trajectory-mode estimator and its validation.** **(A)**
+Example trajectories ($\sigma_{\mathrm{drift}}=\sigma/4$) showing centroid scatter
+plus per-bin fixational drift. **(B)** $\hat p_{\mathrm{marg}}(e)$, the 2-D KDE
+fit on pooled per-bin positions of all samples. **(C)** $\hat p_{cp,\mathrm{marg}}(e)$,
+the 2-D KDE fit on per-bin positions of close-pair midpoint trajectories —
+narrower than (B), concentrated at the centre. **(D)** The ratio
+$\hat p_{cp,\mathrm{marg}}/\hat p_{\mathrm{marg}}$ — the §4.1 distribution mismatch in
+the multi-bin setting, peaking at the centre as expected. **(E)**
+$\sigma_{\mathrm{drift}}$ sweep on a `flat` mask: matched Directions 1 and 2 sit on
+their respective truths (dotted lines) in the flat limit; bias grows smoothly
+with $\sigma_{\mathrm{drift}}/\sigma$; naive over-states.](figures/fig_trajectory.png)
+
+The trajectory-mode estimator is the production-setting bridge for §5.2's
+single-bin analysis: when the §6.2 production change lands, the same
+`target ∈ {'naive','full','central'}` parameter selects the same three
+behaviours; the §5.2 numbers are recovered as the
+$\sigma_{\mathrm{drift}}\to 0$, $T=1$ limit; and the curse-of-dimensionality wall
+that the multi-bin filter raised is sidestepped by replacing the trajectory
+density with two 2-D KDEs evaluated at the trajectory centroid.
+
 ---
 
 # 5. Consequences on synthetic and real data
@@ -917,6 +1047,10 @@ of trial-aligned spikes and real eye trajectories). $1-\alpha$ and the Fano
 factor are computed on the real spikes with each cell's own validity mask
 (reproducing the Figure-2 per-cell $1-\alpha$ at the median); the
 eye-position density is a Gaussian KDE of the measured fixational positions.
+This implementation uses a *single-bin* close-pair filter (the eye position
+at one analysis time bin per sample), so the §4.4 importance weights apply
+without modification; the multi-bin trajectory extension required by the
+production filter (§4.6) is folded into the gated §6.2 pipeline change.
 Pooled over **397 good cells** ($\mathrm{cc}_{\max}>0.85$, 2 monkeys, 24
 sessions):
 
@@ -935,7 +1069,7 @@ sessions):
 - **The gap measures fixation-scale spatial structure, and it is
   measurable.** The gap between the two consistent targets,
   $\lvert(1-\alpha)_{\text{full}} - (1-\alpha)_{\text{central}}\rvert$, has
-  a population **median of 0.089** with a tail beyond $0.3$ (Fig. 5B).
+  a population **median of 0.089** with a tail beyond $0.3$ (Fig. 6B).
   Under the unified random-field model the gap is non-zero under (A2)
   itself when $\ell\sim\sigma$ (Eq. 16) — peaking at $\approx 0.17$ — so
   gap $= 0.089$ is evidence that the cells' rate maps have spatial
@@ -950,7 +1084,7 @@ sessions):
   the Fano factor inherits the rate-variance distribution mismatch
   (Fig. 3C); per-cell shifts are larger.
 
-![**Figure 5 — The correction on real data (397 good cells, cache-only).**
+![**Figure 6 — The correction on real data (397 good cells, cache-only).**
 **(A)** $1-\alpha$ on real spikes: Direction 1 (blue) tracks the naive
 estimate closely (median shift $-0.022$), while Direction 2 (red) is
 systematically lower. **(B)** The full-vs-central gap — a measure of the
@@ -1000,20 +1134,27 @@ Diagnosis and validation are recorded in
 ## 6.2 Extension 2 — implemented here, production gated
 
 Eye-position-distribution matching is implemented and TDD-validated in this
-folder:
+folder, for both the single-bin (§4.4) and multi-bin trajectory (§4.6)
+filters:
 
-- `estimators.decompose(target=...)` — `naive` reproduces the existing
-  pipeline; `full` is Direction 1 (the actual-viewing $p$); `central` is
-  Direction 2 ($p^2$).
-- `test_estimators.py` — 11 tests covering correctness (recovery of the
+- `estimators.decompose(target=...)` — single-bin close-pair filter.
+  `naive` reproduces the existing pipeline; `full` is Direction 1 (the
+  actual-viewing $p$); `central` is Direction 2 ($p^2$).
+- `estimators.decompose_trajectory(target=...)` — multi-bin RMS-trajectory
+  close-pair filter (matching `VisionCore/covariance.py`), with the
+  pooled-per-bin KDE importance weights of §4.6.
+- `test_estimators.py` — 15 tests covering correctness (recovery of the
   closed-form decompositions under each target, finite-threshold-bias
   shrinkage), stability (Direction 2 stabler than Direction 1 for eccentric
   cells), Poisson cancellation (Fano $\to 1$), the pipeline-match
-  (`naive` ↔ `pipeline_one_minus_alpha`), and Extension 1
-  (variable-$n_t$ uniform vs pair-count weighting).
+  (`naive` ↔ `pipeline_one_minus_alpha`), Extension 1 (variable-$n_t$
+  uniform vs pair-count weighting), and the §4.6 multi-bin extension
+  (flat-limit recovery, moderate-drift recovery, strong-drift bias
+  documentation, naive bias on a centrally-modulated cell).
 
 The proposed production change is to add the `target` argument to
-`estimate_rate_covariance` (close-pair weight $q/p^2$) and a corresponding
+`estimate_rate_covariance` (close-pair weight $q/p^2$ derived from the §4.6
+pooled-per-bin KDE ratio at the trajectory centroid) and a corresponding
 per-sample weight $q/p$ to `bagged_split_half_psth_covariance` and the
 $C_{\text{total}}$ computation in `VisionCore/covariance.py`, defaulted to
 `'naive'` so the current numbers are preserved unless `target='full'` is

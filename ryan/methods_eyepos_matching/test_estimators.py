@@ -25,10 +25,14 @@ Run:  uv run --with pytest pytest test_estimators.py -q   (from this folder)
 """
 import numpy as np
 
-from synthetic import make_session, ground_truth
-from estimators import decompose
+from synthetic import make_session, make_trajectory_session, ground_truth
+from estimators import decompose, decompose_trajectory
 
 NTR, NPH, SIG = 600, 100, 0.15
+
+# Trajectory-mode test budget: smaller than the single-bin tests to keep the
+# combined runtime manageable while still giving a stable seed mean.
+T_NPER, T_NPH, T_TWIN = 25, 30, 5
 
 
 def _seed_stats(kinds, target, key, seeds=range(6), deterministic=True,
@@ -376,6 +380,115 @@ def test_mcfarland_recovers_one_minus_alpha_p_under_A2():
         mean, _, gt_p, _ = _seed_stats_sweep("naive", "one_minus_alpha", ell)
         assert abs(mean - gt_p) < 0.06, \
             f"r={r}: McFarland estimate {mean:.3f} != truth {gt_p:.3f}"
+
+
+# ---------------------------------------------------------------------------
+# §4.6 trajectory-mode estimator (multi-bin eye trajectories)
+# ---------------------------------------------------------------------------
+
+def _traj_threshold(sigma_drift, base=0.05):
+    """Inflate the RMS-trajectory close-pair threshold so the effective
+    centroid-distance threshold stays ~constant across sigma_drift values.
+
+    E[RMS^2] for two trajectories with centroid distance d and per-bin drift
+    sigma_drift is d^2 + 4 sigma_drift^2; pick thr so the centroid-matching
+    radius is `base` regardless of sigma_drift.
+    """
+    return float(np.sqrt(base ** 2 + 4.0 * float(sigma_drift) ** 2))
+
+
+def _traj_seed_stats(kinds, target, sigma_drift, seeds=range(6),
+                     n_per=T_NPER, n_T=T_NPH, t_window=T_TWIN, base_thr=0.05,
+                     **mk):
+    """Per-cell mean and std of decompose_trajectory across seeds."""
+    thr = _traj_threshold(sigma_drift, base=base_thr)
+    vals = []
+    sess = None
+    for s in seeds:
+        sess = make_trajectory_session(
+            kinds, n_samples_per_time_bin=n_per, n_time_bins=n_T,
+            t_window=t_window, sigma_eye=SIG, sigma_drift=sigma_drift,
+            seed=s, **mk)
+        d = decompose_trajectory(sess["counts"], sess["trajectories"],
+                                 sess["T_idx"], target=target, threshold=thr)
+        vals.append(d["one_minus_alpha"])
+    vals = np.array(vals, float)
+    return np.nanmean(vals, 0), np.nanstd(vals, 0), sess
+
+
+def test_trajectory_flat_limit_recovers_truth():
+    """sigma_drift = 0: trajectories collapse to their centroid, the
+    pooled-per-bin KDE coincides with the centroid KDE, and the trajectory-mode
+    estimator must recover §4.4's centroid-distribution 1-alpha on a mix of
+    homogeneous and non-homogeneous masks. This is the regime where the
+    flat-trajectory approximation is exact, so the recovery should match the
+    single-bin §4.4 tests' tolerance."""
+    kinds = ["flat", "central", "eccentric", "linear"]
+    oma_full, _, sess = _traj_seed_stats(kinds, "full", sigma_drift=0.0)
+    oma_cent, _, _ = _traj_seed_stats(kinds, "central", sigma_drift=0.0)
+    gt_p = np.array([sess["traj_truth"][c]["p"]["one_minus_alpha"]
+                     for c in range(len(kinds))])
+    gt_p2 = np.array([sess["traj_truth"][c]["p2"]["one_minus_alpha"]
+                      for c in range(len(kinds))])
+    assert np.allclose(oma_full, gt_p, atol=0.08), \
+        f"flat-limit full got {oma_full}, want {gt_p}"
+    assert np.allclose(oma_cent, gt_p2, atol=0.10), \
+        f"flat-limit central got {oma_cent}, want {gt_p2}"
+
+
+def test_trajectory_moderate_drift_recovers_per_bin_marginal_truth():
+    """sigma_drift = sigma/5: the per-bin marginal is N(0, (sigma^2 + sigma_drift^2) I),
+    slightly broader than the centroid distribution. The pooled-per-bin KDE
+    targets that per-bin marginal directly, so the estimator should recover
+    `traj_truth` (the §4.4 closed form at sigma_traj = sqrt(sigma^2 + sigma_drift^2))
+    within a slightly looser tolerance than the flat limit. Tests the
+    smoothing-doesn't-blow-up regime."""
+    kinds = ["flat", "central", "linear"]
+    sd = SIG / 5.0
+    oma_full, _, sess = _traj_seed_stats(kinds, "full", sigma_drift=sd)
+    gt_p = np.array([sess["traj_truth"][c]["p"]["one_minus_alpha"]
+                     for c in range(len(kinds))])
+    err = np.abs(oma_full - gt_p)
+    assert np.all(err < 0.12), \
+        f"moderate-drift full got {oma_full}, want {gt_p} (err {err})"
+
+
+def test_trajectory_strong_drift_documents_bias():
+    """sigma_drift = sigma: the per-bin pooled KDE is heavily smoothed relative
+    to the centroid distribution, AND the inflated close-pair RMS threshold
+    captures most pairs (close-pair filter is no longer selective). The
+    estimator under-states 1-alpha by ~0.3 in this regime -- the flat-trajectory
+    approximation is broken and the importance reweighting is barely applied.
+    This test documents the degradation by asserting the bias is bounded
+    (not unbounded); the actual ~0.3 under-shoot is the writeup §4.6 caveat
+    that the estimator is meaningful only for sigma_drift << sigma_eye."""
+    sd = SIG  # full sigma_drift
+    oma_full, _, sess = _traj_seed_stats(["flat"], "full", sigma_drift=sd,
+                                         seeds=range(4))
+    gt_p = sess["traj_truth"][0]["p"]["one_minus_alpha"]
+    err = abs(float(oma_full[0]) - gt_p)
+    # Bound is generous: the estimator is approximate at this drift level
+    # (empirically err ~ 0.3). A 2x regression (err > 0.6) would signal a
+    # structural problem (e.g. the close-pair filter degenerating to "all
+    # pairs", or the KDE returning NaN at the centroid).
+    assert err < 0.45, \
+        f"strong-drift bias unexpectedly large: got {oma_full[0]} vs truth {gt_p}"
+
+
+def test_trajectory_naive_is_biased_where_matched_is_not_on_central():
+    """Naive trajectory-mode estimator (no importance reweighting on close pairs)
+    still over-states 1-alpha on a centrally-modulated cell -- the same §4.3
+    mechanism applies in the multi-bin setting because the close-pair midpoint
+    density is still concentrated where M^2 is large. The matched 'full'
+    estimator recovers truth at modest drift (sigma/5)."""
+    sd = SIG / 5.0
+    oma_naive, _, sess = _traj_seed_stats(["central"], "naive", sigma_drift=sd)
+    oma_full, _, _ = _traj_seed_stats(["central"], "full", sigma_drift=sd)
+    gt_p = sess["traj_truth"][0]["p"]["one_minus_alpha"]
+    err_naive = abs(float(oma_naive[0]) - gt_p)
+    err_full = abs(float(oma_full[0]) - gt_p)
+    assert err_full < err_naive, \
+        f"matched err {err_full:.3f} !< naive err {err_naive:.3f} (truth {gt_p:.3f})"
 
 
 def test_t_floor_on_sd_one_minus_alpha():

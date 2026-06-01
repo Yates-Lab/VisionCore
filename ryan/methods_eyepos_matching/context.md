@@ -33,9 +33,9 @@ sentence the §4.5 reframe targets).
 
 | file | role |
 |---|---|
-| `synthetic.py` | Unified rate-field generator + closed-form / MC ground truth. |
-| `estimators.py` | `decompose(target=…)` — the matched LOTC estimator (Direction 1 / 2 / naive). |
-| `test_estimators.py` | 15 tests: 11 Ext-2 tests + 3 sanity-check tests + Appendix §A.6 T-floor test. |
+| `synthetic.py` | Unified rate-field generator + closed-form / MC ground truth. `make_trajectory_session` is the §4.6 multi-bin extension (centroid + per-bin drift). |
+| `estimators.py` | `decompose(target=…)` — single-bin §4.4 matched estimator. `decompose_trajectory(target=…)` — §4.6 multi-bin extension with RMS-trajectory close-pair filter and pooled-per-bin KDE reweighting. |
+| `test_estimators.py` | 19 tests: 11 single-bin Ext-2 + 3 sanity + Appendix §A.6 T-floor + 4 §4.6 trajectory-mode tests (flat-limit recovery, moderate-drift recovery, strong-drift bias, naive bias on central). |
 | `_style.py` | Shared matplotlib style + `figures/` save helper. |
 | `fig_model.py` | Visual schematic of the unified generative model components (eye dist, GP field, masks, envelope, resulting rate). Inserted at top of writeup §2.3. |
 | `fig_mechanism.py` | Geometric origin of p vs p² mismatch (Fig. 2). |
@@ -45,8 +45,9 @@ sentence the §4.5 reframe targets).
 | `consistency_sweep.npz` | Cached sweep results for fig_consistency (not committed). |
 | `fig_naive_failure.py` | Naive vs matched on three quantities (Fig. 3). |
 | `fig_correction.py` | Recovery + Direction-1/2 tradeoff + gap (Fig. 4). |
-| `generate_realdata.py` | Cache-only real-data driver (do NOT recompute). |
-| `realdata_results.pkl` | 397-cell cache; reused as-is by `fig_realdata.png` reference. |
+| `fig_trajectory.py` | §4.6 multi-bin extension: KDE snapshots (A-D) + σ_drift sweep validation (E). Fig. 5. |
+| `generate_realdata.py` | Cache-only real-data driver (do NOT recompute). Single-bin close-pair filter (see §5.2 caveat re: §4.6). |
+| `realdata_results.pkl` | 397-cell cache; reused as-is by `fig_realdata.png` reference (now Fig. 6). |
 | `figures/` | All generated PNGs. |
 | `writeup.md` | Source. |
 | `writeup.html` | Build output (committed; pandoc --mathml --self-contained). |
@@ -181,12 +182,23 @@ estimators agree within bootstrap noise at our (N, T, C) scales.
    than the raw bin count. The within-stimulus-frame reliability question is
    a future direction.
 
-3. **Production pipeline change for Ext-2 (gated).** Add target-distribution
+3. **§4.6 multi-bin trajectory extension — DONE.** Added
+   `decompose_trajectory` (RMS-trajectory close-pair filter + two
+   pooled-per-bin KDEs evaluated at the trajectory centroid) and
+   `make_trajectory_session` (centroid + i.i.d. per-bin drift synthetic).
+   Mathematically exact in the flat-trajectory limit; degrades smoothly with
+   σ_drift/σ. Validated by `fig_trajectory.py` and 4 new tests. This is the
+   production-setting bridge: when §6.2 lands, the same target arg selects
+   the same three behaviours, with the trajectory density replaced by two
+   2-D centroid-evaluated KDEs (no curse of dimensionality).
+
+4. **Production pipeline change for Ext-2 (gated).** Add target-distribution
    weights to `estimate_rate_covariance` / `bagged_split_half_psth_covariance`
    / the Ctotal computation in `VisionCore/covariance.py`. Default
-   `target='naive'` so current numbers stand. Then the expensive GPU
-   `fig2_decomposition` cache regen. Confirm wanted before touching shared
-   pipeline.
+   `target='naive'` so current numbers stand. Use the §4.6 pooled-per-bin
+   KDE construction for the multi-bin trajectory case. Then the expensive
+   GPU `fig2_decomposition` cache regen. Confirm wanted before touching
+   shared pipeline.
 
 ## Build / test commands
 
@@ -206,6 +218,7 @@ Run from this folder. Workspace `.venv` is at the v1-fovea repo root;
     uv run python fig_time_bin_weighting.py
     uv run python fig_naive_failure.py
     uv run python fig_correction.py
+    uv run python fig_trajectory.py             # §4.6 multi-bin extension
     uv run python fig_consistency.py            # parallel sweep, cached
 
     # Writeup

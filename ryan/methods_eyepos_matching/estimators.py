@@ -408,3 +408,306 @@ def decompose(counts, eye, target="full", valid=None, threshold=0.05,
         "one_minus_alpha": one_minus_alpha,
         "n_time_bins": int(keep_time_bin.sum()), "n_samples": int(mask.sum()),
     }
+
+
+# ---------------------------------------------------------------------------
+# §4.6: trajectory-mode estimator (multi-bin eye trajectories)
+# ---------------------------------------------------------------------------
+
+def _rms_traj_close_pairs(trajectories, T_idx, threshold):
+    """Enumerate same-T_idx close pairs by RMS trajectory distance.
+
+    Mirrors VisionCore/covariance.py::compute_eye_distances: the per-pair
+    distance is the L2 distance of the flattened trajectory vectors, scaled
+    by 1/sqrt(t_window), so the threshold has the same per-bin-distance units
+    as the single-bin §5.2 scheme (and the flat-trajectory limit of this
+    estimator coincides with `decompose` at the same threshold).
+    """
+    N, T, _ = trajectories.shape
+    inv_sqrt_T = 1.0 / float(np.sqrt(float(T)))
+    flat = trajectories.reshape(N, -1)                       # (N, T*2)
+    gi_acc, gj_acc, t_acc, mid_acc = [], [], [], []
+    for t in np.unique(T_idx):
+        ix = np.where(T_idx == t)[0]
+        if len(ix) < 2:
+            continue
+        F = flat[ix]
+        D = np.linalg.norm(F[:, None, :] - F[None, :, :], axis=-1) * inv_sqrt_T
+        i, j = np.triu_indices(len(ix), k=1)
+        d = D[i, j]
+        close = d < threshold
+        if not close.any():
+            continue
+        gi = ix[i[close]]; gj = ix[j[close]]
+        gi_acc.append(gi); gj_acc.append(gj)
+        t_acc.append(np.full(int(close.sum()), t))
+        mid_acc.append(0.5 * (trajectories[gi] + trajectories[gj]))
+    if not gi_acc:
+        return (np.zeros(0, int), np.zeros(0, int), np.zeros(0, int),
+                np.zeros((0, T, 2)))
+    return (np.concatenate(gi_acc), np.concatenate(gj_acc),
+            np.concatenate(t_acc),
+            np.concatenate(mid_acc, axis=0))
+
+
+def _pooled_per_bin_kde(per_bin_positions):
+    """Fit a 2-D gaussian_kde on pooled per-bin positions.
+
+    Returns a callable p_hat: (M, 2) -> (M,). Bandwidth uses ``scipy``'s
+    Scott's-rule default on the *pooled* point count: within-trajectory
+    correlation means the effective sample size is < N*T, so this slightly
+    under-smooths in dense regions. Practical impact is small at the per-bin
+    drift / centroid spread ratios typical for fixational data (writeup §4.6).
+    """
+    E = np.asarray(per_bin_positions, dtype=float).reshape(-1, 2)
+    finite = np.isfinite(E).all(axis=1)
+    E = E[finite]
+    kde = gaussian_kde(E.T)
+    return lambda X: kde(np.asarray(X, dtype=float).reshape(-1, 2).T)
+
+
+def decompose_trajectory(counts, trajectories, T_idx, target="full",
+                         valid=None, threshold=0.05, weight_clip=1e6,
+                         n_boot=20, seed=42, min_trials_per_time_bin=10,
+                         time_bin_weighting="pair_count",
+                         cpsth_method="mcfarland"):
+    """Trajectory-mode distribution-matched LOTC decomposition (writeup §4.6).
+
+    The multi-bin extension of :func:`decompose`. Each sample is a window of
+    ``t_window`` contiguous bins of eye trajectory rather than a single
+    eye-position observation; close pairs are filtered by RMS trajectory
+    distance (matching ``VisionCore/covariance.py``); the importance-weight
+    density is estimated by two pooled-per-bin 2-D KDEs:
+
+      p_marg     = gaussian_kde over pooled per-bin positions of all samples
+      p_cp,marg  = gaussian_kde over pooled per-bin positions of close-pair
+                   *midpoint* trajectories (recipe (b) of writeup §4.6).
+
+    In the flat-trajectory limit (zero within-window drift) the ratio
+    p_cp,marg(e)/p_marg(e) collapses to the centroid density p_centroid(e), so
+    evaluating that ratio (or its inverse) at the trajectory centroid recovers
+    §4.4's importance weights exactly. For non-zero within-window drift the
+    ratio is a smoothed proxy for p_centroid, biased by an amount controlled
+    by sigma_drift / sigma_eye (validated empirically in fig_trajectory.py).
+
+    Parameters
+    ----------
+    counts : ndarray (N, n_cells)
+        Per-sample window-integrated spike counts (or deterministic rates).
+    trajectories : ndarray (N, t_window, 2)
+        Per-sample per-bin eye trajectories.
+    T_idx : ndarray (N,)
+        Analysis time bin index per sample.
+    target : {'naive', 'full', 'central'}
+        Eye distribution to match all terms to:
+          * 'naive'  : reproduce the unmatched estimator (no reweight).
+          * 'full'   : Direction 1, target = p_marg (the actual per-bin marginal).
+                       Per-pair weight at midpoint centroid c_mid:
+                       p_marg(c_mid) / p_cp,marg(c_mid)   (the inverse ratio;
+                       reduces to 1/p_centroid in the flat limit).
+                       Per-sample weight 1.
+          * 'central': Direction 2, target = p_cp,marg (the close-pair density).
+                       Per-sample weight at centroid c_i:
+                       p_cp,marg(c_i) / p_marg(c_i)       (the ratio;
+                       reduces to p_centroid in the flat limit).
+                       Per-pair weight 1.
+    valid : ndarray (N,) of bool, optional
+        Sample-level validity mask; combined with finiteness.
+    threshold : float
+        Close-pair RMS trajectory threshold (per-bin distance units; see
+        :func:`_rms_traj_close_pairs`).
+    weight_clip, time_bin_weighting, cpsth_method, n_boot, seed,
+    min_trials_per_time_bin : see :func:`decompose`.
+
+    Returns
+    -------
+    dict with the same keys as :func:`decompose` plus ``n_close_pairs``.
+    """
+    counts = np.asarray(counts, dtype=float)
+    trajectories = np.asarray(trajectories, dtype=float)
+    T_idx = np.asarray(T_idx).astype(int)
+    if trajectories.ndim != 3 or trajectories.shape[-1] != 2:
+        raise ValueError("trajectories must have shape (N, t_window, 2)")
+    if counts.ndim != 2:
+        raise ValueError("counts must have shape (N, n_cells)")
+    N, t_window, _ = trajectories.shape
+    if counts.shape[0] != N or T_idx.shape[0] != N:
+        raise ValueError("counts, trajectories, T_idx must share N")
+
+    finite = (np.isfinite(counts).all(axis=1)
+              & np.isfinite(trajectories).all(axis=(1, 2)))
+    valid = finite if valid is None else (np.asarray(valid, bool) & finite)
+
+    # keep only T_idx bins with enough valid trials
+    keep_mask = np.zeros(N, bool)
+    keep_T = []
+    for t in np.unique(T_idx[valid]):
+        ix = np.where(valid & (T_idx == t))[0]
+        if len(ix) >= min_trials_per_time_bin:
+            keep_mask[ix] = True
+            keep_T.append(t)
+    keep_T = np.asarray(keep_T)
+
+    S = counts[keep_mask]                                    # (N', C)
+    Tr = trajectories[keep_mask]                             # (N', t_window, 2)
+    T = T_idx[keep_mask]                                     # (N',)
+    centroids = Tr.mean(axis=1)                              # (N', 2)
+    n_cells = S.shape[1]
+
+    # close pairs (RMS trajectory filter)
+    gi, gj, tpair, mid_traj = _rms_traj_close_pairs(Tr, T, threshold)
+    n_pairs = len(gi)
+
+    # densities
+    p_marg = _pooled_per_bin_kde(Tr.reshape(-1, 2))
+    if n_pairs > 0:
+        p_cp_marg = _pooled_per_bin_kde(mid_traj.reshape(-1, 2))
+    else:
+        p_cp_marg = None
+
+    # per-sample target weight (centroid-evaluated)
+    p_marg_c = np.clip(p_marg(centroids), 1e-12, None)
+    if target == "central":
+        if p_cp_marg is None:
+            return _nan_decompose(n_cells, len(T), N, n_pairs)
+        ratio_samp = np.clip(p_cp_marg(centroids), 1e-12, None) / p_marg_c
+        tw = ratio_samp
+    elif target in ("naive", "full"):
+        tw = np.ones(len(S))
+    else:
+        raise ValueError(f"unknown target: {target!r}")
+
+    # per-sample time-bin compensation (same scheme as decompose)
+    nt_by_T = {int(t): int((T == t).sum()) for t in np.unique(T)}
+    if time_bin_weighting == "pair_count":
+        pw_t_by_T = {t: max(nt_by_T[t] - 1, 0) / 2.0 for t in nt_by_T}
+    elif time_bin_weighting == "uniform":
+        pw_t_by_T = {t: (1.0 / nt_by_T[t]) if nt_by_T[t] > 0 else 0.0
+                     for t in nt_by_T}
+    else:
+        raise ValueError(f"unknown time_bin_weighting: {time_bin_weighting!r}")
+    tb_w = np.array([pw_t_by_T[int(t)] for t in T], dtype=float)
+    sw = tw * tb_w
+
+    Erate = _weighted_mean(S, sw)
+    Ctotal = _weighted_cov(S, sw)
+
+    # Centred S for the close-pair and all-pairs second moments. The summed-
+    # rate count has mean ~ t_window * mu_0 = O(t_window) while the variance
+    # signal is O(1), so the literal "second moment minus Erate^2" subtraction
+    # in the single-bin formula loses precision badly at the smaller sample
+    # sizes typical of the trajectory-mode validation (writeup §4.6). Centring
+    # first turns each pair product (Y_i - mu)(Y_j - mu) into a small * small
+    # cancellation rather than a (T*mu)^2 - (T*mu)^2 catastrophic one; the
+    # identity Σ_{i<j} w_i w_j (Y_i-μ)(Y_j-μ) = ½[(Σw_i(Y_i-μ))² - Σw_i²(Y_i-μ)²]
+    # is the same M6 algebraic trick, just evaluated on centred inputs.
+    S_c = S - Erate[None, :]
+
+    # Cpsth: McFarland M6 / split-half, with trajectory-centroid w_trial
+    if target == "central":
+        w_trial = ratio_samp.copy()
+    else:
+        w_trial = np.ones(len(S))
+
+    if cpsth_method == "mcfarland":
+        Cpsth = _all_pairs_second_moment_with_weights(
+            S_c, w_trial, T, time_bin_weighting=time_bin_weighting)
+    elif cpsth_method == "split_half":
+        Cpsth = _split_half_psth_cov(S, T, sw, n_boot, seed,
+                                     min_trials_per_time_bin,
+                                     time_bin_weighting=time_bin_weighting)
+    else:
+        raise ValueError(f"unknown cpsth_method: {cpsth_method!r}")
+
+    # Crate: close-pair (centred) cross-product with target-importance weight
+    # at the midpoint trajectory centroid.
+    if n_pairs == 0:
+        Crate = np.full((n_cells, n_cells), np.nan)
+    else:
+        mid_centroids = mid_traj.mean(axis=1)                        # (P, 2)
+        if target == "full":
+            num = np.clip(p_marg(mid_centroids), 1e-12, None)
+            den = np.clip(p_cp_marg(mid_centroids), 1e-12, None)
+            pw_q = num / den
+            pw_q = np.clip(pw_q, None, weight_clip * np.median(pw_q))
+        else:                                                        # naive / central
+            pw_q = np.ones(n_pairs)
+        if time_bin_weighting == "pair_count":
+            pw_tt = np.ones(n_pairs)
+        else:                                                        # uniform
+            _, inv = np.unique(tpair, return_inverse=True)
+            nP_t = np.bincount(inv)
+            pw_tt = 1.0 / nP_t[inv]
+        pw = pw_q * pw_tt
+        pw = pw / pw.sum()
+        prod = (S_c[gi].T * pw) @ S_c[gj]
+        Crate = 0.5 * (prod + prod.T)
+
+    CnoiseC = 0.5 * ((Ctotal - Crate) + (Ctotal - Crate).T)
+    noise_corr = cov_to_corr(CnoiseC)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        fano = np.diag(CnoiseC) / Erate
+        alpha = np.clip(np.diag(Cpsth) / np.diag(Crate), 0.0, 1.0)
+    one_minus_alpha = 1.0 - alpha
+    one_minus_alpha[~(np.diag(Crate) > 0)] = np.nan
+
+    return {
+        "Ctotal": Ctotal, "Cpsth": Cpsth, "Crate": Crate, "CnoiseC": CnoiseC,
+        "noise_corr": noise_corr, "fano": fano, "Erate": Erate,
+        "one_minus_alpha": one_minus_alpha,
+        "n_time_bins": int(len(np.unique(T))),
+        "n_samples": int(len(T)),
+        "n_close_pairs": int(n_pairs),
+    }
+
+
+def _all_pairs_second_moment_with_weights(S, w_trial, T,
+                                          time_bin_weighting="pair_count"):
+    """McFarland M6 all-distinct-pair second moment with explicit per-trial
+    weights ``w_trial`` (so the trajectory-mode central-target Cpsth uses the
+    same p_cp,marg/p_marg ratio as its sample weight). Same algebraic identity
+    as :func:`_all_pairs_second_moment` -- factored out so the weighting source
+    (single-bin p_hat vs. trajectory pooled-per-bin ratio) can vary."""
+    C = S.shape[1]
+    num = np.zeros((C, C), dtype=np.float64)
+    denom = 0.0
+    for t in np.unique(T):
+        ix = np.where(T == t)[0]
+        if len(ix) < 2:
+            continue
+        w_t = w_trial[ix]
+        S_t = S[ix]
+        wS_sum = (w_t[:, None] * S_t).sum(0)
+        outer_sum = np.outer(wS_sum, wS_sum)
+        wS2 = (w_t[:, None] ** 2) * S_t
+        diag_term = wS2.T @ S_t
+        pair_sum_t = 0.5 * (outer_sum - diag_term)
+        w_sum = w_t.sum()
+        n_pair_weight_t = 0.5 * (w_sum ** 2 - (w_t ** 2).sum())
+        if n_pair_weight_t <= 0:
+            continue
+        if time_bin_weighting == "pair_count":
+            num += pair_sum_t
+            denom += n_pair_weight_t
+        elif time_bin_weighting == "uniform":
+            num += pair_sum_t / n_pair_weight_t
+            denom += 1.0
+        else:
+            raise ValueError(f"unknown time_bin_weighting: {time_bin_weighting!r}")
+    if denom <= 0:
+        return np.full((C, C), np.nan)
+    prod = num / denom
+    return 0.5 * (prod + prod.T)
+
+
+def _nan_decompose(n_cells, n_time_bins, n_samples, n_pairs):
+    nan_C = np.full((n_cells, n_cells), np.nan)
+    nan_v = np.full(n_cells, np.nan)
+    return {
+        "Ctotal": nan_C, "Cpsth": nan_C, "Crate": nan_C, "CnoiseC": nan_C,
+        "noise_corr": nan_C, "fano": nan_v, "Erate": nan_v,
+        "one_minus_alpha": nan_v,
+        "n_time_bins": int(n_time_bins),
+        "n_samples": int(n_samples),
+        "n_close_pairs": int(n_pairs),
+    }
