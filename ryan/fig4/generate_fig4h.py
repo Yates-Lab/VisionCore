@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 
 from _fig4_data import FIG_DIR, configure_matplotlib
 from _fig4_ablation_data import load_ablation_data, COND_LABEL, PANEL_B_SESSION, PANEL_B_NEURON_ID
+from _fig4_helpers import draw_raster_scalebars, add_raster_colorbar_below
 
 
 def plot_panel_h(ax=None, data=None, cond="zeroed", label_fontsize=8):
@@ -62,6 +63,9 @@ def plot_panel_h(ax=None, data=None, cond="zeroed", label_fontsize=8):
     ax.set_xticks([]); ax.set_yticks([])
     for s in ("top", "right", "left", "bottom"):
         ax.spines[s].set_visible(False)
+    # Bars only (no text): inherit panel E's 100 ms / 10-trial scale. The x-bar
+    # lands in the Twin half (extent [0, w]).
+    draw_raster_scalebars(ax, n_trials=n, show_text=False)
     return fig, ax, im_rate, im_resid
 
 
@@ -73,9 +77,8 @@ if __name__ == "__main__":
     configure_matplotlib()
     fig, ax, im_rate, im_resid = plot_panel_h(cond=args.cond)
     if im_rate is not None:
-        fig.colorbar(im_rate, ax=ax, shrink=0.7, pad=0.02, label="rate (sp/s)")
-        fig.colorbar(im_resid, ax=ax, shrink=0.7, pad=0.08, label="Δ rate")
-    fig.tight_layout()
+        add_raster_colorbar_below(fig, ax, im_rate, "rate (sp/s)")
+        add_raster_colorbar_below(fig, ax, im_resid, "Δ rate", y0=-0.26)
     out = FIG_DIR / f"panel_h_rasters_{args.cond}.pdf"
     fig.savefig(out, bbox_inches="tight", dpi=300)
     print(f"Saved {out}")

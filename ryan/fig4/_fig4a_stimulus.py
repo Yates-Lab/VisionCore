@@ -609,33 +609,43 @@ def plot_panel_a_stimulus(ax, assets):
     header_y = max(
         _quads_top(train_dst_quads),
         test_dst[:, 1].max(),
-    ) + 0.55
+    ) + 1.15
     sub_header_y = header_y - 0.45
 
+    # Extra lift for the Training/Test zone titles (only) so they sit a bit
+    # higher above the screens; "Model input" keeps its own placement below.
+    TITLE_LIFT = 0.4
+    title_y = header_y + TITLE_LIFT
+    sub_y = sub_header_y + TITLE_LIFT
+
     train_cx_proj = float(np.mean([q[:, 0].mean() for q in train_dst_quads]))
-    ax.text(train_cx_proj, header_y, "Training stimuli",
+    ax.text(train_cx_proj, title_y, "Training stimuli",
             ha="center", va="bottom",
             fontsize=10, color=TEXT_COLOR, fontweight="bold")
-    ax.text(train_cx_proj, sub_header_y,
-            "gratings · gabors · natural images",
+    ax.text(train_cx_proj, sub_y,
+            "gratings · gabors · images",
             ha="center", va="bottom", fontsize=7.0,
             color="#555", style="italic")
 
-    test_cx_proj = test_dst[:, 0].mean()
-    ax.text(test_cx_proj, header_y, "Test stimulus",
+    # Center the Test title over the combined test-screen + lag-cube
+    # (model-input) span so it reads over both and pulls clear of the
+    # training stack to its left.
+    test_cube_xs = np.concatenate([test_dst[:, 0], cube_p2[:, 0]])
+    test_cx_proj = 0.5 * (test_cube_xs.min() + test_cube_xs.max())
+    ax.text(test_cx_proj, title_y, "Test stimulus",
             ha="center", va="bottom",
             fontsize=10, color=TEXT_COLOR, fontweight="bold")
-    ax.text(test_cx_proj, sub_header_y,
+    ax.text(test_cx_proj, sub_y,
             "fixated image sequence",
             ha="center", va="bottom", fontsize=7.0,
             color="#555", style="italic")
 
     cube_top_2d = cube_p2[[3, 6, 7], 1].max()
     cube_cx_proj = cube_p2[:, 0].mean()
-    ax.text(cube_cx_proj, cube_top_2d + 1.10, "Model input",
+    ax.text(cube_cx_proj, cube_top_2d + 1.75, "Model input",
             ha="center", va="bottom",
             fontsize=10, color=TEXT_COLOR, fontweight="bold")
-    ax.text(cube_cx_proj, cube_top_2d + 0.70,
+    ax.text(cube_cx_proj, cube_top_2d + 1.35,
             "space × space × time", ha="center", va="bottom",
             fontsize=7.0, color="#555", style="italic")
 
@@ -720,8 +730,8 @@ def plot_panel_a_stimulus(ax, assets):
     for q in train_dst_quads + [test_dst, cube_p2]:
         xs.extend([q[:, 0].min(), q[:, 0].max()])
         ys.extend([q[:, 1].min(), q[:, 1].max()])
-    ys.append(header_y + 0.5)         # top of headers
-    ys.append(cube_top_2d + 1.4)      # top of Model input header
+    ys.append(title_y + 0.5)          # top of (lifted) Train/Test headers
+    ys.append(cube_top_2d + 2.05)     # top of Model input header
     ys.append(min(train_bar_y, test_bar_y) - 0.7)   # below scalebar labels
     ys.append(mid[1] - 0.3)           # below cube time-axis label
     pad_x, pad_y = 0.4, 0.2

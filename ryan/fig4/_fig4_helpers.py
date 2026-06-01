@@ -99,6 +99,54 @@ def order_single_neuron_by_seriation(robs_trials, rhat_trials, dfs_trials,
     return robs_k[order], rhat_k[order], order, first_bin
 
 
+def add_raster_colorbar_below(fig, ax, im, label, *, y0=-0.05, height=0.035,
+                              width=0.675, x0=None, fontsize=6):
+    """Skinny horizontal colorbar floating beneath a raster axes.
+
+    Drawn on an `inset_axes` anchored to `ax` (axes-fraction coords; y0 < 0
+    places it below the axes). Inset axes are excluded from constrained_layout,
+    so the colorbar floats and does NOT steal gridspec space — the raster keeps
+    its full size and row alignment is preserved. Right-aligned to the panel by
+    default (x0=None); the x-scalebar lives in the lower-left, so the right side
+    is clear and the bar can sit just below the panel.
+    """
+    if x0 is None:
+        x0 = 1.0 - width
+    cax = ax.inset_axes([x0, y0, width, height])
+    cb = fig.colorbar(im, cax=cax, orientation="horizontal")
+    cb.ax.tick_params(labelsize=fontsize, length=2, pad=1)
+    cb.set_label(label, fontsize=fontsize, labelpad=2)
+    cb.outline.set_linewidth(0.5)
+    return cb
+
+
+def draw_raster_scalebars(ax, *, n_trials, scale_len_s=0.1, n_trials_scale=10,
+                          scale_fontsize=8, show_text=True):
+    """Draw the x (time) and y (trials) scale bars for a raster axes.
+
+    The bars sit just outside the axes (x-bar below, y-bar to the left) using
+    the axis-blended transforms, so they track the data extent regardless of
+    aspect. With `show_text=False` only the bars are drawn (used by panel H,
+    which inherits panel E's scale).
+    """
+    trans_x = ax.get_xaxis_transform()
+    ax.plot([0.0, scale_len_s], [-0.06, -0.06], "k-", linewidth=2,
+            transform=trans_x, clip_on=False)
+    if show_text:
+        ax.text(scale_len_s / 2, -0.11, f"{int(round(scale_len_s * 1000))} ms",
+                transform=trans_x, ha="center", va="top",
+                fontsize=scale_fontsize, clip_on=False)
+    trans_y = ax.get_yaxis_transform()
+    n_scale = min(n_trials_scale, n_trials)
+    y0, y1 = n_trials, n_trials - n_scale
+    ax.plot([-0.02, -0.02], [y0, y1], "k-", linewidth=2,
+            transform=trans_y, clip_on=False)
+    if show_text:
+        ax.text(-0.04, (y0 + y1) / 2, f"{n_scale} trials",
+                transform=trans_y, ha="right", va="center", rotation=90,
+                fontsize=scale_fontsize, clip_on=False)
+
+
 def draw_raster_pair(ax, robs_rate, rhat_rate, *, window_s, vmin, vmax,
                      scale_len_s=0.1, n_trials_scale=10,
                      label_fontsize=9, scale_fontsize=8):
@@ -121,20 +169,9 @@ def draw_raster_pair(ax, robs_rate, rhat_rate, *, window_s, vmin, vmax,
     ax.set_yticks([])
     for side in ("top", "right", "left", "bottom"):
         ax.spines[side].set_visible(False)
-    trans_x = ax.get_xaxis_transform()
-    ax.plot([0.0, scale_len_s], [-0.06, -0.06], "k-", linewidth=2,
-            transform=trans_x, clip_on=False)
-    ax.text(scale_len_s / 2, -0.11, f"{int(round(scale_len_s * 1000))} ms",
-            transform=trans_x, ha="center", va="top",
-            fontsize=scale_fontsize, clip_on=False)
-    trans_y = ax.get_yaxis_transform()
-    n_scale = min(n_trials_scale, n_trials_local)
-    y0, y1 = n_trials_local, n_trials_local - n_scale
-    ax.plot([-0.02, -0.02], [y0, y1], "k-", linewidth=2,
-            transform=trans_y, clip_on=False)
-    ax.text(-0.04, (y0 + y1) / 2, f"{n_scale} trials",
-            transform=trans_y, ha="right", va="center", rotation=90,
-            fontsize=scale_fontsize, clip_on=False)
+    draw_raster_scalebars(ax, n_trials=n_trials_local, scale_len_s=scale_len_s,
+                          n_trials_scale=n_trials_scale,
+                          scale_fontsize=scale_fontsize, show_text=True)
     return im
 
 

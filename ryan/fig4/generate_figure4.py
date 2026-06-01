@@ -29,7 +29,7 @@ import matplotlib.pyplot as plt
 
 from _fig4_data import FIG_DIR, configure_matplotlib, load_fig4_data
 from _fig4_ablation_data import load_ablation_data, print_ablation_stats
-from _fig4_helpers import select_example_neuron
+from _fig4_helpers import select_example_neuron, add_raster_colorbar_below
 from _fig4a_data import load_panel_a_assets
 from generate_fig4a import render_panel_a, _plot_halves, _fit_two_axes_in_rect
 from generate_fig4b import plot_panel_b
@@ -97,8 +97,8 @@ def _save_standalone_panels(data, example, abl, panel_d):
     for cond in ("zeroed", "permuted"):
         fig_h, ax_h, im_rate, im_resid = plot_panel_h(data=abl, cond=cond)
         if im_resid is not None:
-            fig_h.colorbar(im_rate, ax=ax_h, shrink=0.7, pad=0.02, label="rate (sp/s)")
-            fig_h.colorbar(im_resid, ax=ax_h, shrink=0.7, pad=0.08, label="Δ rate")
+            add_raster_colorbar_below(fig_h, ax_h, im_rate, "rate (sp/s)")
+            add_raster_colorbar_below(fig_h, ax_h, im_resid, "Δ rate", y0=-0.26)
         fig_h.savefig(FIG_DIR / f"panel_h_rasters_{cond}.pdf", bbox_inches="tight", dpi=300)
         plt.close(fig_h)
 
@@ -135,7 +135,7 @@ def _build_composite(data, example, abl, panel_d):
     ax_b.set_title("B", fontweight="bold", loc="left")
 
     ax_c = fig.add_subplot(gs_r1[0, 1])
-    plot_panel_c(ax=ax_c, data=data, legend_fontsize=7)
+    plot_panel_c(ax=ax_c, data=data)
     ax_c.set_title("C", fontweight="bold", loc="left")
 
     ax_d = fig.add_subplot(gs_r1[0, 2])
@@ -152,7 +152,7 @@ def _build_composite(data, example, abl, panel_d):
         label_fontsize=8, scale_fontsize=7, colorbar=False,
     )
     ax_e.set_title("E", fontweight="bold", loc="left")
-    fig.colorbar(im_e, ax=ax_e, shrink=0.8, pad=0.02, label="sp/s")
+    add_raster_colorbar_below(fig, ax_e, im_e, "sp/s")
 
     ax_f = fig.add_subplot(gs_r2[0, 1])
     plot_panel_f(ax=ax_f, data=data, legend_fontsize=7, print_stats=False)
@@ -170,7 +170,7 @@ def _build_composite(data, example, abl, panel_d):
                                      label_fontsize=8)
     ax_h.set_title("H", fontweight="bold", loc="left")
     if im_resid is not None:
-        fig.colorbar(im_resid, ax=ax_h, shrink=0.8, pad=0.02, label="Δ rate")
+        add_raster_colorbar_below(fig, ax_h, im_resid, "Δ rate")
 
     ax_i = fig.add_subplot(gs_r3[0, 1])
     plot_panel_i(ax=ax_i, data=abl, cond="zeroed", legend_fontsize=7,
@@ -204,7 +204,7 @@ def _build_supplement_permuted(abl):
     _, _, _, im_resid = plot_panel_h(ax=ax_a, data=abl, cond="permuted")
     ax_a.set_title("A", fontweight="bold", loc="left")
     if im_resid is not None:
-        fig.colorbar(im_resid, ax=ax_a, shrink=0.8, pad=0.02, label="Δ rate")
+        add_raster_colorbar_below(fig, ax_a, im_resid, "Δ rate")
 
     ax_b = fig.add_subplot(gs[0, 1])
     plot_panel_i(ax=ax_b, data=abl, cond="permuted", legend_fontsize=7,

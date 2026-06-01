@@ -12,8 +12,12 @@ from _fig4_data import (
 )
 
 
-def plot_panel_c(ax=None, data=None, legend_fontsize=8):
-    """Draw the ccnorm histogram on `ax`. Returns (fig, ax)."""
+def plot_panel_c(ax=None, data=None):
+    """Draw the ccnorm histogram on `ax`. Returns (fig, ax).
+
+    Styled to match figure 2 panel C: per-subject stacked histogram with
+    median triangle markers above the axes, no legend.
+    """
     if data is None:
         data = load_fig4_data()
     ccnorm = data["ccnorm"]
@@ -25,24 +29,27 @@ def plot_panel_c(ax=None, data=None, legend_fontsize=8):
     else:
         fig = ax.figure
 
+    finite = good & np.isfinite(ccnorm)
     bins = np.linspace(0, 1, 21)
-    for subj in SUBJECTS:
-        mask = (subjects == subj) & good & np.isfinite(ccnorm)
-        if not mask.any():
-            continue
-        vals = ccnorm[mask]
-        color = SUBJECT_COLORS[subj]
+
+    present = [s for s in reversed(SUBJECTS) if ((subjects == s) & finite).any()]
+    subj_vals = [ccnorm[(subjects == s) & finite] for s in present]
+    subj_colors = [SUBJECT_COLORS[s] for s in present]
+    ax.hist(subj_vals, bins=bins, color=subj_colors, edgecolor="white",
+            stacked=True, alpha=0.75)
+
+    y_marker = ax.get_ylim()[1] * 1.02
+    for subj, vals, color in zip(present, subj_vals, subj_colors):
         med = np.nanmedian(vals)
         q25, q75 = np.nanpercentile(vals, [25, 75])
-        ax.hist(vals, bins=bins, color=color, edgecolor="white", alpha=0.5)
-        ax.axvline(med, color=color, linewidth=2, ls=(0, (1, 1)),
-                   label=f"{subj}: {med:.2f} [{q25:.2f}, {q75:.2f}]")
-        print(f"Panel C — {subj} (N={mask.sum()}): "
+        ax.plot(med, y_marker, marker="v", color=color, markersize=10,
+                clip_on=False)
+        print(f"Panel C — {subj} (N={vals.size}): "
               f"median ccnorm={med:.2f}, IQR=[{q25:.2f}, {q75:.2f}]")
 
     ax.set_xlabel("Normalized correlation (ccnorm)")
     ax.set_ylabel("Count")
-    ax.legend(frameon=False, fontsize=legend_fontsize)
+    ax.grid(True, alpha=0.3, zorder=-1)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     return fig, ax

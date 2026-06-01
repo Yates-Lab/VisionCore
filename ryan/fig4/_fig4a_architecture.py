@@ -54,6 +54,9 @@ S_T   = S_PIX           # world units per time tap (isotropic: 1×1×1 is a cube
 # cross-section scale together, so the aspect is preserved.
 FE_SCALE = 2.0
 STEM_SCALE = 1.5              # per-tap multiplier on stem kt/kh/kw
+# Extra lift for the Stem's title/sub-label only (not the diagram), to keep it
+# clear of the taller neighboring stages' labels.
+STEM_LABEL_LIFT = 0.35
 GRID_GAP = 0.04         # gap between cells in a grid
 FE_GAP   = 0.06         # vertical gap between stacked frontend channels
 
@@ -93,7 +96,7 @@ SKIP_CORNER_R = 0.12
 # pipeline body) and is left-justified to the vertical concat arrow that
 # feeds the concat marker on the blk2→gru flow arrow.
 BEH_HEIGHT = 0.32
-BEH_WIDTH  = 0.825
+BEH_WIDTH  = 1.15
 BEH_Y_GAP  = 0.20       # gap from ConvGRU bottom down to top of behavior box
 
 # Canvas (will be tightened in plot)
@@ -215,7 +218,8 @@ def plot_panel_a_architecture(ax, assets, *, gaps=None, x_start=None):
     )
     label_tops.append(_stage_label_top(
         ax, stem_grid, name="Stem",
-        sub=f"{stem_kt}×{stem_kh}×{stem_kw} · 8 ch"))
+        sub=f"{stem_kt}×{stem_kh}×{stem_kw} · 8 ch",
+        y_top_override=stem_grid["bbox2d"][3] + STEM_LABEL_LIFT))
     stage_records.append({"name": "stem", "grid": stem_grid})
     x_cursor = _next_x(stem_grid, g["stem_to_blk1"])
 
@@ -246,9 +250,11 @@ def plot_panel_a_architecture(ax, assets, *, gaps=None, x_start=None):
         gap=GRID_GAP, palette=PAL_BLOCK2, base_zorder=2.0, edge_width=0.18,
         hue_jitter=0.10,
     )
+    blk2_xmin, blk2_xmax, _, _ = blk2_grid["bbox2d"]
     label_tops.append(_stage_label_top(
         ax, blk2_grid, name="ResBlock 2",
-        sub=f"{blk2_kt}×{blk2_kh}×{blk2_kw} · 128 ch"))
+        sub=f"{blk2_kt}×{blk2_kh}×{blk2_kw} · 128 ch",
+        x_shift=-0.10 * (blk2_xmax - blk2_xmin)))
     stage_records.append({"name": "block2", "grid": blk2_grid})
     x_cursor = _next_x(blk2_grid, g["blk2_to_gru"])
 
@@ -279,7 +285,8 @@ def plot_panel_a_architecture(ax, assets, *, gaps=None, x_start=None):
     label_tops.append(_stage_label_top(
         ax, gru_grid, name="ConvGRU",
         sub=f"{arch['gru_hidden']} ch · k={arch['gru_kernel']}",
-        y_top_override=gru_loop_top))
+        y_top_override=gru_loop_top,
+        x_shift=0.15 * (g_xmax - g_xmin)))
     stage_records.append({"name": "gru", "grid": gru_grid})
     x_cursor = _next_x(gru_grid, g["gru_to_readout"])
 
@@ -336,14 +343,19 @@ def plot_panel_a_architecture(ax, assets, *, gaps=None, x_start=None):
     col_y_top = max(r["sp"]["y_top"] for r in readout_records)
 
     # Title + sub-label in the shared stage-label style (bold name + italic
-    # grey sub), riding above the top readout.
+    # grey sub), riding above the top readout. Centered over the Gaussian
+    # spatial prism (not the full feature-block + prism span) so the label
+    # clears the ConvGRU to its left.
     n_units = assets.arch.get("n_trained_units")
-    sub = f"factorized · N={n_units}" if n_units else "factorized"
-    title_x = 0.5 * (col_x_left + col_x_right)
-    y_sub = col_y_top + LABEL_GAP
-    y_title = y_sub + SUB_GAP
-    ax.text(title_x, y_sub, sub, ha="center", va="baseline",
-            fontsize=7.0, color="#555", style="italic")
+    sub = f"N={n_units}" if n_units else None
+    title_x = prism_x + prism_size / 2
+    if sub:
+        y_sub = col_y_top + LABEL_GAP
+        y_title = y_sub + SUB_GAP
+        ax.text(title_x, y_sub, sub, ha="center", va="baseline",
+                fontsize=7.0, color="#555", style="italic")
+    else:
+        y_title = col_y_top + LABEL_GAP
     ax.text(title_x, y_title, "Readouts", ha="center", va="baseline",
             fontsize=8.5, color=TEXT_COLOR, fontweight="bold")
     label_tops.append(y_title)
@@ -491,14 +503,16 @@ def _next_x(grid, gap):
 
 
 def _stage_label_top(ax, grid, *, name, sub=None, name_fs=8.5, sub_fs=7.0,
-                     y_top_override=None):
+                     y_top_override=None, x_shift=0.0):
     """Place stage name + (optional) sub-label ABOVE the grid, centered on
     the grid's projected bbox so labels clear the back-most kernel layer.
     `y_top_override` lets callers push the label above an overlay
-    (e.g. the recurrent loop on top of GRU). Returns the y of the topmost
-    text baseline so the caller can position a header above all labels."""
+    (e.g. the recurrent loop on top of GRU). `x_shift` nudges the label
+    horizontally off the bbox center (world units; negative → left).
+    Returns the y of the topmost text baseline so the caller can position a
+    header above all labels."""
     xmin, xmax, _, ymax = grid["bbox2d"]
-    front_xmid = (xmin + xmax) / 2
+    front_xmid = (xmin + xmax) / 2 + x_shift
     front_top = y_top_override if y_top_override is not None else ymax
     if sub:
         y_sub = front_top + LABEL_GAP

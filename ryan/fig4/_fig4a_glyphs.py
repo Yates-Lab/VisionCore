@@ -1034,10 +1034,10 @@ def draw_neuron_trace_panel(ax, t, robs_rate, rhat_rate, x0, y0, w, h, *,
 
 
 def draw_pool_glyph(ax, x, y, *, color="#222", fontsize=7.5, zorder=12.0):
-    """Small '↓2×' badge marking a 2× spatial downsample on a flow arrow.
+    """Small '↓2' badge marking a 2× spatial downsample on a flow arrow.
     Default zorder sits above kernel back-layers so the white bbox cleanly
     obscures any kernels behind the badge."""
-    ax.text(x, y, "↓2×", ha="center", va="center",
+    ax.text(x, y, "↓2", ha="center", va="center",
             fontsize=fontsize, color=color, fontweight="bold",
             zorder=zorder,
             bbox=dict(boxstyle="round,pad=0.18",

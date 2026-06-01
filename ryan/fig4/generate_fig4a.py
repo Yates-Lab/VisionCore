@@ -44,6 +44,13 @@ PANEL_HEIGHT_IN = 4.0
 # Inter-half gutter as a fraction of the panel's drawn height.
 GUTTER_FRAC = 0.05
 
+# Per-half size multipliers applied to the shared base height. Shrinking the
+# stimulus and growing the architecture rebalances emphasis between the two
+# halves; because each half's width is its own height times its data aspect,
+# these scale both dimensions uniformly (aspect stays equal).
+STIM_SCALE = 0.8
+ARCH_SCALE = 1.2
+
 
 def _data_aspect(ax):
     """Width:height of the axes' data limits (set by the plot function)."""
@@ -80,12 +87,15 @@ def _plot_halves(fig, ax_stim, ax_arch, assets):
 
 
 def render_panel_a(assets=None, *, recompute=False,
-                   height_in=PANEL_HEIGHT_IN, gutter_frac=GUTTER_FRAC):
+                   height_in=PANEL_HEIGHT_IN, gutter_frac=GUTTER_FRAC,
+                   stim_scale=STIM_SCALE, arch_scale=ARCH_SCALE):
     """Build a standalone panel-A figure with both halves drawn directly.
 
-    Returns `(fig, (ax_stim, ax_arch))`. The figure is sized so each half's
-    axes box exactly matches its data aspect ratio at a shared height — no
-    dead space, no rasterization, fonts in true points.
+    Returns `(fig, (ax_stim, ax_arch))`. Each half's axes box exactly matches
+    its data aspect ratio at a per-half height (`height_in` times its scale),
+    so the two halves can carry different emphasis. The figure height is the
+    taller half and each half is vertically centered — no dead space, no
+    rasterization, fonts in true points.
     """
     if assets is None:
         assets = load_panel_a_assets(recompute=recompute)
@@ -97,55 +107,71 @@ def render_panel_a(assets=None, *, recompute=False,
 
     a_stim, a_arch = _plot_halves(fig, ax_stim, ax_arch, assets)
 
+    h_stim = height_in * stim_scale
+    h_arch = height_in * arch_scale
+    fig_h = max(h_stim, h_arch)
     gutter_in = gutter_frac * height_in
-    w_stim = height_in * a_stim
-    w_arch = height_in * a_arch
+    w_stim = h_stim * a_stim
+    w_arch = h_arch * a_arch
     total_w = w_stim + gutter_in + w_arch
-    fig.set_size_inches(total_w, height_in)
+    fig.set_size_inches(total_w, fig_h)
 
-    ax_stim.set_position([0.0, 0.0, w_stim / total_w, 1.0])
-    ax_arch.set_position([(w_stim + gutter_in) / total_w, 0.0,
-                          w_arch / total_w, 1.0])
+    y_stim = (fig_h - h_stim) / 2.0 / fig_h
+    y_arch = (fig_h - h_arch) / 2.0 / fig_h
+    ax_stim.set_position([0.0, y_stim, w_stim / total_w, h_stim / fig_h])
+    ax_arch.set_position([(w_stim + gutter_in) / total_w, y_arch,
+                          w_arch / total_w, h_arch / fig_h])
     return fig, (ax_stim, ax_arch)
 
 
 def _fit_two_axes_in_rect(fig, ax_stim, ax_arch, rect, a_stim, a_arch,
-                          *, gutter_frac=GUTTER_FRAC):
+                          *, gutter_frac=GUTTER_FRAC,
+                          stim_scale=STIM_SCALE, arch_scale=ARCH_SCALE):
     """Position two equal-aspect axes side-by-side, centered inside `rect`.
 
-    `rect` is the target slot as a figure-fraction Bbox. Both axes are given
-    a common drawn height and widths proportional to their data aspects, then
-    scaled to fit within the slot (height-limited if the slot is wide enough,
-    else width-limited) and centered. The axes are removed from the layout
-    engine so constrained_layout won't override these positions.
+    `rect` is the target slot as a figure-fraction Bbox. Each axes is given a
+    height of a shared base times its own scale (so the halves carry different
+    emphasis) and a width proportional to its data aspect, then the block is
+    scaled to fit within the slot (height-limited by the taller half if the
+    slot is wide enough, else width-limited) and each half is vertically
+    centered. The axes are removed from the layout engine so
+    constrained_layout won't override these positions.
     """
     fw, fh = fig.get_size_inches()
     slot_w_in = rect.width * fw
     slot_h_in = rect.height * fh
-    gutter_in = gutter_frac * slot_h_in
 
-    # Try filling the slot height; shrink to the slot width if that overflows.
-    h_in = slot_h_in
-    if h_in * (a_stim + a_arch) + gutter_in > slot_w_in:
-        h_in = (slot_w_in - gutter_in) / (a_stim + a_arch)
-    w_stim = h_in * a_stim
-    w_arch = h_in * a_arch
+    # Effective per-base-height width (incl. gutter) and tallest-half scale.
+    max_scale = max(stim_scale, arch_scale)
+    width_per_h = stim_scale * a_stim + arch_scale * a_arch + gutter_frac * max_scale
+
+    # Fill the slot height with the taller half; shrink to width if that overflows.
+    h_in = slot_h_in / max_scale
+    if h_in * width_per_h > slot_w_in:
+        h_in = slot_w_in / width_per_h
+
+    h_stim = h_in * stim_scale
+    h_arch = h_in * arch_scale
+    w_stim = h_stim * a_stim
+    w_arch = h_arch * a_arch
+    gutter_in = gutter_frac * (h_in * max_scale)
     used_w_in = w_stim + gutter_in + w_arch
 
-    # Center the used block within the slot.
+    # Center the used block horizontally; center each half vertically.
     x0 = rect.x0 + (rect.width - used_w_in / fw) / 2.0
-    y0 = rect.y0 + (rect.height - h_in / fh) / 2.0
-    h_frac = h_in / fh
+    y_stim = rect.y0 + (rect.height - h_stim / fh) / 2.0
+    y_arch = rect.y0 + (rect.height - h_arch / fh) / 2.0
 
-    ax_stim.set_position([x0, y0, w_stim / fw, h_frac])
-    ax_arch.set_position([x0 + (w_stim + gutter_in) / fw, y0,
-                          w_arch / fw, h_frac])
+    ax_stim.set_position([x0, y_stim, w_stim / fw, h_stim / fh])
+    ax_arch.set_position([x0 + (w_stim + gutter_in) / fw, y_arch,
+                          w_arch / fw, h_arch / fh])
     for ax in (ax_stim, ax_arch):
         ax.set_in_layout(False)
 
 
 def plot_panel_a(*, ax=None, subplotspec=None, fig=None,
-                 assets=None, recompute=False, gutter_frac=GUTTER_FRAC):
+                 assets=None, recompute=False, gutter_frac=GUTTER_FRAC,
+                 stim_scale=STIM_SCALE, arch_scale=ARCH_SCALE):
     """Render panel A, fitting both halves at matched data aspect.
 
     Pass one of:
@@ -168,7 +194,8 @@ def plot_panel_a(*, ax=None, subplotspec=None, fig=None,
         ax.set_visible(False)
         ax.set_in_layout(False)
     else:
-        return render_panel_a(assets, gutter_frac=gutter_frac)
+        return render_panel_a(assets, gutter_frac=gutter_frac,
+                              stim_scale=stim_scale, arch_scale=arch_scale)
 
     ax_stim = fig.add_axes([rect.x0, rect.y0, rect.width / 2, rect.height])
     ax_arch = fig.add_axes([rect.x0 + rect.width / 2, rect.y0,
@@ -176,7 +203,8 @@ def plot_panel_a(*, ax=None, subplotspec=None, fig=None,
 
     a_stim, a_arch = _plot_halves(fig, ax_stim, ax_arch, assets)
     _fit_two_axes_in_rect(fig, ax_stim, ax_arch, rect, a_stim, a_arch,
-                          gutter_frac=gutter_frac)
+                          gutter_frac=gutter_frac,
+                          stim_scale=stim_scale, arch_scale=arch_scale)
     return fig, (ax_stim, ax_arch)
 
 

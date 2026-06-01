@@ -6,7 +6,9 @@ Usage:
 import matplotlib.pyplot as plt
 
 from _fig4_data import FIG_DIR, configure_matplotlib, load_fig4_data
-from _fig4_helpers import draw_raster_pair, select_example_neuron
+from _fig4_helpers import (
+    draw_raster_pair, select_example_neuron, add_raster_colorbar_below,
+)
 
 
 def plot_panel_e(ax=None, data=None, example=None,
@@ -29,7 +31,7 @@ def plot_panel_e(ax=None, data=None, example=None,
         label_fontsize=label_fontsize, scale_fontsize=scale_fontsize,
     )
     if colorbar:
-        fig.colorbar(im, ax=ax, shrink=0.8, pad=0.02, label="sp/s")
+        add_raster_colorbar_below(fig, ax, im, "sp/s")
     return fig, ax, im, example
 
 
