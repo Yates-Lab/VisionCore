@@ -14,12 +14,14 @@ Run from this folder:  uv run python fig_mechanism.py
 """
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 
-from synthetic import profile_M
+from synthetic import ground_truth
 from _style import configure, save, C_FULL, C_CLOSE
 
 SIGMA = 0.15
 THR = 0.05
+ELL = SIGMA   # fixation-scale rate structure for the Panel C bias bars
 
 
 def close_pair_positions(n=3000, sigma=SIGMA, thr=THR, seed=0):
@@ -38,27 +40,37 @@ def main():
     e, mid = close_pair_positions()
     fig, axes = plt.subplots(1, 3, figsize=(10.5, 3.1))
 
-    # --- Panel A: 2D -- all eyes (p) vs close-pair midpoints (p^2) ---
+    # --- Panel A: analytical p(e) heatmap + iso-density contours of p and p^2 ---
+    # No simulation: imshow the closed-form density p(e) = N(0, σ²I) (grayscale)
+    # and draw iso-density contour lines at radius 1σ, 2σ for both p (solid) and
+    # p² = N(0, σ²/2 I) (dashed) at each distribution's own characteristic scale.
+    # For a 2D Gaussian with covariance S²I, the density at radius r = kS is
+    # peak * exp(-k²/2); so contour levels are peak * {exp(-2), exp(-1/2)}.
     ax = axes[0]
-    ax.scatter(e[:, 0], e[:, 1], s=3, alpha=0.10, color="0.6",
-               label=r"all eyes  $p(e)$", zorder=1)
-    ax.scatter(mid[:, 0], mid[:, 1], s=3, alpha=0.14, color=C_CLOSE,
-               label=r"close pairs  $\propto p(e)^2$", zorder=2)
-    th = np.linspace(0, 2 * np.pi, 200)
-    for k in (1, 2):  # k-sigma circles for each distribution
-        ax.plot(k * SIGMA * np.cos(th), k * SIGMA * np.sin(th), color=C_FULL,
-                lw=1.6, zorder=3, label=(r"$p$: $1,2\sigma$" if k == 1 else None))
-        s2 = SIGMA / np.sqrt(2)
-        ax.plot(k * s2 * np.cos(th), k * s2 * np.sin(th), color=C_CLOSE,
-                lw=1.6, ls="--", zorder=3,
-                label=(r"$p^2$: $1,2\sigma/\sqrt{2}$" if k == 1 else None))
     lim = 3 * SIGMA
+    xx = np.linspace(-lim, lim, 200)
+    X, Y = np.meshgrid(xx, xx)
+    r2 = X ** 2 + Y ** 2
+    p_xy = np.exp(-r2 / (2 * SIGMA ** 2)) / (2 * np.pi * SIGMA ** 2)
+    p2_xy = np.exp(-r2 / SIGMA ** 2) / (np.pi * SIGMA ** 2)        # N(0, σ²/2 I)
+    ax.imshow(p_xy, extent=(-lim, lim, -lim, lim), origin="lower",
+              cmap="Greys_r", aspect="equal")
+    peak_p = 1.0 / (2 * np.pi * SIGMA ** 2)
+    peak_p2 = 1.0 / (np.pi * SIGMA ** 2)
+    rel_levels = np.array([np.exp(-2.0), np.exp(-0.5)])             # 2σ, 1σ
+    ax.contour(X, Y, p_xy, levels=peak_p * rel_levels, colors=C_FULL, linewidths=1.6)
+    ax.contour(X, Y, p2_xy, levels=peak_p2 * rel_levels, colors=C_CLOSE,
+               linewidths=1.6, linestyles="--")
     ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim); ax.set_aspect("equal")
     ax.set_xlabel(r"eye $x$ (deg)"); ax.set_ylabel(r"eye $y$ (deg)")
     ax.set_title("A  close pairs concentrate centrally")
-    lg = ax.legend(loc="upper right", markerscale=3, handletextpad=0.2, fontsize=6.5)
-    for h in lg.legend_handles:
-        h.set_alpha(1.0)
+    p_proxy = Line2D([0], [0], color=C_FULL, lw=1.6,
+                     label=r"$p(e)$:  $1,2\sigma$")
+    p2_proxy = Line2D([0], [0], color=C_CLOSE, lw=1.6, ls="--",
+                      label=r"$p(e)^2$:  $1,2\sigma/\sqrt{2}$")
+    ax.legend(handles=[p_proxy, p2_proxy], loc="upper right",
+              handletextpad=0.6, fontsize=7, frameon=False,
+              labelcolor="white")
 
     # --- Panel B: 1D marginal -- variance halves, exact Gaussian overlays ---
     ax = axes[1]
@@ -76,30 +88,35 @@ def main():
     ax.set_title(f"B  variance halves  (obs ratio {var_ratio:.2f})")
     ax.legend(loc="upper right")
 
-    # --- Panel C: consequence -- E_D[M^2] differs across distributions ---
-    # In the unified (multiplicative-mask) model the naive Crate bias source
-    # is the ratio E_{p^2}[M^2] / E_p[M^2]: bias > 1 (central) -> over-state
-    # rate variance; < 1 (eccentric) -> under-state.
+    # --- Panel C: consequence -- direction of the naive bias on 1-α ---
+    # The naive estimator has C_psth on p (correct) but C_rate on p^2 (close-pair),
+    # so 1-α^naive = 1 - I_{M,K,p} / (τ² E_{p²}[M^2]) -- numerator unchanged from
+    # truth, denominator scaled by E_{p²}[M^2] / E_p[M^2]. Direction of the bias:
+    # central > 1 → naive 1-α biased up; eccentric/linear < 1 → biased down.
+    # ground_truth(...) uses closed-form 4M-sample MC of the M-K-D integral
+    # I_{M,K,D} and E_D[M^2] under D ∈ {p, p²}; sampling noise ≲ 1e-3.
     ax = axes[2]
-    rng = np.random.default_rng(1)
-    M = 1_000_000
-    ep = rng.normal(0, SIGMA, size=(M, 2))
-    ep2 = rng.normal(0, SIGMA / np.sqrt(2), size=(M, 2))
     kinds = ["central", "eccentric", "linear"]
     xpos = np.arange(len(kinds))
-    EM2p = [(profile_M(ep, k, SIGMA) ** 2).mean() for k in kinds]
-    EM2p2 = [(profile_M(ep2, k, SIGMA) ** 2).mean() for k in kinds]
+    oma_p, oma_naive = [], []
+    for k in kinds:
+        gt = ground_truth(k, sigma_eye=SIGMA, ell=ELL)
+        oma_p.append(gt["p"]["one_minus_alpha"])
+        # naive: var_psth over p (correct), var_total over p^2 (wrong)
+        oma_naive.append(1.0 - gt["p"]["var_psth"] / gt["p2"]["var_total"])
     w = 0.38
-    ax.bar(xpos - w / 2, EM2p, w, color=C_FULL, label=r"$\mathbb{E}_{p}[M^2]$")
-    ax.bar(xpos + w / 2, EM2p2, w, color=C_CLOSE, label=r"$\mathbb{E}_{p^2}[M^2]$")
+    ax.bar(xpos - w / 2, oma_p, w, color=C_FULL,
+           label=r"$1{-}\alpha^{p}$  (truth)")
+    ax.bar(xpos + w / 2, oma_naive, w, color=C_CLOSE,
+           label=r"$1{-}\alpha^{\mathrm{naive}}$")
     ax.set_xticks(xpos); ax.set_xticklabels(kinds)
-    ax.set_ylabel(r"$\mathbb{E}_D[M^2]$")
-    ax.set_title(r"C  the close-pair / full ratio sets the Crate bias")
-    ax.legend(loc="upper right")
-    for x in xpos:
-        # the close-pair (p^2) estimator over/under-states Crate relative to p
-        sign = "+" if EM2p2[x] > EM2p[x] else "−"
-        ax.annotate(rf"$1{{-}}\alpha$ bias {sign}", (x, max(EM2p[x], EM2p2[x])),
+    ax.set_ylabel(r"$1{-}\alpha$")
+    ax.set_ylim(0, max(max(oma_p), max(oma_naive)) * 1.25)
+    ax.set_title(rf"C  naive bias on $1{{-}}\alpha$  ($\ell{{=}}\sigma$)")
+    ax.legend(loc="upper right", fontsize=7)
+    for x, (a, b) in enumerate(zip(oma_p, oma_naive)):
+        sign = "+" if b > a else "−"
+        ax.annotate(f"bias {sign}", (x, max(a, b)),
                     ha="center", va="bottom", fontsize=7)
 
     fig.tight_layout()

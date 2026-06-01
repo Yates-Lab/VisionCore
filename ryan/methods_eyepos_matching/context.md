@@ -16,7 +16,9 @@ sentence the §4.5 reframe targets).
 ## Status
 
 - All 15 tests pass (`uv run --with pytest pytest test_estimators.py -q`,
-  ~7 min).
+  ~10 min after the M6/split-half switch — the `direction2_is_more_stable`
+  test runs at 12 seeds instead of 6 because M6's removal of bootstrap
+  noise makes the residual stability gap small).
 - Writeup builds cleanly to a self-contained HTML (`pandoc writeup.md -s
   --mathml --self-contained -o writeup.html`).
 - Extension 1 is **already in production** (`VisionCore/covariance.py`:
@@ -35,6 +37,7 @@ sentence the §4.5 reframe targets).
 | `estimators.py` | `decompose(target=…)` — the matched LOTC estimator (Direction 1 / 2 / naive). |
 | `test_estimators.py` | 15 tests: 11 Ext-2 tests + 3 sanity-check tests + Appendix §A.6 T-floor test. |
 | `_style.py` | Shared matplotlib style + `figures/` save helper. |
+| `fig_model.py` | Visual schematic of the unified generative model components (eye dist, GP field, masks, envelope, resulting rate). Inserted at top of writeup §2.3. |
 | `fig_mechanism.py` | Geometric origin of p vs p² mismatch (Fig. 2). |
 | `fig_sanity_check.py` | McFarland recovers analytical 1-α^p under (A1)+(A2) (Fig. 0). |
 | `fig_time_bin_weighting.py` | Ext-1 validation on the unified synthetic (Fig. 1). |
@@ -120,6 +123,27 @@ constant n_t the two coincide; under variable n_t with envelope correlated
 to n_t they differ, and only `pair_count` matches `Crate`'s intrinsic
 weighting.
 
+`cpsth_method` ∈ {`mcfarland`, `split_half`} — how Cpsth is debiased
+against same-time-bin observation noise (Poisson + simultaneous cross-cell
+noise correlations).
+
+- `mcfarland` (default): McFarland Eq. 6/M12 all-distinct-pair second
+  moment, with target-importance per-pair weights `w_i*w_j` (where
+  `w_i = q(e_i)/p(e_i)`) and the same across-bin scheme as Crate. The
+  close-pair Crate (Eq. 8) and unconditioned Cpsth (Eq. 6) are then the
+  same estimator at the two ends of the Δe axis. `_all_pairs_second_moment`
+  uses the algebraic identity `2 Σ_{i<j} w_i w_j S_i⊗S_j = (Σw_i S_i)⊗(Σw_i S_i) − Σ w_i² S_i⊗S_i`
+  so per-bin compute is O(n_t·C²), no explicit pair tensor.
+- `split_half`: bagged split-half PSTH covariance (n_boot=20). Stochastic;
+  same population target in expectation; converges to `mcfarland` as
+  n_boot → ∞. Retained in `_split_half_psth_cov` for the production
+  pipeline's parallel implementation and as a fallback.
+
+Writeup §A.7 motivates the choice (M6's conceptual unification with
+Crate); the production pipeline (`VisionCore/covariance.py`,
+`bagged_split_half_psth_covariance`) still uses split-half, and the two
+estimators agree within bootstrap noise at our (N, T, C) scales.
+
 ## Key empirical findings
 
 - **Sanity check.** `decompose(target='naive', time_bin_weighting='pair_count')`
@@ -176,6 +200,7 @@ Run from this folder. Workspace `.venv` is at the v1-fovea repo root;
     uv run --with pytest pytest test_estimators.py -q
 
     # Figures
+    uv run python fig_model.py
     uv run python fig_mechanism.py
     uv run python fig_sanity_check.py
     uv run python fig_time_bin_weighting.py

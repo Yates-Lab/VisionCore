@@ -13,6 +13,7 @@ parameter, via importance reweighting toward a target q(e):
 
     a sample drawn from p contributes weight  q(e)/p(e)          (Ctotal, Cpsth, mean)
     a close PAIR (sampled from p^2) contributes q(e)/p(e)^2      (rate 2nd moment)
+    an all-pair (sampled from p×p)  contributes q(e_i)q(e_j)/(p(e_i)p(e_j))   (Cpsth 2nd moment)
 
   target='naive'   : reproduce the current pipeline -- close-pair 2nd moment over p^2
                      but mean over p (an INCONSISTENT mix; not a variance under any q).
@@ -21,6 +22,14 @@ parameter, via importance reweighting toward a target q(e):
 
 The two consistent targets coincide iff the stimulus is homogeneous; their gap is a
 direct measure of non-homogeneity.
+
+The PSTH covariance Cpsth uses McFarland's all-distinct-pair second moment (Eqs. 6
+and 12) by default -- the same code-path family as the close-pair Crate estimator
+(Eqs. 8 and 16) with the Δe < ε filter removed. This makes Crate and Cpsth two
+operating points of one estimator on the Δe axis: Crate is its Δe → 0 intercept,
+Cpsth is its eye-distribution-marginalized asymptote. The bagged split-half
+alternative (``cpsth_method='split_half'``) is retained for the parallel
+implementation; see writeup §A.7 for the comparison.
 """
 from __future__ import annotations
 
@@ -68,9 +77,94 @@ def _weighted_cov(S, w):
     return C / denom if denom > 0 else C
 
 
+def _all_pairs_second_moment(S, E, T, phat, target,
+                             time_bin_weighting="pair_count"):
+    """McFarland M6/M12 all-distinct-pair second moment, target-reweighted.
+
+    At each time bin t, every distinct trial pair (i, j) with i<j is included
+    (no Δe restriction -- this is M8/Crate without the close-pair filter, i.e.
+    the same conditional second moment Ceye(Δe) read off at its eye-distribution-
+    marginalized asymptote rather than its Δe → 0 intercept). Per-pair weight
+
+        pw_q(i, j) = w_i * w_j,    w_i = q(e_i)/p(e_i)
+
+    where w_i is the per-trial importance weight that reweights the natural
+    pair sampling p(e_i)·p(e_j) to q(e_i)·q(e_j):
+
+        target ∈ {'naive', 'full'}: w_i = 1               (q = p)
+        target == 'central'       : w_i = p(e_i)          (q = p^2)
+
+    Combined with the across-bin scheme (identical to ``_close_pair_second_moment``):
+
+        'pair_count': pw_t = 1               -- pool pairs, average per pair.
+        'uniform'   : pw_t = 1/|P_t|         -- per-bin mean first, uniform across bins.
+
+    Computed efficiently per bin using the identity
+
+        2 * Σ_{i<j} w_i w_j S_i ⊗ S_j
+            = (Σ_i w_i S_i) ⊗ (Σ_i w_i S_i) − Σ_i w_i² S_i ⊗ S_i,
+
+    avoiding the (Σ_t n_t(n_t-1)/2) explicit pair tensor.
+
+    Distinct-trial pairing cancels Poisson AND simultaneous cross-cell noise in
+    expectation for the same reason as McFarland's M6/M8: trial i and trial j
+    have independent noise, so neither single-cell observation noise nor
+    same-trial cross-cell noise correlations leak into the average.
+    """
+    if target == "central":
+        w_trial = np.clip(phat(E), 1e-12, None)
+    else:                                # 'naive' and 'full' -- q = p marginal
+        w_trial = np.ones(len(S))
+
+    C = S.shape[1]
+    num = np.zeros((C, C), dtype=np.float64)
+    denom = 0.0
+
+    for t in np.unique(T):
+        ix = np.where(T == t)[0]
+        if len(ix) < 2:
+            continue
+        w_t = w_trial[ix]
+        S_t = S[ix]
+
+        wS_sum = (w_t[:, None] * S_t).sum(0)          # (C,)
+        outer_sum = np.outer(wS_sum, wS_sum)          # Σ_{i,j} w_i w_j S_i ⊗ S_j
+        wS2 = (w_t[:, None] ** 2) * S_t               # (n_t, C)
+        diag_term = wS2.T @ S_t                       # Σ_i w_i² S_i ⊗ S_i
+        pair_sum_t = 0.5 * (outer_sum - diag_term)    # Σ_{i<j} w_i w_j S_i ⊗ S_j
+
+        w_sum = w_t.sum()
+        n_pair_weight_t = 0.5 * (w_sum ** 2 - (w_t ** 2).sum())
+        if n_pair_weight_t <= 0:
+            continue
+
+        if time_bin_weighting == "pair_count":
+            num += pair_sum_t
+            denom += n_pair_weight_t
+        elif time_bin_weighting == "uniform":
+            num += pair_sum_t / n_pair_weight_t
+            denom += 1.0
+        else:
+            raise ValueError(f"unknown time_bin_weighting: {time_bin_weighting!r}")
+
+    if denom <= 0:
+        return np.full((C, C), np.nan)
+    prod = num / denom
+    return 0.5 * (prod + prod.T)
+
+
 def _split_half_psth_cov(S, T, sw, n_boot, seed, min_tpp,
                          time_bin_weighting="pair_count"):
     """Split-half PSTH covariance with per-sample target weights sw.
+
+    Bagged-bootstrap alternative to ``_all_pairs_second_moment`` -- both target
+    the same population PSTH covariance via distinct-trial cross-pair products,
+    but this one uses only the cross-half subset of pairs per split, recovering
+    the all-pairs M6 estimator in expectation as ``n_boot → ∞``. Retained so
+    we can fall back to a bootstrap-based estimator if its side benefits
+    (natural SEM across splits, lower memory at very large C) become decisive;
+    not the default path used by ``decompose``. See writeup §A.7 for the
+    comparison.
 
     The per-time-bin mean at bin t is the sw-weighted mean of its trials
     (=> E_q[r|t]). Time bins are combined with one of two weightings:
@@ -186,7 +280,8 @@ def _close_pair_second_moment(S, E, T, phat, target, threshold, weight_clip,
 
 def decompose(counts, eye, target="full", valid=None, threshold=0.05,
               density="kde", weight_clip=1e6, n_boot=20, seed=42,
-              min_trials_per_time_bin=10, time_bin_weighting="pair_count"):
+              min_trials_per_time_bin=10, time_bin_weighting="pair_count",
+              cpsth_method="mcfarland"):
     """Distribution-matched LOTC decomposition of a multi-cell session.
 
     Parameters
@@ -223,6 +318,20 @@ def decompose(counts, eye, target="full", valid=None, threshold=0.05,
             literal nested-bracket reading of Eqs. M8/Eq.6 but pays a variance
             penalty under sharply variable n_t.
         Under constant n_t the two coincide.
+    cpsth_method : {'mcfarland', 'split_half'}
+        How to debias the PSTH covariance against same-time-bin observation
+        noise (single-cell Poisson plus simultaneous cross-cell noise
+        correlations). Both estimators pair distinct trials at the same bin so
+        their noise is independent; the difference is computational form.
+          * 'mcfarland' (default): McFarland Eq. 6/12 -- the all-distinct-pair
+            second moment, with the close-pair filter of M8/Crate removed.
+            Same code-path family as the Crate close-pair estimator, just at
+            the eye-distribution-marginalized end of the Ceye(Δe) axis.
+            Deterministic; minimum variance for fixed data.
+          * 'split_half': bagged split-half (n_boot, seed). Stochastic; targets
+            the same population quantity in expectation; converges to
+            'mcfarland' as n_boot → ∞.
+        See writeup §A.7 for the comparison.
     n_boot, seed, min_trials_per_time_bin : see helpers.
 
     Returns
@@ -271,8 +380,16 @@ def decompose(counts, eye, target="full", valid=None, threshold=0.05,
 
     Erate = _weighted_mean(S, sw)
     Ctotal = _weighted_cov(S, sw)
-    Cpsth = _split_half_psth_cov(S, T, sw, n_boot, seed, min_trials_per_time_bin,
-                                 time_bin_weighting=time_bin_weighting)
+    if cpsth_method == "mcfarland":
+        MM_psth = _all_pairs_second_moment(S, E, T, phat, target,
+                                           time_bin_weighting=time_bin_weighting)
+        Cpsth = MM_psth - np.outer(Erate, Erate)
+    elif cpsth_method == "split_half":
+        Cpsth = _split_half_psth_cov(S, T, sw, n_boot, seed,
+                                     min_trials_per_time_bin,
+                                     time_bin_weighting=time_bin_weighting)
+    else:
+        raise ValueError(f"unknown cpsth_method: {cpsth_method!r}")
     MM = _close_pair_second_moment(S, E, T, phat, target, threshold, weight_clip,
                                    time_bin_weighting=time_bin_weighting)
     Crate = MM - np.outer(Erate, Erate)

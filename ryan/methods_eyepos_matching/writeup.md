@@ -183,26 +183,50 @@ across eye positions ($q$):
 | Estimator | implicit $w_t$ (across-bin) | implicit $q$ (across-eye) |
 |---|---|---|
 | $C_\text{total}$ — LHS of (1); sample variance over all $(i,t)$ | $\propto n_t$ (trial-count) | $p$ |
-| $C_\text{psth}$ — Eq. (6): $\langle\langle Y^i Y^j\rangle_{i\ne j}\rangle_t - \bar Y\bar Y^\top$ | $1/T$ for MM; $\propto n_t$ for $\bar Y\bar Y^\top$ | $p$ |
-| $C_\text{rate}$ — Eq. (8): $\langle\langle Y^i Y^j \mid \Delta e<\varepsilon\rangle_{i\ne j}\rangle_t - \bar Y\bar Y^\top$ | $1/T$ for MM; $\propto n_t$ for $\bar Y\bar Y^\top$ | $p^2$ for MM; $p$ for $\bar Y\bar Y^\top$ |
+| $C_\text{psth}$ — Eq. (6): $\langle\langle Y^i Y^j\rangle_{i\ne j}\rangle_t - \bar Y\bar Y^\top$ | $1/T$ for the $\langle\langle Y^iY^j\rangle\rangle$ term; $\propto n_t$ for $\bar Y\bar Y^\top$ | $p$ |
+| $C_\text{rate}$ — Eq. (8): $\langle\langle Y^i Y^j \mid \Delta e<\varepsilon\rangle_{i\ne j}\rangle_t - \bar Y\bar Y^\top$ | $1/T$ for the $\langle\langle Y^iY^j\rangle\rangle$ term; $\propto n_t$ for $\bar Y\bar Y^\top$ | $p^2$ for the $\langle\langle Y^iY^j\rangle\rangle$ term; $p$ for $\bar Y\bar Y^\top$ |
+
+The notation in the cells:
+
+- **$w_t = 1/T$ ("uniform across bins").** Bin $t$ contributes $1/T$
+  regardless of $n_t$ — compute a per-bin mean first, then average the per-bin
+  means uniformly across $T$ bins. This is McFarland's literal reading of the
+  nested bracket $\langle\langle\,\cdot\,\rangle_{i\ne j}\rangle_t$ in (6) and
+  (8): the inner $\langle\cdot\rangle_{i\ne j}$ averages within bin $t$, the
+  outer $\langle\cdot\rangle_t$ averages bins uniformly.
+- **$w_t \propto n_t$ ("trial-count").** Bin $t$ contributes weight
+  proportional to its trial count — pool all $(i, t)$ samples and weight each
+  equally; bin $t$ then appears $n_t$ times in the pool and contributes $n_t$
+  units of weight. This is how the sample variance of $Y$ pooled over $(i,t)$
+  is computed (so $C_\text{total}$ lives here), and how the global mean
+  $\bar Y = \frac{1}{\sum_t n_t}\sum_{i,t} Y^i(t)$ lives (so the
+  $\bar Y\bar Y^\top$ subtractor lives here).
+
+Concretely: under the fixRSVP staircase $n_t$ ranging $15 \to 360$, a
+360-trial bin and a 15-trial bin contribute equally under $w_t = 1/T$, but
+the 360-trial bin contributes $24\times$ more weight under
+$w_t \propto n_t$. The two weightings coincide only when $n_t$ is
+constant — then $1/T$ and $n_t / \sum n_t$ are the same number for every bin.
+
+The cross-trial **second-moment term** $\langle\langle Y^iY^j\rangle\rangle$ —
+the part that averages distinct-trial products — is distinct from the
+$\bar Y\bar Y^\top$ subtractor because the two are computed from the data
+differently (close-pair products at fixed $t$ vs the global mean over all
+$(i,t)$), so they live on different $(w_t, q)$ cells.
 
 The LOTC (1) holds term-by-term **only when all three estimators land on a
 single $(w_t, q)$**. The literal McFarland forms do not: even inside one
-estimator the second-moment and the mean-square subtractor disagree.
-McFarland's nested-bracket notation $\langle\langle\,\cdot\,\rangle_{i\ne
-j}\rangle_t$ averages within bin $t$ first and then averages bins
-uniformly, putting MM at $w_t = 1/T$; the $\bar Y$ that enters
-$\bar Y\bar Y^\top$ is the global mean over $(i, t)$ and pools samples
-uniformly, putting that term at $w_t \propto n_t$. And $C_\text{rate}$'s
-MM is the only cell at $q = p^2$ (the close-pair conditional density,
-§4.1); every other cell is at $q = p$.
+estimator the second-moment term and the $\bar Y\bar Y^\top$ subtractor
+disagree on $w_t$ (second-moment term at $1/T$, subtractor at $\propto n_t$).
+And $C_\text{rate}$'s second-moment term is the only cell at $q = p^2$ (the
+close-pair conditional density, §4.1); every other cell is at $q = p$.
 
 Two assumptions in McFarland's regime make these inconsistencies invisible:
 
 - **(A1) Uniform trial/time-bin structure.** When $n_t$ is constant,
   $\propto n_t$ and $1/T$ coincide up to a global scaling, so the $w_t$
   column collapses to a single value across all three estimators (and across
-  the MM / $\bar Y$ split within each).
+  the second-moment / $\bar Y$ split within each).
 - **(A2) Statistically stationary stimulus.** The across-time-bin
   distribution of $r(t,e)$ at a fixed eye position is the same at every $e$,
   i.e. $\mathbb{E}_t[r^k(t,e)]$ is independent of $e$ for the moments used.
@@ -283,6 +307,25 @@ architecture. With both switches off, the generator sits squarely in
 McFarland's regime, with a closed-form $1-\alpha^p$ that depends on a single
 ratio — the rate's spatial scale relative to the fixation scale — and covers
 $(0,1)$ as that ratio is swept.
+
+![**Unified generative model — components and resulting data.**
+$r_c(t,e) = \mu_0 + M_c(e)\,\alpha(t)\,s_t(e)$.
+**(A)** Eye distribution $p(e) = \mathcal N(0,\sigma^2 I)$, $\sigma=0.15^\circ$;
+dashed rings at $1\sigma,\,2\sigma$.
+**(B)** One draw of the stationary Gaussian random field $s_t(e)$ with kernel
+$K(\delta)=\tau^2\exp(-\lVert\delta\rVert^2/(2\ell^2))$ at $\ell=0.5\sigma$
+(intentionally short to make spatial structure visible).
+**(C)** The four spatial masks $M_c(e)$ — the (A2) switch — tiled into one
+square: `flat`, `central`, `eccentric`, `linear`.
+**(D)** Envelope effect on a single trial of a `central` cell: identical eye
+trajectory and field draws under $\alpha\equiv 1$ (dashed) and a decaying
+$\alpha(t)$ (solid). Only $\alpha$ differs, so the late-time compression
+toward $\mu_0$ is the envelope alone.
+**(E)** Full rate $r$ over $(\text{trial},\text{time bin})$ for one `central`
+cell with constant $n_t$ — the $(N_\text{tr},T)$ array is a full rectangle.
+**(F)** Same with variable $n_t$ (staircase $15\to 2$); cells past trial end
+are NaN, rendered white. The step line traces the $n_t$ boundary — this is
+the (A1) regime.](figures/fig_model.png)
 
 **Rate field.** For neuron $c$, analysis time bin $t$, and absolute eye position
 $e\in\mathbb R^2$,
@@ -471,12 +514,12 @@ $\bar Y\bar Y^\top$ subtractor is the global mean over $(i, t)$ — trial-count
 $w_t \propto n_t$.
 
 $C_\text{rate}$ uses (8) — the same nested bracket restricted to close pairs
-$\Delta e_{ij} < \varepsilon$. Same reading: MM at $w_t = 1/T$, $\bar Y\bar Y^\top$
-subtractor at trial-count.
+$\Delta e_{ij} < \varepsilon$. Same reading: second-moment term at
+$w_t = 1/T$, $\bar Y\bar Y^\top$ subtractor at trial-count.
 
 Three different across-bin weightings across the three estimators, and an
-additional MM-vs-$\bar Y$ split inside each of $C_\text{psth}$ and
-$C_\text{rate}$. Under (A1) constant $n_t$ all four cells coincide (trial-count
+additional second-moment-vs-$\bar Y$ split inside each of $C_\text{psth}$
+and $C_\text{rate}$. Under (A1) constant $n_t$ all four cells coincide (trial-count
 and $1/T$ collapse to a constant under scaling) and the inconsistency is
 invisible. Under variable $n_t$ they do not: the LOTC (1) fails term-by-term
 because the three estimators no longer measure variance/covariance under the
@@ -485,11 +528,11 @@ same across-bin distribution.
 ## 3.2 Two consistent directions: uniform $1/T$ and pair-count $\propto n_t(n_t{-}1)/2$
 
 Restoring term-by-term consistency means pinning the entire $w_t$ column — every
-MM and every $\bar Y$ subtractor in every estimator — to a single across-bin
-weighting. Two principled choices are available.
+second-moment term and every $\bar Y$ subtractor in every estimator — to a single
+across-bin weighting. Two principled choices are available.
 
-**Uniform direction** ($w_t = 1/T$). Match McFarland's literal MM reading: each
-fixation-aligned bin contributes equally regardless of $n_t$. The
+**Uniform direction** ($w_t = 1/T$). Match McFarland's literal nested-bracket
+reading: each fixation-aligned bin contributes equally regardless of $n_t$. The
 $\bar Y\bar Y^\top$ subtractor (and $C_\text{total}$) are recomputed as
 $\frac{1}{T}\sum_t \frac{1}{n_t}\sum_i Y^i(t)$ — within-bin mean first, then
 uniform across bins. The resulting estimator answers "how does the variance
@@ -574,7 +617,7 @@ chosen as long as $C_\text{rate}$ and $C_\text{psth}$ both use it.
 This is the bias diagnosed and fixed in `ryan/fig2/bias_diagnosis/`
 ($D_z^{\text{shuf}}: -0.0068 \to +0.0010$, $p: <10^{-4}\to 0.44$, after consistent
 pair-count weighting). The pre-fix production pipeline lived in a
-partially-pinned state — close-pair MM at pair-count (pool-then-average),
+partially-pinned state — close-pair second moment at pair-count (pool-then-average),
 $C_\text{psth}$ at uniform $1/T$, $\bar Y$ at trial-count — that the
 post-fix pipeline cleaned by pinning all three to the pair-count direction.
 §6.1 records the production state.
@@ -598,8 +641,8 @@ estimators to a single across-bin weighting. This section fills the $q$
 column by pinning all three to a single across-eye distribution. The two
 extensions are independent — §3 addressed (A1) failure (variable $n_t$); §4
 addresses (A2) failure (non-homogeneous stimulus) — and the same
-natural-vs-stable tradeoff appears on this axis: McFarland's literal MM is
-pinned to the close-pair conditional density $p^2$, the actual viewing
+natural-vs-stable tradeoff appears on this axis: McFarland's literal close-pair
+second moment is pinned to the close-pair conditional density $p^2$, the actual viewing
 distribution is $p$, and §4.5 develops both consistent directions and their
 bias/variance tradeoff.
 
@@ -624,18 +667,25 @@ $$
 For an isotropic Gaussian fixation $p=\mathcal N(0,\sigma^2 I)$ the close-pair
 distribution is *exactly* $p^2=\mathcal N\!\big(0,\tfrac{\sigma^2}{2}I\big)$:
 a tighter, more central Gaussian with **half the variance**. Figure 2
-confirms this geometrically and numerically and shows how
-$\mathrm{Var}_{p}[F]$ and $\mathrm{Var}_{p^2}[F]$ differ across profiles.
+confirms this geometrically and numerically and shows the resulting
+direction of the naive estimator's bias on $1-\alpha$ across mask kinds.
 
-![**Figure 2 — Close pairs sample the squared density $p(e)^2$.** **(A)** Eye
-positions (grey) and the representative positions of distinct-trial close
-pairs (red) for $\sigma=0.15^\circ$, threshold $0.05^\circ$; the $1,2\sigma$
-circles of $p$ (solid) enclose the tighter $1,2\sigma/\sqrt2$ circles of $p^2$
-(dashed). **(B)** The $x$-marginal: the close-pair distribution matches
-$\mathcal N(0,\sigma^2/2)$ (observed variance ratio $\approx 0.5$). **(C)**
-Consequently the FEM variance $\mathrm{Var}[F]$ of an eye-sensitivity profile
-differs between $p$ and $p^2$, and the sign of the resulting $1-\alpha$ bias
-depends on the profile.](figures/fig_mechanism.png)
+![**Figure 2 — Close pairs sample the squared density $p(e)^2$, and this
+shifts $1-\alpha$ in a mask-dependent direction.** **(A)** Analytical eye
+density $p(e) = \mathcal N(0, \sigma^2 I)$ with $\sigma = 0.15^\circ$
+(grayscale), with iso-density contours at $1,2\sigma$ for $p$ (solid) and
+for the close-pair density $p^2 = \mathcal N(0, \sigma^2/2\,I)$ (dashed) at
+each distribution's own characteristic scale — the dashed contours are
+tighter (variance halved). **(B)** The $x$-marginal: the
+close-pair distribution matches $\mathcal N(0,\sigma^2/2)$ (observed variance
+ratio $\approx 0.5$). **(C)** Closed-form / 4M-MC $1-\alpha$ at $\ell=\sigma$,
+$\ell_M=0.6\sigma$, for the unified rate-field model. Blue: the truth
+$1-\alpha^p = 1 - I_{M,K,p} / (\tau^2\,\mathbb E_p[M^2])$. Red: the naive
+estimator $1-\alpha^{\mathrm{naive}} = 1 - I_{M,K,p} / (\tau^2\,
+\mathbb E_{p^2}[M^2])$, which retains the correct PSTH numerator but uses
+the close-pair $\mathbb E_{p^2}[M^2]$ in the denominator. The bias is
+upward for `central` (denominator inflated) and downward for `eccentric`
+/ `linear` (denominator deflated).](figures/fig_mechanism.png)
 
 ## 4.2 The decomposition is consistent only on one distribution
 
@@ -723,6 +773,24 @@ Both directions fix the mean/second-moment inconsistency of (14) by
 construction. They are **the two consistent resolutions** of the mismatch:
 push everything out to the full distribution, or pull everything in to the
 close-pair distribution.
+
+**What gets evaluated in practice.** The table above already exhibits the
+key simplification: although the close-pair sampling density is $p(e)^2$,
+the importance ratios for both consistent targets reduce to expressions in
+$p$ alone, so the implementation never has to evaluate $p^2$ (nor its
+unknown normalizer $\int p^2$) directly. We fit $\hat p(e)$ on the realized
+per-(trial, time-bin) eye-position pool by Gaussian KDE
+(`scipy.stats.gaussian_kde`, Scott's-rule bandwidth) — for synthetic and
+real `fixRSVP` data alike — and evaluate it at close-pair midpoints for
+Direction 1's $1/\hat p$ weights or at per-trial positions for Direction
+2's $\propto\hat p$ weights. Both estimators are *self-normalized*
+(`pw / pw.sum()` in the close-pair second moment;
+`w / w.sum()` in the weighted mean and covariance helpers of
+`estimators.py`), so the unknown $p^2$ normalizer and any uniform
+mis-scaling of $\hat p$ cancel in numerator and denominator. *Shape* errors
+in $\hat p$ do not cancel — they amplify in Direction 1 through the
+$1/\hat p$ factor wherever close pairs are rare (the periphery), and are
+the mechanical origin of the variance penalty discussed in §4.5.
 
 **Equivalence to eye-position stratification.** Importance reweighting (15) is
 equivalent to **stratifying by absolute eye position**: partition $e$ into
@@ -1270,6 +1338,166 @@ truncated-Gaussian prediction (A6.3). **(C)** $\mathrm{sd}[1-\hat\alpha]$
 vs $T$ at $\ell=\sigma$ for $N\in\{100,200,400,800\}$. The dashed line is
 the closed-form floor $\alpha^*\sqrt{2/(T-1)}$; the large-$N$ points sit
 on it.](figures/fig_consistency.png)
+
+## A.7 The PSTH covariance estimator: McFarland M6 vs bagged split-half
+
+The §1 estimators of $C_{\text{psth}}$ and $C_{\text{rate}}$ both rest on the
+cross-trial trick of (4) — distinct-trial products at the same time bin have
+independent observation noise, so the average product converges to the
+underlying rate product with the noise removed. The close-pair estimator (8) is
+one specific arrangement of this trick (pairs restricted to $\Delta e<\varepsilon$).
+The PSTH-covariance estimator (6) is another (pairs unrestricted on $\Delta e$).
+Two computationally distinct estimators target (6); this appendix walks through
+why the naive PSTH covariance fails, names the two distinct-trial estimators
+that fix it, and records the choice this writeup makes.
+
+### A.7.1 Why the naive PSTH covariance is biased — and worse on off-diagonals
+
+The textbook estimator of $C_{\text{psth}}$ is the across-time-bin covariance of
+the per-bin trial-mean count
+
+$$
+\hat\mu_m(t) \;=\; \frac{1}{n_t}\sum_{i=1}^{n_t} Y_m^i(t)
+ \;=\; \mathbb E[Y_m\mid t] \;+\; \underbrace{\frac{1}{n_t}\sum_i \xi_m^i(t)}_{\text{trial-mean noise}},
+$$
+
+where $\xi_m^i(t) = Y_m^i(t) - \mathbb E[Y_m\mid t]$ collects every source of
+trial-to-trial variability at fixed time bin $t$: single-cell Poisson, the FEM
+modulation $r_m(t,e)-\mathbb E_e[r_m\mid t]$, and any shared latent that
+couples cells on the same trial. Taking $\mathrm{Cov}_t(\hat\mu_m, \hat\mu_n)$
+gives, in expectation,
+
+$$
+\mathbb E\!\big[\widehat{\mathrm{Cov}_t}(\hat\mu_m,\hat\mu_n)\big]
+ \;=\; \mathrm{Cov}_t\!\big(\mathbb E[Y_m\mid t],\, \mathbb E[Y_n\mid t]\big)
+ \;+\; \mathbb E_t\!\left[\frac{\mathrm{Cov}\!\big(\xi_m,\xi_n\mid t\big)}{n_t}\right].
+\tag{A7.1}
+$$
+
+The first term is the PSTH covariance we want. The second term is a
+finite-trial *contamination* by the within-bin same-trial noise covariance,
+attenuated by $1/n_t$ but not gone. It has two distinct failure modes:
+
+- **On the diagonal** $(m=n)$, the second term is
+  $\mathbb E_t[\mathrm{Var}(\xi_m\mid t)/n_t]$ — the familiar finite-trial
+  inflation of any sample variance. McFarland and the older literature
+  (Sahani–Linden 2003) routinely debias it via a within-bin variance subtraction
+  $- MS_{\text{within}}/n_0$.
+- **On the off-diagonal** $(m\neq n)$ the second term is
+  $\mathbb E_t[\mathrm{Cov}(\xi_m,\xi_n\mid t)/n_t]$ — *the simultaneous
+  cross-cell noise correlation*, attenuated by $1/n_t$ but present in
+  expectation. This is the quantity the noise-correlation analysis is trying
+  to measure (it shows up in $C_{\text{noise}}^{\text{corr}} = C_{\text{total}}
+  - C_{\text{rate}}$). If $C_{\text{psth}}$ silently carries an attenuated
+  copy of it, $C_{\text{noise}}^{\text{corr}}$ double-counts. The
+  Sahani–Linden diagonal subtraction does **not** address this; off-diagonal
+  debiasing needs an estimator that handles all matrix elements uniformly.
+
+This is what the cross-trial trick fixes by construction. Any estimator that
+averages products of *distinct* trials at the same bin — $Y_m^i(t) Y_n^j(t)$
+with $i\neq j$ — has, in expectation, $\mathbb E[Y_m^i Y_n^j\mid e_i,e_j]
+= r_m(t,e_i)\,r_n(t,e_j)$: trial $i$'s noise (single-cell Poisson *and*
+same-trial cross-cell noise) is independent of trial $j$'s noise and drops out
+of the cross-trial expectation. The diagonal and off-diagonal biases of (A7.1)
+both vanish in the same step.
+
+### A.7.2 Two distinct-trial estimators of $C_{\text{psth}}$
+
+Once the requirement is "average distinct-trial products at the same bin",
+two natural computational arrangements present themselves.
+
+**McFarland M6 / M12 — all-distinct-pair second moment.** Enumerate every
+$i<j$ pair at each bin $t$, weight each pair by $w_i w_j$ with the per-trial
+importance weight $w_i = q(e_i)/p(e_i)$ for target distribution $q$, sum, and
+subtract $\bar Y_m \bar Y_n$ taken under the matching weighted mean:
+
+$$
+\widehat{C_{\text{psth}}}^{\;\text{M6}}_{mn}
+ \;=\;
+ \frac{\sum_t \sum_{i<j} w_i w_j\, Y_m^i(t)\, Y_n^j(t)}{\sum_t \sum_{i<j} w_i w_j}
+ \;-\; \bar Y_m\,\bar Y_n .
+\tag{A7.2}
+$$
+
+This is McFarland's Eq. 6 (single cell, diagonal) and Eq. 12 (cross cell)
+verbatim. It is **identical in structure** to the close-pair estimator (8)
+with the $\Delta e<\varepsilon$ filter removed: $C_{\text{rate}}$ and
+$C_{\text{psth}}$ are the same estimator at the two ends of the $\Delta e$
+axis of the conditional second-moment surface $C_{\text{eye}}(\Delta e)$ —
+$C_{\text{rate}}$ at its $\Delta e\to 0$ intercept, $C_{\text{psth}}$ at its
+eye-distribution-marginalized asymptote. Implemented per bin via the algebraic
+identity $\sum_{i<j} w_i w_j\, S_i\otimes S_j
+ = \tfrac12\big[(\sum_i w_i S_i)\otimes(\sum_i w_i S_i) - \sum_i w_i^2\, S_i\otimes S_i\big]$
+to avoid materialising the $O(\sum_t n_t^2)$ pair tensor (`estimators._all_pairs_second_moment`).
+
+**Bagged split-half.** At each bin $t$, randomly partition the (weighted)
+trials into halves $A$ and $B$; form the per-half PSTHs
+$\hat\mu^{A}_m(t), \hat\mu^{B}_n(t)$ as the $w$-weighted trial means within
+each half; take their across-bin cross-covariance; average over $n_{\text{boot}}$
+independent random partitions. The cross-half product
+$\hat\mu^{A}_m(t)\,\hat\mu^{B}_n(t)$ at bin $t$ is, by construction,
+$(|A||B|)^{-1}\sum_{i\in A,\, j\in B} Y_m^i Y_n^j$ — a *subset* of (A7.2)'s
+$i\neq j$ pairs, restricted to cross-half pairs. Each random partition uses
+about half the available distinct-trial pairs; bagging over $n_{\text{boot}}$
+partitions converges in expectation to the full M6 estimator
+(`estimators._split_half_psth_cov`).
+
+The two are **the same estimator family** — both target (6) by averaging
+distinct-trial products. They differ only in computational form. McFarland M6
+is the $n_{\text{boot}}\to\infty$ limit of bagged split-half, evaluated
+deterministically as a closed-form sum.
+
+### A.7.3 Tradeoffs
+
+| | McFarland M6 (A7.2) | bagged split-half |
+|---|---|---|
+| bias | unbiased | unbiased in expectation |
+| variance (fixed data) | floor — uses every distinct pair once | floor $+\;O(1/n_{\text{boot}})$ bootstrap penalty |
+| determinism | exact (no seed) | seed-dependent |
+| conceptual unity with $C_{\text{rate}}$ | same code path; $C_{\text{rate}}$ is the $\Delta e\to 0$ restriction of (A7.2) | parallel pipeline; the connection to $C_{\text{rate}}$ is via expectations, not code |
+| importance reweighting | per-pair $w_i w_j$ (closed-form) | per-trial $w_i$ via the within-half weighted mean |
+| compute | $O\!\big(\sum_t n_t\,C^2\big)$ via the per-bin identity | $O(n_{\text{boot}}\cdot T\cdot C^2)$ |
+| side benefits | none | natural per-cell SEM across $n_{\text{boot}}$ bootstraps |
+
+The variance ordering follows from M6 being the $n_{\text{boot}}\to\infty$
+limit of split-half: the bootstrap estimator inherits M6's bias and adds an
+$O(1/n_{\text{boot}})$ penalty from the finite partition count. The
+conceptual-unity row is the structural difference: in the M6 path,
+$C_{\text{rate}}$ and $C_{\text{psth}}$ flow out of the *same* function with
+or without the $\Delta e$ filter; in the split-half path, $C_{\text{rate}}$
+and $C_{\text{psth}}$ are computed by genuinely different code that happens
+to target the same population quantities.
+
+### A.7.4 Our choice — McFarland M6
+
+We use the McFarland M6 estimator (A7.2) for every $C_{\text{psth}}$ reported
+in this note (`decompose(cpsth_method='mcfarland')`, the default). The
+deciding factor is the conceptual unification: the writeup's central story —
+"the close-pair restriction in (8) silently changes the eye-position
+distribution from $p$ to $p^2$, and importance reweighting restores
+consistency" — reads more directly when $C_{\text{rate}}$ and
+$C_{\text{psth}}$ are the same estimator at two operating points than when
+they are two estimators that happen to coincide in expectation. Section §1.5's
+$(w_t, q)$ table, in particular, becomes a single statement about which pairs
+the all-pairs second moment averages and how it weights them, applied
+identically to $C_{\text{rate}}$ and $C_{\text{psth}}$.
+
+The bagged split-half implementation is retained at
+`estimators._split_half_psth_cov` and reachable via
+`decompose(cpsth_method='split_half')`. We do not lose anything by keeping it
+— the two estimators agree within bootstrap noise at our $(N, T, C)$ scales
+— and we preserve the option to fall back if its side benefits (natural
+per-cell SEM via the bootstrap distribution, or memory advantage at very
+large $C$ where the per-bin pair-sum identity in M6 starts to dominate) become
+decisive on a future dataset.
+
+The production pipeline (`VisionCore/covariance.py`,
+`bagged_split_half_psth_covariance`) continues to use bagged split-half for
+$C_{\text{psth}}$; that is a pre-existing implementation choice that this
+note does not propose to change. The numerical agreement between the two
+estimators on the same data (within bootstrap noise) means the writeup's
+empirical claims transfer directly across the boundary between this folder's
+M6-based decomposition and the production pipeline.
 
 ---
 
