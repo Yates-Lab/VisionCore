@@ -15,20 +15,21 @@ sentence the §4.5 reframe targets).
 
 ## Status
 
-- All 21 tests pass (`uv run --with pytest pytest test_estimators.py -q`,
-  ~10 min after the M6/split-half switch — the `direction2_is_more_stable`
-  test runs at 12 seeds instead of 6 because M6's removal of bootstrap
-  noise makes the residual stability gap small).
+- All 21 estimator tests pass (`uv run --with pytest pytest test_estimators.py -q`,
+  ~12 min after the M6/split-half switch). Pipeline tests in
+  `test_pipeline.py` (3 tests, including a bit-identical match against the
+  legacy torch `extract_windows`) pass in ~30 s.
 - Writeup builds cleanly to a self-contained HTML (`pandoc writeup.md -s
   --mathml --self-contained -o writeup.html`); the ANOVA side note builds
   with the same command swapping `writeup.md` for `note_anova.md`.
 - Extension 1 is **already in production** (`VisionCore/covariance.py`:
   `estimate_rate_covariance`, `bagged_split_half_psth_covariance` with
   `weighting='pair_count'`).
-- Extension 2 is implemented here and **gated**: the pipeline change to
-  `covariance.py` plus the expensive GPU `fig2_decomposition` cache regen
-  is NOT yet done; given the small population 1-α effect (Δ = −0.022),
-  confirm wanted before touching the shared pipeline.
+- Extension 2: estimator validated, **a CPU-parallel reimplementation of the
+  full Figure-2 pipeline lives in this folder** (§7) and reproduces the legacy
+  numbers at `target='naive'` within the documented tolerance; the production
+  GPU swap of `VisionCore/covariance.py` + `fig2_decomposition` cache regen
+  is the only remaining gated step.
 
 ## File map
 
@@ -57,6 +58,17 @@ sentence the §4.5 reframe targets).
 | `fig_anova.py` | Synthetic validation for `note_anova.md` §5 (ANOVA recovers $1-\alpha^p$ across all four masks). |
 | `fig_panel_d_anova.py` | Real-data panel D: cell-side matched close-pair (naive / D1 pair / D1 trial) vs twin ANOVA. |
 | `fig_panel_d_closepair.py` | Real-data panel D: matched close-pair D1 on BOTH cells and twin. Figure 2 of `note_anova.md`. |
+| `legacy/` | Frozen 2026-06-02 snapshot of `VisionCore/{covariance,stats,subspace}.py` + `VisionCore/ryan/fig2/compute_fig2_data.py`. Used as the §7 comparator. Do not edit. |
+| `data_loading.py` | One-shot aligned-session cache builder (`cache/aligned_sessions.pkl`). Calls `prepare_data` + `align_fixrsvp_trials` + R² inclusion stats once per session. Self-contained boundary for §7. |
+| `pipeline.py` | §7 per-session driver. Numpy port of `extract_windows` (bit-identical to legacy on the test fixture) + `decompose_trajectory` per (window, target) + naive eye-shuffle nulls. Also exposes `decompose_session_legacy` (the snapshot adapter for CPU comparison). |
+| `metrics.py` | §7 stage-2 derived metrics (1-α / Fano / NC means), lifted from `legacy.compute_fig2_data`. Loops over targets. |
+| `compute_methods_data.py` | §7 orchestrator. `joblib(loky)` parallel across sessions; `--legacy` and `--both` modes. Emits `cache/{methods,legacy}_{decomposition,derived}.pkl`. |
+| `test_pipeline.py` | 3 tests: extract-windows bit-equivalence vs legacy, methods-pipeline schema, legacy-adapter smoke run. |
+| `profile_pipeline.py` | cProfile a single session at window=2; writes `cache/profile.prof`. |
+| `timing.py` | Per-(session, window) wall-time CSV for methods vs legacy snapshot (CPU vs CPU). Writes `cache/timing.csv`. |
+| `fig_pipeline_equivalence.py` | Fig. 7 (§7.2): per-cell legacy vs methods at target='naive' scatter (Crate diag, Cpsth diag, 1-α). Exits non-zero if pass criteria fail. |
+| `fig_pipeline_corrections.py` | Fig. 8 (§7.3): 3×3 grid naive/full/central × {1-α dist, Fano scatter, per-session Δz}. |
+| `fig_pipeline_speed.py` | Fig. 9 (§7.4): per-session and per-window wall-time bars, methods vs legacy. |
 
 ## Unified generative model
 
@@ -198,13 +210,25 @@ estimators agree within bootstrap noise at our (N, T, C) scales.
    the same three behaviours, with the trajectory density replaced by two
    2-D centroid-evaluated KDEs (no curse of dimensionality).
 
-4. **Production pipeline change for Ext-2 (gated).** Add target-distribution
-   weights to `estimate_rate_covariance` / `bagged_split_half_psth_covariance`
-   / the Ctotal computation in `VisionCore/covariance.py`. Default
-   `target='naive'` so current numbers stand. Use the §4.6 pooled-per-bin
-   KDE construction for the multi-bin trajectory case. Then the expensive
-   GPU `fig2_decomposition` cache regen. Confirm wanted before touching
-   shared pipeline.
+4. **Methods-folder parallel pipeline — DONE (§7).** A CPU-parallel
+   reimplementation of the entire Figure-2 LOTC pipeline lives in
+   `pipeline.py` / `metrics.py` / `compute_methods_data.py`, using
+   `decompose_trajectory` for stage 1 and the legacy stage-2 aggregator
+   (lifted into `metrics.py`). The numpy windowing port is bit-identical to
+   the legacy torch implementation (`test_pipeline.py`), so equivalence at
+   `target='naive'` is structural rather than empirical. Validated end-to-end
+   via `fig_pipeline_equivalence.py` (per-cell Crate diag / Cpsth diag / 1-α
+   r ≥ 0.99, |Δ pop-median 1-α| ≤ 0.002); corrections at population scale via
+   `fig_pipeline_corrections.py`; runtime via `fig_pipeline_speed.py`.
+
+5. **Production pipeline change for Ext-2 (still gated).** Add target-
+   distribution weights to `estimate_rate_covariance` /
+   `bagged_split_half_psth_covariance` / the Ctotal computation in
+   `VisionCore/covariance.py`. Default `target='naive'` so current numbers
+   stand. Use the §4.6 pooled-per-bin KDE construction for the multi-bin
+   trajectory case. Then the expensive GPU `fig2_decomposition` cache regen.
+   The estimator change is validated end-to-end in §7; only the GPU swap
+   remains.
 
 ## Build / test commands
 

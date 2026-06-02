@@ -1,0 +1,1499 @@
+"""
+Covariance decomposition primitives for the Law of Total Covariance (LOTC).
+
+Flat functions refactored from DualWindowAnalysis class. Each function takes
+explicit arguments instead of reading from self.
+"""
+import numpy as np
+import torch
+from scipy.linalg import logm, expm
+from tqdm import tqdm
+
+from .subspace import project_to_psd  # re-export for convenience
+
+
+# ---------------------------------------------------------------------------
+# Utility functions
+# ---------------------------------------------------------------------------
+
+def cov_to_corr(C, min_var=1e-3):
+    """
+    Convert covariance matrix to correlation matrix.
+
+    Returns NaN for neurons with variance below min_var.
+    Diagonal is set to 0 by convention (for noise correlation analysis).
+
+    Parameters
+    ----------
+    C : ndarray (N, N)
+        Covariance matrix.
+    min_var : float
+        Minimum variance threshold. Neurons below this get NaN correlations.
+
+    Returns
+    -------
+    R : ndarray (N, N)
+        Correlation matrix with diagonal = 0.
+    """
+    C = np.asarray(C, dtype=np.float64)
+    variances = np.diag(C)
+
+    # Neurons with variance below threshold get NaN std
+    valid_mask = variances > min_var
+    std_devs = np.full_like(variances, np.nan)
+    std_devs[valid_mask] = np.sqrt(variances[valid_mask])
+
+    # Outer product of std devs — NaN propagates correctly
+    outer_std = np.outer(std_devs, std_devs)
+
+    R = C / outer_std
+    R = np.clip(R, -1.0, 1.0)
+
+    # NaN entries stay NaN after clip (numpy behavior)
+    # But we need to restore NaN where outer_std was NaN
+    R[~np.isfinite(R)] = np.nan
+
+    # Set diagonal to 0
+    np.fill_diagonal(R, 0.0)
+
+    return R
+
+
+def pava_nonincreasing(y, w, eps=1e-12):
+    """
+    Weighted isotonic regression (Pool-Adjacent-Violators Algorithm).
+
+    Enforces the fitted sequence to be non-increasing.
+
+    Parameters
+    ----------
+    y : array-like
+        Response values.
+    w : array-like
+        Weights for each observation.
+    eps : float
+        Small constant to avoid division by zero.
+
+    Returns
+    -------
+    yhat : ndarray
+        Isotonic fit (non-increasing).
+    """
+    y = np.asarray(y, dtype=np.float64)
+    w = np.asarray(w, dtype=np.float64)
+    means = []
+    weights = []
+    starts = []
+    ends = []
+    for i in range(len(y)):
+        means.append(y[i])
+        weights.append(w[i])
+        starts.append(i)
+        ends.append(i)
+        while len(means) >= 2 and means[-2] < means[-1]:
+            w_new = weights[-2] + weights[-1]
+            m_new = (weights[-2] * means[-2] + weights[-1] * means[-1]) / (w_new + eps)
+            means[-2] = m_new
+            weights[-2] = w_new
+            ends[-2] = ends[-1]
+            means.pop()
+            weights.pop()
+            starts.pop()
+            ends.pop()
+    yhat = np.empty_like(y)
+    for m, s, e in zip(means, starts, ends):
+        yhat[s:e + 1] = m
+    return yhat
+
+
+def get_upper_triangle(C):
+    """Extract upper-triangle values (k=1 diagonal offset) from a square matrix."""
+    rows, cols = np.triu_indices_from(C, k=1)
+    return C[rows, cols]
+
+
+def extract_valid_segments(valid_mask, min_len_bins=36):
+    """
+    Find contiguous valid segments in a (n_trials, n_time) boolean mask.
+
+    Parameters
+    ----------
+    valid_mask : ndarray (n_trials, n_time)
+        Boolean mask of valid time bins per trial.
+    min_len_bins : int
+        Minimum segment length to keep.
+
+    Returns
+    -------
+    segments : list of (trial, start, stop) tuples
+    """
+    mask = np.asarray(valid_mask, dtype=bool)
+    n_trials = mask.shape[0]
+    segments = []
+    for tr in range(n_trials):
+        padded = np.concatenate(([False], mask[tr], [False]))
+        diffs = np.diff(padded.astype(int))
+        starts = np.where(diffs == 1)[0]
+        stops = np.where(diffs == -1)[0]
+        for s, e in zip(starts, stops):
+            if (e - s) >= min_len_bins:
+                segments.append((tr, s, e))
+    return segments
+
+
+# ---------------------------------------------------------------------------
+# Window extraction
+# ---------------------------------------------------------------------------
+
+def extract_windows(robs, eyepos, segments, t_count, t_hist, device="cuda"):
+    """
+    Extract spike count windows and eye trajectories from segments.
+
+    Parameters
+    ----------
+    robs : torch.Tensor (n_trials, n_time, n_cells)
+        Spike observations.
+    eyepos : torch.Tensor (n_trials, n_time, 2)
+        Eye positions.
+    segments : list of (trial, start, stop)
+        Valid contiguous segments.
+    t_count : int
+        Number of bins in the counting window.
+    t_hist : int
+        Number of bins in the history window for trajectory similarity.
+    device : str
+        Torch device.
+
+    Returns
+    -------
+    SpikeCounts : torch.Tensor (N, n_cells)
+    EyeTraj : torch.Tensor (N, total_len, 2)
+    T_idx : torch.Tensor (N,)
+    idx_tr : torch.Tensor (N,)
+    """
+    device = torch.device(device if torch.cuda.is_available() else "cpu")
+    total_len = t_hist + t_count
+    trial_indices, time_indices = [], []
+
+    for (tr, start, stop) in segments:
+        if (stop - start) < total_len:
+            continue
+        t_starts = np.arange(start, stop - total_len + 1, t_count)
+        trial_indices.extend([tr] * len(t_starts))
+        time_indices.extend(t_starts)
+
+    if len(trial_indices) == 0:
+        return None, None, None, None
+
+    idx_tr = torch.tensor(trial_indices, device=device, dtype=torch.long)
+    idx_t0 = torch.tensor(time_indices, device=device, dtype=torch.long)
+
+    # Gather eye trajectory (full history + count window)
+    offsets = torch.arange(total_len, device=device).unsqueeze(0)
+    gather_t = idx_t0.unsqueeze(1) + offsets
+    gather_tr = idx_tr.unsqueeze(1).expand(-1, total_len)
+    EyeTraj = eyepos[gather_tr, gather_t, :]
+
+    # Gather spikes (count window only)
+    spike_offsets = torch.arange(t_hist, total_len, device=device).unsqueeze(0)
+    gather_t_spk = idx_t0.unsqueeze(1) + spike_offsets
+    gather_tr_spk = idx_tr.unsqueeze(1).expand(-1, t_count)
+    S_raw = robs[gather_tr_spk, gather_t_spk, :]
+    SpikeCounts = torch.sum(S_raw, dim=1)
+
+    T_idx = idx_t0 + t_hist
+
+    return SpikeCounts, EyeTraj, T_idx, idx_tr
+
+
+# ---------------------------------------------------------------------------
+# Second moment estimation
+# ---------------------------------------------------------------------------
+
+def compute_eye_distances(EyeTraj):
+    """
+    Compute RMS eye trajectory distance matrix.
+
+    Parameters
+    ----------
+    EyeTraj : torch.Tensor (N, T, 2)
+
+    Returns
+    -------
+    dist_matrix : torch.Tensor (N, N)
+    """
+    N, T, _ = EyeTraj.shape
+    EyeFlat = EyeTraj.reshape(N, -1)
+    return torch.cdist(EyeFlat, EyeFlat) / np.sqrt(T)
+
+
+def bin_pairs_by_distance(dist_matrix, n_bins):
+    """
+    Compute percentile-based bin edges from upper triangle of distance matrix.
+
+    Parameters
+    ----------
+    dist_matrix : torch.Tensor (N, N)
+    n_bins : int
+
+    Returns
+    -------
+    bin_edges : ndarray
+    bin_centers : ndarray
+    """
+    N = dist_matrix.shape[0]
+    i, j = torch.triu_indices(N, N, offset=1)
+    dist = dist_matrix[i, j]
+    bin_edges = np.percentile(dist.cpu().numpy(), np.arange(0, 100, 100 / (n_bins + 1)))
+    bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+    return bin_edges, bin_centers
+
+
+def compute_conditional_second_moments(SpikeCounts, EyeTraj, T_idx, n_bins=25):
+    """
+    Compute E[SS^T | distance_bin] using time-matched distinct-trial pairs.
+
+    Parameters
+    ----------
+    SpikeCounts : torch.Tensor (N, C)
+    EyeTraj : torch.Tensor (N, T, 2)
+    T_idx : torch.Tensor (N,)
+    n_bins : int or array-like
+        Number of bins, or pre-computed bin edges.
+
+    Returns
+    -------
+    MM : ndarray (n_bins, C, C) — conditional second moments
+    bin_centers : ndarray (n_bins,)
+    count_e : ndarray (n_bins,) — pair counts per bin
+    bin_edges : ndarray
+    """
+    N_samples, T, _ = EyeTraj.shape
+    device = EyeTraj.device
+    C = SpikeCounts.shape[1]
+
+    # Compute distance matrix
+    EyeFlat = EyeTraj.reshape(N_samples, -1)
+    inv_sqrt_T = 1.0 / torch.sqrt(torch.tensor(float(T), device=device, dtype=EyeTraj.dtype))
+
+    # Bin edges
+    if isinstance(n_bins, int):
+        i_up, j_up = torch.triu_indices(N_samples, N_samples, offset=1)
+        dist_up = torch.cdist(EyeFlat, EyeFlat)[i_up, j_up] * inv_sqrt_T
+        bin_edges = np.percentile(dist_up.cpu().numpy(), np.arange(0, 100, 100 / (n_bins + 1)))
+    else:
+        bin_edges = np.asarray(n_bins)
+
+    bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+    n_bins_actual = len(bin_edges) - 1
+
+    unique_times = np.unique(T_idx.detach().cpu().numpy())
+    bin_edges_t = torch.as_tensor(bin_edges, device=device, dtype=EyeTraj.dtype)
+
+    # Accumulators on CPU
+    SS_e_t = torch.zeros((n_bins_actual, C, C), device='cpu', dtype=torch.float64)
+    count_e_t = torch.zeros((n_bins_actual,), device='cpu', dtype=torch.long)
+
+    def accumulate_split(valid_idx):
+        N = len(valid_idx)
+        if N < 2:
+            return
+
+        X = EyeTraj[valid_idx]
+        S = SpikeCounts[valid_idx]
+
+        ii, jj = torch.triu_indices(N, N, offset=1, device=device)
+
+        Xflat = X.reshape(N, -1)
+        D = torch.cdist(Xflat, Xflat) * inv_sqrt_T
+        d = D[ii, jj]
+
+        bid = torch.bucketize(d, bin_edges_t, right=False)
+
+        ok = (bid >= 1) & (bid <= n_bins_actual)
+        if not ok.any():
+            return
+        ii = ii[ok]
+        jj = jj[ok]
+        bid = bid[ok]
+
+        for k in range(1, n_bins_actual + 1):
+            mk = (bid == k)
+            if not mk.any():
+                continue
+            Si = S[ii[mk]]
+            Sj = S[jj[mk]]
+            M = Si.transpose(0, 1).matmul(Sj)
+            SS_e_t[k - 1] += M.detach().cpu().to(torch.float64)
+            count_e_t[k - 1] += mk.sum().detach().cpu()
+
+    for t in unique_times:
+        valid = np.where((T_idx == t).detach().cpu().numpy())[0]
+        if len(valid) < 10:
+            continue
+        accumulate_split(valid)
+
+    SS_e = SS_e_t.numpy()
+    count_e = count_e_t.numpy()
+
+    MM = SS_e / count_e[:, None, None]
+    MM = 0.5 * (MM + np.swapaxes(MM, -1, -2))
+
+    return MM, bin_centers, count_e, bin_edges
+
+
+# ---------------------------------------------------------------------------
+# Intercept fitting
+# ---------------------------------------------------------------------------
+
+def _fit_best_monotonic(y, w):
+    """Fit both non-increasing and non-decreasing PAVA, return intercept of better fit."""
+    y_decr = pava_nonincreasing(y, w)
+    sse_decr = np.sum(w * (y - y_decr) ** 2)
+
+    y_incr = -pava_nonincreasing(-y, w)
+    sse_incr = np.sum(w * (y - y_incr) ** 2)
+
+    return y_decr[0] if sse_decr < sse_incr else y_incr[0]
+
+
+def fit_intercept_pava(Ceye, count_e):
+    """
+    PAVA-based intercept fitting for each element of the covariance tensor.
+
+    Parameters
+    ----------
+    Ceye : ndarray (n_bins, n_cells, n_cells)
+    count_e : ndarray (n_bins,)
+
+    Returns
+    -------
+    C_intercept : ndarray (n_cells, n_cells)
+    """
+    n_bins, n_cells, _ = Ceye.shape
+    C_intercept = np.zeros((n_cells, n_cells), dtype=Ceye.dtype)
+
+    for i in range(n_cells):
+        # Diagonal: variance must be non-increasing
+        y_diag = Ceye[:, i, i]
+        yhat = pava_nonincreasing(y_diag, count_e)
+        C_intercept[i, i] = yhat[0]
+
+        # Off-diagonals: can be increasing or decreasing
+        for j in range(i + 1, n_cells):
+            y = Ceye[:, i, j]
+            valid = np.isfinite(y)
+            if not valid.any():
+                C_intercept[i, j] = np.nan
+                C_intercept[j, i] = np.nan
+                continue
+            val = _fit_best_monotonic(y[valid], count_e[valid])
+            C_intercept[i, j] = val
+            C_intercept[j, i] = val
+
+    return C_intercept
+
+
+def fit_intercept_linear(Ceye, bin_centers, count_e, d_max=0.4, min_bins=3,
+                         eps=1e-8, eval_at_first_bin=True):
+    """
+    Weighted local linear regression intercept for each (i,j).
+
+    Parameters
+    ----------
+    Ceye : ndarray (n_bins, n_cells, n_cells)
+    bin_centers : ndarray (n_bins,)
+    count_e : ndarray (n_bins,)
+    d_max : float
+        Maximum distance to include in regression.
+    min_bins : int
+        Minimum number of bins required.
+    eps : float
+        Numerical stability threshold.
+    eval_at_first_bin : bool
+        If True, evaluate at first bin center (conservative).
+        If False, extrapolate to d=0.
+
+    Returns
+    -------
+    C_intercept : ndarray (n_cells, n_cells)
+    """
+    n_bins, n_cells, _ = Ceye.shape
+    C_intercept = np.full((n_cells, n_cells), np.nan, dtype=Ceye.dtype)
+
+    x = np.asarray(bin_centers, dtype=np.float64)
+    w_all = np.asarray(count_e, dtype=np.float64)
+
+    use_mask = np.isfinite(x) & (x > 0) & (x <= d_max) & np.isfinite(w_all) & (w_all > 0)
+    idx = np.where(use_mask)[0]
+
+    if idx.size < min_bins:
+        k0 = np.where(np.isfinite(x) & np.isfinite(w_all) & (w_all > 0))[0]
+        if k0.size > 0:
+            return Ceye[k0[0]].copy()
+        return C_intercept
+
+    x_loc = x[idx]
+    w_loc = w_all[idx]
+    x_eval = x_loc[0] if eval_at_first_bin else 0.0
+
+    S0 = np.sum(w_loc)
+    Sx = np.sum(w_loc * x_loc)
+    Sxx = np.sum(w_loc * x_loc ** 2)
+    det = S0 * Sxx - Sx ** 2
+
+    if S0 == 0 or (det / (S0 * S0)) < eps:
+        return Ceye[idx[0]].copy()
+
+    def _fit_pair(i, j):
+        y = Ceye[idx, i, j]
+        if not np.isfinite(y).all():
+            v = np.isfinite(y)
+            if np.sum(v) < 3:
+                return np.nan
+            wv, xv, yv = w_loc[v], x_loc[v], y[v]
+            s0 = np.sum(wv)
+            sx = np.sum(wv * xv)
+            sxx = np.sum(wv * xv ** 2)
+            d = s0 * sxx - sx ** 2
+            if d <= 0:
+                return np.nan
+            sy = np.sum(wv * yv)
+            sxy = np.sum(wv * xv * yv)
+            beta1 = (s0 * sxy - sx * sy) / d
+            beta0 = (sxx * sy - sx * sxy) / d
+        else:
+            Sy = np.sum(w_loc * y)
+            Sxy = np.sum(w_loc * x_loc * y)
+            beta1 = (S0 * Sxy - Sx * Sy) / det
+            beta0 = (Sxx * Sy - Sx * Sxy) / det
+        return beta0 + beta1 * x_eval
+
+    for i in range(n_cells):
+        C_intercept[i, i] = _fit_pair(i, i)
+        for j in range(i + 1, n_cells):
+            val = _fit_pair(i, j)
+            C_intercept[i, j] = val
+            C_intercept[j, i] = val
+
+    return C_intercept
+
+
+def fit_intercept_log_euclidean(Ceye, bin_centers, count_e, d_max=0.4,
+                                min_bins=3, ridge=1e-6, eval_at_first_bin=True):
+    """
+    Log-Euclidean intercept fitting: weighted linear regression in the space
+    of matrix logarithms, guaranteeing a positive semi-definite result.
+
+    Mathematical background
+    -----------------------
+    The set of symmetric positive definite (SPD) matrices forms a Riemannian
+    manifold — a curved space where straight-line (Euclidean) interpolation
+    between two SPD matrices can exit the cone and produce indefinite results.
+    This is exactly why element-wise linear regression on Ceye[k] can yield a
+    non-PSD intercept matrix.
+
+    The Log-Euclidean framework (Arsigny et al., 2006, "Log-Euclidean metrics
+    for fast and simple calculus on diffusion tensors") addresses this by
+    mapping SPD matrices into an unconstrained vector space via the matrix
+    logarithm:
+
+        S = logm(C)          C ∈ SPD(n)  →  S ∈ Sym(n)
+
+    In this "log domain", the symmetric matrices form a flat vector space
+    where standard linear operations (weighted mean, linear regression) are
+    well-defined. The inverse map (matrix exponential) sends any symmetric
+    matrix back to an SPD matrix:
+
+        C = expm(S)          S ∈ Sym(n)  →  C ∈ SPD(n)
+
+    Algorithm
+    ---------
+    1. Regularize: each bin's covariance Ceye[k] is projected to SPD by
+       adding a small ridge (ε·I) to ensure strict positive definiteness,
+       which is required for the matrix logarithm to be real-valued.
+
+    2. Map to log domain: S[k] = logm(Ceye[k] + ε·I) for each distance bin.
+
+    3. Fit weighted linear regression on each element (i, j) of S[k] against
+       bin center distance d[k], using pair counts as weights — identical to
+       fit_intercept_linear but operating on the log-domain matrices.
+
+    4. Evaluate the fitted line at the target distance (first bin center or
+       d = 0) to get S_intercept.
+
+    5. Map back: C_intercept = expm(S_intercept). The matrix exponential of
+       any real symmetric matrix is guaranteed SPD, so the result is always a
+       valid covariance matrix.
+
+    Why this is better than project_to_psd post-hoc
+    ------------------------------------------------
+    The current pipeline fits element-wise in Euclidean space (which can leave
+    the SPD cone), then projects back via eigenvalue clamping. That projection
+    finds the nearest PSD matrix in Frobenius norm, but it distorts the
+    carefully fitted element values — especially off-diagonal covariances,
+    which carry the noise correlation signal.
+
+    Log-Euclidean regression never leaves the SPD cone, so no post-hoc
+    correction is needed. The regression "straight line" in log-space
+    corresponds to a geodesic-like curve in SPD space that respects the
+    manifold geometry.
+
+    Parameters
+    ----------
+    Ceye : ndarray (n_bins, n_cells, n_cells)
+        Covariance matrices conditioned on eye-trajectory distance bin.
+    bin_centers : ndarray (n_bins,)
+        Distance bin centers.
+    count_e : ndarray (n_bins,)
+        Number of pairs in each bin (regression weights).
+    d_max : float
+        Maximum distance to include in the regression.
+    min_bins : int
+        Minimum number of usable bins required.
+    ridge : float
+        Small positive constant added to diagonals before taking logm,
+        ensuring strict positive definiteness. Should be small relative
+        to typical variances (default 1e-6).
+    eval_at_first_bin : bool
+        If True, evaluate the fitted line at the first bin center
+        (conservative, avoids extrapolation). If False, extrapolate to d=0.
+
+    Returns
+    -------
+    C_intercept : ndarray (n_cells, n_cells)
+        Estimated covariance at zero eye-trajectory distance. Guaranteed
+        symmetric positive definite.
+    """
+    n_bins, n_cells, _ = Ceye.shape
+
+    x = np.asarray(bin_centers, dtype=np.float64)
+    w_all = np.asarray(count_e, dtype=np.float64)
+
+    # Select bins within distance range with valid data
+    use_mask = np.isfinite(x) & (x > 0) & (x <= d_max) & np.isfinite(w_all) & (w_all > 0)
+    idx = np.where(use_mask)[0]
+
+    if idx.size < min_bins:
+        # Fall back to the nearest valid bin, regularized
+        k0 = np.where(np.isfinite(x) & np.isfinite(w_all) & (w_all > 0))[0]
+        if k0.size > 0:
+            C0 = Ceye[k0[0]].copy()
+            C0 = 0.5 * (C0 + C0.T)
+            C0 = np.nan_to_num(C0, nan=0.0)
+            C0 += ridge * np.eye(n_cells)
+            return expm(logm(C0))  # round-trip ensures SPD
+        return np.full((n_cells, n_cells), np.nan, dtype=Ceye.dtype)
+
+    x_loc = x[idx]
+    w_loc = w_all[idx]
+    x_eval = x_loc[0] if eval_at_first_bin else 0.0
+
+    # --- Step 1-2: Regularize each bin and map to log domain ---
+    S = np.empty((len(idx), n_cells, n_cells), dtype=np.float64)
+    for k_i, k in enumerate(idx):
+        Ck = Ceye[k].copy().astype(np.float64)
+        Ck = 0.5 * (Ck + Ck.T)
+        Ck = np.nan_to_num(Ck, nan=0.0)
+        Ck += ridge * np.eye(n_cells)
+        S[k_i] = logm(Ck).real  # .real guards against tiny imaginary residuals
+
+    # --- Step 3: Weighted linear regression on each element of S ---
+    # Same WLS formula as fit_intercept_linear:
+    #   beta0 = (Sxx * Sy - Sx * Sxy) / det
+    #   beta1 = (S0 * Sxy - Sx * Sy) / det
+    #   intercept_value = beta0 + beta1 * x_eval
+    S0 = np.sum(w_loc)
+    Sx = np.sum(w_loc * x_loc)
+    Sxx = np.sum(w_loc * x_loc ** 2)
+    det = S0 * Sxx - Sx ** 2
+
+    if det / (S0 * S0) < 1e-8:
+        # Degenerate case: all bins at same distance, use weighted mean
+        S_intercept = np.average(S, axis=0, weights=w_loc)
+    else:
+        # Vectorized WLS across all matrix elements at once
+        # S has shape (n_used_bins, n_cells, n_cells)
+        Sy = np.einsum('k,kij->ij', w_loc, S)
+        Sxy = np.einsum('k,k,kij->ij', w_loc, x_loc, S)
+        beta0 = (Sxx * Sy - Sx * Sxy) / det
+        beta1 = (S0 * Sxy - Sx * Sy) / det
+        S_intercept = beta0 + beta1 * x_eval
+
+    # --- Step 4: Symmetrize (guards against float accumulation) ---
+    S_intercept = 0.5 * (S_intercept + S_intercept.T)
+
+    # --- Step 5: Map back to SPD via matrix exponential ---
+    C_intercept = expm(S_intercept).real
+
+    # Symmetrize the result (expm of a symmetric matrix is symmetric,
+    # but floating point can introduce ~1e-16 asymmetry)
+    C_intercept = 0.5 * (C_intercept + C_intercept.T)
+
+    return C_intercept
+
+
+# ---------------------------------------------------------------------------
+# PSTH covariance
+# ---------------------------------------------------------------------------
+
+def bagged_split_half_psth_covariance(S, T_idx, n_boot=20, min_trials_per_time=10,
+                                      seed=42, global_mean=None,
+                                      weighting='pair_count'):
+    """
+    Bagged split-half PSTH covariance (unbiased estimator).
+
+    Parameters
+    ----------
+    S : torch.Tensor (N, C)
+        Spike counts.
+    T_idx : torch.Tensor (N,)
+        Time indices.
+    n_boot : int
+        Number of bootstrap splits.
+    min_trials_per_time : int
+        Minimum trials per time bin.
+    seed : int
+        Random seed.
+    global_mean : ndarray (C,), optional
+        Global mean for centering. If None, uses local centering.
+    weighting : str
+        'uniform' for equal (1/T) weighting over time bins, or
+        'pair_count' to weight each time bin by n_t*(n_t-1)/2,
+        matching the implicit weighting in
+        compute_conditional_second_moments.
+
+    Returns
+    -------
+    C_psth : ndarray (C, C)
+    PSTH_mean : ndarray (T, C)
+    """
+    rng = np.random.default_rng(seed)
+    unique_times = np.unique(T_idx.detach().cpu().numpy())
+    N_cells = S.shape[1]
+
+    time_groups = {}
+    for t in unique_times:
+        ix_t = np.where((T_idx == t).detach().cpu().numpy())[0]
+        if len(ix_t) >= min_trials_per_time:
+            time_groups[t] = ix_t
+
+    if len(time_groups) < 2:
+        return np.full((N_cells, N_cells), np.nan), None
+
+    C_accum = np.zeros((N_cells, N_cells))
+    valid_boots = 0
+    PSTH_mean_accum = np.zeros((len(time_groups), N_cells))
+
+    mu_global = None
+    if global_mean is not None:
+        mu_global = np.asarray(global_mean).reshape(1, -1)
+
+    sorted_times = sorted(time_groups.keys())
+
+    # Time-bin weights for the cross-covariance
+    if weighting == 'pair_count':
+        pair_counts = np.array([
+            len(time_groups[t]) * (len(time_groups[t]) - 1) / 2
+            for t in sorted_times
+        ])
+        w = pair_counts / pair_counts.sum()
+    elif weighting == 'uniform':
+        w = None
+    else:
+        raise ValueError(f"weighting must be 'uniform' or 'pair_count', got {weighting!r}")
+
+    for k in range(n_boot):
+        PSTH_A_list = []
+        PSTH_B_list = []
+
+        for t in sorted_times:
+            ix_t = time_groups[t]
+            perm = rng.permutation(ix_t)
+            mid = len(ix_t) // 2
+            mu_A = S[perm[:mid]].mean(0).detach().cpu().numpy()
+            mu_B = S[perm[mid:]].mean(0).detach().cpu().numpy()
+            PSTH_A_list.append(mu_A)
+            PSTH_B_list.append(mu_B)
+
+        XA = np.stack(PSTH_A_list)
+        XB = np.stack(PSTH_B_list)
+        PSTH_mean_accum += (XA + XB) / 2.0
+
+        if mu_global is not None:
+            XA_c = XA - mu_global
+            XB_c = XB - mu_global
+        else:
+            XA_c = XA - XA.mean(0, keepdims=True)
+            XB_c = XB - XB.mean(0, keepdims=True)
+
+        if w is not None:
+            C_k = (XA_c * w[:, None]).T @ XB_c
+        else:
+            n_time = XA.shape[0]
+            C_k = (XA_c.T @ XB_c) / (n_time - 1)
+        C_k = 0.5 * (C_k + C_k.T)
+
+        C_accum += C_k
+        valid_boots += 1
+
+    if valid_boots == 0:
+        return np.full((N_cells, N_cells), np.nan), None
+
+    C_final = C_accum / valid_boots
+    PSTH_final = PSTH_mean_accum / valid_boots
+
+    return C_final, PSTH_final
+
+
+# ---------------------------------------------------------------------------
+# Rate covariance estimation
+# ---------------------------------------------------------------------------
+
+def estimate_rate_covariance(SpikeCounts, EyeTraj, T_idx, n_bins=25,
+                             Ctotal=None, intercept_mode='linear',
+                             intercept_kwargs=None):
+    """
+    Estimate eye-conditioned rate covariance matrix (Crate).
+
+    Chains second moment computation + intercept fitting.
+
+    Parameters
+    ----------
+    SpikeCounts : torch.Tensor (N, C)
+    EyeTraj : torch.Tensor (N, T, 2)
+    T_idx : torch.Tensor (N,)
+    n_bins : int or array-like
+    Ctotal : ndarray (C, C), optional
+        Total covariance for physical limit check.
+    intercept_mode : str
+        'linear', 'isotonic', 'log_euclidean', 'lowest_bin', or
+        'below_threshold'. The 'below_threshold' mode takes a
+        `threshold` kwarg (degrees) and pools all pair samples with
+        Δe < threshold into a single bin used as the intercept.
+
+    Returns
+    -------
+    Crate : ndarray (C, C)
+    Erate : ndarray (C,)
+    Ceye : ndarray (n_bins, C, C)
+    bin_centers : ndarray
+    count_e : ndarray
+    bin_edges : ndarray
+    """
+    MM, bin_centers, count_e, bin_edges = compute_conditional_second_moments(
+        SpikeCounts, EyeTraj, T_idx, n_bins=n_bins
+    )
+
+    # Pair-count-weighted mean rate for consistent Ceye estimation.
+    #
+    # compute_conditional_second_moments accumulates cross-trial products
+    # S_i S_j^T across time bins, where each time bin t with n_t trials
+    # contributes n_t*(n_t-1)/2 pairs.  The resulting second moment MM is
+    # therefore implicitly weighted by pair count, not trial count.
+    #
+    # Converting MM to covariance requires subtracting E[rate] x E[rate]^T
+    # under the *same* weighting.  The old code used the trial-count-weighted
+    # global mean (torch.nanmean), which weights each time bin by n_t.  This
+    # mismatch — pair-weighted (~ n_t^2) second moment minus trial-weighted
+    # (~ n_t) mean squared — inflates off-diagonal Ceye and creates a small
+    # but systematic negative bias in the shuffle null (~Dz = -0.007).
+    #
+    # Fix: weight the mean rate by pair count to match the second moment.
+    # This eliminates 93% of the shuffle null bias while preserving the
+    # real-data signal (Dz changes < 0.003).
+    #
+    # Old line: Erate = torch.nanmean(SpikeCounts, 0).detach().cpu().numpy()
+    unique_times = np.unique(T_idx.detach().cpu().numpy())
+    C = SpikeCounts.shape[1]
+    weighted_sum = torch.zeros(C, device=SpikeCounts.device, dtype=torch.float64)
+    total_pairs = 0.0
+    for t in unique_times:
+        mask = (T_idx == t)
+        n_t = mask.sum().item()
+        if n_t < 10:  # matches the threshold in compute_conditional_second_moments
+            continue
+        n_pairs_t = n_t * (n_t - 1) / 2
+        mu_t = SpikeCounts[mask].mean(0).to(torch.float64)
+        weighted_sum += n_pairs_t * mu_t
+        total_pairs += n_pairs_t
+    Erate = (weighted_sum / total_pairs).detach().cpu().numpy()
+
+    Ceye = MM - Erate[:, None] * Erate[None, :]
+
+    ikw = dict(intercept_kwargs) if intercept_kwargs else {}
+    if intercept_mode == 'linear':
+        ikw.setdefault('eval_at_first_bin', True)
+        Crate = fit_intercept_linear(Ceye, bin_centers, count_e, **ikw)
+    elif intercept_mode == 'isotonic':
+        Crate = fit_intercept_pava(Ceye, count_e)
+    elif intercept_mode == 'log_euclidean':
+        ikw.setdefault('eval_at_first_bin', True)
+        Crate = fit_intercept_log_euclidean(Ceye, bin_centers, count_e, **ikw)
+    elif intercept_mode == 'lowest_bin':
+        Crate = Ceye[0].copy()
+    elif intercept_mode == 'below_threshold':
+        threshold = float(ikw.get('threshold', 0.05))
+        # Recompute conditional second moments pooling all pairs with
+        # Δe < threshold into a single bin. Independent of the caller's
+        # n_bins, so the intercept estimate is session-invariant.
+        EyeFlat = EyeTraj.reshape(EyeTraj.shape[0], -1)
+        max_dist = float(
+            (torch.cdist(EyeFlat, EyeFlat).max()
+             / torch.sqrt(torch.tensor(float(EyeTraj.shape[1]),
+                                       device=EyeTraj.device,
+                                       dtype=EyeTraj.dtype))
+             ).detach().cpu()
+        )
+        bin_edges_thr = np.array([0.0, threshold, max(max_dist, threshold) + 1e-6])
+        MM_thr, _, count_thr, _ = compute_conditional_second_moments(
+            SpikeCounts, EyeTraj, T_idx, n_bins=bin_edges_thr
+        )
+        if count_thr[0] == 0:
+            raise ValueError(
+                f"below_threshold: no pairs with Δe < {threshold}"
+            )
+        Crate = MM_thr[0] - Erate[:, None] * Erate[None, :]
+    else:
+        raise ValueError(f"Invalid intercept_mode: {intercept_mode!r}")
+
+    if Ctotal is not None:
+        bad_mask = np.diag(Crate) > 0.99 * np.diag(Ctotal)
+        Crate[bad_mask, :] = np.nan
+        Crate[:, bad_mask] = np.nan
+        Ceye[:, bad_mask, :] = np.nan
+        Ceye[:, :, bad_mask] = np.nan
+
+    return Crate, Erate, Ceye, bin_centers, count_e, bin_edges
+
+
+# ---------------------------------------------------------------------------
+# Deterministic-rate variance decomposition (model digital twin)
+# ---------------------------------------------------------------------------
+
+def rate_variance_components(rate, valid=None, min_trials_per_phase=2):
+    """Decompose a deterministic rate matrix into PSTH and FEM variance.
+
+    This is the model-side analogue of the empirical Law-of-Total-Covariance
+    decomposition (see ``run_covariance_decomposition``). It returns, per
+    neuron, the fraction of rate variance driven by fixational eye movements
+    (``one_minus_alpha``) so the digital twin's 1-alpha can be compared cell by
+    cell against the empirically measured 1-alpha.
+
+    Why the empirical machinery is unnecessary here
+    ------------------------------------------------
+    For real neurons, spike counts S are noisy observations of a latent rate
+    r(t, e) that depends on stimulus phase t and the within-trial eye
+    trajectory e. The empirical decomposition estimates the *rate* variance and
+    splits it into a stimulus-locked (PSTH) part and an eye-movement (FEM) part:
+
+        Var_{t,e}(r) = Var_t(E_e[r|t])      +   E_t[Var_e(r|t)]
+                       \\_____ PSTH ______/      \\_____ FEM _____/   (law of total variance)
+
+    Every heavy step in ``covariance.py`` exists only to strip Poisson
+    observation noise out of S: the eye-distance binning + intercept fit
+    extrapolate distinct-trial cross-products to delta_e -> 0 (giving the
+    Poisson-free rate variance ``Crate``), and ``bagged_split_half_psth_covariance``
+    debiases the PSTH variance against the same Poisson noise.
+
+    The digital twin is *deterministic*: given its inputs it emits the rate
+    rhat[i, t] directly, with no observation noise, evaluated at each trial's
+    actual eye trajectory. So there is no Poisson term to remove, the
+    eye-distance apparatus is unnecessary, and the whole thing collapses to a
+    textbook one-way random-effects ANOVA of rhat grouped by stimulus phase t.
+
+    Estimator (analytic random-effects ANOVA)
+    ------------------------------------------
+    Group rates by phase t (column); phase t has n_t valid trials, with T kept
+    phases and N = sum_t n_t total samples. With phase mean rhat_bar(t) and
+    grand mean rhat_bar:
+
+        SS_within  = sum_t sum_i (rhat[i,t] - rhat_bar(t))^2 ,  df = N - T
+        SS_between = sum_t n_t (rhat_bar(t) - rhat_bar)^2     ,  df = T - 1
+        MS_within  = SS_within / (N - T)
+        MS_between = SS_between / (T - 1)
+
+    The mean squares have exact expectations (method of moments, no Gaussian
+    assumption) E[MS_within] = sigma2_W and E[MS_between] = sigma2_W + n0 sigma2_B
+    with the unbalanced effective group size
+
+        n0 = (N - sum_t n_t^2 / N) / (T - 1)   (= n when balanced),
+
+    yielding the unbiased component estimates
+
+        sigma2_within  (FEM)  = MS_within
+        sigma2_between (PSTH) = max((MS_between - MS_within) / n0, 0)
+        one_minus_alpha       = clip(sigma2_within / (sigma2_within + sigma2_between), 0, 1)
+
+    Note the convention difference from the empirical pipeline: the empirical
+    side estimates the total rate variance directly and takes FEM as the
+    residual ``Crate - Cpsth``; here both components are estimated directly and
+    the total is their sum. Both target the identical population ratio
+    sigma2_W / (sigma2_W + sigma2_B).
+
+    Why MS_between must be debiased even with exact rates
+    -----------------------------------------------------
+    With finite n_t the naive between-phase variance Var_t(rhat_bar(t)) is
+    biased up by E_t[Var_e(r|t)/n_t]: each phase mean still averages only n_t
+    eye-trajectory draws. Subtracting MS_within / n0 removes exactly this term.
+    Skipping it would inflate alpha (deflate 1-alpha) by an alpha-dependent
+    amount -- a pure estimator artifact, worst precisely for the FEM-dominated
+    cells this comparison is about. ``psth_variance_splithalf`` is an
+    assumption-light cross-check that achieves the same debiasing by cancelling
+    the per-phase sampling noise across disjoint trial halves.
+
+    1-alpha is invariant to the affine rescaling rhat -> a*rhat + b applied
+    upstream (rescale_rhat): a shift leaves every variance unchanged and a scale
+    multiplies both components by a^2, cancelling in the ratio.
+
+    Parameters
+    ----------
+    rate : ndarray (n_trials, n_phases)
+        Per-trial deterministic rate (or expected count) for ONE neuron.
+        Columns are stimulus phase (time bin); rows are repeats/trials.
+        Non-finite entries are treated as missing.
+    valid : ndarray (n_trials, n_phases) of bool, optional
+        Mask of usable samples (e.g. the data filter ``dfs != 0`` intersected
+        with fixation bins). Combined with ``isfinite(rate)``. If None, only
+        the finite-entry mask is used.
+    min_trials_per_phase : int
+        Phases with fewer valid trials than this are dropped (>= 2 needed for a
+        within-phase variance). Mirrors the empirical ``min_trials_per_time``.
+
+    Returns
+    -------
+    dict with keys:
+        sigma2_within  : float -- FEM (within-phase) variance component.
+        sigma2_between : float -- PSTH (between-phase) variance component (>= 0).
+        sigma2_total   : float -- sigma2_within + sigma2_between.
+        one_minus_alpha: float -- FEM fraction in [0, 1], NaN if undetermined.
+        n_phases       : int   -- number of phases retained.
+        n_samples      : int   -- total valid trial x phase samples retained.
+    """
+    rate = np.asarray(rate, dtype=np.float64)
+    if rate.ndim != 2:
+        raise ValueError(f"rate must be 2D (trials, phases), got {rate.shape}")
+
+    finite = np.isfinite(rate)
+    if valid is None:
+        valid = finite
+    else:
+        valid = np.asarray(valid, dtype=bool) & finite
+
+    nan_result = {
+        "sigma2_within": np.nan, "sigma2_between": np.nan,
+        "sigma2_total": np.nan, "one_minus_alpha": np.nan,
+        "n_phases": 0, "n_samples": 0,
+    }
+
+    r0 = np.where(valid, rate, 0.0)
+    n_t = valid.sum(axis=0).astype(np.float64)        # trials per phase
+    keep = n_t >= min_trials_per_phase
+    if keep.sum() < 2:
+        return nan_result
+
+    n_t = n_t[keep]
+    sum_t = r0.sum(axis=0)[keep]
+    sumsq_t = (r0 ** 2).sum(axis=0)[keep]
+    mu_t = sum_t / n_t
+    ss_within_t = sumsq_t - n_t * mu_t ** 2           # within-phase SS per phase
+
+    T = int(keep.sum())
+    N = float(n_t.sum())
+    if N <= T:                                        # no within-phase df
+        return nan_result
+
+    grand = (n_t * mu_t).sum() / N
+    ss_within = float(ss_within_t.sum())
+    ss_between = float((n_t * (mu_t - grand) ** 2).sum())
+
+    ms_within = ss_within / (N - T)
+    ms_between = ss_between / (T - 1)
+    n0 = (N - (n_t ** 2).sum() / N) / (T - 1)
+
+    sigma2_within = ms_within
+    sigma2_between = max((ms_between - ms_within) / n0, 0.0)
+    sigma2_total = sigma2_within + sigma2_between
+
+    if sigma2_total <= 0:
+        one_minus_alpha = np.nan
+    else:
+        one_minus_alpha = float(np.clip(sigma2_within / sigma2_total, 0.0, 1.0))
+
+    return {
+        "sigma2_within": sigma2_within,
+        "sigma2_between": sigma2_between,
+        "sigma2_total": sigma2_total,
+        "one_minus_alpha": one_minus_alpha,
+        "n_phases": T,
+        "n_samples": int(N),
+    }
+
+
+def psth_variance_splithalf(rate, valid=None, min_trials_per_phase=2,
+                            n_boot=50, seed=0):
+    """Bagged split-half estimate of the between-phase (PSTH) variance.
+
+    Assumption-light cross-check on the analytic ``sigma2_between`` from
+    ``rate_variance_components``. At each phase the valid trials are randomly
+    split into disjoint halves A and B; the cross-covariance of the two
+    half-PSTHs across phases cancels the per-phase finite-trial sampling noise
+    in expectation (the noise in A and B is independent), leaving the true
+    between-phase variance. Averaged ("bagged") over ``n_boot`` random splits.
+
+    Parameters
+    ----------
+    rate : ndarray (n_trials, n_phases)
+        Per-trial deterministic rate for ONE neuron (see
+        ``rate_variance_components``).
+    valid : ndarray (n_trials, n_phases) of bool, optional
+        Usable-sample mask, combined with isfinite(rate).
+    min_trials_per_phase : int
+        Phases with fewer valid trials are dropped (need >= 2 to split).
+    n_boot : int
+        Number of random split-half repetitions to average.
+    seed : int
+        RNG seed for reproducibility.
+
+    Returns
+    -------
+    float
+        Bagged split-half between-phase variance (may be negative for a
+        near-zero-PSTH cell), or NaN if fewer than two phases qualify.
+    """
+    rate = np.asarray(rate, dtype=np.float64)
+    finite = np.isfinite(rate)
+    if valid is None:
+        valid = finite
+    else:
+        valid = np.asarray(valid, dtype=bool) & finite
+
+    n_trials, n_phases = rate.shape
+    phase_trials = []
+    for t in range(n_phases):
+        idx = np.where(valid[:, t])[0]
+        if len(idx) >= min_trials_per_phase:
+            phase_trials.append((t, idx))
+    if len(phase_trials) < 2:
+        return np.nan
+
+    rng = np.random.default_rng(seed)
+    acc = 0.0
+    for _ in range(n_boot):
+        mu_a, mu_b = [], []
+        for t, idx in phase_trials:
+            perm = rng.permutation(idx)
+            mid = len(perm) // 2
+            if mid < 1 or len(perm) - mid < 1:
+                continue
+            mu_a.append(rate[perm[:mid], t].mean())
+            mu_b.append(rate[perm[mid:], t].mean())
+        if len(mu_a) < 2:
+            continue
+        a = np.asarray(mu_a)
+        b = np.asarray(mu_b)
+        acc += np.mean((a - a.mean()) * (b - b.mean())) * len(a) / (len(a) - 1)
+    return acc / n_boot
+
+
+def pipeline_one_minus_alpha(rate, eyepos, valid=None, threshold=0.05,
+                             min_trials_per_phase=10, n_bins=10, n_boot=20,
+                             seed=42, device="cpu"):
+    """Per-cell 1-alpha via the empirical close-pair estimator on deterministic rates.
+
+    "Estimator B": the SAME machinery fig2 uses on real spikes -- the
+    ``below_threshold`` (Delta_e < ``threshold`` deg) close-pair intercept for the
+    rate covariance Crate (``estimate_rate_covariance``) and the bagged split-half
+    PSTH covariance (``bagged_split_half_psth_covariance``) -- but applied to a
+    DETERMINISTIC multi-neuron rate field rather than noisy spike counts. Each
+    (trial, phase) is one sample; phases are the stimulus time bins (T_idx); close
+    pairs are distinct-trial pairs whose instantaneous eye positions lie within
+    ``threshold`` degrees. There is no Poisson noise to remove and no Ctotal
+    physical-limit mask (``Ctotal=None``), so the estimator reports the rate
+    variance split directly.
+
+    This is the companion to ``rate_variance_components`` ("estimator A", the
+    all-samples one-way ANOVA). The two target the same population ratio
+    sigma2_FEM / sigma2_rate but differ in (i) estimator form and (ii) the
+    eye-position distribution they integrate FEM over: A uses *all* (trial, phase)
+    samples (the full fixational distribution) while B uses only *close pairs*
+    (Delta_e < threshold). Running both on the *same* rates isolates the
+    estimator's effect from the signal's, so panel D can place the model and the
+    neurons on the same estimator instead of comparing A-on-model to B-on-neurons.
+
+    Parameters
+    ----------
+    rate : ndarray (n_trials, n_phases, n_cells)
+        Per-trial deterministic rate; columns are stimulus phase.
+    eyepos : ndarray (n_trials, n_phases, 2)
+        Per-(trial, phase) eye position in degrees.
+    valid : ndarray (n_trials, n_phases) of bool, optional
+        Usable-sample mask; combined with finiteness of ``rate`` (over cells) and
+        ``eyepos``. If None, derived from finiteness alone.
+    threshold : float
+        Close-pair eye-distance threshold (deg) for the Crate intercept.
+    min_trials_per_phase : int
+        Phases with fewer valid trials are dropped (mirrors the empirical
+        ``min_trials_per_time``).
+    n_bins : int
+        Bin count for the initial (discarded) percentile binning inside
+        ``estimate_rate_covariance``; the ``below_threshold`` intercept itself is
+        independent of it.
+    n_boot, seed : int
+        Bagged split-half PSTH controls.
+    device : str
+        Torch device for the pairwise ops.
+
+    Returns
+    -------
+    dict with keys:
+        one_minus_alpha : ndarray (n_cells,) -- 1 - clip(Cpsth_diag/Crate_diag, 0, 1),
+                          NaN where Crate_diag <= 0.
+        crate_diag      : ndarray (n_cells,) -- diag of the close-pair rate cov.
+        cpsth_diag      : ndarray (n_cells,) -- diag of the split-half PSTH cov.
+        n_phases        : int -- phases retained.
+        n_samples       : int -- total (trial, phase) samples retained.
+    """
+    rate = np.asarray(rate, dtype=np.float64)
+    eyepos = np.asarray(eyepos, dtype=np.float64)
+    if rate.ndim != 3:
+        raise ValueError(f"rate must be 3D (trials, phases, cells), got {rate.shape}")
+    n_trials, n_phases, n_cells = rate.shape
+
+    finite = np.isfinite(rate).all(axis=2) & np.isfinite(eyepos).all(axis=2)
+    if valid is None:
+        valid = finite
+    else:
+        valid = np.asarray(valid, dtype=bool) & finite
+
+    keep_phase = valid.sum(axis=0) >= min_trials_per_phase
+    sample_mask = valid & keep_phase[None, :]
+
+    nan_diag = np.full(n_cells, np.nan)
+    nan_result = {
+        "one_minus_alpha": nan_diag.copy(), "crate_diag": nan_diag.copy(),
+        "cpsth_diag": nan_diag.copy(), "n_phases": int(keep_phase.sum()),
+        "n_samples": int(sample_mask.sum()),
+    }
+    if keep_phase.sum() < 2 or sample_mask.sum() < 2 * min_trials_per_phase:
+        return nan_result
+
+    tr_idx, ph_idx = np.where(sample_mask)
+    dev = torch.device(device if (device != "cuda" or torch.cuda.is_available())
+                       else "cpu")
+    S = torch.as_tensor(rate[tr_idx, ph_idx, :], dtype=torch.float32, device=dev)
+    EyeTraj = torch.as_tensor(eyepos[tr_idx, ph_idx, :], dtype=torch.float32,
+                              device=dev).unsqueeze(1)        # (N, 1, 2)
+    T_idx = torch.as_tensor(ph_idx, dtype=torch.long, device=dev)
+
+    Crate, Erate, *_ = estimate_rate_covariance(
+        S, EyeTraj, T_idx, n_bins=n_bins, Ctotal=None,
+        intercept_mode="below_threshold",
+        intercept_kwargs={"threshold": threshold},
+    )
+    Cpsth, _ = bagged_split_half_psth_covariance(
+        S, T_idx, n_boot=n_boot, min_trials_per_time=min_trials_per_phase,
+        seed=seed, global_mean=Erate,
+    )
+
+    crate_diag = np.diag(Crate).astype(np.float64).copy()
+    cpsth_diag = np.diag(Cpsth).astype(np.float64).copy()
+    with np.errstate(divide="ignore", invalid="ignore"):
+        alpha = np.clip(cpsth_diag / crate_diag, 0.0, 1.0)
+    one_minus_alpha = 1.0 - alpha
+    one_minus_alpha[~(crate_diag > 0)] = np.nan
+
+    return {
+        "one_minus_alpha": one_minus_alpha,
+        "crate_diag": crate_diag,
+        "cpsth_diag": cpsth_diag,
+        "n_phases": int(keep_phase.sum()),
+        "n_samples": int(sample_mask.sum()),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Trial alignment for fixRSVP data
+# ---------------------------------------------------------------------------
+
+def align_fixrsvp_trials(dset, valid_time_bins=120, min_fix_dur=20,
+                         min_total_spikes=200, fixation_radius=1.0):
+    """
+    Extract trial-aligned robs, eyepos, valid_mask from a fixRSVP DictDataset.
+
+    Converts the flat (T, ...) covariate arrays into trial-aligned
+    (n_trials, n_time, ...) arrays using trial_inds and psth_inds,
+    filters by fixation and trial duration, and selects neurons by
+    spike count.
+
+    Parameters
+    ----------
+    dset : DictDataset
+        Raw fixRSVP dataset with covariates: robs, eyepos, trial_inds,
+        psth_inds.
+    valid_time_bins : int
+        Maximum number of within-trial time bins to retain.
+    min_fix_dur : int
+        Minimum number of fixation time bins for a trial to be included.
+    min_total_spikes : int
+        Minimum total spike count for a neuron to be included.
+    fixation_radius : float
+        Maximum eye distance from center (degrees) to count as fixation.
+
+    Returns
+    -------
+    robs : ndarray (n_good_trials, valid_time_bins, n_neurons_used)
+        or None if insufficient data.
+    eyepos_out : ndarray (n_good_trials, valid_time_bins, 2)
+    valid_mask : ndarray (n_good_trials, valid_time_bins)
+    neuron_mask : ndarray (n_neurons_used,)
+        Indices into the original neuron axis.
+    metadata : dict
+        n_trials_total, n_trials_good, n_neurons_total, n_neurons_used.
+    """
+    covs = dset.covariates if hasattr(dset, 'covariates') else dset
+
+    trial_inds = np.asarray(covs['trial_inds']).ravel()
+    psth_inds = np.asarray(covs['psth_inds']).ravel()
+    robs_flat = np.asarray(covs['robs'])       # (T, NC)
+    eyepos_flat = np.asarray(covs['eyepos'])   # (T, 2)
+
+    trials = np.unique(trial_inds)
+    NT = len(trials)
+    NC = robs_flat.shape[1]
+    T = int(psth_inds.max()) + 1
+
+    # Fixation mask: eye within fixation_radius degrees of center
+    fixation = np.hypot(eyepos_flat[:, 0], eyepos_flat[:, 1]) < fixation_radius
+
+    # Pre-allocate trial-aligned arrays (NaN-padded)
+    robs_aligned = np.full((NT, T, NC), np.nan)
+    eyepos_aligned = np.full((NT, T, 2), np.nan)
+    fix_dur = np.full(NT, np.nan)
+
+    for i, trial_id in enumerate(trials):
+        ix = (trial_inds == trial_id) & fixation
+        if not np.any(ix):
+            continue
+        t_inds = psth_inds[ix]
+        fix_dur[i] = len(t_inds)
+        robs_aligned[i, t_inds] = robs_flat[ix]
+        eyepos_aligned[i, t_inds] = eyepos_flat[ix]
+
+    # Filter trials by fixation duration
+    good_trials = fix_dur > min_fix_dur
+    if good_trials.sum() < 2:
+        return None, None, None, None, {"n_trials_total": NT, "n_trials_good": 0,
+                                         "n_neurons_total": NC, "n_neurons_used": 0}
+
+    robs_aligned = robs_aligned[good_trials]
+    eyepos_aligned = eyepos_aligned[good_trials]
+
+    # Truncate to valid_time_bins
+    T_use = min(valid_time_bins, T)
+    iix = np.arange(T_use)
+    robs_trunc = robs_aligned[:, iix]
+    eyepos_trunc = eyepos_aligned[:, iix]
+
+    # Neuron inclusion: total spikes across all good trials
+    neuron_mask = np.where(np.nansum(robs_trunc, axis=(0, 1)) > min_total_spikes)[0]
+    if len(neuron_mask) < 3:
+        return None, None, None, None, {"n_trials_total": NT,
+                                         "n_trials_good": int(good_trials.sum()),
+                                         "n_neurons_total": NC, "n_neurons_used": 0}
+
+    robs_out = robs_trunc[:, :, neuron_mask]
+
+    # Valid mask: finite spikes and eye position
+    valid_mask = (np.isfinite(np.sum(robs_out, axis=2))
+                  & np.isfinite(np.sum(eyepos_trunc, axis=2)))
+
+    metadata = {
+        "n_trials_total": NT,
+        "n_trials_good": int(good_trials.sum()),
+        "n_neurons_total": NC,
+        "n_neurons_used": len(neuron_mask),
+    }
+
+    return robs_out, eyepos_trunc, valid_mask, neuron_mask, metadata
+
+
+# ---------------------------------------------------------------------------
+# Full decomposition sweep
+# ---------------------------------------------------------------------------
+
+def run_covariance_decomposition(robs, eyepos, valid_mask,
+                                 window_sizes_ms=None, window_sizes_bins=None,
+                                 t_hist_ms=None, t_hist_bins=None,
+                                 n_bins=15, n_shuffles=0,
+                                 seed=42, dt=1 / 240, min_seg_len=36,
+                                 intercept_mode='linear', intercept_kwargs=None,
+                                 device="cuda"):
+    """
+    Full LOTC decomposition sweep across counting windows.
+
+    Convenience function that chains segmentation, window extraction,
+    second moment estimation, intercept fitting, and PSTH covariance.
+
+    Window sizes can be specified in bins (preferred) or milliseconds.
+    If both are provided, window_sizes_bins takes precedence.
+
+    Parameters
+    ----------
+    robs : ndarray (n_trials, n_time, n_cells)
+    eyepos : ndarray (n_trials, n_time, 2)
+    valid_mask : ndarray (n_trials, n_time)
+    window_sizes_ms : list of float, optional
+        Counting window sizes in milliseconds. Converted to bins via
+        int(ms / (dt * 1000)). Ignored if window_sizes_bins is provided.
+    window_sizes_bins : list of int, optional
+        Counting window sizes in time bins (preferred). Avoids rounding.
+    t_hist_ms : float, optional
+        History window in milliseconds. Default 10 ms if neither
+        t_hist_ms nor t_hist_bins is provided.
+    t_hist_bins : int, optional
+        History window in bins. Takes precedence over t_hist_ms.
+    n_bins : int
+    n_shuffles : int
+    seed : int
+    dt : float
+        Duration of one time bin in seconds.
+    min_seg_len : int
+    intercept_mode : str
+    device : str
+
+    Returns
+    -------
+    results : list of dict
+        Per-window metrics. Each dict includes 'window_bins' and 'window_ms'.
+    mats : list of dict
+    """
+    if window_sizes_bins is None and window_sizes_ms is None:
+        raise ValueError("Provide window_sizes_bins or window_sizes_ms")
+
+    ms_per_bin = dt * 1000
+
+    if window_sizes_bins is not None:
+        win_bins_list = list(window_sizes_bins)
+    else:
+        win_bins_list = [max(1, int(ms / ms_per_bin)) for ms in window_sizes_ms]
+
+    if t_hist_bins is not None:
+        t_hist_bins_val = t_hist_bins
+    elif t_hist_ms is not None:
+        t_hist_bins_val = int(t_hist_ms / ms_per_bin)
+    else:
+        t_hist_bins_val = int(10 / ms_per_bin)  # default 10 ms
+    device_obj = torch.device(device if torch.cuda.is_available() else "cpu")
+
+    # Sanitize
+    if np.isnan(robs).any():
+        robs = np.nan_to_num(robs, nan=0.0)
+    eyepos = np.nan_to_num(eyepos, nan=0.0)
+
+    robs_t = torch.tensor(robs, dtype=torch.float32, device=device_obj)
+    eyepos_t = torch.tensor(eyepos, dtype=torch.float32, device=device_obj)
+
+    # Segment extraction
+    segments = extract_valid_segments(valid_mask, min_len_bins=min_seg_len)
+    print(f"Found {len(segments)} valid segments")
+
+    rng_shuffle = torch.Generator(device=device_obj)
+    rng_shuffle.manual_seed(seed)
+
+    results = []
+    mats_save = []
+
+    for t_count_bins in tqdm(win_bins_list):
+        win_ms_actual = t_count_bins * ms_per_bin
+
+        SpikeCounts, EyeTraj, T_idx, _ = extract_windows(
+            robs_t, eyepos_t, segments, t_count_bins,
+            max(t_hist_bins_val, t_count_bins), device=str(device_obj)
+        )
+
+        if SpikeCounts is None:
+            continue
+
+        n_samples = SpikeCounts.shape[0]
+        if n_samples < 100:
+            continue
+
+        # Total covariance
+        ix = np.isfinite(SpikeCounts.sum(1).detach().cpu().numpy())
+        Ctotal = torch.cov(SpikeCounts[ix].T, correction=1).detach().cpu().numpy()
+
+        # Rate covariance
+        Crate, Erate, Ceye, bin_centers, count_e, bin_edges = estimate_rate_covariance(
+            SpikeCounts, EyeTraj, T_idx, n_bins=n_bins,
+            Ctotal=Ctotal, intercept_mode=intercept_mode,
+            intercept_kwargs=intercept_kwargs,
+        )
+
+        # PSTH covariance
+        Cpsth, PSTH_mean = bagged_split_half_psth_covariance(
+            SpikeCounts, T_idx, n_boot=20, min_trials_per_time=10,
+            seed=seed, global_mean=Erate
+        )
+
+        # Shuffle controls
+        shuffled_intercepts = []
+        if n_shuffles > 0:
+            for k in range(n_shuffles):
+                perm = torch.randperm(n_samples, generator=rng_shuffle, device=device_obj)
+                EyeTraj_shuff = EyeTraj[perm]
+                Crate_shuff, _, _, _, _, _ = estimate_rate_covariance(
+                    SpikeCounts, EyeTraj_shuff, T_idx, n_bins=bin_edges,
+                    Ctotal=Ctotal, intercept_mode=intercept_mode,
+                    intercept_kwargs=intercept_kwargs,
+                )
+                shuffled_intercepts.append(Crate_shuff)
+
+        # Derived matrices
+        Cfem = Crate - Cpsth
+        Cfem = 0.5 * (Cfem + Cfem.T)
+
+        CnoiseU = Ctotal - Cpsth
+        CnoiseC = Ctotal - Crate
+        CnoiseU = 0.5 * (CnoiseU + CnoiseU.T)
+        CnoiseC = 0.5 * (CnoiseC + CnoiseC.T)
+
+        ff_uncorr = np.diag(CnoiseU) / Erate
+        ff_corr = np.diag(CnoiseC) / Erate
+        NoiseCorrU = cov_to_corr(CnoiseU)
+        NoiseCorrC = cov_to_corr(CnoiseC)
+        alpha = np.diag(Cpsth) / np.diag(Crate)
+
+        if np.isnan(Cfem).any():
+            rank = np.nan
+        else:
+            evals = np.linalg.eigvalsh(Cfem)[::-1]
+            pos = evals[evals > 0]
+            rank = (np.sum(pos[:2]) / np.sum(pos)) if len(pos) > 2 else 1.0
+
+        results.append({
+            "window_bins": t_count_bins,
+            "window_ms": win_ms_actual,
+            "ff_uncorr": ff_uncorr,
+            "ff_corr": ff_corr,
+            "ff_uncorr_mean": np.nanmean(ff_uncorr),
+            "ff_corr_mean": np.nanmean(ff_corr),
+            "alpha": alpha,
+            "fem_rank_ratio": rank,
+            "n_samples": n_samples,
+            "Erates": Erate,
+            "count_e": count_e,
+        })
+
+        mats_save.append({
+            "Total": Ctotal,
+            "PSTH": Cpsth,
+            "FEM": Cfem,
+            "Intercept": Crate,
+            "Shuffled_Intercepts": shuffled_intercepts,
+            "NoiseCorrU": NoiseCorrU,
+            "NoiseCorrC": NoiseCorrC,
+            "PSTH_mean": PSTH_mean,
+        })
+
+    return results, mats_save
