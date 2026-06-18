@@ -11,7 +11,7 @@ two assumption violations in `fixRSVP`:
 
 The methodology is grounded in **`fem-v1-fovea/references/Mcfarland-Butts-2016.pdf`**
 (Eqs. 4, 6, 8, 9, 10, 13, 14, 16; the p.6228 homogeneity caveat is the
-sentence the §4.5 reframe targets).
+sentence the §4.3 reframe targets).
 
 ## Status
 
@@ -28,7 +28,7 @@ sentence the §4.5 reframe targets).
   `estimate_rate_covariance`, `bagged_split_half_psth_covariance` with
   `weighting='pair_count'`).
 - Extension 2: estimator validated, **a CPU-parallel reimplementation of the
-  full Figure-2 pipeline lives in this folder** (§7) and reproduces the legacy
+  full Figure-2 pipeline lives in this folder** (now `note_pipeline.md` §7) and reproduces the legacy
   numbers at `target='naive'` within the documented tolerance; the production
   GPU swap of `VisionCore/covariance.py` + `fig2_decomposition` cache regen
   is the only remaining gated step.
@@ -37,25 +37,25 @@ sentence the §4.5 reframe targets).
 
 | file | role |
 |---|---|
-| `synthetic.py` | Unified rate-field generator + closed-form ground truth (all three masks close analytically). `make_trajectory_session` is the §4.6 multi-bin extension (centroid + per-bin drift). |
-| `estimators.py` | `decompose(target=…)` — single-bin §4.4 matched estimator. `decompose_trajectory(target=…)` — §4.6 multi-bin extension with RMS-trajectory close-pair filter and pooled-per-bin KDE reweighting. |
-| `test_estimators.py` | 24 tests: 12 single-bin Ext-2 + 3 sanity + Appendix §A.9 T-floor + 4 §4.6 trajectory-mode tests + 2 trial_count direction tests + 1 additive-vs-multiplicative cross-cell bias (§3). |
+| `synthetic.py` | Unified rate-field generator + closed-form ground truth (all three masks close analytically). `make_trajectory_session` is the §4.4 multi-bin extension (centroid + per-bin drift). |
+| `estimators.py` | `decompose(target=…)` — single-bin §4.2 matched estimator. `decompose_trajectory(target=…)` — §4.4 multi-bin extension with RMS-trajectory close-pair filter and pooled-per-bin KDE reweighting. |
+| `test_estimators.py` | 24 tests: 12 single-bin Ext-2 + 3 sanity + Appendix §A.9 T-floor + 4 §4.4 trajectory-mode tests + 2 trial_count direction tests + 1 additive-vs-multiplicative cross-cell bias (§3). |
 | `_style.py` | Shared matplotlib style + `figures/` save helper. |
 | `fig_model.py` | Visual schematic of the unified generative model components (eye dist, GP field, masks, envelope, resulting rate). Inserted at top of writeup §2.3. |
-| `fig_mechanism.py` | Geometric origin of p vs p² mismatch (Fig. 2). |
+| `fig_mechanism.py` | Geometric origin of p vs p² mismatch + closed-form naive bias across masks (2-row Fig. 2: A/B top, C full-width flat/central/eccentric bars at σ_M=σ_e; flat ≈ no bias). Concludes writeup §4.1. |
 | `fig_distribution_truth.py` | Closed-form 1-α depends on eye distribution (flat) and mask width (central). End of §2.3 (Fig. 0a). |
 | `fig_sanity_check.py` | McFarland recovers analytical 1-α^p under (A1)+(A2) (Fig. 0b; panels A recovery + B threshold). |
 | `fig_weighting_bias.py` | Ext-1 (Fig. 1, 3 panels A/C/D): A = variable-n_t weighting divergence; C = synthetic shuffle-null Dz (additive transient biases mixed, multiplicative gain does not; truth 0); D = real shuffle-null Dz (mixed −0.020 vs consistent −0.001). Replaces the old `fig_time_bin_weighting.py`. |
 | `compute_weighting_data.py` | Ext-1 real-data driver (cache-only, all 25 sessions from `cache/aligned_sessions.pkl`): mixed vs consistent weighting -> shuffle-null Dz, corrected NC. Writes `cache/weighting_realdata.pkl`. No GPU / covariance.py / realdata_results.pkl touched. |
 | `fig_consistency.py` | Appendix §A.9: parallel sweep over (N, T); SEM heatmap, clipping bias, T-floor. |
 | `consistency_sweep.npz` | Cached sweep results for fig_consistency (not committed). |
-| `fig_naive_failure.py` | Naive vs matched on three quantities (Fig. 3). |
-| `fig_correction.py` | Recovery + Direction-1/2 tradeoff + gap (Fig. 4). |
-| `fig_trajectory.py` | §4.6 multi-bin extension: KDE snapshots (A-D) + σ_drift sweep validation (E). Fig. 5. |
-| `generate_realdata.py` | Cache-only real-data driver (do NOT recompute). Single-bin close-pair filter (see §5.2 caveat re: §4.6). |
-| `realdata_results.pkl` | 397-cell cache; reused as-is by `fig_realdata.png` reference (now Fig. 6). |
+| `fig_recovery.py` | Matched estimators recover analytical 1-α^p (full) / 1-α^{p²} (central) on central+eccentric across an ℓ/σ sweep; naive biased off both (Fig. 3, σ_M=σ_e, N=800). Concludes writeup §4.2. Replaced the old fig_naive_failure.py + fig_correction.py (deleted 2026-06-18). |
+| `fig_trajectory.py` | §4.4 multi-bin extension: KDE snapshots (A-D) + σ_drift sweep validation (E). Fig. 4. |
+| `generate_realdata.py` | Cache-only real-data driver (do NOT recompute). Single-bin close-pair filter (see §4.5 caveat re: §4.4). Saves Fig. 5 (writeup §4.5). |
+| `realdata_results.pkl` | 397-cell cache; reused as-is by `fig_realdata.png` reference (now Fig. 5). |
 | `figures/` | All generated PNGs. |
-| `writeup.md` | Main methods writeup source (Ext-1, Ext-2, multi-bin trajectory, consistency, M6 vs split-half). |
+| `writeup.md` | Main methods writeup source. §4 = Ext-2: 4.1 naive failures (merged old 4.1–4.3, concl. Fig 2), 4.2 corrected estimator (concl. Fig 3), 4.3 Dir-1/2 tradeoff+gap, 4.4 multi-bin trajectory (Fig 4), 4.5 real data (Fig 5). Old §5 deleted; §6–§7 moved to note_pipeline.md (2026-06-18 restructure). |
+| `note_pipeline.md` | Implementation note: production-pipeline state (§6) + CPU-parallel Figure-2 reimplementation/validation (§7, Figs 7–9), moved out of writeup.md. Section/figure numbers retained from the main note. Builds to note_pipeline.html. |
 | `writeup.html` | Build output (committed; pandoc --mathml --self-contained). |
 | `note_anova.md` | Side note: one-way ANOVA on known rates + fig4 panel D investigation. Tangential to main writeup. |
 | `note_anova.html` | Build output (committed; pandoc --mathml --self-contained). |
@@ -202,7 +202,7 @@ estimators agree within bootstrap noise at our (N, T, C) scales.
 - **Real data (397 good cells, cached).** Naive median 1-α 0.734 reproduces
   fig2's 0.732; Direction 1 0.702 (population bias −0.022); Direction 2
   0.608; gap median 0.089; Fano 0.846 → 0.875.
-- **Gap reframe (§4.5).** Gap = 0.089 in real data means the cell rate has
+- **Gap reframe (§4.3).** Gap = 0.089 in real data means the cell rate has
   spatial structure on the fixation scale (expected for any cell with a
   finite RF), NOT (A2) violation. The (A2) baseline for the random field
   alone at ℓ = σ is ≈ 0.17.
@@ -223,17 +223,17 @@ estimators agree within bootstrap noise at our (N, T, C) scales.
    than the raw bin count. The within-stimulus-frame reliability question is
    a future direction.
 
-3. **§4.6 multi-bin trajectory extension — DONE.** Added
+3. **§4.4 multi-bin trajectory extension — DONE.** Added
    `decompose_trajectory` (RMS-trajectory close-pair filter + two
    pooled-per-bin KDEs evaluated at the trajectory centroid) and
    `make_trajectory_session` (centroid + i.i.d. per-bin drift synthetic).
    Mathematically exact in the flat-trajectory limit; degrades smoothly with
    σ_drift/σ. Validated by `fig_trajectory.py` and 4 new tests. This is the
-   production-setting bridge: when §6.2 lands, the same target arg selects
+   production-setting bridge: when `note_pipeline.md` §6.2 lands, the same target arg selects
    the same three behaviours, with the trajectory density replaced by two
    2-D centroid-evaluated KDEs (no curse of dimensionality).
 
-4. **Methods-folder parallel pipeline — DONE (§7).** A CPU-parallel
+4. **Methods-folder parallel pipeline — DONE (now `note_pipeline.md` §7).** A CPU-parallel
    reimplementation of the entire Figure-2 LOTC pipeline lives in
    `pipeline.py` / `metrics.py` / `compute_methods_data.py`, using
    `decompose_trajectory` for stage 1 and the legacy stage-2 aggregator
@@ -248,9 +248,9 @@ estimators agree within bootstrap noise at our (N, T, C) scales.
    distribution weights to `estimate_rate_covariance` /
    `bagged_split_half_psth_covariance` / the Ctotal computation in
    `VisionCore/covariance.py`. Default `target='naive'` so current numbers
-   stand. Use the §4.6 pooled-per-bin KDE construction for the multi-bin
+   stand. Use the §4.4 pooled-per-bin KDE construction for the multi-bin
    trajectory case. Then the expensive GPU `fig2_decomposition` cache regen.
-   The estimator change is validated end-to-end in §7; only the GPU swap
+   The estimator change is validated end-to-end in `note_pipeline.md` §7; only the GPU swap
    remains.
 
 ## Build / test commands
@@ -271,9 +271,8 @@ Run from this folder. Workspace `.venv` is at the v1-fovea repo root;
     uv run python fig_sanity_check.py
     uv run python compute_weighting_data.py     # Ext-1 real-data driver (cache-only, all sessions)
     uv run python fig_weighting_bias.py         # Ext-1 cross-cell weighting bias (Fig. 1)
-    uv run python fig_naive_failure.py
-    uv run python fig_correction.py
-    uv run python fig_trajectory.py             # §4.6 multi-bin extension
+    uv run python fig_recovery.py               # Fig. 3 matched-estimator recovery (§4.2)
+    uv run python fig_trajectory.py             # §4.4 multi-bin extension (Fig. 4)
     uv run python fig_consistency.py            # parallel sweep, cached
 
     # ANOVA side note figures (note_anova.md)
@@ -283,8 +282,9 @@ Run from this folder. Workspace `.venv` is at the v1-fovea repo root;
 
     # Writeup (number-eqs.lua re-adds equation numbers; pandoc --mathml
     # drops amsmath \tag{})
-    pandoc writeup.md   -s --mathml --self-contained --lua-filter=number-eqs.lua -o writeup.html
-    pandoc note_anova.md -s --mathml --self-contained --lua-filter=number-eqs.lua -o note_anova.html
+    pandoc writeup.md      -s --mathml --self-contained --lua-filter=number-eqs.lua -o writeup.html
+    pandoc note_pipeline.md -s --mathml --self-contained --lua-filter=number-eqs.lua -o note_pipeline.html
+    pandoc note_anova.md    -s --mathml --self-contained --lua-filter=number-eqs.lua -o note_anova.html
 
 ## External pointers
 

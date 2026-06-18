@@ -62,9 +62,10 @@ McFarland et al. for each assumption violation:
 
 Sections 1 and 2 set up McFarland's estimator and the synthetic model that
 breaks both assumptions. Sections 3 and 4 develop and validate one extension
-each on the synthetic. Section 5 reports the consequences on synthetic and
-real data. Section 6 records the production-pipeline state — Extension 1 has
-already been integrated; Extension 2 is implemented in this folder and gated.
+each, on synthetic ground truth and on real `fixRSVP` data. A companion
+implementation note (`note_pipeline.md`) records the production-pipeline
+state — Extension 1 has already been integrated; Extension 2 is implemented
+in this folder and gated.
 
 ---
 
@@ -620,7 +621,7 @@ $D_z = f_z(C_\text{noise}^{\text{corr}}) - f_z(C_\text{noise}^{\text{uncorr}})$,
 with $C_\text{noise}^{\text{corr}} = C_\text{total} - C_\text{rate}^{\text{shuf}}$
 and $C_\text{noise}^{\text{uncorr}} = C_\text{total} - C_\text{psth}$, then has a
 known truth of exactly zero — independent of any (A2) effect, since shuffling
-removes the eye dependence Extension 2 acts on (§4.3). Any deviation is pure
+removes the eye dependence Extension 2 acts on (§4.1). Any deviation is pure
 weighting mismatch.
 
 On real `fixRSVP` (Fig. 1D; 25 sessions, 100 shuffles each, cache-only via
@@ -632,7 +633,8 @@ $C_\text{psth}$, so the corrected noise covariance is pushed down and the
 corrected noise correlations are biased negative (median $+0.008$ mixed vs
 $+0.019$ consistent). The pre-fix production pipeline lived in exactly this mixed
 state — close-pair second moment at pair-count, $C_\text{psth}$ at uniform $1/T$,
-$\bar Y$ at trial-count — and the fix pins all three to pair-count (§6.1).
+$\bar Y$ at trial-count — and the fix pins all three to pair-count
+(`note_pipeline.md` §6.1).
 
 ![**Figure 1 — Mixing time-bin weightings biases the cross-cell covariance; the
 bias is additive, not multiplicative.** Consistent (pair-count $n_t$) in green,
@@ -709,10 +711,10 @@ extensions are independent — §3 addressed (A1) failure (variable $n_t$); §4
 addresses (A2) failure (non-homogeneous stimulus) — and the same
 natural-vs-stable tradeoff appears on this axis: McFarland's literal close-pair
 second moment is pinned to the close-pair conditional density $p^2$, the actual viewing
-distribution is $p$, and §4.5 develops both consistent directions and their
-bias/variance tradeoff.
+distribution is $p$, and §4.2 develops both consistent directions, with their
+bias/variance tradeoff in §4.3.
 
-## 4.1 Close pairs are sampled from $p(e)^2$
+## 4.1 Failures of the naive estimator
 
 Take two trials with eye positions $e_i, e_j$ drawn independently from $p$.
 The density of close pairs *at position $e$* — pairs with $e_i\approx e_j
@@ -732,31 +734,10 @@ $$
 
 For an isotropic Gaussian fixation $p=\mathcal N(0,\sigma_e^2 I)$ the close-pair
 distribution is *exactly* $p^2=\mathcal N\!\big(0,\tfrac{\sigma_e^2}{2}I\big)$:
-a tighter, more central Gaussian with **half the variance**. Figure 2
-confirms this geometrically and numerically and shows the resulting
-direction of the naive estimator's bias on $1-\alpha$ across mask kinds.
+a tighter, more central Gaussian with **half the variance**.
 
-![**Figure 2 — Close pairs sample the squared density $p(e)^2$, and this
-shifts $1-\alpha$ in a mask-dependent direction.** **(A)** Analytical eye
-density $p(e) = \mathcal N(0, \sigma_e^2 I)$ with $\sigma_e = 0.15^\circ$
-(grayscale), with iso-density contours at $1,2\sigma_e$ for $p$ (solid) and
-for the close-pair density $p^2 = \mathcal N(0, \sigma_e^2/2\,I)$ (dashed) at
-each distribution's own characteristic scale — the dashed contours are
-tighter (variance halved). **(B)** The $x$-marginal: the
-close-pair distribution matches $\mathcal N(0,\sigma_e^2/2)$ (observed variance
-ratio $\approx 0.5$). **(C)** Closed-form $1-\alpha$ at $\ell=\sigma_e$,
-$\sigma_M=0.6\sigma_e$, for the unified rate-field model. Blue: the truth
-$1-\alpha^p = 1 - I_{M,K,p} / (\tau^2\,\mathbb E_p[M^2])$. Red: the naive
-estimator $1-\alpha^{\mathrm{naive}} = 1 - I_{M,K,p} / (\tau^2\,
-\mathbb E_{p^2}[M^2])$, which retains the correct PSTH numerator but uses
-the close-pair $\mathbb E_{p^2}[M^2]$ in the denominator. The bias is
-upward for `central` (denominator inflated) and downward for `eccentric`
-(denominator deflated).](figures/fig_mechanism.png)
-
-## 4.2 The decomposition is consistent only on one distribution
-
-Combining §1 and §4.1: in the non-homogeneous case the *naive* pipeline
-measures
+Combining §1 with the close-pair density above, in the non-homogeneous case
+the *naive* pipeline measures
 
 $$
 C_{\text{total}},\,C_{\text{psth}} \ \text{over } p(e),
@@ -778,8 +759,6 @@ distribution**. Equation (13) violates this whenever
 $\mathbb{E}_{p^2}[r^2]\neq\mathbb{E}_p[r^2]$, i.e. whenever the rate depends
 on absolute eye position — precisely the non-homogeneous case.
 
-## 4.3 A sharper inconsistency in the naive estimator
-
 There is a second, subtler defect already present in (7) as written. The
 close-pair second moment is over $p^2$, but the term subtracted from it —
 $\bar Y_c^2$, the global mean — is over $p$:
@@ -795,7 +774,9 @@ This is **not a variance under any single distribution**. Because
 $\mathbb{E}_{p^2}[r]>\mathbb{E}_p[r]$ for a centrally-peaked profile and
 $\mathbb{E}_{p^2}[r]<\mathbb{E}_p[r]$ for an eccentric one, the naive
 $C_{\text{rate}}$ can be *inflated above* the true $p^2$ variance (central
-cells) or driven *negative* (eccentric cells). We confirm both below.
+cells) or driven *negative* (eccentric cells). Figure 2C shows both
+directions on the closed-form decomposition; §4.2 confirms the empirical
+recovery.
 
 Note that this is a different axis from Extension 1: Extension 1's
 shuffle null is **blind** to (A2) because shuffling eye trajectories
@@ -804,7 +785,32 @@ $r(e)$ dependence on which the distribution mismatch acts. A
 shuffle-null $D_z\approx 0$ therefore says nothing about eye-position
 consistency.
 
-## 4.4 The corrected estimator: target distribution as a parameter
+Figure 2 collects the geometry and its consequence: the central
+concentration of the close-pair density (A, B), and the resulting closed-form
+$1-\alpha$ bias across mask kinds (C). The bias is negligible for the
+homogeneous `flat` mask, where $\mathbb E_{p^2}[M^2]=\mathbb E_p[M^2]$ and the
+decomposition is consistent on either distribution, and grows with the mask's
+dependence on absolute eye position.
+
+![**Figure 2 — Close pairs sample the squared density $p(e)^2$, and this
+shifts $1-\alpha$ in a mask-dependent direction.** **(A)** Analytical eye
+density $p(e) = \mathcal N(0, \sigma_e^2 I)$ with $\sigma_e = 0.15^\circ$
+(grayscale), with iso-density contours at $1,2\sigma_e$ for $p$ (solid) and
+for the close-pair density $p^2 = \mathcal N(0, \sigma_e^2/2\,I)$ (dashed) at
+each distribution's own characteristic scale — the dashed contours are
+tighter (variance halved). **(B)** The $x$-marginal: the close-pair
+distribution matches $\mathcal N(0,\sigma_e^2/2)$ (observed variance ratio
+$\approx 0.5$). **(C)** Closed-form $1-\alpha$ at $\ell=\sigma_e$,
+$\sigma_M=\sigma_e$ for the unified rate-field model, across the three
+masks. Blue: the truth $1-\alpha^p = 1 - I_{M,K,p} / (\tau^2\,\mathbb E_p[M^2])$.
+Red: the naive estimator $1-\alpha^{\mathrm{naive}} = 1 - I_{M,K,p} / (\tau^2\,
+\mathbb E_{p^2}[M^2])$, which keeps the correct PSTH numerator but uses the
+close-pair $\mathbb E_{p^2}[M^2]$ in the denominator. For the `flat` mask
+$\mathbb E_{p^2}[M^2]=\mathbb E_p[M^2]$ and the naive bias is negligible; the
+bias is upward for `central` (denominator inflated) and downward for
+`eccentric` (denominator deflated).](figures/fig_mechanism.png)
+
+## 4.2 The corrected estimator: target distribution as a parameter
 
 The close-pair conditioning is *required* to cancel the independent Poisson
 noise, so we cannot avoid sampling from $p^2$ when forming the second-moment
@@ -856,20 +862,26 @@ Direction 1's $1/\hat p$ weights or at per-trial positions for Direction
 mis-scaling of $\hat p$ cancel in numerator and denominator. *Shape* errors
 in $\hat p$ do not cancel — they amplify in Direction 1 through the
 $1/\hat p$ factor wherever close pairs are rare (the periphery), and are
-the mechanical origin of the variance penalty discussed in §4.5.
+the mechanical origin of the variance penalty discussed in §4.3.
 
-**Equivalence to eye-position stratification.** Importance reweighting (15) is
-equivalent to **stratifying by absolute eye position**: partition $e$ into
-strata, estimate the close-pair second moment *within* each stratum (where
-$p\approx$ const so $p^2\approx p$ locally and the local estimate is unbiased
-for $\mathbb E[r^2\mid s]$), then aggregate strata with weights equal to the
-target occupancy $q(s)$. As the strata shrink this is exactly (15); with
-finite strata it pools pairs before weighting, trading a little resolution for
-lower variance. This is the natural generalization of McFarland et al.: their
-estimator conditions on time bin $t$ and on $\Delta e\approx0$; the correction
-conditions *additionally* on absolute eye position.
+Figure 3 confirms the construction on synthetic ground truth. Across an
+$\ell/\sigma_e$ sweep for a `central` mask (left) and an `eccentric` mask
+(right), Direction 1 (`full`) tracks the analytical $1-\alpha^p$ and
+Direction 2 (`central`) tracks $1-\alpha^{p^2}$, while the naive estimator
+departs from both in the mask-dependent direction of §4.1 — upward for
+`central`, downward for `eccentric`.
 
-## 4.5 Direction 1 vs Direction 2: tradeoff and fixation-scale spatial-structure measure
+![**Figure 3 — The matched estimators recover the analytical decomposition
+under each target distribution.** Closed-form $1-\alpha^p$ (solid) and
+$1-\alpha^{p^2}$ (dashed) vs $\ell/\sigma_e$ for the unified rate-field model
+with a `central` mask (**A**) and an `eccentric` mask (**B**), at
+$\sigma_M=\sigma_e$ ($N=800$ trials). Overlaid points are the empirical estimator at matched
+$\ell/\sigma_e$ (mean $\pm$ sd across seeds): Direction 1 (`full`, $p$-weighted)
+on the $1-\alpha^p$ curve, Direction 2 (`central`, $p^2$-weighted) on the
+$1-\alpha^{p^2}$ curve, and the naive estimator biased off both — upward for
+`central`, downward (clipping toward $0$) for `eccentric`.](figures/fig_recovery.png)
+
+## 4.3 Direction 1 vs Direction 2: tradeoff and fixation-scale spatial-structure measure
 
 The two consistent directions are not equally easy to estimate. Direction 1
 (target $p$) requires the unbounded weight $1/p$, largest in the periphery —
@@ -907,17 +919,16 @@ structure on the fixation scale**: small gap when the rate is essentially
 constant within a fixation ($\ell\gg\sigma_e$) or essentially decorrelated
 within a fixation ($\ell\ll\sigma_e$); large gap when the rate's spatial
 scale and the fixation scale are comparable. Non-homogeneous masks
-(`central`, `eccentric`) **add** to this baseline; Fig. 4C plots
-the empirical gap across mask kinds with the (A2) baseline overlaid.
+(`central`, `eccentric`) **add** to this baseline.
 
 The gap is still a useful empirical signal — it tells you that the *choice*
 of eye-position distribution $D$ matters for the reported $1-\alpha$ — but
 it is not a clean test of (A2).
 
-## 4.6 Multi-bin eye trajectories: the production-setting extension
+## 4.4 Multi-bin eye trajectories: the production-setting extension
 
-§4.4 framed the close-pair filter as a single-bin condition
-$\lvert e_i-e_j\rvert<\varepsilon$ — and the §5.2 real-data analysis honours
+§4.2 framed the close-pair filter as a single-bin condition
+$\lvert e_i-e_j\rvert<\varepsilon$ — and the §4.5 real-data analysis honours
 that framing by using the eye position at one analysis time bin per sample.
 The production covariance pipeline
 (`VisionCore/covariance.py::compute_eye_distances`) instead works on
@@ -937,11 +948,11 @@ the spike-count bin — are similar. The motivation is that the neuron integrate
 over a temporal window, so the response context that a close pair has to share
 is the whole window, not the instantaneous eye position.
 
-This breaks the §4.4 importance-weight construction as written. The close-pair
+This breaks the §4.2 importance-weight construction as written. The close-pair
 density now lives on $\mathbb R^{2T}$ — the trajectory density $p(\tau)$
 squared, restricted to $\lVert\tau_i-\tau_j\rVert_{\mathrm{RMS}}<\varepsilon$ — and
 fitting a density in $\mathbb R^{2T}$ for typical $T\in[10,30]$ is the curse of
-dimensionality. We *cannot* simply lift the §5.2 single-bin KDE to the
+dimensionality. We *cannot* simply lift the §4.5 single-bin KDE to the
 trajectory and call it done.
 
 **Our extension.** Build the importance weight from two 2-D KDEs:
@@ -956,7 +967,7 @@ $$
 where $\hat p_{\mathrm{marg}}$ pools per-bin positions across *all* samples and
 $\hat p_{cp,\mathrm{marg}}$ pools per-bin positions of the *close-pair midpoint
 trajectories* $m_k=\tfrac12(\tau_i+\tau_j)$ (one midpoint trajectory per close
-pair $k$, contributing $T$ per-bin positions to the pool). The §4.4 importance
+pair $k$, contributing $T$ per-bin positions to the pool). The §4.2 importance
 weights are then evaluated at each trajectory's **centroid**
 $c_i=\tfrac1T\sum_t e_{i,t}$:
 
@@ -985,7 +996,7 @@ supported on constant trajectories with weight $p_{\mathrm{centroid}}(c)^2$, and
 pooling per-bin positions across midpoint trajectories collapses to a single
 $p_{\mathrm{centroid}}^2$ KDE). The ratio $\hat p_{cp,\mathrm{marg}}/\hat p_{\mathrm{marg}}$
 at the centroid then collapses to $p_{\mathrm{centroid}}(c)$ up to a normalising
-constant, and the table above recovers §4.4's Direction 1 pair weight
+constant, and the table above recovers §4.2's Direction 1 pair weight
 $1/p_{\mathrm{centroid}}(c)$ and Direction 2 sample weight $\propto p_{\mathrm{centroid}}(c)$
 exactly. Self-normalisation absorbs the normalising constant in numerator and
 denominator.
@@ -995,7 +1006,7 @@ estimator targets the *per-bin marginal* $p_{\mathrm{pb}}(e)=p_{\mathrm{centroid
 — a Gaussian-smoothed version of the centroid distribution. The "actual viewing
 distribution" the estimator aims at is therefore $\mathcal N(0,\sigma_{\mathrm{traj}}^2 I)$
 with $\sigma_{\mathrm{traj}}^2=\sigma_e^2+\sigma_{\mathrm{drift}}^2$, and the truth to
-compare against is §4.4's closed form at $\sigma_{\mathrm{traj}}$
+compare against is §4.2's closed form at $\sigma_{\mathrm{traj}}$
 (`synthetic.ground_truth(kind, sqrt(sigma_e^2+sigma_drift^2), ell, sigma_M=sigma_M)`). The
 construction is *exact* in expectation in the flat limit; for non-zero drift
 the residual comes from two sources:
@@ -1010,7 +1021,7 @@ the residual comes from two sources:
    loses selectivity and the central-region concentration of the close-pair
    midpoint density weakens.
 
-**Validation (Fig. 5).** A controlled synthetic with explicit
+**Validation (Fig. 4).** A controlled synthetic with explicit
 $\sigma_{\mathrm{drift}}$ knob (`synthetic.make_trajectory_session`) shows the
 flat-limit recovery is sharp and the bias grows smoothly with
 $\sigma_{\mathrm{drift}}/\sigma_e$. At $\sigma_{\mathrm{drift}}/\sigma_e=0$ the corrected
@@ -1024,7 +1035,7 @@ setting: $\hat p_{cp,\mathrm{marg}}$ is narrower than $\hat p_{\mathrm{marg}}$, 
 their ratio peaks at the centre — the close pairs over-represent the
 high-density region exactly as the single-bin §4.1 picture predicts.
 
-![**Figure 5 — The trajectory-mode estimator and its validation.** **(A)**
+![**Figure 4 — The trajectory-mode estimator and its validation.** **(A)**
 Example trajectories ($\sigma_{\mathrm{drift}}=\sigma_e/4$) showing centroid scatter
 plus per-bin fixational drift. **(B)** $\hat p_{\mathrm{marg}}(e)$, the 2-D KDE
 fit on pooled per-bin positions of all samples. **(C)** $\hat p_{cp,\mathrm{marg}}(e)$,
@@ -1036,10 +1047,11 @@ $\sigma_{\mathrm{drift}}$ sweep on a `flat` mask: matched Directions 1 and 2 sit
 their respective truths (dotted lines) in the flat limit; bias grows smoothly
 with $\sigma_{\mathrm{drift}}/\sigma_e$; naive over-states.](figures/fig_trajectory.png)
 
-The trajectory-mode estimator is the production-setting bridge for §5.2's
-single-bin analysis: when the §6.2 production change lands, the same
+The trajectory-mode estimator is the production-setting bridge for §4.5's
+single-bin analysis: when the §6.2 production change lands (`note_pipeline.md`),
+the same
 `target ∈ {'naive','full','central'}` parameter selects the same three
-behaviours; the §5.2 numbers are recovered as the
+behaviours; the §4.5 numbers are recovered as the
 $\sigma_{\mathrm{drift}}\to 0$, $T=1$ limit; and the curse-of-dimensionality wall
 that the multi-bin filter raised is sidestepped by replacing the trajectory
 density with two 2-D KDEs evaluated at the trajectory centroid.
@@ -1052,7 +1064,7 @@ $S_i S_j^\top$ followed by an $\hat r\hat r^\top$ subtraction. The motivation
 is numerical: when $\hat r \cdot t_\text{window}$ dominates the magnitude of
 $S$, the literal "second moment minus $\hat r\hat r^\top$" can be a
 catastrophic cancellation, whereas centring first turns each pair product
-into a small-times-small operation. This matters on the §4.6 synthetic
+into a small-times-small operation. This matters on the §4.4 synthetic
 validation, where $\hat r$ is a known constant and the precision argument is
 clean.
 
@@ -1078,7 +1090,7 @@ close-pair pool is sparse and the per-pair weights for `full` are a
 density-ratio that the KDE only estimates). The centred and uncentred forms
 therefore agree asymptotically (both consistent for $C_\text{rate}^q$) but
 differ in finite samples by an amount controlled by
-$\|\hat r - \bar X_w\|\,\|\hat r\|$. On the §7 real data this gap is
+$\|\hat r - \bar X_w\|\,\|\hat r\|$. On the `note_pipeline.md` §7 real data this gap is
 non-negligible — e.g. at $t_\text{count}=2$ the median $1-\alpha_\text{full}$
 shifts from $0.71$ (centred) to $0.77$ (uncentred), and similarly for
 central.
@@ -1087,90 +1099,29 @@ For the inconsistent target `naive` the gap is also non-zero, and for a
 different reason: $\hat r$ estimates $\mathbb{E}_p[r]$ while $\bar X_w$
 estimates $\mathbb{E}_{p^2}[r]$, so the two are not even equal in
 expectation. The centred and uncentred naive estimators are therefore two
-different inconsistent estimators of the §4.3 mixed quantity, with neither
+different inconsistent estimators of the §4.1 mixed quantity, with neither
 privileged.
 
-The §7 pipeline uses the **uncentred form for all three targets** for two
-reasons:
+The `note_pipeline.md` §7 pipeline uses the **uncentred form for all three
+targets** for two reasons:
 
-  1. **§5.2 reference compatibility.** The cell-side single-bin analysis in
-     §5.2 (`generate_realdata.py`, Fig. 6) ran on the single-bin
-     `estimators.decompose`, which is uncentred. The §7 multi-cell, multi-
-     window pipeline numbers must extend §5.2 rather than redefine it, and
-     this requires the same close-pair Crate semantic.
-  2. **§7.2 equivalence audit.** Legacy `compute_conditional_second_moments`
+  1. **§4.5 reference compatibility.** The cell-side single-bin analysis in
+     §4.5 (`generate_realdata.py`, Fig. 5) ran on the single-bin
+     `estimators.decompose`, which is uncentred. The `note_pipeline.md` §7
+     multi-cell, multi-window pipeline numbers must extend §4.5 rather than
+     redefine it, and this requires the same close-pair Crate semantic.
+  2. **`note_pipeline.md` §7.2 equivalence audit.** Legacy `compute_conditional_second_moments`
      is uncentred, so `target='naive'` exact equivalence requires the
      uncentred form.
 
 The centred form remains the default in
-`estimators.decompose_trajectory` because the §4.6 synthetic validation
+`estimators.decompose_trajectory` because the §4.4 synthetic validation
 relies on its precision claim. Future work that promotes the trajectory-
 mode estimator to production should decide centred vs uncentred per
 target on its own finite-sample merits — the two are not interchangeable
 on real data even where both are consistent.
 
----
-
-# 5. Consequences on synthetic and real data
-
-## 5.1 The naive estimator's $1-\alpha$ failure (synthetic)
-
-Pure-Poisson synthetic data (true noise correlation $0$, true Fano $1$) under
-the §2 unified generator, with the three non-homogeneous masks, exposes the
-naive estimator's bias most clearly on $1-\alpha$ (Fig. 3A):
-
-- **$1-\alpha$** (panel A): the naive estimator **over-states** for central
-  masks (close pairs over-represent the center, where $M^2$ is large) and
-  **under-states** for eccentric masks — occasionally producing
-  $C_\text{rate} \approx 0$ that clips $1-\alpha$ to $0$. The matched
-  estimator (target $p$) lands on the identity line within seed noise.
-
-The sign rule is set by where each cell's stimulus visibility lives: the
-close-pair density $p^2(e)$ emphasizes the center, so a mask whose
-$E_{p^2}[M^2]/E_p[M^2]>1$ (a **central** mask) over-states $C_\text{rate}$
-and a mask whose ratio is $<1$ (an **eccentric** mask) under-states it.
-
-The leak of this $1-\alpha$ bias into the **noise correlation** and **Fano
-factor** is qualitatively present but quantitatively mild under the unified
-model (Fig. 3B–C: naive median $|r|=0.015$ vs matched $0.010$; both Fano
-medians $\approx 1.01$). The additive model in earlier drafts predicted much
-larger leaks because the additive $bF(e)$ term shifted the *mean* of $r$
-with $e$, generating a large cross-term in $\bar Y^2$. In the unified
-multiplicative model the mean $\mathbb E_t[r(t,e)] = \mu_0$ stays
-$e$-independent, so the cross-term vanishes in expectation and only the
-$M^2$-ratio bias survives. The real-data findings in §5.2 (small population
-shifts on Fano, $0.846\to 0.875$) are consistent with this milder regime.
-
-![**Figure 3 — The naive (distribution-unmatched) estimator is biased on
-$1-\alpha$ in a mask-dependent direction; its leak into noise correlation
-and Fano is mild under the unified model.** Pure-Poisson synthetic (true
-noise correlation $0$, true Fano $1$); "matched" is the $p$-target corrected
-estimator. **(A)** $1-\alpha$ vs ground truth: naive (×) biased centrally
-(low values) or oversaturated; matched (○) on identity. **(B)** Noise
-correlation: both estimators close to $0$ (truth); naive slightly wider.
-**(C)** Fano: both estimators near $1$ (truth); naive slightly biased
-high.](figures/fig_naive_failure.png)
-
-The matched estimator recovers each target's own closed-form decomposition
-(`test_estimators.py::test_full_target_recovers_p_decomposition` and
-`::test_central_target_recovers_p2_decomposition`), up to a small
-finite-threshold smoothing that shrinks as the threshold shrinks. Figure 4
-illustrates the recovery and the Direction-1/Direction-2 tradeoff.
-
-![**Figure 4 — The matched estimator recovers ground truth and exposes the
-Direction-1/Direction-2 tradeoff.** **(A)** `full` recovers the $p$
-decomposition and `central` the $p^2$ decomposition (identity line). **(B)**
-For an eccentric-modulated cell, Direction 1's unbounded $1/p$ weights
-make $1-\alpha$ noisy as the threshold shrinks; Direction 2 is stable.
-**(C)** The full-vs-central gap across mask kinds (unified random-field
-synthetic, $\ell=\sigma_e$). The dashed line is the closed-form (A2)
-baseline ($\approx 0.17$) — the gap is non-zero even for `flat` because
-the field has spatial structure on the fixation scale. Non-homogeneous
-masks (`central`, `eccentric`) shift the gap relative to the
-baseline; the gap is a measure of *fixation-scale spatial structure*, not
-an (A2) test.](figures/fig_correction.png)
-
-## 5.2 Real-data consequences (`fixRSVP`, cache-only)
+## 4.5 Consequences on real data (`fixRSVP`, cache-only)
 
 We applied the matched estimator to the real `fixRSVP` recordings, cache-only
 (no GPU, no model inference; `generate_realdata.py` reads the Figure-4 cache
@@ -1179,9 +1130,10 @@ factor are computed on the real spikes with each cell's own validity mask
 (reproducing the Figure-2 per-cell $1-\alpha$ at the median); the
 eye-position density is a Gaussian KDE of the measured fixational positions.
 This implementation uses a *single-bin* close-pair filter (the eye position
-at one analysis time bin per sample), so the §4.4 importance weights apply
+at one analysis time bin per sample), so the §4.2 importance weights apply
 without modification; the multi-bin trajectory extension required by the
-production filter (§4.6) is folded into the gated §6.2 pipeline change.
+production filter (§4.4) is folded into the gated §6.2 pipeline change
+(`note_pipeline.md`).
 Pooled over **397 good cells** ($\mathrm{cc}_{\max}>0.85$, 2 monkeys, 24
 sessions):
 
@@ -1200,7 +1152,7 @@ sessions):
 - **The gap measures fixation-scale spatial structure, and it is
   measurable.** The gap between the two consistent targets,
   $\lvert(1-\alpha)_{\text{full}} - (1-\alpha)_{\text{central}}\rvert$, has
-  a population **median of 0.089** with a tail beyond $0.3$ (Fig. 6B).
+  a population **median of 0.089** with a tail beyond $0.3$ (Fig. 5B).
   Under the unified random-field model the gap is non-zero under (A2)
   itself when $\ell\sim\sigma_e$ (Eq. 16) — peaking at $\approx 0.17$ — so
   gap $= 0.089$ is evidence that the cells' rate maps have spatial
@@ -1212,10 +1164,10 @@ sessions):
   Direction-1-vs-naive bias we found above ($-0.022$).
 - **The Fano factor shifts modestly** under matching (median
   $0.846\to0.875$, $+3\%$), consistent with the synthetic prediction that
-  the Fano factor inherits the rate-variance distribution mismatch
-  (Fig. 3C); per-cell shifts are larger.
+  the Fano factor inherits the rate-variance distribution mismatch;
+  per-cell shifts are larger.
 
-![**Figure 6 — The correction on real data (397 good cells, cache-only).**
+![**Figure 5 — The correction on real data (397 good cells, cache-only).**
 **(A)** $1-\alpha$ on real spikes: Direction 1 (blue) tracks the naive
 estimate closely (median shift $-0.022$), while Direction 2 (red) is
 systematically lower. **(B)** The full-vs-central gap — a measure of the
@@ -1225,356 +1177,12 @@ factor: naive vs matched, a modest median shift with larger per-cell
 changes.](figures/fig_realdata.png)
 
 The **noise-correlation** consequence on real spikes is small at the
-population level — both on the unified synthetic (Fig. 3B: naive vs matched
-median $|r|$ differ by $\approx 0.005$) and consistent with the modest Fano
-shift here ($0.846\to 0.875$). Quantifying it directly on real spike pairs
-requires either the full windowed pipeline or careful joint-pair validity
-masking; because it shares the same pipeline change, it is folded into the
-gated Figure-2 fix (§6) rather than approximated here.
-
----
-
-# 6. The current pipeline: state and proposed production change
-
-The covariance machinery and caches are shared by Figures 2–4, so a pipeline
-change has broad blast radius. This section consolidates the
-production-pipeline state for each extension.
-
-## 6.1 Extension 1 — already integrated
-
-Consistent pair-count time-bin weighting has been integrated into the production
-pipeline (`VisionCore/covariance.py`):
-
-- `estimate_rate_covariance` — pair-count-weighted $\bar Y$ matching the
-  close-pair second moment, pinning the $\bar Y$ cell of the §1.5 table to
-  the pair-count direction (§3.4).
-- `bagged_split_half_psth_covariance` — `weighting` parameter, default
-  `'pair_count'`, pinning $C_\text{psth}$ to the pair-count direction.
-
-Together with the trial-count $C_\text{total}$ already being recomputed at
-the same per-sample weight inside the production estimator, this pins the
-full $w_t$ column to the pair-count direction (§3.4).
-
-On the Allen 2022-04-13 session (49 cells, 3667 windows) the fix moved the
-shuffle-null $D_z$ from $-0.0068$ ($p<10^{-4}$) to $+0.0010$ ($p=0.44$); the
-real-data $D_z$ shifted only $-0.0855 \to -0.0819$ (signal-to-null ratio
-$12.5\times \to 83.7\times$), so the scientific conclusion was preserved.
-Diagnosis and validation are recorded in
-`ryan/fig2/bias_diagnosis/FINAL_REPORT.md`.
-
-## 6.2 Extension 2 — estimator validated, pipeline rebuilt locally, GPU swap gated
-
-Eye-position-distribution matching is implemented and TDD-validated in this
-folder, for both the single-bin (§4.4) and multi-bin trajectory (§4.6)
-filters:
-
-- `estimators.decompose(target=...)` — single-bin close-pair filter.
-  `naive` reproduces the existing pipeline; `full` is Direction 1 (the
-  actual-viewing $p$); `central` is Direction 2 ($p^2$).
-- `estimators.decompose_trajectory(target=...)` — multi-bin RMS-trajectory
-  close-pair filter (matching `VisionCore/covariance.py`), with the
-  pooled-per-bin KDE importance weights of §4.6.
-- `test_estimators.py` — 21 tests covering correctness (recovery of the
-  closed-form decompositions under each target, finite-threshold-bias
-  shrinkage), stability (Direction 2 stabler than Direction 1 for eccentric
-  cells), Poisson cancellation (Fano $\to 1$), the pipeline-match
-  (`naive` ↔ `pipeline_one_minus_alpha`), Extension 1 (variable-$n_t$
-  uniform vs pair-count weighting), and the §4.6 multi-bin extension
-  (flat-limit recovery, moderate-drift recovery, strong-drift bias
-  documentation, naive bias on a centrally-modulated cell).
-
-§7 rebuilds the entire Figure-2 LOTC pipeline in this folder around
-`decompose_trajectory`. The replacement runs all three targets in parallel on
-CPU, reproduces the legacy numbers at `target='naive'` within a small,
-documented tolerance, and quantifies the correction at `full`/`central` across
-the same 30 sessions. The proposed production change is the same as before —
-add the `target` argument to `estimate_rate_covariance` and
-`bagged_split_half_psth_covariance`, defaulted to `'naive'` so existing
-numbers are preserved unless `target='full'` is explicitly requested — but the
-gate is now narrower: the *estimator change* is validated end-to-end; only
-the *GPU cache regeneration* in production remains pending explicit approval.
-
----
-
-# 7. Pipeline implementation and validation
-
-Sections 1–6 establish the corrected estimator and confirm it on synthetic
-data with a closed-form ground truth (Figs. 1–5) and on cached real-data
-quantities at the per-cell level (Fig. 6). This section closes the loop: a
-parallel, CPU-only reimplementation of the entire Figure-2 LOTC pipeline,
-verified against the production pipeline on the same 25 sessions ($11$ Allen,
-$14$ Logan; $n = 1313$ included cells at the canonical window
-$t_\text{count} = 2$ bins $\approx 16.7$ ms), and quantifying the
-distribution-matched correction at population scale.
-
-The pipeline is self-contained: every script lives in this folder, the only
-dependency on the broader codebase is a one-shot data loader that produces a
-local cache (`cache/aligned_sessions.pkl`), and the production code itself is
-frozen as a verbatim snapshot under `legacy/` so the comparator never drifts.
-
-## 7.1 Architecture
-
-The production pipeline (`legacy/compute_fig2_data.py`, the 2026-06-02
-snapshot of `VisionCore/ryan/fig2/compute_fig2_data.py`) is two-stage and
-GPU-bound: stage 1 calls `VisionCore.covariance.run_covariance_decomposition`
-which does its close-pair binning and second-moment accumulation on a
-torch GPU tensor; stage 2 aggregates per-cell 1-α, Fano, and noise-
-correlation summaries from the per-session covariance matrices.
-
-The replacement keeps the two-stage structure but rewrites stage 1 around
-`decompose_trajectory` (numpy-only, all three targets per call) and lifts
-stage 2 verbatim from the snapshot. Self-containment is enforced at the
-boundary between data loading and decomposition:
-
-  * `data_loading.py` — calls `models.data.prepare_data` once per session,
-    aligns the fixRSVP trials via `legacy.covariance.align_fixrsvp_trials`,
-    pre-computes the rate-Hz and split-half PSTH-$R^2$ inclusion statistics,
-    and writes a single pickle `cache/aligned_sessions.pkl` keyed by
-    `schema_version=1`. Sessions that the legacy pipeline skips (failures
-    inside `prepare_data`, missing fixRSVP, too few trials) are skipped here
-    too, byte-for-byte.
-  * `pipeline.py` — per-session driver. The numpy port of
-    `legacy.covariance.extract_windows` (`_extract_windows_numpy`) is verified
-    bit-identical to the legacy torch implementation on a 3-window fixture
-    (`test_pipeline.py::test_extract_windows_matches_legacy`), so the close-
-    pair pool and per-bin time-index `T_idx` match by construction.
-    For each $(t_\text{count}\in\{1,2,3,6\}, \text{target}\in\{\text{naive},
-    \text{full}, \text{central}\})$ it calls `decompose_trajectory(...)`,
-    then overrides the returned $C_\text{rate}$ with the uncentred
-    close-pair form $\hat M\!M - \hat r\hat r^\top$ (see §4.6's centred-form
-    discussion and §7.2 item 6 for why this matters for both consistent
-    and inconsistent targets), and runs 100 eye-trajectory shuffles of
-    `target='naive'` to reproduce the legacy null. Full/central shuffles
-    are deferred (§7.5) — the naive null is enough to reproduce the legacy
-    $p$-values that drive the equivalence check, and the corrections
-    figure only needs the real population shifts.
-  * `metrics.py` — stage-2 aggregation. The session-clustered Fano-slope
-    bootstrap, Fisher-$z$ noise-correlation means, and shuffle-null
-    $p$-values are lifted verbatim from `legacy.compute_fig2_data`
-    (`_compute_metrics`, `_compute_alpha_stats`, `_compute_fano_stats`,
-    `_compute_nc_stats`, `_clustered_slope_bootstrap`) so the only
-    methodological difference between the two pipelines is the
-    target-distribution weighting inside stage 1.
-  * `compute_methods_data.py` — orchestrator. `joblib.Parallel(backend="loky")`
-    over the aligned-session list; each worker pins its BLAS thread pool to 1
-    (`threadpool_limits(1)`) so $n$ workers do not oversubscribe the box.
-    The same script with `--legacy` runs the snapshot's
-    `_compute_one_session` on CPU against the same aligned cache, producing
-    a comparator pickle `cache/legacy_decomposition.pkl` that the
-    equivalence figure reads.
-
-The aligned-session cache is the cut that makes everything else
-regeneratable from inside this folder: once it exists, `compute_methods_data
-[--legacy|--both]`, `timing.py`, `profile_pipeline.py`, and the three
-figure scripts run without touching `VisionCore.covariance` (live),
-`models.data.prepare_data`, or any production cache. A future refactor of
-`VisionCore.covariance` does not change the comparator's behaviour.
-
-## 7.2 Equivalence at `target='naive'`
-
-The methods pipeline at `target='naive'`, `cpsth_method='split_half'`,
-`time_bin_weighting='pair_count'` should be algebraically identical to the
-legacy snapshot up to a small set of known controlled differences:
-
-  1. **Shuffle RNG** — legacy uses a torch generator on GPU; methods uses
-     `numpy.default_rng`. We compare *distributions* of null statistics, not
-     per-draw values.
-  2. **NaN handling** — legacy `nan_to_num(eyepos, nan=0.0)` before
-     `extract_windows` (turning trial dropouts into zero-trajectory close
-     pairs); the methods pipeline matches this behaviour (in
-     `pipeline.decompose_session`, `nan_to_num` is applied on `robs` and
-     `eyepos` before segmentation, identical to legacy
-     `run_covariance_decomposition`).
-  3. **$C_\text{total}$ definition** — the methods pipeline replaces
-     `decompose_trajectory`'s weighted $C_\text{total}$ with the legacy
-     unweighted definition (`np.cov(X.T, ddof=1)` on isfinite rows; see
-     `pipeline._ctotal_unweighted`), so the Fano-factor numerator
-     $C_\text{noise} = C_\text{total} - C_\text{rate}$ uses the same total.
-  4. **$\bar r$ ("Erate") under variable $n_t$** — legacy computes
-     pair-count-weighted $\bar r$ inside `estimate_rate_covariance` (a 2025
-     fix; see §3.4). The methods pipeline uses the `_weighted_mean` of $S$
-     with the same per-bin weight; the implementations agree to ~$10^{-9}$
-     on the diagonal.
-  5. **`intercept_mode='below_threshold'`** — legacy `below_threshold(0.05)`
-     pools all $\Delta e<0.05$ pairs into a single bin and averages with
-     uniform per-pair weight; this is identical to the methods close-pair
-     estimator at `threshold=0.05` and `time_bin_weighting='pair_count'`.
-  6. **Centred vs uncentred close-pair second moment.** The §4.6
-     `decompose_trajectory` estimator computes the close-pair second
-     moment on the *centred* counts $S - \hat r$; the legacy
-     `compute_conditional_second_moments` accumulates the *uncentred*
-     product $S_i S_j^\top$ and subtracts $\hat r\,\hat r^\top$ afterward.
-     The §4.6 closing subsection walks through the algebra: the two forms
-     collapse to the same expression iff $\hat r = \bar X_w$, where
-     $\bar X_w$ is the weighted close-pair-set sample mean. For the
-     consistent targets `full` and `central` the importance reweighting
-     makes $\hat r$ and $\bar X_w$ converge to the same population
-     quantity — but they are distinct estimators in finite samples, so the
-     centred and uncentred forms differ on real data by a non-negligible
-     amount (e.g. at $t_\text{count}=2$, $\text{median}(1-\alpha_\text{full})
-     = 0.71$ centred vs $0.77$ uncentred). For the inconsistent target
-     `naive` the gap is also nonzero, and there $\hat r$ and $\bar X_w$
-     do not even share a limit. The §7 pipeline overrides Crate with the
-     uncentred form via `pipeline._legacy_compat_crate` for **all three
-     targets**, so that (a) the equivalence audit against the legacy
-     uncentred form is exact for naive, and (b) the full/central numbers
-     extend the §5.2 cell-side reference (Fig. 6) — which also used the
-     uncentred form via single-bin `estimators.decompose`. The §4.6
-     centred form remains the default inside `decompose_trajectory` for
-     its synthetic precision benefits, but the two estimators are *not*
-     interchangeable on real data.
-
-Fig. 7 reports, on the canonical window $t_\text{count}=2$ bins, the
-per-cell scatter of legacy vs methods at $\text{target}=\text{naive}$, for
-three quantities:
-
-  A. $\text{diag}(C_\text{rate})$ (the rate-variance numerator),
-  B. $\text{diag}(C_\text{psth})$ (the PSTH-variance term debiased against
-     same-bin observation noise),
-  C. $1-\alpha = 1 - C_\text{psth}/C_\text{rate}$ (the headline number).
-
-Pass criteria — Pearson $r\ge 0.99$ on A and B, $|\Delta\text{median}(1-\alpha)|
-\le 0.002$ — are checked in code (`fig_pipeline_equivalence.py` exits
-non-zero if any fail). On the 25 sessions $\times$ canonical window run,
-$n=1313$ included cells: $r_\text{Crate} = 1.0000$,
-$r_\text{Cpsth} = 1.0000$, $r_{1-\alpha} = 0.9999$;
-$|\Delta\text{median}(1-\alpha)| = 0.0017$ (legacy median $0.7890$, methods
-$0.7873$). The residual $|\Delta|$ comes from the small Cpsth difference
-that the split-half-bootstrap loop accumulates from a different per-worker
-RNG order between the two `Parallel` runs (item 1) — pure stochastic
-noise, not estimator bias.
-
-![**Figure 7 — Pipeline equivalence at $t_\text{count}=2$ bins (target='naive').**
-Per-cell scatter of legacy snapshot (x-axis) vs methods pipeline (y-axis)
-across all 25 sessions at the canonical window. **(A)** Rate-variance diagonal
-on log axes; **(B)** PSTH-variance diagonal on log axes; **(C)** $1-\alpha$ on
-linear axes. Inset: Pearson $r$, slope-through-origin, and median absolute
-difference. The dashed line is the unit diagonal.](figures/fig_pipeline_equivalence.png)
-
-## 7.3 The correction at population scale
-
-With equivalence at `target='naive'` established, the same 30-session run
-returns the full and central targets at no extra cost. Figure 8 reports the
-target-dependence of the three headline quantities on the canonical window:
-
-  * the $1-\alpha$ distribution (population median, histogram),
-  * the corrected vs uncorrected Fano factor (slope-through-origin and
-    geometric mean), and
-  * the per-session Fisher-$z$ noise-correlation shift
-    $\Delta\bar z = \bar z_\text{cor} - \bar z_\text{unc}$.
-
-The three columns are *the same neurons*, *the same fixational eye
-distribution*, *the same trial structure*, run through the *same Stage-2
-aggregator* — only the eye-distribution weighting inside Stage 1 changes.
-The shifts between columns are therefore pure estimator effects, not signal
-effects.
-
-At the canonical window $t_\text{count} = 2$ bins ($n = 1313$ included
-cells, 25 sessions):
-
-  * $\text{median}(1-\alpha)$: naive $0.793$, Direction 1 (full)
-    $0.773$, Direction 2 (central) $0.601$. The Direction-1 vs naive
-    shift is the same $\sim -0.02$ headline number that the cell-side
-    `generate_realdata.py` reported in §5.2 — recovered here at full
-    multi-cell, multi-window scope. The Direction-2 shift to $0.601$ is
-    larger because the close-pair eye distribution $p^2$ concentrates
-    on the central fixation peak, where the cell's mean rate is least
-    eye-modulated; this is the same close-pair-density mechanism that
-    the synthetic-data Fig. 3A exhibits.
-  * $\text{median}(\text{Fano}_\text{cor})$: naive $0.931$, full
-    $0.949$, central $0.900$. The Direction-1 Fano is *higher* than
-    naive (the $C_\text{noise}$ numerator gains the cross-term
-    correction) and the Direction-2 Fano is *lower* by a similar
-    margin — both directions move the Fano factor *away* from the
-    "no-FEM" reference of 1.0 by less than the naive estimator
-    suggests.
-  * Per-session noise-correlation shift $\Delta\bar z =
-    \bar z_\text{cor} - \bar z_\text{unc}$: naive $-0.0683$,
-    full $-0.0591$, central $-0.0386$. The eye-distribution-matched
-    estimators reduce the apparent noise-correlation suppression by
-    $\sim 15\text{–}45\%$ (naive over-suppresses, as predicted in §4
-    by the close-pair-vs-marginal density mismatch).
-
-![**Figure 8 — Eye-distribution-matching corrections at population scale
-($t_\text{count} = 2$ bins, $n = 1313$ cells).** Columns: naive (legacy),
-Direction 1 (full $p$), Direction 2 (central $p^2$). Row A: $1-\alpha$
-population histograms with the column median annotated. Row B: Fano
-corrected vs uncorrected, log-log; annotation gives the geometric mean
-(uncorrected, corrected) and slope-through-origin (uncorrected,
-corrected). Row C: per-session $\Delta\bar z = \bar z_\text{cor} -
-\bar z_\text{unc}$ sorted by session, coloured by subject.](figures/fig_pipeline_corrections.png)
-
-## 7.4 Runtime
-
-`timing.py` benchmarks per-(session, window) wall-time legacy-snapshot vs
-methods, on CPU. Both pipelines pay the same data-prep cost (the aligned-
-session cache); only the decomposition runtime is timed.
-
-Two numbers are relevant:
-
-  * **Per-session, sequential, CPU.** On a 6-session benchmark with
-    20 shuffles, methods runs at $1$–$3$ s per session per window vs
-    legacy $1.2$–$9.7$ s. Pooled across the four windows the methods
-    pipeline is $\boldsymbol{1.91\times}$ faster than the legacy snapshot
-    (methods $47.7$ s, legacy $91.1$ s). The speedup is larger for the
-    smaller windows ($2.14\times$ at $t_\text{count} = 1$) where the
-    legacy GPU pipeline's torch-tensor overhead dominates and smaller
-    for the larger windows ($1.46\times$ at $t_\text{count} = 6$) where
-    the close-pair enumeration is the limiting step in both.
-  * **Pipeline-wide, parallel.** The orchestrator (`compute_methods_data
-    --both`) processes all 25 sessions across 4 windows + 3 targets +
-    20 shuffles via `joblib.Parallel(n_jobs=-1, backend="loky")` with
-    BLAS pinned to 1 thread per worker. End-to-end on a 64-thread
-    workstation: **methods Stage 1 $\boldsymbol{11.7}$ s**
-    ($0.5$ s/session) vs **legacy Stage 1 $\boldsymbol{37.3}$ s**
-    ($1.5$ s/session) — a $\boldsymbol{3.2\times}$ wall-clock speedup
-    even at this trimmed shuffle count. The methods pipeline's
-    parallelism advantage is in addition to the per-session speedup
-    above: the legacy `_compute_one_session` instantiates torch
-    on the worker process and is not safe to fan out across GPU
-    workers without explicit `CUDA_VISIBLE_DEVICES` pinning, whereas
-    the methods pipeline is pure numpy and scales linearly with cores.
-
-Profiling a single session (`profile_pipeline.py`, $t_\text{count} = 2$,
-all three targets, 10 shuffles) confirms the expected hotspot:
-`scipy.stats.gaussian_kde.evaluate` accounts for 64% of the methods CPU
-time, dominated by the per-session pooled-per-bin KDE for $\hat p_\text{marg}$
-and $\hat p_\text{cp,marg}$. Close-pair enumeration is the next 10%; the
-split-half PSTH covariance is 8%. The KDE could be replaced with a
-gridded 2-D histogram (the only thing the importance weights use is the
-density ratio at the trajectory centroids) for an additional ~3$\times$
-speedup, but that's a refinement, not a correctness issue.
-
-![**Figure 9 — Per-session wall-time, methods vs legacy snapshot, CPU vs CPU
-(6 sessions, 20 shuffles, all 4 windows).** **(A)** Per-session bars at the
-canonical window $t_\text{count} = 2$, sorted by methods runtime. **(B)**
-Per-window mean ± sd across sessions; legend shows total wall-time per
-pipeline. The methods pipeline is $1.91\times$ faster than the legacy
-snapshot pooled across windows, with the largest gap at the smallest
-windows (where legacy torch overhead dominates). The 64-worker parallel
-orchestrator extends this to a $3.2\times$ pipeline-wide
-speedup.](figures/fig_pipeline_speed.png)
-
-## 7.5 Deferred
-
-  * **Subspace / participation-ratio / eigenspectrum metrics** (Figure-2
-    panels E–G in the legacy bundle). These read off $C_\text{psth}$ and
-    $C_\text{fem}$ exactly as in legacy stage 2 and can be lifted verbatim
-    when needed; the equivalence demonstrated here transfers to those
-    panels with zero additional estimator work.
-  * **Eye-shuffle nulls for the `full` and `central` targets**. The
-    Stage-1 implementation runs nulls for `naive` only (the legacy
-    semantic). Full/central nulls would require re-fitting
-    $\hat p_\text{cp,marg}$ on each shuffle's close-pair midpoints and re-
-    computing the per-sample $\hat p_\text{cp,marg}/\hat p_\text{marg}$
-    ratio under the shuffled eye assignment — straightforward but not
-    needed for the equivalence assertion in §7.2.
-  * **Production GPU cache regeneration** (`fig2_decomposition.pkl`). The
-    on-disk fig2 cache that `VisionCore/ryan/fig2/generate_fig2*.py` reads
-    still ships with `target='naive'` numbers. Swapping it to `target='full'`
-    requires the production GPU pipeline to support the `target` argument
-    and a fresh expensive run; per the project memory this swap is gated on
-    explicit approval and is not in scope here.
+population level — both on the unified synthetic (naive vs matched median
+$|r|$ differ by $\approx 0.005$) and consistent with the modest Fano shift
+here ($0.846\to 0.875$). Quantifying it directly on real spike pairs requires
+either the full windowed pipeline or careful joint-pair validity masking;
+because it shares the same pipeline change, it is folded into the gated
+Figure-2 fix (`note_pipeline.md` §6) rather than approximated here.
 
 ---
 
@@ -1784,7 +1392,7 @@ develops the bias/variance tradeoff between them.
   $\mathrm{Var}_\text{PSTH}^D$ *does* depend on $D$ through the eye-
   distribution-spread of the PSTH integrand, so the Direction-1 and
   Direction-2 targets do not coincide in $1-\alpha$; their gap is the
-  fixation-scale spatial-structure measure of §4.5. The
+  fixation-scale spatial-structure measure of §4.3. The
   `test_homogeneous_mask_correction_is_noop_for_full_target` test confirms
   that under (A2) (`flat` mask), `target='naive'` and `target='full'` agree
   on $1-\alpha^p$ while `target='central'` recovers $1-\alpha^{p^2}$.
@@ -1888,7 +1496,7 @@ the raw bin count. With a $50$ ms stimulus-frame period and
 $\sim 6$–$12$ post-fix bins per fixation (depending on bin width), the
 effective $T$ is reduced by the bins-per-frame multiplicity and the floor
 correspondingly rises. We do not propagate this correction through the
-real-data numbers in §5.2 — those are robust to it at the population
+real-data numbers in §4.5 — those are robust to it at the population
 median (Δ $1-\alpha = -0.022$) — but it matters for per-cell SEM and is
 the operative reason the within-stimulus-frame reliability question is
 flagged as a future direction (§2.3).
@@ -1930,7 +1538,7 @@ empirical points sit on the analytical curve as $\sigma_\alpha$ is varied.
 The bias reaches $\sim -0.08$ at $\sigma_\alpha\approx 0.3$ — small in
 absolute terms, but a $9\%$ shift relative to the true $1-\alpha^*=0.957$.
 The same effect explains the saturation of $1-\hat\alpha$ at $0$ for
-eccentric-mask cells in §5.1, where the unclipped close-pair $\hat\alpha$
+eccentric-mask cells (§4.1, Fig. 3), where the unclipped close-pair $\hat\alpha$
 excursions above $1$ from the inflated-$C_\text{rate}$ side of the naive
 inconsistency.
 
@@ -2118,10 +1726,10 @@ uv run python fig_distribution_truth.py
 uv run python fig_sanity_check.py
 uv run python compute_weighting_data.py     # Ext-1 real-data driver (cache-only, all sessions)
 uv run python fig_weighting_bias.py         # Ext-1 cross-cell weighting bias (Fig. 1)
-uv run python fig_naive_failure.py
-uv run python fig_correction.py
+uv run python fig_recovery.py               # matched estimators recover analytical 1-α (Fig. 3)
+uv run python fig_trajectory.py             # multi-bin trajectory extension (Fig. 4)
 uv run python fig_consistency.py            # parallel sweep; cached to .npz
-uv run python generate_realdata.py          # cache-only; --recompute to rebuild
+uv run python generate_realdata.py          # cache-only; --recompute to rebuild (Fig. 5)
 uv run --with pytest pytest test_estimators.py -q
 ```
 

@@ -26,7 +26,7 @@ When rates are deterministic, the Law-of-Total-Variance decomposition the
 main note builds for spike counts collapses to a textbook one-way
 random-effects ANOVA of $r$ grouped by analysis time bin $t$. Sections
 1–4 record the math and identify what the ANOVA targets: exactly
-$1-\alpha^p$, i.e. Direction 1 of `writeup.md` §4.4. Section 5 verifies
+$1-\alpha^p$, i.e. Direction 1 of `writeup.md` §4.2. Section 5 verifies
 on the unified synthetic from `writeup.md` §2.3 that the ANOVA recovers
 the analytical truth across all three mask kinds with visibly tighter bars
 than the matched close-pair Direction-1 estimator.

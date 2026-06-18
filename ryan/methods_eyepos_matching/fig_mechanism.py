@@ -38,7 +38,10 @@ def close_pair_positions(n=3000, sigma=SIGMA, thr=THR, seed=0):
 def main():
     configure()
     e, mid = close_pair_positions()
-    fig, axes = plt.subplots(1, 3, figsize=(10.5, 3.1))
+    fig = plt.figure(figsize=(8.6, 6.2), constrained_layout=True)
+    gs = fig.add_gridspec(2, 2, height_ratios=[1.05, 0.95])
+    axes = [fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 1]),
+            fig.add_subplot(gs[1, :])]
 
     # --- Panel A: analytical p(e) heatmap + iso-density contours of p and p^2 ---
     # No simulation: imshow the closed-form density p(e) = N(0, σ²I) (grayscale)
@@ -95,31 +98,37 @@ def main():
     # central > 1 → naive 1-α biased up; eccentric < 1 → biased down.
     # ground_truth(...) returns the closed-form M-K-D integral I_{M,K,D} and
     # E_D[M^2] under D ∈ {p, p²} (both masks close analytically; no Monte Carlo).
+    # The `flat` mask is the consistency case: E_{p^2}[M^2] = E_p[M^2] = 1, so
+    # the naive denominator equals the truth and the bias vanishes -- it anchors
+    # the panel as the no-bias reference for the closed-form solutions.
     ax = axes[2]
-    kinds = ["central", "eccentric"]
+    kinds = ["flat", "central", "eccentric"]
     xpos = np.arange(len(kinds))
     oma_p, oma_naive = [], []
     for k in kinds:
-        gt = ground_truth(k, sigma_eye=SIGMA, ell=ELL)
+        gt = ground_truth(k, sigma_eye=SIGMA, ell=ELL, sigma_M=SIGMA)
         oma_p.append(gt["p"]["one_minus_alpha"])
         # naive: var_psth over p (correct), var_total over p^2 (wrong)
         oma_naive.append(1.0 - gt["p"]["var_psth"] / gt["p2"]["var_total"])
-    w = 0.38
+    w = 0.34
     ax.bar(xpos - w / 2, oma_p, w, color=C_FULL,
            label=r"$1{-}\alpha^{p}$  (truth)")
     ax.bar(xpos + w / 2, oma_naive, w, color=C_CLOSE,
            label=r"$1{-}\alpha^{\mathrm{naive}}$")
     ax.set_xticks(xpos); ax.set_xticklabels(kinds)
     ax.set_ylabel(r"$1{-}\alpha$")
-    ax.set_ylim(0, max(max(oma_p), max(oma_naive)) * 1.25)
-    ax.set_title(rf"C  naive bias on $1{{-}}\alpha$  ($\ell{{=}}\sigma_e$)")
-    ax.legend(loc="upper right", fontsize=7)
+    ax.set_ylim(0, max(max(oma_p), max(oma_naive)) * 1.28)
+    ax.set_title(rf"C  naive bias on $1{{-}}\alpha$ across masks  ($\ell{{=}}\sigma_e$, "
+                 rf"$\sigma_M{{=}}\sigma_e$)")
+    ax.legend(loc="upper right", fontsize=8)
     for x, (a, b) in enumerate(zip(oma_p, oma_naive)):
-        sign = "+" if b > a else "−"
-        ax.annotate(f"bias {sign}", (x, max(a, b)),
+        if abs(b - a) < 5e-3:
+            txt = r"bias $\approx$0"
+        else:
+            txt = "bias " + ("+" if b > a else "−")
+        ax.annotate(txt, (x, max(a, b)),
                     ha="center", va="bottom", fontsize=7)
 
-    fig.tight_layout()
     save(fig, "fig_mechanism.png")
 
 
