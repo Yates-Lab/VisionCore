@@ -65,9 +65,9 @@ def main():
     ax.set_xlabel(r"eye $x$ (deg)"); ax.set_ylabel(r"eye $y$ (deg)")
     ax.set_title("A  close pairs concentrate centrally")
     p_proxy = Line2D([0], [0], color=C_FULL, lw=1.6,
-                     label=r"$p(e)$:  $1,2\sigma$")
+                     label=r"$p(e)$:  $1,2\sigma_e$")
     p2_proxy = Line2D([0], [0], color=C_CLOSE, lw=1.6, ls="--",
-                      label=r"$p(e)^2$:  $1,2\sigma/\sqrt{2}$")
+                      label=r"$p(e)^2$:  $1,2\sigma_e/\sqrt{2}$")
     ax.legend(handles=[p_proxy, p2_proxy], loc="upper right",
               handletextpad=0.6, fontsize=7, frameon=False,
               labelcolor="white")
@@ -80,9 +80,9 @@ def main():
     xx = np.linspace(-3 * SIGMA, 3 * SIGMA, 400)
     gauss = lambda x, s: np.exp(-x**2 / (2 * s**2)) / (s * np.sqrt(2 * np.pi))
     ax.plot(xx, gauss(xx, SIGMA), color=C_FULL,
-            label=rf"$\mathcal{{N}}(0,\sigma^2)$, $\sigma$={SIGMA}")
+            label=rf"$\mathcal{{N}}(0,\sigma_e^2)$, $\sigma_e$={SIGMA}")
     ax.plot(xx, gauss(xx, SIGMA / np.sqrt(2)), color=C_CLOSE,
-            label=r"$\mathcal{N}(0,\sigma^2/2)$ (= $p^2$)")
+            label=r"$\mathcal{N}(0,\sigma_e^2/2)$ (= $p^2$)")
     var_ratio = mid[:, 0].var() / e[:, 0].var()
     ax.set_xlabel(r"eye $x$ (deg)"); ax.set_ylabel("density")
     ax.set_title(f"B  variance halves  (obs ratio {var_ratio:.2f})")
@@ -92,11 +92,11 @@ def main():
     # The naive estimator has C_psth on p (correct) but C_rate on p^2 (close-pair),
     # so 1-α^naive = 1 - I_{M,K,p} / (τ² E_{p²}[M^2]) -- numerator unchanged from
     # truth, denominator scaled by E_{p²}[M^2] / E_p[M^2]. Direction of the bias:
-    # central > 1 → naive 1-α biased up; eccentric/linear < 1 → biased down.
-    # ground_truth(...) uses closed-form 4M-sample MC of the M-K-D integral
-    # I_{M,K,D} and E_D[M^2] under D ∈ {p, p²}; sampling noise ≲ 1e-3.
+    # central > 1 → naive 1-α biased up; eccentric < 1 → biased down.
+    # ground_truth(...) returns the closed-form M-K-D integral I_{M,K,D} and
+    # E_D[M^2] under D ∈ {p, p²} (both masks close analytically; no Monte Carlo).
     ax = axes[2]
-    kinds = ["central", "eccentric", "linear"]
+    kinds = ["central", "eccentric"]
     xpos = np.arange(len(kinds))
     oma_p, oma_naive = [], []
     for k in kinds:
@@ -112,7 +112,7 @@ def main():
     ax.set_xticks(xpos); ax.set_xticklabels(kinds)
     ax.set_ylabel(r"$1{-}\alpha$")
     ax.set_ylim(0, max(max(oma_p), max(oma_naive)) * 1.25)
-    ax.set_title(rf"C  naive bias on $1{{-}}\alpha$  ($\ell{{=}}\sigma$)")
+    ax.set_title(rf"C  naive bias on $1{{-}}\alpha$  ($\ell{{=}}\sigma_e$)")
     ax.legend(loc="upper right", fontsize=7)
     for x, (a, b) in enumerate(zip(oma_p, oma_naive)):
         sign = "+" if b > a else "−"

@@ -10,7 +10,7 @@ Direction-1 vs Direction-2 tradeoff.
   C  the gap |1-alpha(full) - 1-alpha(central)| measures whether the cell's rate
      has spatial structure on the fixation scale (ell ~ sigma). Even a homogeneous
      (flat) cell under (A2) has a non-zero gap from the random field's spatial
-     correlation length; non-homogeneous masks (central, eccentric, linear) add to
+     correlation length; non-homogeneous masks (central, eccentric) add to
      it. The closed-form (A2) baseline is shown as a reference line.
 
 Run from this folder:  uv run python fig_correction.py
@@ -23,12 +23,11 @@ from estimators import decompose
 from _style import configure, save, C_FULL, C_CLOSE, C_TRUTH
 
 SIG = 0.15
-PCOLOR = {"central": "#8e44ad", "eccentric": "#e67e22", "linear": "#16a085",
-          "flat": "#7f8c8d"}
+PCOLOR = {"central": "#8e44ad", "eccentric": "#e67e22", "flat": "#7f8c8d"}
 
 
 def recovery(seeds=range(6), N=400):
-    kinds = ["central", "eccentric", "linear"] * 3
+    kinds = ["central", "eccentric"] * 4
     full_gt, full_es, cent_gt, cent_es, col = [], [], [], [], []
     for s in seeds:
         sess = make_session(kinds, n_trials=N, n_time_bins=100, sigma_eye=SIG, seed=s)
@@ -59,7 +58,7 @@ def stability(thresholds=(0.08, 0.05, 0.03, 0.02, 0.012), seeds=range(8), N=500)
 
 
 def gap(seeds=range(6), N=400):
-    kinds = ["flat", "linear", "eccentric", "central"]
+    kinds = ["flat", "eccentric", "central"]
     g = {k: [] for k in kinds}
     for s in seeds:
         sess = make_session(kinds, n_trials=N, n_time_bins=100, sigma_eye=SIG, seed=s)
@@ -101,7 +100,7 @@ def main():
     # --- C: fixation-scale spatial-structure gap ---
     gm, gs = gap()
     ax = axes[2]
-    order = ["flat", "linear", "eccentric", "central"]
+    order = ["flat", "eccentric", "central"]
     xs = np.arange(len(order))
     ax.bar(xs, [gm[k] for k in order], yerr=[gs[k] for k in order],
            color=[PCOLOR[k] for k in order], alpha=0.8, capsize=3)
@@ -114,7 +113,7 @@ def main():
     ell = sig
     gap_a2 = sig**2 * ell**2 / ((ell**2 + 2 * sig**2) * (ell**2 + sig**2))
     ax.axhline(gap_a2, color=C_TRUTH, lw=0.8, ls="--",
-               label=rf"(A2) baseline (flat, $\ell=\sigma$): {gap_a2:.2f}")
+               label=rf"(A2) baseline (flat, $\ell=\sigma_e$): {gap_a2:.2f}")
     ax.axhline(0, color=C_TRUTH, lw=0.6)
     ax.legend(fontsize=7, loc="upper left")
 

@@ -52,8 +52,8 @@ N_VALUES = np.array([100, 200, 400, 800])
 T_VALUES = np.array([25, 50, 100, 200])
 N_SEEDS = 10
 REGIMES = {
-    "sigma":   {"ell": SIG,        "label": r"$\ell = \sigma$"},
-    "0.3sig":  {"ell": 0.3 * SIG,  "label": r"$\ell = 0.3\sigma$"},
+    "sigma":   {"ell": SIG,        "label": r"$\ell = \sigma_e$"},
+    "0.3sig":  {"ell": 0.3 * SIG,  "label": r"$\ell = 0.3\sigma_e$"},
 }
 
 CACHE = Path(__file__).resolve().parent / "consistency_sweep.npz"
@@ -188,7 +188,7 @@ def panel_A_sd_heatmap(ax, data):
     ax.set_yticklabels([str(n) for n in N_VALUES])
     ax.set_xlabel(r"time bins $T$")
     ax.set_ylabel(r"trials/bin $N$")
-    ax.set_title(r"A  empirical sd$[1-\hat\alpha]$  ($\ell=\sigma$)")
+    ax.set_title(r"A  empirical sd$[1-\hat\alpha]$  ($\ell=\sigma_e$)")
     # numeric annotations
     for i in range(len(N_VALUES)):
         for j in range(len(T_VALUES)):
@@ -232,7 +232,7 @@ def panel_B_bias_vs_sd(ax, data):
     ax.axhline(0, color="grey", lw=0.6, ls=":")
     ax.set_xlabel(r"empirical sd$[1-\hat\alpha]$")
     ax.set_ylabel(r"bias  mean$[1-\hat\alpha] - (1-\alpha^*)$")
-    ax.set_title(rf"B  clipping bias  ($\ell=0.3\sigma$,  $\alpha^*$={alpha:.3f})")
+    ax.set_title(rf"B  clipping bias  ($\ell=0.3\sigma_e$,  $\alpha^*$={alpha:.3f})")
     ax.legend(fontsize=7, loc="lower left", ncol=2)
 
 
@@ -259,7 +259,7 @@ def panel_C_sd_vs_T(ax, data):
     ax.set_yscale("log")
     ax.set_xlabel(r"time bins $T$")
     ax.set_ylabel(r"sd$[1-\hat\alpha]$")
-    ax.set_title(r"C  sd vs $T$  ($\ell=\sigma$)")
+    ax.set_title(r"C  sd vs $T$  ($\ell=\sigma_e$)")
     ax.legend(fontsize=7, loc="upper right")
 
 

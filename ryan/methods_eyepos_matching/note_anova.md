@@ -3,6 +3,14 @@ title: "Variance decomposition with known rates: the one-way ANOVA"
 subtitle: "A side note to `writeup.md` (methods_eyepos_matching)"
 author: "fem-v1-fovea methods note"
 date: "2026-05-31"
+header-includes: |
+  <style>
+  .numbered-equation { position: relative; }
+  .numbered-equation .eqno {
+    position: absolute; right: 0.5em; top: 50%;
+    transform: translateY(-50%);
+  }
+  </style>
 ---
 
 # Summary
@@ -20,7 +28,7 @@ random-effects ANOVA of $r$ grouped by analysis time bin $t$. Sections
 1–4 record the math and identify what the ANOVA targets: exactly
 $1-\alpha^p$, i.e. Direction 1 of `writeup.md` §4.4. Section 5 verifies
 on the unified synthetic from `writeup.md` §2.3 that the ANOVA recovers
-the analytical truth across all four mask kinds with visibly tighter bars
+the analytical truth across all three mask kinds with visibly tighter bars
 than the matched close-pair Direction-1 estimator.
 
 Section 6 applies this to fig4 panel D and uncovers an unexpected residual:
@@ -176,11 +184,11 @@ validity mask and proceeds — no explicit reweighting required.
 # 5. Validation across masks
 
 Figure 1 sweeps $\ell/\sigma$ over $[0.25, 4]$ on the unified synthetic
-(`writeup.md` §2.3) at each of the four mask kinds and overlays, per
+(`writeup.md` §2.3) at each of the three mask kinds and overlays, per
 panel:
 
-1. **Analytical $1-\alpha^p$** — closed form via `writeup.md` §A.5 (flat,
-   central) or 4M-sample Monte Carlo (eccentric, linear) via
+1. **Analytical $1-\alpha^p$** — closed form via `writeup.md` §A.1–A.4
+   (flat, central, eccentric all close analytically) via
    `synthetic.ground_truth`;
 2. **ANOVA on noise-free rates** — `rate_variance_components` on the
    deterministic rate field of one cell;
@@ -188,7 +196,7 @@ panel:
    `decompose(target='full', density='gaussian')` from this folder
    (importance-reweighted close-pair second moment).
 
-All three agree across all four masks. ANOVA markers sit tightly on the
+All three agree across all three masks. ANOVA markers sit tightly on the
 analytical curve; the close-pair Direction-1 markers are unbiased but
 visibly wider, especially for the **eccentric** mask, where the FEM
 variance lives in the periphery and the $1/\hat p(e)$ weights pick up
@@ -196,7 +204,7 @@ unbounded tails. The ANOVA pays no such tax: it uses every
 $(\text{trial}, \text{time bin})$ sample once, with no $\Delta e$ threshold
 and no importance weights.
 
-![**Figure 1.** ANOVA on noise-free rates recovers the analytical $1-\alpha^p$ across all four mask kinds, agreeing with the matched close-pair Direction-1 estimator (`decompose(target='full')`) but with visibly tighter error bars. Same target, two estimators; ANOVA wins on efficiency when rates are deterministic.](figures/fig_anova.png)
+![**Figure 1.** ANOVA on noise-free rates recovers the analytical $1-\alpha^p$ across all three mask kinds, agreeing with the matched close-pair Direction-1 estimator (`decompose(target='full')`) but with visibly tighter error bars. Same target, two estimators; ANOVA wins on efficiency when rates are deterministic.](figures/fig_anova.png)
 
 # 6. Application to fig4 panel D
 

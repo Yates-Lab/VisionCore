@@ -11,7 +11,7 @@ and shows the resulting data structure.
   B  one draw of the stationary Gaussian random field s_t(e); kernel
      K(delta) = tau^2 exp(-||delta||^2 / (2 ell^2)) at a small ell to make
      the spatial structure visible.
-  C  the four spatial masks M_c(e) tiled into a single 2x2 square.
+  C  the three spatial masks M_c(e) tiled left-to-right.
   D  envelope effect: r(t, e_t) over one trial, with alpha(t) constant vs
      decaying -- the only difference between the two curves is alpha.
   E  full model rate r over (trial, time bin) with constant n_t; the
@@ -32,7 +32,7 @@ from _style import configure, save, C_FULL, C_CLOSE, C_TRUTH
 SIG = 0.15        # fixational spread (deg)
 TAU = 1.0
 MU0 = 6.0
-ELL_M = 0.6 * SIG       # default mask length scale (synthetic._default_ell_M)
+ELL_M = 0.6 * SIG       # default mask length scale (synthetic._default_sigma_M)
 ELL_VIS = 0.5 * SIG     # smaller field length scale -> visible structure
 
 GRID_LIM = 3.0 * SIG    # heatmap extent: +- 3 sigma
@@ -60,9 +60,9 @@ def panel_A_eye(ax, rng):
     ax.set_xlim(-GRID_LIM, GRID_LIM); ax.set_ylim(-GRID_LIM, GRID_LIM)
     ax.set_aspect("equal")
     ax.set_xlabel(r"eye $x$ (deg)"); ax.set_ylabel(r"eye $y$ (deg)")
-    ax.set_title(rf"A  eye distribution  $p(e)=\mathcal{{N}}(0,\sigma^2 I)$,"
-                 rf" $\sigma={SIG}^\circ$")
-    ax.text(0.04, 0.04, r"dashed: $1\sigma, 2\sigma$",
+    ax.set_title(rf"A  eye distribution  $p(e)=\mathcal{{N}}(0,\sigma_e^2 I)$,"
+                 rf" $\sigma_e={SIG}^\circ$")
+    ax.text(0.04, 0.04, r"dashed: $1\sigma_e, 2\sigma_e$",
             transform=ax.transAxes, fontsize=7, color=C_TRUTH)
 
 
@@ -77,46 +77,32 @@ def panel_B_field(ax, rng):
     ax.set_xlabel(r"eye $x$ (deg)"); ax.set_ylabel(r"eye $y$ (deg)")
     ax.set_title(r"B  field  $s_t(e)\sim\mathrm{GP}(0,K)$,  "
                  r"$K(\delta)=\tau^2 e^{-\|\delta\|^2/(2\ell^2)}$"
-                 r"  ($\ell=0.5\sigma$)")
+                 r"  ($\ell=0.5\sigma_e$)")
     cb = plt.colorbar(im, ax=ax, shrink=0.85, pad=0.02)
     cb.set_label(r"$s_t(e)$")
 
 
 def panel_C_masks_tiled(ax):
-    """All four masks rendered into one square imshow, 2x2 quadrants."""
+    """The three masks rendered into one imshow, tiled left-to-right."""
     n = GRID_N
     _, e_grid = _eye_grid()
-    tile = np.zeros((2 * n, 2 * n))
-    # origin='lower' -> rows index from bottom up:
-    #   TL (top-left)   = eccentric   TR (top-right)   = linear
-    #   BL (bottom-left)= flat        BR (bottom-right)= central
-    layout = [
-        (slice(0, n),     slice(0, n),     "flat"),
-        (slice(0, n),     slice(n, 2*n),   "central"),
-        (slice(n, 2*n),   slice(0, n),     "eccentric"),
-        (slice(n, 2*n),   slice(n, 2*n),   "linear"),
-    ]
-    for rs, cs, kind in layout:
-        tile[rs, cs] = profile_M(e_grid, kind, SIG, ELL_M)
-    im = ax.imshow(tile, extent=[0, 2, 0, 2], origin="lower",
+    kinds = ["flat", "central", "eccentric"]
+    tile = np.zeros((n, len(kinds) * n))
+    for k, kind in enumerate(kinds):
+        tile[:, k * n:(k + 1) * n] = profile_M(e_grid, kind, SIG, ELL_M)
+    im = ax.imshow(tile, extent=[0, len(kinds), 0, 1], origin="lower",
                    cmap="viridis", vmin=0, vmax=1)
-    ax.axhline(1.0, color="w", lw=1.2)
-    ax.axvline(1.0, color="w", lw=1.2)
-    labels = [
-        ("flat",      (0.5, 0.95)),
-        ("central",   (1.5, 0.95)),
-        ("eccentric", (0.5, 1.95)),
-        ("linear",    (1.5, 1.95)),
-    ]
-    for txt, (x, y) in labels:
-        ax.text(x, y, txt, color="w", ha="center", va="top",
+    for x in range(1, len(kinds)):
+        ax.axvline(x, color="w", lw=1.2)
+    for k, kind in enumerate(kinds):
+        ax.text(k + 0.5, 0.95, kind, color="w", ha="center", va="top",
                 fontsize=9, fontweight="bold",
                 path_effects=[patheffects.withStroke(linewidth=1.6,
                                                      foreground="k")])
     ax.set_xticks([]); ax.set_yticks([])
     ax.set_aspect("equal")
-    ax.set_title(r"C  spatial masks  $M_c(e)$  (4 kinds, tiled)")
-    cb = plt.colorbar(im, ax=ax, shrink=0.85, pad=0.02)
+    ax.set_title(r"C  spatial masks  $M_c(e)$  (3 kinds, tiled)")
+    cb = plt.colorbar(im, ax=ax, shrink=0.6, pad=0.02)
     cb.set_label(r"$M(e)$")
 
 
@@ -127,11 +113,11 @@ def panel_D_envelope(ax, seed=2):
     # the only difference between the two rate traces is alpha(t).
     sess_const = make_session(
         ["central"], n_trials=1, n_time_bins=T,
-        sigma_eye=SIG, ell=ELL_VIS, tau=TAU, mu_0=MU0, ell_M=ELL_M,
+        sigma_eye=SIG, ell=ELL_VIS, tau=TAU, mu_0=MU0, sigma_M=ELL_M,
         psth_envelope=None, seed=seed)
     sess_decay = make_session(
         ["central"], n_trials=1, n_time_bins=T,
-        sigma_eye=SIG, ell=ELL_VIS, tau=TAU, mu_0=MU0, ell_M=ELL_M,
+        sigma_eye=SIG, ell=ELL_VIS, tau=TAU, mu_0=MU0, sigma_M=ELL_M,
         psth_envelope=alpha_decay, seed=seed)
     t = np.arange(T)
     ax.plot(t, sess_const["rate"][0, :, 0], color=C_TRUTH, lw=1.4, ls="--",
@@ -148,7 +134,7 @@ def panel_D_envelope(ax, seed=2):
 def _make_rate(seed, n_trials_per_time_bin=None):
     sess = make_session(
         ["central"], n_trials=N_TRIALS_VIS, n_time_bins=N_TIME_VIS,
-        sigma_eye=SIG, ell=ELL_VIS, tau=TAU, mu_0=MU0, ell_M=ELL_M,
+        sigma_eye=SIG, ell=ELL_VIS, tau=TAU, mu_0=MU0, sigma_M=ELL_M,
         n_trials_per_time_bin=n_trials_per_time_bin, seed=seed)
     return sess["rate"][:, :, 0]
 

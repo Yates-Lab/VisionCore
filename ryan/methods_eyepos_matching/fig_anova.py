@@ -15,7 +15,7 @@ against two references on the same noise-free synthetic data:
     this folder, which targets the same population quantity by a different
     route (importance-reweighted close-pair second moment).
 
-Across all four mask types (flat, central, eccentric, linear) the two
+Across all three mask types (flat, central, eccentric) the two
 estimators fall on the analytical line; the ANOVA error bars are visibly
 tighter, because the ANOVA uses every (trial, time-bin) sample once and
 pays no close-pair variance tax (no Delta-e threshold, no unbounded 1/p
@@ -45,7 +45,6 @@ MASK_TITLES = {
     "flat":      "flat  (A2 holds)",
     "central":   "central",
     "eccentric": "eccentric",
-    "linear":    "linear",
 }
 
 
@@ -125,7 +124,7 @@ def _panel(ax, kind, ratios, seeds, show_y_label=True, show_legend=False):
     ax.set_xscale("log")
     ax.set_xticks([0.25, 0.5, 1.0, 2.0, 4.0])
     ax.set_xticklabels(["0.25", "0.5", "1", "2", "4"])
-    ax.set_xlabel(r"$\ell\,/\,\sigma$")
+    ax.set_xlabel(r"$\ell\,/\,\sigma_e$")
     if show_y_label:
         ax.set_ylabel(r"$1-\alpha^p$")
     ax.set_ylim(-0.03, 1.05)
@@ -139,7 +138,7 @@ def main():
     print("fig_anova.py  --  sweep over ell/sigma per mask")
     print(f"  N_TRIALS={N_TRIALS}  N_TIME_BINS={N_TIME_BINS}  "
           f"SEEDS={len(list(SEEDS))}  threshold={THR}")
-    fig, axes = plt.subplots(1, 4, figsize=(13.6, 3.2), sharey=True)
+    fig, axes = plt.subplots(1, 3, figsize=(10.5, 3.2), sharey=True)
     for ax, kind in zip(axes, PROFILE_KINDS):
         _panel(ax, kind, RATIOS, SEEDS,
                show_y_label=(kind == PROFILE_KINDS[0]),

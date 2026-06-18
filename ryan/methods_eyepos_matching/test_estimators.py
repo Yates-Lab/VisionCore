@@ -10,7 +10,7 @@ with a per-cell spatial mask M(e). The (A1) violation is variable n_t; the
   * recover the closed-form 1-alpha^p^2 under (A2) with target='central'
     (Direction 2: the close-pair distribution),
   * recover each direction's truth on non-homogeneous masks
-    (central/eccentric/linear),
+    (central/eccentric),
   * be MUCH less biased than the naive estimator on a centrally-modulated cell,
   * be MORE STABLE for target='central' than 'full' on an eccentric-modulated
     cell (the unbounded-1/p tail-variance cost of Direction 1),
@@ -77,8 +77,8 @@ def test_homogeneous_mask_correction_is_noop_for_full_target():
 
 def test_full_target_recovers_p_decomposition():
     """Direction 1: target='full' recovers the closed-form p decomposition on
-    non-homogeneous masks (central/eccentric/linear)."""
-    kinds = ["central", "eccentric", "linear"]
+    non-homogeneous masks (central/eccentric)."""
+    kinds = ["central", "eccentric"]
     oma, _, sess = _seed_stats(kinds, "full", "one_minus_alpha")
     gt = np.array([sess["truth"][c]["p"]["one_minus_alpha"]
                    for c in range(len(kinds))])
@@ -89,11 +89,11 @@ def test_central_target_recovers_p2_decomposition():
     """Direction 2: target='central' recovers the closed-form p^2 decomposition.
 
     Tested on masks whose spatial scale is broad enough relative to the
-    close-pair threshold (eccentric, linear) that finite-threshold smoothing
+    close-pair threshold (eccentric) that finite-threshold smoothing
     is small; the narrow central mask is exercised separately in the
     threshold-shrinks test.
     """
-    kinds = ["eccentric", "linear"]
+    kinds = ["eccentric"]
     oma, _, sess = _seed_stats(kinds, "central", "one_minus_alpha")
     gt = np.array([sess["truth"][c]["p2"]["one_minus_alpha"]
                    for c in range(len(kinds))])
@@ -166,7 +166,7 @@ def test_direction2_is_more_stable_than_direction1_for_eccentric():
 def test_full_target_removes_poisson_fano_to_one():
     """Pure Poisson + non-homogeneous masks: the matched 'full' estimator gives
     Fano ~ 1; the naive estimator is biased further from 1."""
-    kinds = ["central", "eccentric", "linear", "central"]
+    kinds = ["central", "eccentric", "eccentric", "central"]
     fano_full, _, _ = _seed_stats(kinds, "full", "fano", seeds=range(8),
                                   deterministic=False)
     fano_naive, _, _ = _seed_stats(kinds, "naive", "fano", seeds=range(8),
@@ -182,7 +182,7 @@ def test_naive_path_matches_existing_pipeline():
     """Sanity: target='naive' reproduces the existing close-pair pipeline
     (pipeline_one_minus_alpha) on the same deterministic rates."""
     from VisionCore.covariance import pipeline_one_minus_alpha
-    sess = make_session(["central", "eccentric", "linear"], n_trials=200,
+    sess = make_session(["central", "eccentric"], n_trials=200,
                         n_time_bins=100, sigma_eye=SIG, seed=3)
     rate, eye = sess["rate"], sess["eye"]
     d = decompose(rate, eye, target="naive", density="gaussian")
@@ -229,7 +229,7 @@ def test_pair_count_and_uniform_directions_both_recover_truth_under_variable_nt(
     """
     nt = _staircase_n_t(NPH, lo=15, hi=int(NTR * 0.6))
     env = np.linspace(1.0, 0.05, NPH)
-    kinds = ["flat", "central", "linear"]
+    kinds = ["flat", "central", "eccentric"]
     truth = None
     oma_pair, oma_uni = [], []
     for s in range(6):
@@ -271,7 +271,7 @@ def test_trial_count_targets_same_population_as_other_directions():
     exact-numerics one. Across seeds the means must agree to seed-SEM, and
     each must match the analytical 1-alpha^p.
     """
-    kinds = ["flat", "central", "linear"]
+    kinds = ["flat", "central"]
     truth = None
     pair_vals, uni_vals, trial_vals = [], [], []
     for s in range(6):
@@ -318,7 +318,7 @@ def test_trial_count_recovers_truth_under_variable_nt():
     """
     nt = _staircase_n_t(NPH, lo=15, hi=int(NTR * 0.6))
     env = np.linspace(1.0, 0.05, NPH)
-    kinds = ["flat", "central", "linear"]
+    kinds = ["flat", "central"]
     truth = None
     oma_trial = []
     for s in range(6):
@@ -439,6 +439,51 @@ def test_random_field_closed_form_one_minus_alpha():
             f"r={r}: gt_p2 {gt['p2']['one_minus_alpha']} != ref {oma_p2_ref}"
 
 
+def test_central_mask_closed_form_matches_mc():
+    """The `central` (Gaussian) mask closed form for 1-alpha matches a direct
+    Monte-Carlo evaluation of the LOTC ratio under both p and p^2, across mask
+    widths -- it is the analytic curve plotted in writeup Fig. 0a B."""
+    from synthetic import _central_one_minus_alpha_closed_form, profile_M
+    sig, ell = SIG, SIG
+    rng = np.random.default_rng(0)
+    n = 2_000_000
+    for sigma_M in (0.4 * sig, 0.6 * sig, 1.0 * sig):
+        for dist, s in (("p", sig), ("p2", sig / np.sqrt(2.0))):
+            e1 = rng.normal(0.0, s, size=(n, 2))
+            e2 = rng.normal(0.0, s, size=(n, 2))
+            M1 = profile_M(e1, "central", sig, sigma_M)
+            M2 = profile_M(e2, "central", sig, sigma_M)
+            d2 = ((e1 - e2) ** 2).sum(-1)
+            K12 = np.exp(-d2 / (2.0 * ell ** 2))            # tau = 1
+            oma_mc = 1.0 - float((M1 * M2 * K12).mean()) / float((M1 ** 2).mean())
+            oma_cf = _central_one_minus_alpha_closed_form(sig, ell, sigma_M, dist)
+            assert abs(oma_cf - oma_mc) < 3e-3, \
+                f"{dist} sigma_M={sigma_M:.3f}: closed form {oma_cf} vs MC {oma_mc}"
+
+
+def test_eccentric_mask_closed_form_matches_mc():
+    """The `eccentric` mask M(e) = 1 - exp(-||e||^2/(2 sigma_M^2)) closed form for
+    1-alpha matches a direct Monte-Carlo evaluation of the LOTC ratio under both
+    p and p^2, across mask widths -- it is the analytic curve plotted in writeup
+    Fig. 0a C."""
+    from synthetic import _eccentric_one_minus_alpha_closed_form, profile_M
+    sig, ell = SIG, SIG
+    rng = np.random.default_rng(0)
+    n = 2_000_000
+    for sigma_M in (0.4 * sig, 0.6 * sig, 1.0 * sig):
+        for dist, s in (("p", sig), ("p2", sig / np.sqrt(2.0))):
+            e1 = rng.normal(0.0, s, size=(n, 2))
+            e2 = rng.normal(0.0, s, size=(n, 2))
+            M1 = profile_M(e1, "eccentric", sig, sigma_M)
+            M2 = profile_M(e2, "eccentric", sig, sigma_M)
+            d2 = ((e1 - e2) ** 2).sum(-1)
+            K12 = np.exp(-d2 / (2.0 * ell ** 2))            # tau = 1
+            oma_mc = 1.0 - float((M1 * M2 * K12).mean()) / float((M1 ** 2).mean())
+            oma_cf = _eccentric_one_minus_alpha_closed_form(sig, ell, sigma_M, dist)
+            assert abs(oma_cf - oma_mc) < 3e-3, \
+                f"{dist} sigma_M={sigma_M:.3f}: closed form {oma_cf} vs MC {oma_mc}"
+
+
 def test_random_field_var_total_is_K_zero_under_A2():
     """Under (A2) the total rate variance equals K(0) = tau^2 -- a key
     D-invariance the rest of the closed form relies on. Verify empirically
@@ -463,6 +508,67 @@ def test_mcfarland_recovers_one_minus_alpha_p_under_A2():
         mean, _, gt_p, _ = _seed_stats_sweep("naive", "one_minus_alpha", ell)
         assert abs(mean - gt_p) < 0.06, \
             f"r={r}: McFarland estimate {mean:.3f} != truth {gt_p:.3f}"
+
+
+# ---------------------------------------------------------------------------
+# Additive vs multiplicative across-bin structure (§3 cross-cell weighting bias)
+# ---------------------------------------------------------------------------
+
+def test_additive_transient_biases_offdiag_crate_but_gain_does_not():
+    """The cross-cell weighting bias is ADDITIVE, not multiplicative (writeup §3).
+
+    Under variable n_t with the inconsistent ('mixed') weighting -- close-pair
+    2nd moment at pair-count, Ybar at trial-count -- the off-diagonal C_rate is
+    biased by Er_pair (x) Er_pair - Er_trial (x) Er_trial. A multiplicative gain
+    envelope alpha(t) leaves the mean rate flat (zero-mean field), so
+    Er_pair ~ Er_trial and there is no off-diagonal inflation. A random per-cell
+    ADDITIVE onset transient makes Er_pair > Er_trial for every cell, so the
+    off-diagonal inflation ~ mu_0 (delta_m + delta_n) > 0 for all pairs."""
+    from estimators import (_close_pair_second_moment, _weighted_mean,
+                            _density_fn)
+    nt = _staircase_n_t(NPH, lo=15, hi=int(NTR * 0.6))
+    env = np.linspace(1.0, 0.05, NPH)
+    decay = np.linspace(1.0, 0.0, NPH)
+    n_cells = 6
+
+    def offdiag_inflation(add_transient):
+        diffs = []
+        for s in range(8):
+            # independent fields isolate the mean mechanism: the bias is
+            # additive and needs no cross-cell co-tuning (writeup §3).
+            sess = make_session(["flat"] * n_cells, n_trials=NTR, n_time_bins=NPH,
+                                sigma_eye=SIG, seed=s, n_trials_per_time_bin=nt,
+                                psth_envelope=env)
+            rate = np.asarray(sess["rate"], float).copy()
+            if add_transient:
+                rng = np.random.default_rng(100 + s)
+                A = 0.5 * rng.uniform(0.3, 1.0, n_cells)
+                rate += A[None, None, :] * decay[None, :, None]
+            finite = np.isfinite(rate).all(2)
+            keep = finite.sum(0) >= 10
+            mask = finite & keep[None, :]
+            tr, ph = np.where(mask)
+            S = rate[tr, ph, :]; E = sess["eye"][tr, ph, :]; T = ph
+            phat = _density_fn(E, "gaussian")
+            nt_by = {t: int((T == t).sum()) for t in np.unique(T)}
+            pcw = np.array([max(nt_by[t] - 1, 0) / 2.0 for t in T])
+            Er_pc = _weighted_mean(S, pcw); Er_tr = S.mean(0)
+            MM = _close_pair_second_moment(S, E, T, phat, "naive", 0.05, 1e6,
+                                           "pair_count")
+            Cr_c = MM - np.outer(Er_pc, Er_pc)
+            Cr_m = MM - np.outer(Er_tr, Er_tr)
+            iu = np.triu_indices(n_cells, 1)
+            diffs.append(float(np.mean(Cr_m[iu] - Cr_c[iu])))
+        return float(np.mean(diffs))
+
+    infl_gain = offdiag_inflation(False)
+    infl_add = offdiag_inflation(True)
+    assert infl_add > 0.15, \
+        f"additive transient should inflate off-diag C_rate: {infl_add:.4f}"
+    assert abs(infl_gain) < 0.15, \
+        f"multiplicative gain should barely move off-diag C_rate: {infl_gain:.4f}"
+    assert infl_add - infl_gain > 0.20, \
+        f"additive inflation ({infl_add:.4f}) should dwarf gain ({infl_gain:.4f})"
 
 
 # ---------------------------------------------------------------------------
@@ -506,7 +612,7 @@ def test_trajectory_flat_limit_recovers_truth():
     homogeneous and non-homogeneous masks. This is the regime where the
     flat-trajectory approximation is exact, so the recovery should match the
     single-bin §4.4 tests' tolerance."""
-    kinds = ["flat", "central", "eccentric", "linear"]
+    kinds = ["flat", "central", "eccentric"]
     oma_full, _, sess = _traj_seed_stats(kinds, "full", sigma_drift=0.0)
     oma_cent, _, _ = _traj_seed_stats(kinds, "central", sigma_drift=0.0)
     gt_p = np.array([sess["traj_truth"][c]["p"]["one_minus_alpha"]
@@ -526,7 +632,7 @@ def test_trajectory_moderate_drift_recovers_per_bin_marginal_truth():
     `traj_truth` (the §4.4 closed form at sigma_traj = sqrt(sigma^2 + sigma_drift^2))
     within a slightly looser tolerance than the flat limit. Tests the
     smoothing-doesn't-blow-up regime."""
-    kinds = ["flat", "central", "linear"]
+    kinds = ["flat", "central"]
     sd = SIG / 5.0
     oma_full, _, sess = _traj_seed_stats(kinds, "full", sigma_drift=sd)
     gt_p = np.array([sess["traj_truth"][c]["p"]["one_minus_alpha"]

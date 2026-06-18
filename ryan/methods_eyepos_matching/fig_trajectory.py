@@ -157,7 +157,7 @@ def panel_E(ax, kind="flat", sigma_drift_values=(0.0, 0.015, 0.03, 0.045, 0.06,
             label=r"truth $1-\alpha^p$")
     ax.plot(sd_arr / SIG, truth_p2, color=C_CLOSE, lw=0.6, ls=":",
             label=r"truth $1-\alpha^{p^2}$")
-    ax.set_xlabel(r"$\sigma_{\rm drift}/\sigma$"); ax.set_ylabel(r"$1-\alpha$")
+    ax.set_xlabel(r"$\sigma_{\rm drift}/\sigma_e$"); ax.set_ylabel(r"$1-\alpha$")
     ax.set_title(f"E  $\\sigma_{{\\rm drift}}$ sweep ({kind} mask)")
     ax.legend(fontsize=7, loc="lower left", ncol=1)
     ax.set_ylim(0, 1)

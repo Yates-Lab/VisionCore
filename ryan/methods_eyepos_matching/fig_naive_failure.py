@@ -23,8 +23,8 @@ from estimators import decompose
 from _style import configure, save, C_FULL, C_CLOSE, C_TRUTH
 from VisionCore.covariance import get_upper_triangle
 
-PROFILES = ["central"] * 4 + ["eccentric"] * 4 + ["linear"] * 4
-PCOLOR = {"central": "#8e44ad", "eccentric": "#e67e22", "linear": "#16a085"}
+PROFILES = ["central"] * 6 + ["eccentric"] * 6
+PCOLOR = {"central": "#8e44ad", "eccentric": "#e67e22"}
 N, NPH, SIG, THR = 400, 100, 0.15, 0.05
 
 
@@ -63,7 +63,7 @@ def main():
     # --- A: 1-alpha, naive vs matched, colored by profile ---
     ax = axes[0]
     ax.plot([0, 1], [0, 1], color=C_TRUTH, lw=0.8, ls="--", zorder=0)
-    for kind in ("central", "eccentric", "linear"):
+    for kind in ("central", "eccentric"):
         m = oma["kind"] == kind
         ax.scatter(oma["gt"][m], np.nan_to_num(oma["naive"][m], nan=-0.03)[:],
                    s=18, color=PCOLOR[kind], marker="x", alpha=0.8,

@@ -28,9 +28,8 @@ position e in R^2,
              position e (e.g., when the RF leaves the windowed stimulus,
              M -> 0 and the rate collapses to baseline).
                  flat       M(e) = 1                              (A2 holds)
-                 central    M(e) = exp(-||e||^2 / (2 ell_M^2))    (A2 broken; peak at center)
-                 eccentric  M(e) = 1 - exp(-||e||^2 / (2 ell_M^2))(A2 broken; center suppressed)
-                 linear     M(e) = 0.5*(1 + tanh(x / ell_M))      (A2 broken; smooth x-gradient)
+                 central    M(e) = exp(-||e||^2 / (2 sigma_M^2))    (A2 broken; peak at center)
+                 eccentric  M(e) = 1 - exp(-||e||^2 / (2 sigma_M^2))(A2 broken; center suppressed)
 
   * mu_0:    baseline rate (counts/window), keeping r positive.
 
@@ -69,37 +68,33 @@ Extension-1 bias is therefore a property of the ESTIMATOR (finite-sample
 inconsistency under w-mismatch), not of the ground truth.
 
 For Gaussian D = N(0, sigma^2 I) and Gaussian K, the integral in (2) closes
-analytically for the `flat` mask:
+analytically for all three masks (writeup Appendix A.1-A.4). For the `flat` mask:
     1-alpha^p   = 2*sigma^2 / (ell^2 + 2*sigma^2)
     1-alpha^p^2 = sigma^2   / (ell^2 + sigma^2)
-For `central` (Gaussian) mask there is also a closed form (Appendix A.5 of the
-writeup). For `eccentric` / `linear` we use Monte Carlo (4M-sample default;
-sub-1e-3 sampling noise, well below test tolerances).
+The `central` (Gaussian) and `eccentric` (1 - Gaussian) masks close the same
+way; `ground_truth` returns the exact value for each (no Monte Carlo).
 """
 from __future__ import annotations
 
 import numpy as np
-
-# Large MC sample size for closed-form-quality ground truth.
-_GT_N = 4_000_000
 
 
 # ---------------------------------------------------------------------------
 # Spatial mask  M_c(e) -- the (A2) switch
 # ---------------------------------------------------------------------------
 
-PROFILE_KINDS = ("flat", "central", "eccentric", "linear")
+PROFILE_KINDS = ("flat", "central", "eccentric")
 
 
-def _default_ell_M(sigma_eye):
+def _default_sigma_M(sigma_eye):
     """Default mask length scale; 0.6 * sigma_eye keeps the central/eccentric
     profile narrow enough that the close-pair (p^2) and full-p moments differ
     meaningfully -- which is the regime the (A2) demo lives in. Tunable via
-    the make_session(ell_M=...) argument when needed."""
+    the make_session(sigma_M=...) argument when needed."""
     return 0.6 * float(sigma_eye)
 
 
-def profile_M(e, kind, sigma_eye, ell_M=None):
+def profile_M(e, kind, sigma_eye, sigma_M=None):
     """Per-cell spatial mask M(e) in [0, 1].
 
     Parameters
@@ -110,25 +105,23 @@ def profile_M(e, kind, sigma_eye, ell_M=None):
         One of PROFILE_KINDS.
     sigma_eye : float
         Fixational spread (deg); sets the default mask length scale.
-    ell_M : float or None
-        Mask length scale (deg). If None, falls back to ``_default_ell_M``.
+    sigma_M : float or None
+        Mask length scale (deg). If None, falls back to ``_default_sigma_M``.
 
     Returns
     -------
     ndarray (...) in [0, 1].
     """
-    if ell_M is None:
-        ell_M = _default_ell_M(sigma_eye)
+    if sigma_M is None:
+        sigma_M = _default_sigma_M(sigma_eye)
     x, y = e[..., 0], e[..., 1]
     r2 = x ** 2 + y ** 2
     if kind == "flat":
         return np.ones_like(x)
     if kind == "central":
-        return np.exp(-r2 / (2.0 * ell_M ** 2))
+        return np.exp(-r2 / (2.0 * sigma_M ** 2))
     if kind == "eccentric":
-        return 1.0 - np.exp(-r2 / (2.0 * ell_M ** 2))
-    if kind == "linear":
-        return 0.5 * (1.0 + np.tanh(x / ell_M))
+        return 1.0 - np.exp(-r2 / (2.0 * sigma_M ** 2))
     raise ValueError(f"unknown profile kind: {kind!r}")
 
 
@@ -151,6 +144,77 @@ def _flat_one_minus_alpha_closed_form(sigma_eye, ell, distribution):
     raise ValueError(f"unknown distribution: {distribution!r}")
 
 
+def _central_one_minus_alpha_closed_form(sigma_eye, ell, sigma_M, distribution):
+    """Closed form for the `central` Gaussian mask M(e)=exp(-||e||^2/(2 sigma_M^2))
+    under Gaussian D and Gaussian K, in 2-D (writeup Appendix A.5).
+
+    For a Gaussian across-eye distribution D = N(0, s^2 I), with mask scale
+    sigma_M and the effective convolution scale
+    sigma_eff^2 = s^2 sigma_M^2 / (s^2 + sigma_M^2):
+        E_D[M^2]        = sigma_M^2 / (sigma_M^2 + 2 s^2)
+        I_{M,K,D}/tau^2 = (sigma_M^2 / (s^2 + sigma_M^2))^2 * ell^2 / (ell^2 + 2 sigma_eff^2)
+        1 - alpha       = 1 - (I/tau^2) / E_D[M^2]
+
+    with s^2 = sigma^2 for D = p and s^2 = sigma^2 / 2 for D = p^2 (the close-pair
+    density). The ratio is independent of tau and of the time-bin weighting.
+    """
+    if distribution == "p":
+        s2 = float(sigma_eye) ** 2
+    elif distribution == "p2":
+        s2 = float(sigma_eye) ** 2 / 2.0
+    else:
+        raise ValueError(f"unknown distribution: {distribution!r}")
+    L2 = float(ell) ** 2
+    sm2 = float(sigma_M) ** 2                  # mask scale squared
+    s_eff2 = s2 * sm2 / (s2 + sm2)             # effective convolution scale squared
+    E_M2 = sm2 / (sm2 + 2.0 * s2)
+    I_over_tau2 = (sm2 / (s2 + sm2)) ** 2 * L2 / (L2 + 2.0 * s_eff2)
+    return 1.0 - (I_over_tau2 / E_M2)
+
+
+def _eccentric_one_minus_alpha_closed_form(sigma_eye, ell, sigma_M, distribution):
+    r"""Closed form for the `eccentric` mask M(e) = 1 - exp(-||e||^2/(2 sigma_M^2))
+    under Gaussian D and Gaussian K, in 2-D (writeup Appendix A.4).
+
+    Write M = 1 - g with g(e) = exp(-||e||^2/(2 sigma_M^2)). Expanding
+    M(e1) M(e2) = 1 - g1 - g2 + g1 g2 splits both moments into Gaussian pieces:
+        E_D[M^2]  = 1 - 2 E_D[g] + E_D[g^2]
+        I_{M,K,D} = J0 - 2 J1 + J2
+    with, for D = N(0, s^2 I) in 2-D,
+        E_D[g]   = sigma_M^2 / (sigma_M^2 + s^2)
+        E_D[g^2] = sigma_M^2 / (sigma_M^2 + 2 s^2).
+    Each J term factorises across the two spatial dims; the per-dim integral is a
+    2-variable Gaussian whose quadratic form has matrix
+        Lambda = [[p1 + 1/ell^2, -1/ell^2], [-1/ell^2, p2 + 1/ell^2]],
+        p_k = 1/s^2 + c_k,   det Lambda = p1 p2 + (p1 + p2)/ell^2,
+    giving per-dim value 1/(s^2 sqrt(det Lambda)) and J = tau^2 (per-dim)^2. The
+    g-factors enter through (c1, c2): (0,0) -> J0, (1/sigma_M^2, 0) -> J1,
+    (1/sigma_M^2, 1/sigma_M^2) -> J2. tau cancels in the 1-alpha ratio.
+
+    s^2 = sigma^2 for D = p and sigma^2/2 for D = p^2 (the close-pair density).
+    """
+    if distribution == "p":
+        s2 = float(sigma_eye) ** 2
+    elif distribution == "p2":
+        s2 = float(sigma_eye) ** 2 / 2.0
+    else:
+        raise ValueError(f"unknown distribution: {distribution!r}")
+    L2 = float(ell) ** 2
+    lm2 = float(sigma_M) ** 2
+
+    E_M2 = 1.0 - 2.0 * lm2 / (lm2 + s2) + lm2 / (lm2 + 2.0 * s2)
+
+    def _term(c1, c2):
+        p1 = 1.0 / s2 + c1
+        p2 = 1.0 / s2 + c2
+        det = p1 * p2 + (p1 + p2) / L2
+        return (1.0 / (s2 * np.sqrt(det))) ** 2
+
+    cM = 1.0 / lm2
+    I_over_tau2 = _term(0.0, 0.0) - 2.0 * _term(cM, 0.0) + _term(cM, cM)
+    return 1.0 - (I_over_tau2 / E_M2)
+
+
 def _time_bin_amp_sq_mean(psth_envelope, time_bin_weights):
     """Mean of alpha(t)^2 under the given time-bin weighting (default uniform)."""
     if psth_envelope is None:
@@ -166,13 +230,13 @@ def _time_bin_amp_sq_mean(psth_envelope, time_bin_weights):
     return float((w * a ** 2).sum())
 
 
-def ground_truth(kind, sigma_eye, ell, tau=1.0, ell_M=None,
-                 psth_envelope=None, time_bin_weights=None,
-                 n=_GT_N, seed=12345):
-    """Closed-form / MC ground truth for the LOTC decomposition of one cell.
+def ground_truth(kind, sigma_eye, ell, tau=1.0, sigma_M=None,
+                 psth_envelope=None, time_bin_weights=None):
+    """Closed-form ground truth for the LOTC decomposition of one cell.
 
-    Returns a dict keyed by distribution 'p' (full fixational) and 'p^2'
-    (close-pair / central), each with:
+    All three masks (`flat`, `central`, `eccentric`) close analytically, so the
+    decomposition is exact (no Monte Carlo). Returns a dict keyed by distribution
+    'p' (full fixational) and 'p^2' (close-pair / central), each with:
         var_psth, var_fem, var_total, one_minus_alpha.
 
     The ``one_minus_alpha`` ratio is invariant under (time_bin_weights, psth_envelope)
@@ -181,32 +245,36 @@ def ground_truth(kind, sigma_eye, ell, tau=1.0, ell_M=None,
     var_psth alone).
     """
     a2_mean = _time_bin_amp_sq_mean(psth_envelope, time_bin_weights)
-    rng = np.random.default_rng(seed)
     tau2 = float(tau) ** 2
 
     out = {}
     for dist in ("p", "p2"):
-        # Closed-form shortcut for the only kind that has a clean one.
         if kind == "flat":
             oma = _flat_one_minus_alpha_closed_form(sigma_eye, ell, dist)
             var_total = a2_mean * tau2  # E_D[M^2] = 1
             var_psth = (1.0 - oma) * var_total
             var_fem = var_total - var_psth
-        else:
-            sd = float(sigma_eye) if dist == "p" \
-                else float(sigma_eye) / np.sqrt(2.0)
-            e1 = rng.normal(0.0, sd, size=(n, 2))
-            e2 = rng.normal(0.0, sd, size=(n, 2))
-            M1 = profile_M(e1, kind, sigma_eye, ell_M)
-            M2 = profile_M(e2, kind, sigma_eye, ell_M)
-            E_M2 = float((M1 ** 2).mean())
-            d2 = ((e1 - e2) ** 2).sum(-1)
-            K12 = tau2 * np.exp(-d2 / (2.0 * float(ell) ** 2))
-            I = float((M1 * M2 * K12).mean())  # the M-K-D integral
+        elif kind == "central":
+            sigma_M_eff = _default_sigma_M(sigma_eye) if sigma_M is None else float(sigma_M)
+            s2 = float(sigma_eye) ** 2 if dist == "p" \
+                else float(sigma_eye) ** 2 / 2.0
+            E_M2 = sigma_M_eff ** 2 / (sigma_M_eff ** 2 + 2.0 * s2)
+            oma = _central_one_minus_alpha_closed_form(sigma_eye, ell, sigma_M_eff, dist)
             var_total = a2_mean * tau2 * E_M2
-            var_psth = a2_mean * I
+            var_psth = (1.0 - oma) * var_total
             var_fem = var_total - var_psth
-            oma = var_fem / var_total if var_total > 0 else float("nan")
+        elif kind == "eccentric":
+            sigma_M_eff = _default_sigma_M(sigma_eye) if sigma_M is None else float(sigma_M)
+            s2 = float(sigma_eye) ** 2 if dist == "p" \
+                else float(sigma_eye) ** 2 / 2.0
+            lm2 = sigma_M_eff ** 2
+            E_M2 = 1.0 - 2.0 * lm2 / (lm2 + s2) + lm2 / (lm2 + 2.0 * s2)
+            oma = _eccentric_one_minus_alpha_closed_form(sigma_eye, ell, sigma_M_eff, dist)
+            var_total = a2_mean * tau2 * E_M2
+            var_psth = (1.0 - oma) * var_total
+            var_fem = var_total - var_psth
+        else:
+            raise ValueError(f"unknown profile kind: {kind!r}")
         out[dist] = {
             "var_psth": var_psth,
             "var_fem": var_fem,
@@ -241,8 +309,8 @@ def _draw_field_at(eyes, ell, tau, rng, n_cells, jitter=1e-8):
     each of `n_cells` cells.
 
     Per-time-bin covariance Sigma[i,j] = tau^2 * exp(-||e_i - e_j||^2 / (2 ell^2));
-    sample s = L @ z with z iid N(0, I_n) per cell, retry Cholesky with
-    growing jitter on the (rare) near-singular case.
+    sample s = L @ z with z N(0, I_n) per cell (independent across cells), retry
+    Cholesky with growing jitter on the (rare) near-singular case.
     """
     n = eyes.shape[0]
     if n == 0:
@@ -266,7 +334,7 @@ def _draw_field_at(eyes, ell, tau, rng, n_cells, jitter=1e-8):
 
 
 def make_session(kinds, n_trials=600, n_time_bins=100, sigma_eye=0.15,
-                 ell=None, tau=1.0, mu_0=6.0, ell_M=None,
+                 ell=None, tau=1.0, mu_0=6.0, sigma_M=None,
                  noise_cov=None, seed=0,
                  return_rate=True, n_trials_per_time_bin=None,
                  psth_envelope=None):
@@ -287,7 +355,7 @@ def make_session(kinds, n_trials=600, n_time_bins=100, sigma_eye=0.15,
         Field amplitude (sd); K(0) = tau^2.
     mu_0 : float
         Baseline rate (counts/window).
-    ell_M : float or None
+    sigma_M : float or None
         Mask length scale (deg); see ``profile_M``.
     noise_cov : ndarray (n_cells, n_cells), optional
         Per-(trial, time-bin) shared latent covariance Sigma_u; None -> pure Poisson.
@@ -312,12 +380,12 @@ def make_session(kinds, n_trials=600, n_time_bins=100, sigma_eye=0.15,
         truth   : list[dict] per-cell ground_truth(...) over 'p' and 'p2'
         noise_cov : Sigma_u used (or None)
         kinds   : the profile list
-        sigma_eye, ell, tau, mu_0, ell_M, alpha
+        sigma_eye, ell, tau, mu_0, sigma_M, alpha
     """
     if ell is None:
         ell = float(sigma_eye)
-    if ell_M is None:
-        ell_M = _default_ell_M(sigma_eye)
+    if sigma_M is None:
+        sigma_M = _default_sigma_M(sigma_eye)
 
     rng = np.random.default_rng(seed)
     n_cells = len(kinds)
@@ -345,7 +413,7 @@ def make_session(kinds, n_trials=600, n_time_bins=100, sigma_eye=0.15,
     # Per-cell mask M(e); then r = mu_0 + M(e) * alpha(t) * s_t(e).
     rate = np.empty((n_rows, n_time_bins, n_cells))
     for c, kind in enumerate(kinds):
-        M = profile_M(eye, kind, sigma_eye, ell_M)              # (n_rows, n_time_bins)
+        M = profile_M(eye, kind, sigma_eye, sigma_M)              # (n_rows, n_time_bins)
         rate[:, :, c] = mu_0 + M * alpha[None, :] * s[:, :, c]
     rate = np.clip(rate, 1e-6, None)
 
@@ -362,7 +430,7 @@ def make_session(kinds, n_trials=600, n_time_bins=100, sigma_eye=0.15,
         rate[inv] = np.nan
         eye[inv] = np.nan
 
-    truth = [ground_truth(kind, sigma_eye, ell=ell, tau=tau, ell_M=ell_M,
+    truth = [ground_truth(kind, sigma_eye, ell=ell, tau=tau, sigma_M=sigma_M,
                           psth_envelope=psth_envelope)
              for kind in kinds]
 
@@ -378,7 +446,7 @@ def make_session(kinds, n_trials=600, n_time_bins=100, sigma_eye=0.15,
         "ell": float(ell),
         "tau": float(tau),
         "mu_0": float(mu_0),
-        "ell_M": float(ell_M),
+        "sigma_M": float(sigma_M),
         "alpha": alpha,
     }
     if return_rate:
@@ -392,7 +460,7 @@ def make_session(kinds, n_trials=600, n_time_bins=100, sigma_eye=0.15,
 
 def make_trajectory_session(kinds, n_samples_per_time_bin=30, n_time_bins=40,
                             t_window=5, sigma_eye=0.15, sigma_drift=0.0,
-                            ell=None, tau=1.0, mu_0=6.0, ell_M=None,
+                            ell=None, tau=1.0, mu_0=6.0, sigma_M=None,
                             psth_envelope=None, seed=0, return_rate=True):
     """Generate a trajectory-mode synthetic session for §4.6 validation.
 
@@ -430,7 +498,7 @@ def make_trajectory_session(kinds, n_samples_per_time_bin=30, n_time_bins=40,
     construction, so the truth to compare against is
 
         truth_traj = ground_truth(kind, sqrt(sigma_eye^2 + sigma_drift^2),
-                                  ell, ell_M=ell_M, psth_envelope=...)
+                                  ell, sigma_M=sigma_M, psth_envelope=...)
 
     (returned as ``traj_truth`` in the output). The standard
     ``ground_truth(..., sigma_eye=sigma_eye, ...)`` is also returned as
@@ -448,7 +516,7 @@ def make_trajectory_session(kinds, n_samples_per_time_bin=30, n_time_bins=40,
         Number of within-window offsets per sample (trajectory length).
     sigma_eye, sigma_drift : float
         Centroid spread and within-window drift (deg).
-    ell, tau, mu_0, ell_M : as in make_session.
+    ell, tau, mu_0, sigma_M : as in make_session.
     psth_envelope : None or length-n_time_bins array
         Per-T_idx amplitude envelope alpha(T_idx). Default 1.
     seed : int
@@ -463,7 +531,7 @@ def make_trajectory_session(kinds, n_samples_per_time_bin=30, n_time_bins=40,
         centroids    : (N, 2) per-sample trajectory centroid
         counts       : (N, n_cells) per-sample window-summed deterministic rate
         T_idx        : (N,) analysis time bin index
-        kinds, sigma_eye, sigma_drift, ell, tau, mu_0, ell_M, alpha, t_window
+        kinds, sigma_eye, sigma_drift, ell, tau, mu_0, sigma_M, alpha, t_window
         centroid_truth : per-cell ground_truth(kind, sigma_eye, ...) — flat-limit reference
         traj_truth     : per-cell ground_truth(kind, sqrt(sigma_eye^2+sigma_drift^2), ...)
                          — per-bin marginal target (what the pooled-per-bin KDE estimator
@@ -471,8 +539,8 @@ def make_trajectory_session(kinds, n_samples_per_time_bin=30, n_time_bins=40,
     """
     if ell is None:
         ell = float(sigma_eye)
-    if ell_M is None:
-        ell_M = _default_ell_M(sigma_eye)
+    if sigma_M is None:
+        sigma_M = _default_sigma_M(sigma_eye)
     rng = np.random.default_rng(seed)
     n_cells = len(kinds)
     n_per = int(n_samples_per_time_bin)
@@ -504,17 +572,17 @@ def make_trajectory_session(kinds, n_samples_per_time_bin=30, n_time_bins=40,
             eyes_t = trajectories[ix, t, :]                                  # (n_T, 2)
             s_field = _draw_field_at(eyes_t, ell, tau, rng, n_cells)         # (n_T, n_cells)
             for c, kind in enumerate(kinds):
-                M_t = profile_M(eyes_t, kind, sigma_eye, ell_M)              # (n_T,)
+                M_t = profile_M(eyes_t, kind, sigma_eye, sigma_M)              # (n_T,)
                 rate_traj[ix, t, c] = mu_0 + M_t * alpha[T] * s_field[:, c]
     rate_traj = np.clip(rate_traj, 1e-6, None)
     counts = rate_traj.sum(axis=1)                          # (N, n_cells)
 
     centroid_truth = [ground_truth(kind, sigma_eye, ell=ell, tau=tau,
-                                   ell_M=ell_M, psth_envelope=psth_envelope)
+                                   sigma_M=sigma_M, psth_envelope=psth_envelope)
                       for kind in kinds]
     sigma_traj = float(np.sqrt(float(sigma_eye) ** 2 + float(sigma_drift) ** 2))
     traj_truth = [ground_truth(kind, sigma_traj, ell=ell, tau=tau,
-                               ell_M=ell_M, psth_envelope=psth_envelope)
+                               sigma_M=sigma_M, psth_envelope=psth_envelope)
                   for kind in kinds]
 
     out = {
@@ -528,7 +596,7 @@ def make_trajectory_session(kinds, n_samples_per_time_bin=30, n_time_bins=40,
         "ell": float(ell),
         "tau": float(tau),
         "mu_0": float(mu_0),
-        "ell_M": float(ell_M),
+        "sigma_M": float(sigma_M),
         "alpha": alpha,
         "t_window": int(t_window),
         "centroid_truth": centroid_truth,

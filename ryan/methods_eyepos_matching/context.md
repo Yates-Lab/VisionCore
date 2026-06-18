@@ -15,13 +15,15 @@ sentence the §4.5 reframe targets).
 
 ## Status
 
-- All 21 estimator tests pass (`uv run --with pytest pytest test_estimators.py -q`,
+- All 24 estimator tests pass (`uv run --with pytest pytest test_estimators.py -q`,
   ~12 min after the M6/split-half switch). Pipeline tests in
   `test_pipeline.py` (3 tests, including a bit-identical match against the
   legacy torch `extract_windows`) pass in ~30 s.
 - Writeup builds cleanly to a self-contained HTML (`pandoc writeup.md -s
-  --mathml --self-contained -o writeup.html`); the ANOVA side note builds
-  with the same command swapping `writeup.md` for `note_anova.md`.
+  --mathml --self-contained --lua-filter=number-eqs.lua -o writeup.html`);
+  the `number-eqs.lua` filter re-adds equation numbers that pandoc's MathML
+  writer drops (amsmath `\tag{}`). The ANOVA side note builds with the same
+  command swapping `writeup.md` for `note_anova.md`.
 - Extension 1 is **already in production** (`VisionCore/covariance.py`:
   `estimate_rate_covariance`, `bagged_split_half_psth_covariance` with
   `weighting='pair_count'`).
@@ -35,15 +37,17 @@ sentence the §4.5 reframe targets).
 
 | file | role |
 |---|---|
-| `synthetic.py` | Unified rate-field generator + closed-form / MC ground truth. `make_trajectory_session` is the §4.6 multi-bin extension (centroid + per-bin drift). |
+| `synthetic.py` | Unified rate-field generator + closed-form ground truth (all three masks close analytically). `make_trajectory_session` is the §4.6 multi-bin extension (centroid + per-bin drift). |
 | `estimators.py` | `decompose(target=…)` — single-bin §4.4 matched estimator. `decompose_trajectory(target=…)` — §4.6 multi-bin extension with RMS-trajectory close-pair filter and pooled-per-bin KDE reweighting. |
-| `test_estimators.py` | 21 tests: 11 single-bin Ext-2 + 3 sanity + Appendix §A.6 T-floor + 4 §4.6 trajectory-mode tests + 2 trial_count direction tests (target / variable-$n_t$ truth recovery). |
+| `test_estimators.py` | 24 tests: 12 single-bin Ext-2 + 3 sanity + Appendix §A.9 T-floor + 4 §4.6 trajectory-mode tests + 2 trial_count direction tests + 1 additive-vs-multiplicative cross-cell bias (§3). |
 | `_style.py` | Shared matplotlib style + `figures/` save helper. |
 | `fig_model.py` | Visual schematic of the unified generative model components (eye dist, GP field, masks, envelope, resulting rate). Inserted at top of writeup §2.3. |
 | `fig_mechanism.py` | Geometric origin of p vs p² mismatch (Fig. 2). |
-| `fig_sanity_check.py` | McFarland recovers analytical 1-α^p under (A1)+(A2) (Fig. 0). |
-| `fig_time_bin_weighting.py` | Ext-1 validation on the unified synthetic (Fig. 1). |
-| `fig_consistency.py` | Appendix §A.6: parallel sweep over (N, T); SEM heatmap, clipping bias, T-floor. |
+| `fig_distribution_truth.py` | Closed-form 1-α depends on eye distribution (flat) and mask width (central). End of §2.3 (Fig. 0a). |
+| `fig_sanity_check.py` | McFarland recovers analytical 1-α^p under (A1)+(A2) (Fig. 0b; panels A recovery + B threshold). |
+| `fig_weighting_bias.py` | Ext-1 (Fig. 1, 3 panels A/C/D): A = variable-n_t weighting divergence; C = synthetic shuffle-null Dz (additive transient biases mixed, multiplicative gain does not; truth 0); D = real shuffle-null Dz (mixed −0.020 vs consistent −0.001). Replaces the old `fig_time_bin_weighting.py`. |
+| `compute_weighting_data.py` | Ext-1 real-data driver (cache-only, all 25 sessions from `cache/aligned_sessions.pkl`): mixed vs consistent weighting -> shuffle-null Dz, corrected NC. Writes `cache/weighting_realdata.pkl`. No GPU / covariance.py / realdata_results.pkl touched. |
+| `fig_consistency.py` | Appendix §A.9: parallel sweep over (N, T); SEM heatmap, clipping bias, T-floor. |
 | `consistency_sweep.npz` | Cached sweep results for fig_consistency (not committed). |
 | `fig_naive_failure.py` | Naive vs matched on three quantities (Fig. 3). |
 | `fig_correction.py` | Recovery + Direction-1/2 tradeoff + gap (Fig. 4). |
@@ -55,7 +59,7 @@ sentence the §4.5 reframe targets).
 | `writeup.html` | Build output (committed; pandoc --mathml --self-contained). |
 | `note_anova.md` | Side note: one-way ANOVA on known rates + fig4 panel D investigation. Tangential to main writeup. |
 | `note_anova.html` | Build output (committed; pandoc --mathml --self-contained). |
-| `fig_anova.py` | Synthetic validation for `note_anova.md` §5 (ANOVA recovers $1-\alpha^p$ across all four masks). |
+| `fig_anova.py` | Synthetic validation for `note_anova.md` §5 (ANOVA recovers $1-\alpha^p$ across all three masks). |
 | `fig_panel_d_anova.py` | Real-data panel D: cell-side matched close-pair (naive / D1 pair / D1 trial) vs twin ANOVA. |
 | `fig_panel_d_closepair.py` | Real-data panel D: matched close-pair D1 on BOTH cells and twin. Figure 2 of `note_anova.md`. |
 | `legacy/` | Frozen 2026-06-02 snapshot of `VisionCore/{covariance,stats,subspace}.py` + `VisionCore/ryan/fig2/compute_fig2_data.py`. Used as the §7 comparator. Do not edit. |
@@ -84,13 +88,17 @@ For neuron c, analysis time bin t, eye position e:
   uses a decaying alpha correlated with n_t).
 - **M_c(e) ∈ [0, 1]** — spatial mask (the (A2) switch):
   - `flat`: M ≡ 1; (A2) holds.
-  - `central`: exp(-||e||² / (2 ell_M²)); (A2) violated, response peaks
+  - `central`: exp(-||e||² / (2 σ_M²)); (A2) violated, response peaks
     at fixation (the windowing mechanism).
-  - `eccentric`: 1 - exp(-||e||² / (2 ell_M²)); the bounded complement.
-  - `linear`: ½(1 + tanh(x / ell_M)); smooth x-gradient.
+  - `eccentric`: 1 - exp(-||e||² / (2 σ_M²)); the bounded complement.
+
+  All three masks have closed-form 1-α (writeup Appendix A.1–A.4),
+  MC-verified; `ground_truth` returns the exact value (no Monte Carlo).
 - **mu_0** — baseline rate (default 6); marginal `r ~ N(mu_0, M(e)² τ²)`,
   Pr[r < 0] ~ 1e-9 with default params.
 - **n_trials_per_time_bin** — array of length n_time_bins; variable → breaks (A1).
+  Per-cell fields are independent (true cross-covariance 0); the §3 cross-cell
+  weighting bias needs no cross-cell co-tuning, so there is no shared-field knob.
 
 Eye distribution: `e ~ p = N(0, sigma^2 I)`, `sigma = 0.15°`. Close-pair
 density `p² = N(0, sigma²/2 · I)` exactly.
@@ -120,8 +128,8 @@ rates, all FEM) or ℓ → ∞ (uniform field, no FEM); maximum ≈ 0.17 at
 The gap measures rate spatial structure on the fixation scale, not (A2)
 violation.
 
-For `central` (Gaussian) the integrals close in closed form (Appendix
-§A.5); for `eccentric`, `linear` MC at 4M samples (sampling noise ≲ 1e-3).
+All three masks (`flat`, `central`, `eccentric`) close in closed form
+(Appendix §A.1–A.4), each MC-verified to ≲ 1e-3.
 
 ## The estimator (`estimators.decompose`)
 
@@ -158,13 +166,28 @@ noise correlations).
   n_boot → ∞. Retained in `_split_half_psth_cov` for the production
   pipeline's parallel implementation and as a fallback.
 
-Writeup §A.7 motivates the choice (M6's conceptual unification with
+Writeup §A.10 motivates the choice (M6's conceptual unification with
 Crate); the production pipeline (`VisionCore/covariance.py`,
 `bagged_split_half_psth_covariance`) still uses split-half, and the two
 estimators agree within bootstrap noise at our (N, T, C) scales.
 
 ## Key empirical findings
 
+- **Ext-1 cross-cell bias (§3, NEW).** Mixing time-bin weightings (close-pair
+  Crate pair-count, Cpsth uniform 1/T, Ybar trial-count — the pre-fix production
+  state) biases the CROSS-CELL covariance, not the per-cell 1-α. Real data (25
+  sessions, `compute_weighting_data.py`): corrected NC median +0.019 (consistent)
+  → +0.008 (mixed, many pairs negative); shuffle-null Dz −0.001 (consistent) →
+  −0.020 (mixed). The bias is **additive, not multiplicative**: a gain envelope is
+  weighting-invariant (no bias); a random per-cell additive onset transient
+  reproduces it (μ_pair > μ_trial, δ_c>0 → off-diagonal Crate inflated ≈
+  μ0(δ_m+δ_n)). It needs **no cross-cell co-tuning**: the bias survives with
+  independent fields AND independent per-cell transient shapes (cross-cell PSTH
+  cov ≈ 0), because the large μ0 multiplies each cell's own δ_c — so the old
+  `field_corr`/"PSTH-covariance substrate" framing was dropped (2026-06-17). The
+  two consistent weights (n_t, 1/T) are equivalent in the model; default to n_t
+  (lower variance). Reproduces the `ryan/fig2/bias_diagnosis` single-session
+  result at population scale.
 - **Sanity check.** `decompose(target='naive', time_bin_weighting='pair_count')`
   with constant n_t recovers analytical `1-α^p` across an ell/σ sweep
   covering (0,1) — Fig. 0A.
@@ -186,7 +209,7 @@ estimators agree within bootstrap noise at our (N, T, C) scales.
 
 ## Open items (active)
 
-1. **Appendix §A.6 — DONE.** Explored SEM(N, T) via the parallel
+1. **Appendix §A.9 — DONE.** Explored SEM(N, T) via the parallel
    `fig_consistency.py` sweep + closed-form derivation. The across-time-bin
    floor `sd[1-α̂] = α√(2/(T−1))` is derived and matches empirics; the [0,1]
    clipping bias is characterised against the truncated-Gaussian formula.
@@ -238,14 +261,16 @@ Run from this folder. Workspace `.venv` is at the v1-fovea repo root;
     # Generator self-check
     uv run python synthetic.py
 
-    # Tests (21 tests, ~7 minutes -- random field Cholesky per time bin)
+    # Tests (23 tests, ~7 minutes -- random field Cholesky per time bin)
     uv run --with pytest pytest test_estimators.py -q
 
     # Main writeup figures
     uv run python fig_model.py
     uv run python fig_mechanism.py
+    uv run python fig_distribution_truth.py
     uv run python fig_sanity_check.py
-    uv run python fig_time_bin_weighting.py
+    uv run python compute_weighting_data.py     # Ext-1 real-data driver (cache-only, all sessions)
+    uv run python fig_weighting_bias.py         # Ext-1 cross-cell weighting bias (Fig. 1)
     uv run python fig_naive_failure.py
     uv run python fig_correction.py
     uv run python fig_trajectory.py             # §4.6 multi-bin extension
@@ -256,9 +281,10 @@ Run from this folder. Workspace `.venv` is at the v1-fovea repo root;
     uv run python fig_panel_d_anova.py          # cell-side matching, ANOVA on twin
     uv run python fig_panel_d_closepair.py      # Fig. 2 of note_anova.md
 
-    # Writeup
-    pandoc writeup.md   -s --mathml --self-contained -o writeup.html
-    pandoc note_anova.md -s --mathml --self-contained -o note_anova.html
+    # Writeup (number-eqs.lua re-adds equation numbers; pandoc --mathml
+    # drops amsmath \tag{})
+    pandoc writeup.md   -s --mathml --self-contained --lua-filter=number-eqs.lua -o writeup.html
+    pandoc note_anova.md -s --mathml --self-contained --lua-filter=number-eqs.lua -o note_anova.html
 
 ## External pointers
 
