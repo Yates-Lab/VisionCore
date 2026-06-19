@@ -1,20 +1,39 @@
-r"""Real-data quantification of the eye-position-matching correction (cache-only).
+r"""Real-data payoff for the eye-position-matching correction (writeup §4.5).
 
-Uses the fig4 cache (real V1 spikes + model-twin rates on the REAL fixational eye
-trajectories, trial-aligned by analysis time bin). No GPU, no model inference.
+Fully self-contained and isolated from every other component of the project:
+the ONLY input is ``cache/aligned_sessions.pkl`` -- the fig2-inclusion-criteria
+aligned arrays (real fixRSVP spikes + real fixational eye trajectories, all 25
+sessions), built once by ``data_loading.py``. There is no dependency on the
+fig4 panel-D cache, no GPU, and no model inference.
 
-  * 1-alpha and Fano are computed on the real SPIKES (robs), per cell, with each
-    cell's own validity mask (dfs != 0 & eye-finite) -- this reproduces fig2's
-    per-cell 1-alpha at the median. We report the naive estimate, the two matched
-    targets ('full' -> p, 'central' -> p^2), and the full-vs-central GAP (a direct
-    non-homogeneity measure; ~0 only for a homogeneous stimulus).
-  * Noise correlation is illustrated on the deterministic model rates (rhat): with
-    no Poisson noise the true stimulus-independent covariance is ~0, so any nonzero
-    naive Ctotal-Crate is the distribution-mismatch leak; the matched estimator
-    removes it.
+Methodology mirrors the rest of §4 exactly:
+
+  * the §4.4 TRAJECTORY-mode estimator, run through the same production code
+    path as the §6 pipeline (``pipeline.decompose_session``): each sample's
+    eye-trajectory window is reduced to its GEOMETRIC MEDIAN, close pairs are
+    filtered on the whole-window RMS trajectory distance, and a single KDE
+    supplies the §4.2 importance weights -- the production-setting estimator of
+    §4.4, not the single-bin stand-in the old draft used;
+  * the t_hist/t_count window split of §4.4: the close-pair match is on the
+    ~100 ms (12-bin) trajectory window (the neuron's integration context), but
+    the spike COUNT feeding Ctotal/Crate/Fano is the single ~8 ms bin at its
+    end. The small count window keeps the Fano factor (a count-per-mean, NOT a
+    window-stable ratio like 1-alpha) in its reported sub-Poisson regime;
+  * run per session (so close pairs are never formed across sessions), on the
+    REAL spikes, with each cell carrying the session's shared validity window;
+  * per-cell 1-alpha and Fano pooled across sessions over the fig2 good-cell
+    inclusion mask (rate_hz > 2 Hz AND split-half PSTH r^2 > 0.05 -- the exact
+    cut of legacy.compute_fig2_data), so the population is the same one Figure 2
+    reports.
+
+We report, per cell, the naive estimate, the two matched targets
+('full' -> p, 'central' -> p^2), the full-vs-central GAP (a direct
+fixation-scale spatial-structure measure), and the Fano factor (naive vs full).
 
 Run from this folder:  uv run python generate_realdata.py [--recompute]
 """
+from __future__ import annotations
+
 import argparse
 import sys
 from pathlib import Path
@@ -22,184 +41,197 @@ from pathlib import Path
 import numpy as np
 import dill
 import matplotlib.pyplot as plt
-from scipy.stats import gaussian_kde
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "fig4"))
-from _fig4_data import load_fig4_data, CCMAX_THRESHOLD          # noqa: E402
-from _style import configure, save, C_FULL, C_CLOSE, C_TRUTH    # noqa: E402
+THIS_DIR = Path(__file__).resolve().parent
+if str(THIS_DIR) not in sys.path:
+    sys.path.insert(0, str(THIS_DIR))
 
-CACHE = Path(__file__).resolve().parent / "realdata_results.pkl"
-THR = 0.05
-MIN_TPP = 10
+from data_loading import load_cache                                # noqa: E402
+from pipeline import decompose_session, DT as PIPE_DT               # noqa: E402
+from _style import configure, save, C_FULL, C_CLOSE, C_TRUTH       # noqa: E402
+
+CACHE = THIS_DIR / "realdata_results.pkl"
+SCHEMA_VERSION = 3                       # 3 = self-contained, production estimator
+
+# --- estimator window (the §4.4 t_hist/t_count decoupling) ----------------
+# The close-pair match is on the WHOLE eye-trajectory window (the neuron's
+# integration context, §4.4), reduced to its geometric median; the spike COUNT
+# -- and hence Ctotal, Crate and the Fano factor -- is over the small t_count
+# window only. We use a ~100 ms trajectory (12 bins, exactly §4.4's T_WINDOW)
+# with a SINGLE-bin (~8 ms) count window, the regime in which the FEM-corrected
+# Fano factor is reported. (Summing the count over the whole trajectory window
+# would silently change the counting timescale and inflate the Fano, which is a
+# count-per-mean ratio -- not the dimensionless 1-alpha, which is window-stable.)
+T_HIST_MS = 92.0         # -> 11 bins at 120 Hz; +1 count bin = 12-bin trajectory
+T_COUNT_BINS = 1         # single ~8.3 ms spike-count bin
+TARGETS = ("naive", "full", "central")
+
+# --- fig2 inclusion criteria (legacy.compute_fig2_data) -------------------
+MIN_RATE_HZ = 2.0
+MIN_PSTH_R2 = 0.05
+MIN_VAR = 0.0
+
+C_GAP = "#8e44ad"        # purple -- non-homogeneity gap
 
 
 # ---------------------------------------------------------------------------
-# Per-cell 1-alpha / Fano on real spikes (close pairs enumerated once / session)
+# Per-session decomposition via the production estimator (geometric-median
+# trajectory mode, uncentred Crate -- identical code path to the §7 pipeline).
+# The diagonal of every matrix is the per-cell result.
 # ---------------------------------------------------------------------------
 
-def _percell_session(robs, eye, vm, dfs, thr=THR, weight_clip=1e6):
-    """Per-cell naive/full/central 1-alpha and Fano for one session.
+def run_session(rec):
+    C = rec["robs"].shape[2]
+    nan = np.full(C, np.nan)
+    rate_hz = np.asarray(rec["rate_hz"], float)
+    psth_r2 = np.asarray(rec["psth_r2"], float)
+    incl = (np.isfinite(rate_hz) & (rate_hz > MIN_RATE_HZ)
+            & np.isfinite(psth_r2) & (psth_r2 > MIN_PSTH_R2))
 
-    Close pairs (same bin, |de|<thr) are enumerated once; each cell uses only the
-    pairs and samples where it is valid (dfs!=0). Returns dict of (C,) arrays.
-    """
-    n_tr, n_ph, C = robs.shape
-    S = np.nan_to_num(robs, nan=0.0)
-    Dfs = (dfs != 0)
-    # flatten to valid-eye samples
-    samp = np.where(vm)
-    si_tr, si_ph = samp
-    Sf = S[si_tr, si_ph, :]                # (N, C)
-    Ef = eye[si_tr, si_ph, :]              # (N, 2)
-    Df = Dfs[si_tr, si_ph, :]              # (N, C) per-cell validity
-    Tf = si_ph
-    N = len(Tf)
-    kde = gaussian_kde(Ef.T)
-    p_samp = np.clip(kde(Ef.T), 1e-12, None)
+    r = decompose_session(rec, windows_bins=(T_COUNT_BINS,),
+                          t_hist_ms=T_HIST_MS, n_shuffles=0)
+    if not r["windows"]:
+        return dict(naive=nan, full=nan, central=nan, fano_naive=nan,
+                    fano_full=nan, good=incl, subj=np.array([rec["subject"]] * C),
+                    _n_pairs=0, _n_windows=0)
 
-    # enumerate close pairs once (per time bin)
-    pi, pj = [], []
-    for t in np.unique(Tf):
-        ix = np.where(Tf == t)[0]
-        if len(ix) < 2:
-            continue
-        a, b = np.triu_indices(len(ix), k=1)
-        d = np.linalg.norm(Ef[ix[a]] - Ef[ix[b]], axis=1)
-        c = d < thr
-        pi.append(ix[a[c]]); pj.append(ix[b[c]])
-    pi = np.concatenate(pi); pj = np.concatenate(pj)
-    mid = 0.5 * (Ef[pi] + Ef[pj])
-    pm = np.clip(kde(mid.T), 1e-12, None)
-    pw_full = np.clip(1.0 / pm, None, weight_clip * np.median(1.0 / pm))
+    w = r["windows"][0]
+    Ctotal = w["Ctotal"]
+    good = incl & (np.diag(Ctotal) > MIN_VAR)
+    oma = {t: w["targets"][t]["one_minus_alpha"] for t in TARGETS}
 
-    out = {k: np.full(C, np.nan) for k in
-           ("naive", "full", "central", "fano_naive", "fano_full", "Erate")}
-    SiSj = Sf[pi] * Sf[pj]                  # (P, C) per-cell pair products
-    Vp = Df[pi] & Df[pj]                    # (P, C) pair valid for cell
-    for c in range(C):
-        vc = Df[:, c]
-        if vc.sum() < 2 * MIN_TPP:
-            continue
-        vpc = Vp[:, c]
-        if vpc.sum() < MIN_TPP:
-            continue
-        sc = Sf[vc, c]
-        # time-bin pair-count weighting for PSTH split-half (per cell, c-valid)
-        oma, fano, erate = {}, {}, {}
-        for tgt in ("naive", "full", "central"):
-            sw = p_samp[vc] if tgt == "central" else np.ones(vc.sum())
-            er = np.average(sc, weights=sw)
-            ctot = _wvar(sc, sw, er)
-            pw = pw_full[vpc] if tgt == "full" else np.ones(vpc.sum())
-            mm = np.average(SiSj[vpc, c], weights=pw)
-            crate = mm - er ** 2
-            cpsth = _psth_diag(sc, Tf[vc], sw)
-            oma[tgt] = 1.0 - np.clip(cpsth / crate, 0, 1) if crate > 0 else np.nan
-            fano[tgt] = (ctot - crate) / er if er > 0 else np.nan
-            erate[tgt] = er
-        out["naive"][c] = oma["naive"]; out["full"][c] = oma["full"]
-        out["central"][c] = oma["central"]
-        out["fano_naive"][c] = fano["naive"]; out["fano_full"][c] = fano["full"]
-        out["Erate"][c] = erate["full"]
-    return out
+    fano = {}
+    for t in ("naive", "full"):
+        b = w["targets"][t]
+        CnoiseC = 0.5 * ((Ctotal - b["Crate"]) + (Ctotal - b["Crate"]).T)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            fano[t] = np.where(b["Erate"] > 0,
+                               np.diag(CnoiseC) / b["Erate"], np.nan)
 
-
-def _wvar(x, w, mu):
-    """Reliability-weights unbiased variance (reduces to ddof=1 for uniform w)."""
-    wn = w / w.sum()
-    denom = 1.0 - np.sum(wn ** 2)
-    return np.sum(wn * (x - mu) ** 2) / denom if denom > 0 else np.nan
-
-
-def _psth_diag(s, t, sw, n_boot=20, seed=0):
-    """Split-half PSTH variance (one cell) with sample weights sw, pair-count time bins."""
-    rng = np.random.default_rng(seed)
-    time_bins = [u for u in np.unique(t) if (t == u).sum() >= MIN_TPP]
-    if len(time_bins) < 2:
-        return np.nan
-    idx = {u: np.where(t == u)[0] for u in time_bins}
-    nt = np.array([len(idx[u]) for u in time_bins], float)
-    wph = nt * (nt - 1) / 2
-    wph /= wph.sum()
-    acc = 0.0
-    for _ in range(n_boot):
-        A, B = [], []
-        for u in time_bins:
-            ix = rng.permutation(idx[u]); m = len(ix) // 2
-            wa, wb = sw[ix[:m]], sw[ix[m:]]
-            A.append(np.average(s[ix[:m]], weights=wa))
-            B.append(np.average(s[ix[m:]], weights=wb))
-        A, B = np.array(A), np.array(B)
-        acc += np.sum(wph * (A - np.average(A, weights=wph)) *
-                      (B - np.average(B, weights=wph)))
-    return acc / n_boot
+    return dict(
+        naive=oma["naive"], full=oma["full"], central=oma["central"],
+        fano_naive=fano["naive"], fano_full=fano["full"],
+        good=good, subj=np.array([rec["subject"]] * C),
+        _n_pairs=int(w["n_close_pairs"]), _n_windows=int(w["n_samples"]),
+    )
 
 
 def compute():
-    data = load_fig4_data()
-    pooled = {k: [] for k in ("naive", "full", "central", "fano_naive",
-                              "fano_full", "good", "subj")}
-    for sr in data["session_results"]:
-        ccmax = np.asarray(sr["ccmax"]); good = ccmax > CCMAX_THRESHOLD
-        if good.sum() < 2:
-            continue
-        r = _percell_session(sr["robs_used"], sr["eyepos_used"],
-                             sr["valid_mask"], sr["dfs_used"])
-        for k in ("naive", "full", "central", "fano_naive", "fano_full"):
+    sessions = load_cache()
+    keys = ("naive", "full", "central", "fano_naive", "fano_full", "good", "subj")
+    pooled = {k: [] for k in keys}
+    n_sess = 0
+    for rec in sessions:
+        r = run_session(rec)
+        for k in keys:
             pooled[k].append(r[k])
-        pooled["good"].append(good)
-        pooled["subj"].append(np.array([sr["subject"]] * len(good)))
-        print(f"  {sr['session']:22s} good={good.sum():3d} "
-              f"naive={np.nanmedian(r['naive'][good]):.3f} "
-              f"full={np.nanmedian(r['full'][good]):.3f} "
-              f"central={np.nanmedian(r['central'][good]):.3f}")
-    return {k: np.concatenate(v) for k, v in pooled.items()}
+        n_sess += 1
+        g = r["good"]
+        print(f"  {rec['session']:22s} good={g.sum():3d}/{len(g):3d} "
+              f"win={r['_n_windows']:4d} pairs={r['_n_pairs']:6d} "
+              f"naive={np.nanmedian(r['naive'][g]):.3f} "
+              f"full={np.nanmedian(r['full'][g]):.3f} "
+              f"central={np.nanmedian(r['central'][g]):.3f}")
+    out = {k: np.concatenate(v) for k, v in pooled.items()}
+    out["schema_version"] = SCHEMA_VERSION
+    out["n_sessions"] = n_sess
+    return out
 
+
+# ---------------------------------------------------------------------------
+# Report
+# ---------------------------------------------------------------------------
 
 def report(res):
     g = res["good"]
-    print("\n=== pooled good cells (n=%d) ===" % g.sum())
+    subj = res["subj"][g]
+    n_subj = len(np.unique(subj))
+    print(f"\n=== pooled fig2-good cells "
+          f"(n={int(g.sum())}, {n_subj} monkeys, {res['n_sessions']} sessions) ===")
     for k in ("naive", "full", "central"):
-        print(f"  1-alpha {k:8s}: median {np.nanmedian(res[k][g]):.3f}")
+        v = res[k][g]
+        print(f"  1-alpha {k:8s}: median {np.nanmedian(v):.3f}  "
+              f"(n_finite={np.isfinite(v).sum()})")
     shift = res["naive"][g] - res["full"][g]
     gap = np.abs(res["full"][g] - res["central"][g])
-    print(f"  naive - full (Direction 1 shift): median {np.nanmedian(shift):+.3f}")
-    print(f"  |full - central| gap (non-homogeneity): median {np.nanmedian(gap):.3f}")
-    print(f"  Fano naive median {np.nanmedian(res['fano_naive'][g]):.3f}, "
-          f"full median {np.nanmedian(res['fano_full'][g]):.3f}")
+    print(f"  naive - full (Direction-1 shift): median {np.nanmedian(shift):+.3f}")
+    print(f"  |full - central| gap            : median {np.nanmedian(gap):.3f}  "
+          f"(p90 {np.nanpercentile(gap, 90):.3f})")
+    fn, ff = res["fano_naive"][g], res["fano_full"][g]
+    print(f"  Fano naive median {np.nanmedian(fn):.3f} -> "
+          f"full median {np.nanmedian(ff):.3f} "
+          f"(median per-cell shift {np.nanmedian(ff - fn):+.3f})")
+
+
+# ---------------------------------------------------------------------------
+# Figure 5 -- 2 rows x 3 columns
+# ---------------------------------------------------------------------------
+
+def _scatter(ax, x, y, color, xlabel, ylabel, title, lim=(0, 1)):
+    ax.plot(lim, lim, color=C_TRUTH, lw=0.8, ls="--", zorder=1)
+    ok = np.isfinite(x) & np.isfinite(y)
+    ax.scatter(x[ok], y[ok], s=9, color=color, alpha=0.45, lw=0, zorder=2)
+    med = np.nanmedian(y[ok] - x[ok])
+    ax.set_xlabel(xlabel); ax.set_ylabel(ylabel); ax.set_title(title)
+    ax.set_xlim(*lim); ax.set_ylim(*lim); ax.set_aspect("equal")
+    ax.text(0.04, 0.96, f"$\\Delta$median {med:+.3f}\n$n={int(ok.sum())}$",
+            transform=ax.transAxes, va="top", ha="left", fontsize=7,
+            color=C_TRUTH)
 
 
 def make_figure(res):
     configure()
     g = res["good"]
-    fig, axes = plt.subplots(1, 3, figsize=(10.5, 3.3))
+    naive, full, central = res["naive"][g], res["full"][g], res["central"][g]
+    fano_n, fano_f = res["fano_naive"][g], res["fano_full"][g]
+    gap = np.abs(full - central)
 
-    ax = axes[0]
-    ax.plot([0, 1], [0, 1], color=C_TRUTH, lw=0.8, ls="--")
-    ax.scatter(res["naive"][g], res["full"][g], s=10, color=C_FULL, alpha=0.5,
-               label="Direction 1 (full, $p$)")
-    ax.scatter(res["naive"][g], res["central"][g], s=10, color=C_CLOSE, alpha=0.5,
-               marker="s", label="Direction 2 (central, $p^2$)")
-    ax.set_xlabel(r"naive $1-\alpha$"); ax.set_ylabel(r"matched $1-\alpha$")
-    ax.set_title("A  real spikes: naive vs matched"); ax.set_xlim(0, 1); ax.set_ylim(0, 1)
-    ax.set_aspect("equal"); ax.legend(fontsize=7, loc="upper left")
+    fig, axes = plt.subplots(2, 3, figsize=(11.5, 7.2))
 
-    ax = axes[1]
-    gap = np.abs(res["full"][g] - res["central"][g])
-    ax.hist(gap[np.isfinite(gap)], bins=np.linspace(0, 0.5, 30), color="#8e44ad", alpha=0.8)
-    ax.axvline(np.nanmedian(gap), color=C_TRUTH, ls="--",
-               label=f"median {np.nanmedian(gap):.3f}")
+    # --- top row: all three pairwise combinations of naive / central / full ---
+    _scatter(axes[0, 0], naive, full, C_FULL,
+             r"naive $1-\alpha$", r"full ($p$) $1-\alpha$",
+             "A  naive vs full (Direction 1)")
+    _scatter(axes[0, 1], naive, central, C_CLOSE,
+             r"naive $1-\alpha$", r"central ($p^2$) $1-\alpha$",
+             "B  naive vs central (Direction 2)")
+    _scatter(axes[0, 2], full, central, C_GAP,
+             r"full ($p$) $1-\alpha$", r"central ($p^2$) $1-\alpha$",
+             "C  full vs central")
+
+    # --- bottom-left: the headline distribution -- full (p) 1-alpha -----------
+    ax = axes[1, 0]
+    vals = full[np.isfinite(full)]
+    ax.hist(vals, bins=np.linspace(0, 1, 30), color=C_FULL, alpha=0.85)
+    ax.axvline(np.median(vals), color=C_TRUTH, ls="--",
+               label=f"median {np.median(vals):.3f}")
+    ax.set_xlabel(r"full ($p$) $1-\alpha$"); ax.set_ylabel("cell count")
+    ax.set_title(r"D  FEM fraction $1-\alpha$ (Direction 1)")
+    ax.legend(fontsize=8)
+
+    # --- bottom-middle: non-homogeneity gap -----------------------------------
+    ax = axes[1, 1]
+    gv = gap[np.isfinite(gap)]
+    ax.hist(gv, bins=np.linspace(0, 0.5, 30), color=C_GAP, alpha=0.85)
+    ax.axvline(np.median(gv), color=C_TRUTH, ls="--",
+               label=f"median {np.median(gv):.3f}")
     ax.set_xlabel(r"$|(1-\alpha)_{\rm full}-(1-\alpha)_{\rm central}|$")
     ax.set_ylabel("cell count")
-    ax.set_title("B  non-homogeneity gap (real)"); ax.legend(fontsize=7)
+    ax.set_title("E  fixation-scale structure gap")
+    ax.legend(fontsize=8)
 
-    ax = axes[2]
-    lim = (0.5, 2.0)
+    # --- bottom-right: Fano shift ---------------------------------------------
+    ax = axes[1, 2]
+    lim = (0.2, 1.8)
     ax.plot(lim, lim, color=C_TRUTH, lw=0.8, ls="--")
-    ax.scatter(res["fano_naive"][g], res["fano_full"][g], s=10, color=C_FULL, alpha=0.5)
-    ax.set_xlabel("naive Fano"); ax.set_ylabel("matched (full) Fano")
-    ax.set_title("C  Fano shift (real spikes)")
+    ok = np.isfinite(fano_n) & np.isfinite(fano_f)
+    ax.scatter(fano_n[ok], fano_f[ok], s=9, color=C_FULL, alpha=0.45, lw=0)
+    ax.set_xlabel("naive Fano"); ax.set_ylabel(r"matched (full, $p$) Fano")
+    ax.set_title("F  Fano shift")
     ax.set_xlim(*lim); ax.set_ylim(*lim); ax.set_aspect("equal")
+    ax.text(0.04, 0.96,
+            f"median {np.nanmedian(fano_n[ok]):.3f}$\\to${np.nanmedian(fano_f[ok]):.3f}",
+            transform=ax.transAxes, va="top", ha="left", fontsize=7, color=C_TRUTH)
 
     fig.tight_layout()
     save(fig, "fig_realdata.png")
@@ -212,6 +244,12 @@ def main():
     if CACHE.exists() and not args.recompute:
         with open(CACHE, "rb") as f:
             res = dill.load(f)
+        if res.get("schema_version") != SCHEMA_VERSION:
+            print(f"cache schema {res.get('schema_version')} != {SCHEMA_VERSION}; "
+                  "recomputing")
+            res = compute()
+            with open(CACHE, "wb") as f:
+                dill.dump(res, f)
     else:
         res = compute()
         with open(CACHE, "wb") as f:

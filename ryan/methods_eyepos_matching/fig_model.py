@@ -32,7 +32,7 @@ from _style import configure, save, C_FULL, C_CLOSE, C_TRUTH
 SIG = 0.15        # fixational spread (deg)
 TAU = 1.0
 MU0 = 6.0
-ELL_M = 0.6 * SIG       # default mask length scale (synthetic._default_sigma_M)
+ELL_M = 1.0 * SIG       # default mask length scale (synthetic._default_sigma_M)
 ELL_VIS = 0.5 * SIG     # smaller field length scale -> visible structure
 
 GRID_LIM = 3.0 * SIG    # heatmap extent: +- 3 sigma

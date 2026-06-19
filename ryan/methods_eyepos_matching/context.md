@@ -37,9 +37,9 @@ sentence the §4.3 reframe targets).
 
 | file | role |
 |---|---|
-| `synthetic.py` | Unified rate-field generator + closed-form ground truth (all three masks close analytically). `make_trajectory_session` is the §4.4 multi-bin extension (centroid + per-bin drift). |
-| `estimators.py` | `decompose(target=…)` — single-bin §4.2 matched estimator. `decompose_trajectory(target=…)` — §4.4 multi-bin extension with RMS-trajectory close-pair filter and pooled-per-bin KDE reweighting. |
-| `test_estimators.py` | 24 tests: 12 single-bin Ext-2 + 3 sanity + Appendix §A.9 T-floor + 4 §4.4 trajectory-mode tests + 2 trial_count direction tests + 1 additive-vs-multiplicative cross-cell bias (§3). |
+| `synthetic.py` | Unified rate-field generator + closed-form ground truth (all three masks close analytically). GP field sampled via eigendecomposition (`_draw_field_at`, stable for dense/smooth covariances). `make_trajectory_session` is the trajectory-mode TEST fixture (centroid + per-bin drift); its σ_drift sweep / σ_traj `traj_truth` are deprecated (writeup no longer references them). |
+| `estimators.py` | `decompose(target=…)` — single-bin §4.2 matched estimator. `decompose_trajectory(target=…, reduction=…)` — §4.4 multi-bin extension: RMS-trajectory close-pair filter + reduce each trajectory to one representative point (`_geometric_median`, default; or `centroid`) + ONE KDE on those points reusing the §4.2 weights (p² implied; no separate close-pair KDE). |
+| `test_estimators.py` | 27 tests: 12 single-bin Ext-2 + 3 sanity + Appendix §A.9 T-floor + trajectory-mode tests (2 `_geometric_median` unit, flat-limit recovery, geomedian recovery at realistic drift, geomedian≈centroid in flat regime, naive-biased) + 1 `_draw_field_at` coincident-point eigendecomposition test + 2 trial_count direction tests + 1 additive-vs-multiplicative cross-cell bias (§3). |
 | `_style.py` | Shared matplotlib style + `figures/` save helper. |
 | `fig_model.py` | Visual schematic of the unified generative model components (eye dist, GP field, masks, envelope, resulting rate). Inserted at top of writeup §2.3. |
 | `fig_mechanism.py` | Geometric origin of p vs p² mismatch + closed-form naive bias across masks (2-row Fig. 2: A/B top, C full-width flat/central/eccentric bars at σ_M=σ_e; flat ≈ no bias). Concludes writeup §4.1. |
@@ -50,7 +50,7 @@ sentence the §4.3 reframe targets).
 | `fig_consistency.py` | Appendix §A.9: parallel sweep over (N, T); SEM heatmap, clipping bias, T-floor. |
 | `consistency_sweep.npz` | Cached sweep results for fig_consistency (not committed). |
 | `fig_recovery.py` | Matched estimators recover analytical 1-α^p (full) / 1-α^{p²} (central) on central+eccentric across an ℓ/σ sweep; naive biased off both (Fig. 3, σ_M=σ_e, N=800). Concludes writeup §4.2. Replaced the old fig_naive_failure.py + fig_correction.py (deleted 2026-06-18). |
-| `fig_trajectory.py` | §4.4 multi-bin extension: KDE snapshots (A-D) + σ_drift sweep validation (E). Fig. 4. |
+| `fig_trajectory.py` | §4.4 multi-bin extension validated on REAL eye traces (Fig. 4): A real within-window flatness + example windows; B ℓ/σ recovery (D1→1-α^p, D2→1-α^p², naive biased) with synthetic rates on real eye windows, truth evaluated non-parametrically over the real eye sample; C geomedian-vs-centroid divergence confined to the microsaccade tail. Replaces the old synthetic σ_drift sweep. |
 | `generate_realdata.py` | Cache-only real-data driver (do NOT recompute). Single-bin close-pair filter (see §4.5 caveat re: §4.4). Saves Fig. 5 (writeup §4.5). |
 | `realdata_results.pkl` | 397-cell cache; reused as-is by `fig_realdata.png` reference (now Fig. 5). |
 | `figures/` | All generated PNGs. |
@@ -223,15 +223,26 @@ estimators agree within bootstrap noise at our (N, T, C) scales.
    than the raw bin count. The within-stimulus-frame reliability question is
    a future direction.
 
-3. **§4.4 multi-bin trajectory extension — DONE.** Added
-   `decompose_trajectory` (RMS-trajectory close-pair filter + two
-   pooled-per-bin KDEs evaluated at the trajectory centroid) and
-   `make_trajectory_session` (centroid + i.i.d. per-bin drift synthetic).
-   Mathematically exact in the flat-trajectory limit; degrades smoothly with
-   σ_drift/σ. Validated by `fig_trajectory.py` and 4 new tests. This is the
-   production-setting bridge: when `note_pipeline.md` §6.2 lands, the same target arg selects
-   the same three behaviours, with the trajectory density replaced by two
-   2-D centroid-evaluated KDEs (no curse of dimensionality).
+3. **§4.4 multi-bin trajectory extension — DONE (single-point reduction,
+   real-eye validation; 2026-06-18 rework).** `decompose_trajectory` reduces
+   each trajectory to one representative point (`_geometric_median`, robust to
+   within-window microsaccades; `reduction='centroid'` optional) and fits ONE
+   KDE on those points, reusing the §4.2 single-bin weights (p² implied by p̂;
+   no separate close-pair KDE, no ℝ^{2T} density). RMS-trajectory close-pair
+   filter kept. Exact in the flat-trajectory limit; the small-drift residual is
+   validated **on real eye traces** (`fig_trajectory.py`): synthetic rates on
+   real `fixRSVP` eye windows, truth evaluated non-parametrically over the real
+   eye sample (p over representative points, p² over their close-pair
+   midpoints). Real windows are nearly flat (median within-window drift
+   ≈0.07σ_e); reductions diverge only in a ~16% microsaccade tail. D1 recovers
+   1-α^p, D2 recovers 1-α^p² with small bias over ℓ/σ∈[0.5,1.5]; naive biased.
+   The old synthetic σ_drift sweep + σ_traj closed-form truth are deprecated
+   (kept in `make_trajectory_session` for tests, removed from the writeup).
+   **Fixed a real bug**: `_draw_field_at` used Cholesky+growing-jitter, which
+   on dense/smooth covariances injected diagonal noise that decorrelated close
+   pairs and inflated 1-α; now eigendecomposition sampling (variance- and
+   coincident-point-preserving). `pipeline.py`/`note_pipeline.md` §7 synced to
+   the same single-point reduction.
 
 4. **Methods-folder parallel pipeline — DONE (now `note_pipeline.md` §7).** A CPU-parallel
    reimplementation of the entire Figure-2 LOTC pipeline lives in

@@ -487,7 +487,13 @@ def _pooled_per_bin_kde(per_bin_positions):
     Scott's-rule default on the *pooled* point count: within-trajectory
     correlation means the effective sample size is < N*T, so this slightly
     under-smooths in dense regions. Practical impact is small at the per-bin
-    drift / centroid spread ratios typical for fixational data (writeup §4.6).
+    drift / centroid spread ratios typical for fixational data.
+
+    DEPRECATED for the §4.4 estimator: ``decompose_trajectory`` now reduces each
+    trajectory to a single representative point and fits ONE KDE on those points
+    (the §4.2 construction), so the separate close-pair-midpoint KDE this helper
+    used to supply is no longer used there. Retained because ``pipeline.py``'s
+    legacy-compat Crate still imports it; see note_pipeline.md.
     """
     E = np.asarray(per_bin_positions, dtype=float).reshape(-1, 2)
     finite = np.isfinite(E).all(axis=1)
@@ -496,29 +502,56 @@ def _pooled_per_bin_kde(per_bin_positions):
     return lambda X: kde(np.asarray(X, dtype=float).reshape(-1, 2).T)
 
 
+def _geometric_median(points, n_iter=128, eps=1e-10, tol=1e-9):
+    """Geometric median (L1 multivariate median) of a point set, by Weiszfeld.
+
+    Reduces over the second-to-last axis: ``points`` of shape ``(..., M, 2)``
+    returns ``(..., 2)``. The geometric median minimises ``sum_m ||x - p_m||``,
+    so a brief within-window microsaccade -- a few bins far from the fixation
+    cluster -- leaves it inside the cluster, whereas the centroid (which
+    minimises the *squared* distance) is dragged toward the excursion. This is
+    the robust single-point reduction used by ``decompose_trajectory`` (§4.4).
+
+    Distances are floored at ``eps`` so the iteration is stable when an iterate
+    lands on a data point (the >50%-mass degenerate case converges to that
+    point, which is the correct geometric median there).
+    """
+    P = np.asarray(points, dtype=float)
+    x = P.mean(axis=-2)                                   # (..., 2) Weiszfeld init
+    for _ in range(n_iter):
+        diff = P - x[..., None, :]                        # (..., M, 2)
+        d = np.maximum(np.sqrt((diff ** 2).sum(-1)), eps)  # (..., M)
+        w = 1.0 / d                                        # (..., M)
+        x_new = (w[..., None] * P).sum(-2) / w.sum(-1)[..., None]
+        if np.max(np.abs(x_new - x)) < tol:
+            x = x_new
+            break
+        x = x_new
+    return x
+
+
 def decompose_trajectory(counts, trajectories, T_idx, target="full",
                          valid=None, threshold=0.05, weight_clip=1e6,
                          n_boot=20, seed=42, min_trials_per_time_bin=10,
                          time_bin_weighting="pair_count",
-                         cpsth_method="mcfarland"):
-    """Trajectory-mode distribution-matched LOTC decomposition (writeup §4.6).
+                         cpsth_method="mcfarland",
+                         reduction="geometric_median"):
+    """Trajectory-mode distribution-matched LOTC decomposition (writeup §4.4).
 
     The multi-bin extension of :func:`decompose`. Each sample is a window of
     ``t_window`` contiguous bins of eye trajectory rather than a single
-    eye-position observation; close pairs are filtered by RMS trajectory
-    distance (matching ``VisionCore/covariance.py``); the importance-weight
-    density is estimated by two pooled-per-bin 2-D KDEs:
+    eye-position observation. The close-pair filter is the RMS trajectory
+    distance (matching ``VisionCore/covariance.py``), but the importance-weight
+    density is built by **reducing each trajectory to a single representative
+    2-D point** and fitting ONE KDE on those points -- the *exact* §4.2
+    single-bin construction, with ``p^2`` implied by ``p_hat`` (no separate
+    close-pair-midpoint KDE).
 
-      p_marg     = gaussian_kde over pooled per-bin positions of all samples
-      p_cp,marg  = gaussian_kde over pooled per-bin positions of close-pair
-                   *midpoint* trajectories (recipe (b) of writeup §4.6).
-
-    In the flat-trajectory limit (zero within-window drift) the ratio
-    p_cp,marg(e)/p_marg(e) collapses to the centroid density p_centroid(e), so
-    evaluating that ratio (or its inverse) at the trajectory centroid recovers
-    §4.4's importance weights exactly. For non-zero within-window drift the
-    ratio is a smoothed proxy for p_centroid, biased by an amount controlled
-    by sigma_drift / sigma_eye (validated empirically in fig_trajectory.py).
+    Within a fixation the eye is nearly stationary (fixational drift over a
+    t_hist+t_count window is small relative to the across-fixation spread), so
+    the trajectory collapses to its representative point and the reduction is
+    exact in the flat limit; for the small non-zero drift of real fixations it
+    is approximate, validated directly on real eye traces (fig_trajectory.py).
 
     Parameters
     ----------
@@ -529,18 +562,18 @@ def decompose_trajectory(counts, trajectories, T_idx, target="full",
     T_idx : ndarray (N,)
         Analysis time bin index per sample.
     target : {'naive', 'full', 'central'}
-        Eye distribution to match all terms to:
+        Eye distribution to match all terms to (the §4.2 single-bin construction
+        applied to the representative points rho_i, with KDE p_hat fit on rho):
           * 'naive'  : reproduce the unmatched estimator (no reweight).
-          * 'full'   : Direction 1, target = p_marg (the actual per-bin marginal).
-                       Per-pair weight at midpoint centroid c_mid:
-                       p_marg(c_mid) / p_cp,marg(c_mid)   (the inverse ratio;
-                       reduces to 1/p_centroid in the flat limit).
-                       Per-sample weight 1.
-          * 'central': Direction 2, target = p_cp,marg (the close-pair density).
-                       Per-sample weight at centroid c_i:
-                       p_cp,marg(c_i) / p_marg(c_i)       (the ratio;
-                       reduces to p_centroid in the flat limit).
-                       Per-pair weight 1.
+          * 'full'   : Direction 1, q = p. Per-pair weight ``1/p_hat(rho_mid)``
+                       at the midpoint of the two representative points; per-
+                       sample weight 1.
+          * 'central': Direction 2, q = p^2. Per-sample weight ``p_hat(rho_i)``;
+                       per-pair weight 1.
+    reduction : {'geometric_median', 'centroid'}
+        How to reduce each trajectory to its representative 2-D point. The
+        geometric median (default) is robust to within-window microsaccades;
+        the centroid is the plain per-bin mean (provided for comparison).
     valid : ndarray (N,) of bool, optional
         Sample-level validity mask; combined with finiteness.
     threshold : float
@@ -581,27 +614,27 @@ def decompose_trajectory(counts, trajectories, T_idx, target="full",
     S = counts[keep_mask]                                    # (N', C)
     Tr = trajectories[keep_mask]                             # (N', t_window, 2)
     T = T_idx[keep_mask]                                     # (N',)
-    centroids = Tr.mean(axis=1)                              # (N', 2)
     n_cells = S.shape[1]
 
-    # close pairs (RMS trajectory filter)
-    gi, gj, tpair, mid_traj = _rms_traj_close_pairs(Tr, T, threshold)
+    # Reduce each trajectory to one representative 2-D point rho_i, then the
+    # estimator is the §4.2 single-bin construction on {rho_i}: one KDE p_hat,
+    # with p^2 implied by p_hat (no separate close-pair KDE).
+    if reduction == "geometric_median":
+        rho = _geometric_median(Tr)                          # (N', 2)
+    elif reduction == "centroid":
+        rho = Tr.mean(axis=1)                                # (N', 2)
+    else:
+        raise ValueError(f"unknown reduction: {reduction!r}")
+    phat = _density_fn(rho, "kde")
+    p_rho = np.clip(phat(rho), 1e-12, None)                  # (N',)
+
+    # close pairs (RMS trajectory filter -- still the whole-window match)
+    gi, gj, tpair, _mid_traj = _rms_traj_close_pairs(Tr, T, threshold)
     n_pairs = len(gi)
 
-    # densities
-    p_marg = _pooled_per_bin_kde(Tr.reshape(-1, 2))
-    if n_pairs > 0:
-        p_cp_marg = _pooled_per_bin_kde(mid_traj.reshape(-1, 2))
-    else:
-        p_cp_marg = None
-
-    # per-sample target weight (centroid-evaluated)
-    p_marg_c = np.clip(p_marg(centroids), 1e-12, None)
+    # per-sample target weight (representative-point-evaluated, as in §4.2)
     if target == "central":
-        if p_cp_marg is None:
-            return _nan_decompose(n_cells, len(T), N, n_pairs)
-        ratio_samp = np.clip(p_cp_marg(centroids), 1e-12, None) / p_marg_c
-        tw = ratio_samp
+        tw = p_rho.copy()
     elif target in ("naive", "full"):
         tw = np.ones(len(S))
     else:
@@ -635,9 +668,9 @@ def decompose_trajectory(counts, trajectories, T_idx, target="full",
     # is the same M6 algebraic trick, just evaluated on centred inputs.
     S_c = S - Erate[None, :]
 
-    # Cpsth: McFarland M6 / split-half, with trajectory-centroid w_trial
+    # Cpsth: McFarland M6 / split-half, with representative-point w_trial
     if target == "central":
-        w_trial = ratio_samp.copy()
+        w_trial = p_rho.copy()
     else:
         w_trial = np.ones(len(S))
 
@@ -652,15 +685,14 @@ def decompose_trajectory(counts, trajectories, T_idx, target="full",
         raise ValueError(f"unknown cpsth_method: {cpsth_method!r}")
 
     # Crate: close-pair (centred) cross-product with target-importance weight
-    # at the midpoint trajectory centroid.
+    # at the midpoint of the two representative points (the §4.2 close-pair
+    # midpoint weight 1/p_hat, exactly).
     if n_pairs == 0:
         Crate = np.full((n_cells, n_cells), np.nan)
     else:
-        mid_centroids = mid_traj.mean(axis=1)                        # (P, 2)
+        rho_mid = 0.5 * (rho[gi] + rho[gj])                          # (P, 2)
         if target == "full":
-            num = np.clip(p_marg(mid_centroids), 1e-12, None)
-            den = np.clip(p_cp_marg(mid_centroids), 1e-12, None)
-            pw_q = num / den
+            pw_q = 1.0 / np.clip(phat(rho_mid), 1e-12, None)
             pw_q = np.clip(pw_q, None, weight_clip * np.median(pw_q))
         else:                                                        # naive / central
             pw_q = np.ones(n_pairs)

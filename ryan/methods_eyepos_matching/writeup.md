@@ -928,9 +928,8 @@ it is not a clean test of (A2).
 ## 4.4 Multi-bin eye trajectories: the production-setting extension
 
 §4.2 framed the close-pair filter as a single-bin condition
-$\lvert e_i-e_j\rvert<\varepsilon$ — and the §4.5 real-data analysis honours
-that framing by using the eye position at one analysis time bin per sample.
-The production covariance pipeline
+$\lvert e_i-e_j\rvert<\varepsilon$, on the eye position at one analysis time bin
+per sample. The production covariance pipeline
 (`VisionCore/covariance.py::compute_eye_distances`) instead works on
 **$T$-bin trajectories**: each sample $i$ carries an eye trajectory
 $\tau_i = (e_{i,1},\ldots,e_{i,T})$ over a window of $T = t_{\mathrm{hist}}+t_{\mathrm{count}}$
@@ -952,237 +951,252 @@ This breaks the §4.2 importance-weight construction as written. The close-pair
 density now lives on $\mathbb R^{2T}$ — the trajectory density $p(\tau)$
 squared, restricted to $\lVert\tau_i-\tau_j\rVert_{\mathrm{RMS}}<\varepsilon$ — and
 fitting a density in $\mathbb R^{2T}$ for typical $T\in[10,30]$ is the curse of
-dimensionality. We *cannot* simply lift the §4.5 single-bin KDE to the
+dimensionality. We *cannot* simply lift the §4.2 single-bin KDE to the
 trajectory and call it done.
 
-**Our extension.** Build the importance weight from two 2-D KDEs:
+**Our extension.** Within a fixation the eye is nearly stationary — fixational
+drift over a $t_{\mathrm{hist}}+t_{\mathrm{count}}$ window is small relative to
+the across-fixation spread ($\sigma_{\mathrm{drift}}\ll\sigma_e$; Fig. 4A) — so we
+**reduce each trajectory to a single representative 2-D point** and recover the
+single-bin §4.2 estimator exactly. We take the representative point to be the
+**geometric median** of the window's per-bin positions,
 
 $$
-\hat p_{\mathrm{marg}}(e)\,=\,\mathrm{KDE}\big(\{e_{i,t}\}_{i=1\dots N,\,t=1\dots T}\big),
-\qquad
-\hat p_{cp,\mathrm{marg}}(e)\,=\,\mathrm{KDE}\big(\{m_{k,t}\}_{k=1\dots P,\,t=1\dots T}\big)
+\rho_i \;=\; \arg\min_{x\in\mathbb R^2}\ \sum_{t=1}^{T}\big\lVert x-e_{i,t}\big\rVert ,
 \tag{18}
 $$
 
-where $\hat p_{\mathrm{marg}}$ pools per-bin positions across *all* samples and
-$\hat p_{cp,\mathrm{marg}}$ pools per-bin positions of the *close-pair midpoint
-trajectories* $m_k=\tfrac12(\tau_i+\tau_j)$ (one midpoint trajectory per close
-pair $k$, contributing $T$ per-bin positions to the pool). The §4.2 importance
-weights are then evaluated at each trajectory's **centroid**
-$c_i=\tfrac1T\sum_t e_{i,t}$:
+which, unlike the centroid, is robust to the occasional within-window
+microsaccade: a brief excursion drags the mean toward the saccade endpoint but
+leaves the median in the fixation cluster (Fig. 4A, C). With each trajectory
+reduced to $\rho_i$ the problem is *exactly* §4.2 — fit one KDE $\hat p$ on
+$\{\rho_i\}$ and apply the §4.2 importance weights:
 
-| target | per-sample weight at $c_i$ | per-pair weight at $c_{\mathrm{mid}}=\tfrac12(c_i+c_j)$ |
+| target | per-sample weight at $\rho_i$ | per-pair weight at $\rho_{\mathrm{mid}}=\tfrac12(\rho_i+\rho_j)$ |
 |---|---|---|
-| **Direction 1** (`full`) | $1$ | $\hat p_{\mathrm{marg}}(c_{\mathrm{mid}})\,/\,\hat p_{cp,\mathrm{marg}}(c_{\mathrm{mid}})$ |
-| **Direction 2** (`central`) | $\hat p_{cp,\mathrm{marg}}(c_i)\,/\,\hat p_{\mathrm{marg}}(c_i)$ | $1$ |
+| **Direction 1** (`full`) | $1$ | $1/\hat p(\rho_{\mathrm{mid}})$ |
+| **Direction 2** (`central`) | $\hat p(\rho_i)$ | $1$ |
 | naive | $1$ | $1$ |
 
-(`estimators.decompose_trajectory`).
+(`estimators.decompose_trajectory`, `reduction='geometric_median'`). The
+close-pair filter remains the whole-trajectory RMS distance (17) — two trials
+are "close" only when their entire windows match — but the importance density is
+built from the reduced points, so the separate close-pair KDE is unnecessary:
+$p^2$ is implied by $\hat p$ exactly as in §4.2 (no density estimate in
+$\mathbb R^{2T}$, sidestepping the curse of dimensionality).
 
-**Why this works in the flat-trajectory limit.** Decompose
-$e_{i,t}=c_i+\xi_{i,t}$ with $\xi_{i,t}\sim\mathcal N(0,\sigma_{\mathrm{drift}}^2 I)$
-i.i.d. across $t$ and centroid $c_i\sim p_{\mathrm{centroid}}$. As
-$\sigma_{\mathrm{drift}}\to 0$ the trajectory collapses to its centroid, so
+In the exactly-flat limit ($\sigma_{\mathrm{drift}}\to 0$) the trajectory
+collapses to its representative point, the reduction is exact, and Directions 1
+and 2 recover $1-\alpha^p$ and $1-\alpha^{p^2}$ as in §4.2. For the small but
+non-zero drift of real fixations the reduction is approximate; rather than bound
+the residual on a synthetic drift model, we measure it directly on **real
+fixational eye traces**.
 
-$$
-\hat p_{\mathrm{marg}}(e) \;\to\; p_{\mathrm{centroid}}(e),
-\qquad
-\hat p_{cp,\mathrm{marg}}(e) \;\propto\; p_{\mathrm{centroid}}(e)^2
-\tag{19}
-$$
+**Validation on real eye statistics (Fig. 4).** We pool
+$t_{\mathrm{hist}}+t_{\mathrm{count}}$-bin eye-trajectory windows from the 25 real
+`fixRSVP` sessions (`cache/aligned_sessions.pkl`) and carry a synthetic rate
+field (9) on top, so the eye statistics are real while the ground truth is
+known. The truth is evaluated *non-parametrically* over the realized eye sample,
+with no Gaussian assumption: $1-\alpha^p$ from the field moments (10) over the
+empirical measure of the representative points $\{\rho_i\}$, and
+$1-\alpha^{p^2}$ over the empirical measure of close-pair midpoints of
+$\{\rho_i\}$ (a direct draw from the close-pair density $p^2$). Real fixational
+windows are nearly flat — the within-window RMS drift has median
+$\approx 0.07\,\sigma_e$ (Fig. 4A) — so the reduction is an excellent
+approximation. We use the geometric median rather than the centroid because it
+tracks the majority of the window's per-bin positions: when a window happens to
+contain a microsaccade it stays in the fixation cluster, whereas the centroid is
+pulled toward the excursion (Fig. 4B). Across the physiologically relevant range
+$\ell/\sigma_e\in[0.5,1.5]$ (real cells sit near $\ell/\sigma_e\approx 0.9$),
+Direction 1 recovers $1-\alpha^p$ and Direction 2 recovers $1-\alpha^{p^2}$ with
+small bias on both the homogeneous (`flat`) and non-homogeneous (`central`)
+masks (Fig. 4C).
 
-(the latter because in the flat limit $p_{cp}(\tau)\propto p(\tau)^2$ is
-supported on constant trajectories with weight $p_{\mathrm{centroid}}(c)^2$, and
-pooling per-bin positions across midpoint trajectories collapses to a single
-$p_{\mathrm{centroid}}^2$ KDE). The ratio $\hat p_{cp,\mathrm{marg}}/\hat p_{\mathrm{marg}}$
-at the centroid then collapses to $p_{\mathrm{centroid}}(c)$ up to a normalising
-constant, and the table above recovers §4.2's Direction 1 pair weight
-$1/p_{\mathrm{centroid}}(c)$ and Direction 2 sample weight $\propto p_{\mathrm{centroid}}(c)$
-exactly. Self-normalisation absorbs the normalising constant in numerator and
-denominator.
+![**Figure 4 — The trajectory-mode estimator validated on real fixational eye
+statistics.** Synthetic rate fields (9) carried on real `fixRSVP`
+eye-trajectory windows (25 sessions); ground truth evaluated non-parametrically
+over the realized eye sample. **(A)** Within-window RMS drift relative to the
+across-fixation spread $\sigma_e$: real trajectories are nearly flat (median
+$\approx 0.07\,\sigma_e$); the arrows (colour-matched to B) mark where the two
+example windows fall. **(B)** The two example windows — a pure fixation and one
+containing a microsaccade. The geometric median ($\bigstar$) tracks the majority
+of the per-bin positions (the fixation cluster); the centroid ($\times$) is
+pulled toward the microsaccade excursion — which is why the reduction uses the
+geometric median. **(C)** Recovery across an $\ell/\sigma_e$ sweep for `flat`
+and `central` masks (`central` at $\sigma_M=\sigma_e$, as in Figs. 2–3):
+Direction 1 (`full`, blue) tracks the empirical
+$1-\alpha^p$ and Direction 2 (`central`, red) tracks $1-\alpha^{p^2}$. Lines are
+the non-parametric truth, markers the matched-estimator mean $\pm$ sd; solid
+line / circles = `flat`, dashed line / squares = `central`.](figures/fig_trajectory.png)
 
-**The flat-trajectory approximation.** For $\sigma_{\mathrm{drift}}>0$ the
-estimator targets the *per-bin marginal* $p_{\mathrm{pb}}(e)=p_{\mathrm{centroid}}*\phi_{\sigma_{\mathrm{drift}}}(e)$
-— a Gaussian-smoothed version of the centroid distribution. The "actual viewing
-distribution" the estimator aims at is therefore $\mathcal N(0,\sigma_{\mathrm{traj}}^2 I)$
-with $\sigma_{\mathrm{traj}}^2=\sigma_e^2+\sigma_{\mathrm{drift}}^2$, and the truth to
-compare against is §4.2's closed form at $\sigma_{\mathrm{traj}}$
-(`synthetic.ground_truth(kind, sqrt(sigma_e^2+sigma_drift^2), ell, sigma_M=sigma_M)`). The
-construction is *exact* in expectation in the flat limit; for non-zero drift
-the residual comes from two sources:
+This trajectory-mode estimator — validated here on real eye statistics with a
+known synthetic ground truth — is exactly the one §4.5 turns on the **real
+spikes**: same `target ∈ {'naive','full','central'}` parameter, same
+geometric-median reduction, same single KDE, with the curse-of-dimensionality
+wall the multi-bin filter raises sidestepped by reducing each trajectory to its
+representative point. It is also the production-setting bridge: when the §6.2
+production change lands (`note_pipeline.md`) the same code path carries the
+correction into `VisionCore/covariance.py` without modification.
 
-1. **Centroid-vs-per-bin smoothing.** Evaluating the ratio at the trajectory
-   centroid (a single 2-D point) discards within-window drift; the ratio at
-   $c_i$ is biased by an amount that scales with $\sigma_{\mathrm{drift}}/\sigma_e$.
-2. **Threshold inflation.** Because $E[\lVert\tau_i-\tau_j\rVert^2_{\mathrm{RMS}}]
-   \approx d_{\mathrm{centroid}}^2 + 4\sigma_{\mathrm{drift}}^2$, the RMS-trajectory
-   threshold $\varepsilon$ must grow with $\sigma_{\mathrm{drift}}$ to admit any
-   close pairs at all; at large $\sigma_{\mathrm{drift}}$ the close-pair filter
-   loses selectivity and the central-region concentration of the close-pair
-   midpoint density weakens.
+## 4.5 Consequences on real data (`fixRSVP`)
 
-**Validation (Fig. 4).** A controlled synthetic with explicit
-$\sigma_{\mathrm{drift}}$ knob (`synthetic.make_trajectory_session`) shows the
-flat-limit recovery is sharp and the bias grows smoothly with
-$\sigma_{\mathrm{drift}}/\sigma_e$. At $\sigma_{\mathrm{drift}}/\sigma_e=0$ the corrected
-Directions 1 and 2 sit on their respective truths within seed noise (panel
-E); at $\sigma_{\mathrm{drift}}/\sigma_e\sim 0.2$ — comparable to the operating
-regime for fixational drift over a typical $t_{\mathrm{hist}}+t_{\mathrm{count}}$
-window — the bias is small; at $\sigma_{\mathrm{drift}}/\sigma_e\sim 1$ the
-trajectories are no longer "essentially flat" and the bias is visible but
-bounded. Panels B–D show the §4.1 mechanism reappearing in the multi-bin
-setting: $\hat p_{cp,\mathrm{marg}}$ is narrower than $\hat p_{\mathrm{marg}}$, and
-their ratio peaks at the centre — the close pairs over-represent the
-high-density region exactly as the single-bin §4.1 picture predicts.
-
-![**Figure 4 — The trajectory-mode estimator and its validation.** **(A)**
-Example trajectories ($\sigma_{\mathrm{drift}}=\sigma_e/4$) showing centroid scatter
-plus per-bin fixational drift. **(B)** $\hat p_{\mathrm{marg}}(e)$, the 2-D KDE
-fit on pooled per-bin positions of all samples. **(C)** $\hat p_{cp,\mathrm{marg}}(e)$,
-the 2-D KDE fit on per-bin positions of close-pair midpoint trajectories —
-narrower than (B), concentrated at the centre. **(D)** The ratio
-$\hat p_{cp,\mathrm{marg}}/\hat p_{\mathrm{marg}}$ — the §4.1 distribution mismatch in
-the multi-bin setting, peaking at the centre as expected. **(E)**
-$\sigma_{\mathrm{drift}}$ sweep on a `flat` mask: matched Directions 1 and 2 sit on
-their respective truths (dotted lines) in the flat limit; bias grows smoothly
-with $\sigma_{\mathrm{drift}}/\sigma_e$; naive over-states.](figures/fig_trajectory.png)
-
-The trajectory-mode estimator is the production-setting bridge for §4.5's
-single-bin analysis: when the §6.2 production change lands (`note_pipeline.md`),
-the same
-`target ∈ {'naive','full','central'}` parameter selects the same three
-behaviours; the §4.5 numbers are recovered as the
-$\sigma_{\mathrm{drift}}\to 0$, $T=1$ limit; and the curse-of-dimensionality wall
-that the multi-bin filter raised is sidestepped by replacing the trajectory
-density with two 2-D KDEs evaluated at the trajectory centroid.
-
-### A note on the centred close-pair second moment
-
-The implementation in `decompose_trajectory` computes the close-pair second
-moment on *centred* counts $S - \hat r$ instead of the usual uncentred
-$S_i S_j^\top$ followed by an $\hat r\hat r^\top$ subtraction. The motivation
-is numerical: when $\hat r \cdot t_\text{window}$ dominates the magnitude of
-$S$, the literal "second moment minus $\hat r\hat r^\top$" can be a
-catastrophic cancellation, whereas centring first turns each pair product
-into a small-times-small operation. This matters on the §4.4 synthetic
-validation, where $\hat r$ is a known constant and the precision argument is
-clean.
-
-The two forms are related by the identity
-
-$$\sum_{(i,j) \text{ close}} w_{ij}(S_i - \hat r)(S_j - \hat r)^\top
-  = \widehat{MM} - \hat r\,\bar Y_w^\top - \bar X_w\,\hat r^\top + \hat r\hat r^\top,$$
-
-where $\widehat{MM} = \sum w_{ij} S_i S_j^\top / \sum w_{ij}$ is the
-weighted close-pair second moment and $\bar X_w = \sum w_{ij} S_i / \sum w_{ij}$,
-$\bar Y_w = \sum w_{ij} S_j / \sum w_{ij}$ are the weighted close-pair-set
-sample means of the left and right cell. They collapse to the uncentred form
-$\widehat{MM} - \hat r\hat r^\top$ if and only if $\bar X_w = \bar Y_w = \hat r$ —
-that is, if the mean we subtract equals the close-pair-set sample mean.
-
-For the consistent targets (`full`, `central`) the importance reweighting
-makes $\bar X_w$ and $\hat r$ both estimate the same population quantity
-($\mathbb{E}_p[r]$ for full, $\mathbb{E}_{p^2}[r]$ for central) — but they
-remain **distinct estimators in finite samples**: $\hat r$ averages all
-samples under the per-sample weighting (low variance), while $\bar X_w$
-averages the close-pair subset under the per-pair weighting (noisier — the
-close-pair pool is sparse and the per-pair weights for `full` are a
-density-ratio that the KDE only estimates). The centred and uncentred forms
-therefore agree asymptotically (both consistent for $C_\text{rate}^q$) but
-differ in finite samples by an amount controlled by
-$\|\hat r - \bar X_w\|\,\|\hat r\|$. On the `note_pipeline.md` §7 real data this gap is
-non-negligible — e.g. at $t_\text{count}=2$ the median $1-\alpha_\text{full}$
-shifts from $0.71$ (centred) to $0.77$ (uncentred), and similarly for
-central.
-
-For the inconsistent target `naive` the gap is also non-zero, and for a
-different reason: $\hat r$ estimates $\mathbb{E}_p[r]$ while $\bar X_w$
-estimates $\mathbb{E}_{p^2}[r]$, so the two are not even equal in
-expectation. The centred and uncentred naive estimators are therefore two
-different inconsistent estimators of the §4.1 mixed quantity, with neither
-privileged.
-
-The `note_pipeline.md` §7 pipeline uses the **uncentred form for all three
-targets** for two reasons:
-
-  1. **§4.5 reference compatibility.** The cell-side single-bin analysis in
-     §4.5 (`generate_realdata.py`, Fig. 5) ran on the single-bin
-     `estimators.decompose`, which is uncentred. The `note_pipeline.md` §7
-     multi-cell, multi-window pipeline numbers must extend §4.5 rather than
-     redefine it, and this requires the same close-pair Crate semantic.
-  2. **`note_pipeline.md` §7.2 equivalence audit.** Legacy `compute_conditional_second_moments`
-     is uncentred, so `target='naive'` exact equivalence requires the
-     uncentred form.
-
-The centred form remains the default in
-`estimators.decompose_trajectory` because the §4.4 synthetic validation
-relies on its precision claim. Future work that promotes the trajectory-
-mode estimator to production should decide centred vs uncentred per
-target on its own finite-sample merits — the two are not interchangeable
-on real data even where both are consistent.
-
-## 4.5 Consequences on real data (`fixRSVP`, cache-only)
-
-We applied the matched estimator to the real `fixRSVP` recordings, cache-only
-(no GPU, no model inference; `generate_realdata.py` reads the Figure-4 cache
-of trial-aligned spikes and real eye trajectories). $1-\alpha$ and the Fano
-factor are computed on the real spikes with each cell's own validity mask
-(reproducing the Figure-2 per-cell $1-\alpha$ at the median); the
-eye-position density is a Gaussian KDE of the measured fixational positions.
-This implementation uses a *single-bin* close-pair filter (the eye position
-at one analysis time bin per sample), so the §4.2 importance weights apply
-without modification; the multi-bin trajectory extension required by the
-production filter (§4.4) is folded into the gated §6.2 pipeline change
-(`note_pipeline.md`).
-Pooled over **397 good cells** ($\mathrm{cc}_{\max}>0.85$, 2 monkeys, 24
-sessions):
+We close by turning the matched estimator on the real `fixRSVP` recordings.
+This is the payoff section, and it is built to be self-contained: the only input
+is `cache/aligned_sessions.pkl` (`data_loading.py`), the trial-aligned spikes
+and real eye trajectories for **every** session under the **Figure-2 inclusion
+criteria** (firing rate $>2$ Hz and split-half PSTH $r^2>0.05$; the exact cut of
+`compute_fig2_data`). There is no dependence on the model twin, no GPU, and no
+other component's cache — `generate_realdata.py` re-derives Figure 5 from the
+aligned arrays alone, through the same production code path as the §6 pipeline
+(`pipeline.decompose_session`). The estimator is the §4.4 **trajectory-mode**
+estimator applied to the real spikes without modification, using the
+$t_{\mathrm{hist}}/t_{\mathrm{count}}$ window split exactly as §4.4 describes:
+the close-pair match is on the whole $\approx 100$ ms ($12$-bin) eye-trajectory
+window — the neuron's integration context — reduced to its **geometric median**
+and filtered on the RMS trajectory distance (17), with a single KDE $\hat p$
+supplying the §4.2 importance weights ($p^2$ implied); the spike **count** that
+enters $C_{\text{total}}$, $C_{\text{rate}}$ and the Fano factor is the single
+$\approx 8$ ms ($t_{\mathrm{count}}=1$) bin at the end of that window. Keeping
+the count window small matters: $1-\alpha$ is a ratio of two rate variances and
+is stable across the counting timescale, but the Fano factor is a
+count-per-mean and is *not* — integrating the count over the whole trajectory
+window would silently change the timescale and inflate it. $1-\alpha$ and the
+Fano factor are computed per cell with the session's shared validity window, run
+one session at a time so no close pair is ever formed across sessions, then
+pooled. This is exactly the step from McFarland's homogeneous,
+translation-invariant use case to the general-purpose windowed stimulus of our
+dataset: the same three `target ∈ {'naive','full','central'}` behaviours, now on
+arbitrary fixational trajectories. Pooled over **1359 good cells** (2 monkeys,
+25 sessions):
 
 | quantity | naive | Direction 1 ($p$, `full`) | Direction 2 ($p^2$, `central`) |
 |---|---|---|---|
-| median $1-\alpha$ | **0.734** | 0.702 | 0.608 |
-| median Fano | 0.846 | 0.875 | — |
+| median $1-\alpha$ | 0.728 | **0.692** | 0.537 |
+| median Fano | 0.943 | 0.954 | — |
 
-- **The naive bias on population $1-\alpha$ is small.** The naive median
-  (0.734) reproduces the Figure-2 value (0.732) and lies only $+0.022$ above
-  the Direction-1-corrected value (0.702). On the actual-viewing target $p$,
+- **The headline: the reported results barely move.** On the actual-viewing
+  target $p$ — the scientifically correct one (§4.3) — the matched
+  $1-\alpha$ tracks the naive estimate cell-by-cell: the per-cell median shift
+  naive$\,\to\,$full is $+0.018$ (the matched value sits just below the naive
+  one), and the scatter clusters on the identity line (Fig. 5A). The naive
+  population median (0.728) reproduces the Figure-2 value ($\approx 0.73$). So
   the existing Figure-2 / Figure-4 panel-D $1-\alpha$ conclusions are
-  therefore **robust** to the (A2) distribution mismatch at the population
-  level — real V1 cells do not behave like the extreme synthetic
-  `central`/`eccentric` profiles, which suffer large biases.
-- **The gap measures fixation-scale spatial structure, and it is
-  measurable.** The gap between the two consistent targets,
-  $\lvert(1-\alpha)_{\text{full}} - (1-\alpha)_{\text{central}}\rvert$, has
-  a population **median of 0.089** with a tail beyond $0.3$ (Fig. 5B).
-  Under the unified random-field model the gap is non-zero under (A2)
-  itself when $\ell\sim\sigma_e$ (Eq. 16) — peaking at $\approx 0.17$ — so
-  gap $= 0.089$ is evidence that the cells' rate maps have spatial
-  structure on the fixation scale, which is *expected* for any cell with a
-  finite spatial RF, not necessarily that (A2) is violated. What the gap
-  *does* say is that the **choice** of eye-position distribution $D$
-  matters for the reported $1-\alpha$ at this scale: a $\pm 0.09$ swing
-  between Direction 1 and Direction 2 is the order of the
-  Direction-1-vs-naive bias we found above ($-0.022$).
-- **The Fano factor shifts modestly** under matching (median
-  $0.846\to0.875$, $+3\%$), consistent with the synthetic prediction that
-  the Fano factor inherits the rate-variance distribution mismatch;
-  per-cell shifts are larger.
+  **robust** to the (A2) distribution mismatch: real V1 cells do not behave
+  like the extreme synthetic `central`/`eccentric` profiles that suffer large
+  biases (§4.1). The full $1-\alpha$ distribution that the panel-D analysis
+  reports is Fig. 5D.
+- **But the estimator is now correct, not coincidentally close.** The naive
+  estimator was the inconsistent $p$-vs-$p^2$ mix of (13)–(14); it happened to
+  land near the consistent Direction-1 answer here only because real cells are
+  mild. The matched estimator pins every term to one distribution by
+  construction, so the agreement is now *guaranteed* to be a small, bounded
+  correction rather than an uncontrolled one — and the size of the
+  distribution-dependence is visible directly: pulling everything in to the
+  close-pair density $p^2$ (Direction 2) moves the population median down to
+  0.537 (Fig. 5B, C), $\approx 0.16$ below Direction 1.
+- **The gap measures fixation-scale spatial structure.** The per-cell gap
+  $\lvert(1-\alpha)_{\text{full}} - (1-\alpha)_{\text{central}}\rvert$ has a
+  population **median of 0.119** (90th percentile 0.354; Fig. 5E). Under the
+  unified random-field model the gap is non-zero under (A2) itself when
+  $\ell\sim\sigma_e$ (Eq. 16) — peaking at $\approx 0.17$ — so a gap of this
+  size is *expected* for any cell with a finite spatial RF, not evidence that
+  (A2) is violated. What it does say is that the **choice** of eye-position
+  distribution materially changes the reported $1-\alpha$ at the fixation
+  scale, which is exactly why a principled, consistent choice (Direction 1)
+  matters even though it leaves the headline number intact.
+- **The Fano factor stays sub-Poisson and barely shifts.** The FEM-corrected
+  Fano factor is $0.943$ naive $\to 0.954$ matched (Direction 1), a per-cell
+  median shift of $+0.011$ that leaves it comfortably below $1$ (Fig. 5F) — the
+  sub-Poisson regime the uncorrected Fano is reported in. The shift is
+  consistent with the synthetic prediction that the Fano factor inherits the
+  rate-variance distribution mismatch; per-cell shifts are larger than the
+  median.
 
-![**Figure 5 — The correction on real data (397 good cells, cache-only).**
-**(A)** $1-\alpha$ on real spikes: Direction 1 (blue) tracks the naive
-estimate closely (median shift $-0.022$), while Direction 2 (red) is
-systematically lower. **(B)** The full-vs-central gap — a measure of the
-rate's spatial structure on the fixation scale — has median $0.089$ with a
-heavy tail. **(C)** Fano
-factor: naive vs matched, a modest median shift with larger per-cell
-changes.](figures/fig_realdata.png)
+![**Figure 5 — The matched correction on real `fixRSVP` spikes (1359 good
+cells, 2 monkeys, 25 sessions; trajectory-mode, geometric-median reduction).**
+*Top row — the three pairwise comparisons of the naive and two matched
+$1-\alpha$ estimates.* **(A)** naive vs Direction 1 (`full`, target $p$): on the
+identity line (per-cell median shift $-0.018$) — matching to the actual viewing
+distribution leaves the reported $1-\alpha$ essentially unchanged. **(B)** naive
+vs Direction 2 (`central`, target $p^2$): systematically lower. **(C)** full vs
+central: the two consistent targets, separated by the distribution-dependence of
+$1-\alpha$. *Bottom row — the reported quantities.* **(D)** the FEM-fraction
+$1-\alpha$ distribution on the headline Direction-1 target (median 0.692).
+**(E)** the full-vs-central gap, a fixation-scale spatial-structure measure
+(median 0.119, heavy tail). **(F)** Fano factor, naive vs matched (`full`):
+sub-Poisson ($\approx 0.95$, below $1$) with a small median shift and larger
+per-cell changes.](figures/fig_realdata.png)
 
-The **noise-correlation** consequence on real spikes is small at the
-population level — both on the unified synthetic (naive vs matched median
-$|r|$ differ by $\approx 0.005$) and consistent with the modest Fano shift
-here ($0.846\to 0.875$). Quantifying it directly on real spike pairs requires
-either the full windowed pipeline or careful joint-pair validity masking;
-because it shares the same pipeline change, it is folded into the gated
-Figure-2 fix (`note_pipeline.md` §6) rather than approximated here.
+Figure 5 reports the two quantities `decompose_session` returns per cell,
+$1-\alpha$ and the Fano factor. The **noise-correlation** consequence lives in
+the cross-cell covariance of the full Figure-2/Figure-3 pipeline, which a
+companion note (`note_consistency.md`) runs end-to-end under each `target` on the
+same 25 sessions and checks against the published production pipeline. Figure 6
+collects the five affected panels (A–E). Each draws the published production
+result (`PROD`) alongside `naive`, `full`, and `central`; `PROD` and `naive`
+overlay throughout, so the matched pipeline reproduces the published panels
+before any correction is applied and the movement to read is
+`naive`$\to$`full`$\to$`central`.
+
+![**Figure 6A (Fig 2C)** — per-cell $1-\alpha$ histogram at 8.3 ms. `naive`,
+`full`, and `central` shift left in turn: under a less close-pair-dominated
+distribution a smaller fraction of rate variance is attributed to FEM. This is
+the same shift Fig 5A/D shows cell by cell.](figures/consistency/cmp_fig2c.png)
+
+![**Figure 6B (Fig 2E)** — population Fano slope-through-origin vs counting
+window (open/dashed uncorrected, filled/solid corrected). The corrected `full`
+and `central` slopes sit just above `naive` — less correction — matching the
+small $0.943\to0.954$ Fano shift of Fig 5F.](figures/consistency/cmp_fig2e.png)
+
+![**Figure 6C (Fig 3B)** — corrected vs uncorrected noise-correlation scatter at
+8.3 ms, one panel per monkey. The matched corrected values sit above the naive
+ones: the naive close-pair estimator over-removes shared rate variance and drives
+the corrected correlation toward zero.](figures/consistency/cmp_fig3b.png)
+
+![**Figure 6D (Fig 3C)** — mean Fisher-$z$ noise correlation vs window. The
+corrected `full` and `central` curves are pulled up toward the uncorrected curve
+at every window, while the naive corrected curve sits near
+zero.](figures/consistency/cmp_fig3c.png)
+
+![**Figure 6E (Fig 3D)** — $\Delta z$ (corrected − uncorrected) vs window against
+the eye-shuffle null 95% band (the naive null; `note_consistency.md` §2.4). The
+matched $\Delta z$ is attenuated relative to naive, and `central` loses
+separation from the null first at the long window.](figures/consistency/cmp_fig3d.png)
+
+Across the five panels the result is consistent and has one large feature. On
+$1-\alpha$ (Fig 6A) and the Fano factor (Fig 6B) the matched estimators barely
+move the published curves, as Figure 5 already showed cell by cell. The noise
+correlation behaves differently. The naive close-pair estimator drives the
+FEM-corrected correlation to essentially zero — population mean Fisher-$z$
+$z_c = 0.003$ at 8.3 ms and $0.0005$ at 25 ms — while matching to the actual
+viewing distribution ($p$, `full`) leaves a clearly positive residual,
+$z_c = 0.011$ and $0.020$ at the same two windows (Fig 6C, D). Equivalently the
+FEM correction $\Delta z$ shrinks by roughly a fifth to a third ($-0.089\to-0.070$
+at 25 ms, $-0.098\to-0.064$ at 50 ms; Fig 6E), and `central` moves slightly
+further in the same direction. This is the one place the (A2) mismatch changes a
+conclusion rather than a number: the naive pipeline reports that the FEM
+correction removes essentially all noise correlation, whereas the consistent
+estimator restores a positive residual — §4.1's over-subtraction acting on the
+cross-cell covariance.
+
+**The bottom line.** McFarland's cross-trial decomposition is exact only in its
+original regime — uniform trials (A1) and a statistically stationary, spatially
+homogeneous stimulus (A2). The `fixRSVP` setting breaks both: variable fixation
+durations make $n_t$ non-uniform (§2.1), and the windowed natural image makes the
+rate depend on absolute eye position (§2.2). Extension 1 (§3) pins the time-bin
+weighting; Extension 2 (§4) pins the eye-position distribution; each is validated
+against closed-form ground truth and against the production filter's multi-bin
+trajectories. On the real recordings the per-cell quantities stand: the
+$1-\alpha$ distribution shifts by $\approx 0.02$ at the median and the Fano
+factor stays sub-Poisson ($0.943\to0.954$), so the Figure-2 and Figure-4
+conclusions built on them are unchanged. The quantity that moves is the corrected
+noise correlation — the naive close-pair estimator subtracts too much shared rate
+variance and drives it to zero, and the consistent estimator restores a positive
+residual (mean Fisher-$z$ from near $0$ to $\approx 0.01$–$0.02$). That is the
+largest consequence of matching the eye-position distribution, and the reason the
+correction earns its place even where the headline numbers hold: it carries
+McFarland's estimator from his translation-invariant special case to the
+windowed, non-uniform-trial stimulus of our dataset.
 
 ---
 
@@ -1497,7 +1511,7 @@ $\sim 6$–$12$ post-fix bins per fixation (depending on bin width), the
 effective $T$ is reduced by the bins-per-frame multiplicity and the floor
 correspondingly rises. We do not propagate this correction through the
 real-data numbers in §4.5 — those are robust to it at the population
-median (Δ $1-\alpha = -0.022$) — but it matters for per-cell SEM and is
+median (Δ $1-\alpha \approx 0.02$) — but it matters for per-cell SEM and is
 the operative reason the within-stimulus-frame reliability question is
 flagged as a future direction (§2.3).
 
@@ -1729,7 +1743,7 @@ uv run python fig_weighting_bias.py         # Ext-1 cross-cell weighting bias (F
 uv run python fig_recovery.py               # matched estimators recover analytical 1-α (Fig. 3)
 uv run python fig_trajectory.py             # multi-bin trajectory extension (Fig. 4)
 uv run python fig_consistency.py            # parallel sweep; cached to .npz
-uv run python generate_realdata.py          # cache-only; --recompute to rebuild (Fig. 5)
+uv run python generate_realdata.py          # §4.5 real-data payoff, self-contained from aligned cache (Fig. 5)
 uv run --with pytest pytest test_estimators.py -q
 ```
 

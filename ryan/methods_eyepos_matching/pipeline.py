@@ -30,7 +30,7 @@ if str(THIS_DIR) not in sys.path:
     sys.path.insert(0, str(THIS_DIR))
 
 from estimators import (                                          # noqa: E402
-    decompose_trajectory, _rms_traj_close_pairs, _pooled_per_bin_kde,
+    decompose_trajectory, _rms_traj_close_pairs, _geometric_median, _density_fn,
 )
 from legacy.covariance import extract_valid_segments              # noqa: E402
 
@@ -122,7 +122,7 @@ def _ctotal_unweighted(counts):
 # ---------------------------------------------------------------------------
 #
 # ``estimators.decompose_trajectory`` computes its close-pair Crate from
-# centred S (``S_c = S - Erate``) for numerical precision in the §4.6
+# centred S (``S_c = S - Erate``) for numerical precision in the §4.4
 # synthetic validation. The legacy ``estimate_rate_covariance`` with
 # ``intercept_mode='below_threshold'`` computes Crate from raw S as
 # ``MM - Erate ⊗ Erate``, which differs by cross terms
@@ -133,40 +133,42 @@ def _ctotal_unweighted(counts):
 #
 # For the equivalence comparison and for the methods pipeline's main
 # Stage-1 output (consumed by Fig. 7 + Fig. 8), we override Crate with the
-# legacy uncentred form. The §4.6 centred estimator remains the
+# legacy uncentred form. The §4.4 centred estimator remains the
 # theoretically-validated default in ``estimators.decompose_trajectory``
-# and is what fig_trajectory.py uses.
+# and is what fig_trajectory.py uses. The importance weights here match the
+# §4.4 single-point reduction: each trajectory is reduced to its geometric
+# median rho_i and one KDE p_hat is fit on {rho_i}; Direction 1 weights close
+# pairs by 1/p_hat(rho_mid) at the midpoint of the two representative points
+# (p^2 implied by p_hat, exactly as in §4.2 -- no separate close-pair KDE).
 # ---------------------------------------------------------------------------
 
 def _legacy_compat_crate(counts, trajectories, T_idx, target, threshold,
                          Erate, time_bin_weighting, weight_clip,
-                         p_marg=None, p_cp_marg=None):
+                         phat=None, rho=None, reduction="geometric_median"):
     """Recompute the close-pair Crate as ``MM - Erate ⊗ Erate`` (legacy form).
 
-    Re-enumerates close pairs (cheap relative to KDE fits) and applies the
-    target-specific importance weights at the midpoint trajectory centroid.
-    Returns (Crate, n_pairs, p_marg, p_cp_marg) where the densities are
-    fit-on-demand if not supplied (so callers can share them with the
-    `decompose_trajectory` call for free).
+    Re-enumerates close pairs and applies the §4.4 single-point-reduction
+    importance weights. Returns (Crate, n_pairs, phat, rho) where the
+    representative points ``rho`` and KDE ``phat`` are computed on-demand if not
+    supplied (so callers can share them across targets for free).
     """
     n_cells = counts.shape[1]
-    gi, gj, tpair, mid_traj = _rms_traj_close_pairs(
+    gi, gj, tpair, _mid_traj = _rms_traj_close_pairs(
         trajectories, T_idx, threshold
     )
     n_pairs = len(gi)
     if n_pairs == 0:
-        return np.full((n_cells, n_cells), np.nan), 0, p_marg, p_cp_marg
+        return np.full((n_cells, n_cells), np.nan), 0, phat, rho
 
-    if p_marg is None:
-        p_marg = _pooled_per_bin_kde(trajectories.reshape(-1, 2))
-    if p_cp_marg is None:
-        p_cp_marg = _pooled_per_bin_kde(mid_traj.reshape(-1, 2))
+    if rho is None:
+        rho = (_geometric_median(trajectories) if reduction == "geometric_median"
+               else trajectories.mean(axis=1))
+    if phat is None:
+        phat = _density_fn(rho, "kde")
 
-    mid_centroids = mid_traj.mean(axis=1)
     if target == "full":
-        num = np.clip(p_marg(mid_centroids), 1e-12, None)
-        den = np.clip(p_cp_marg(mid_centroids), 1e-12, None)
-        pw_q = num / den
+        rho_mid = 0.5 * (rho[gi] + rho[gj])
+        pw_q = 1.0 / np.clip(phat(rho_mid), 1e-12, None)
         pw_q = np.clip(pw_q, None, weight_clip * np.median(pw_q))
     else:
         pw_q = np.ones(n_pairs)
@@ -192,7 +194,7 @@ def _legacy_compat_crate(counts, trajectories, T_idx, target, threshold,
     prod = (counts[gi].T * pw) @ counts[gj]
     MM = 0.5 * (prod + prod.T)
     Crate = MM - np.outer(Erate, Erate)
-    return Crate, n_pairs, p_marg, p_cp_marg
+    return Crate, n_pairs, phat, rho
 
 
 def _enumerate_close_pairs(trajectories, T_idx, threshold):
@@ -350,8 +352,9 @@ def decompose_session(aligned,
 
         per_target = {}
         n_close_pairs = None
-        # densities are eye-only and target-independent; fit once per window
-        p_marg = p_cp_marg = None
+        # representative points + KDE are eye-only and target-independent;
+        # compute once per window and share across targets
+        phat = rho = None
         for tgt in targets:
             real = decompose_trajectory(
                 counts, trajectories, T_idx, target=tgt,
@@ -363,17 +366,17 @@ def decompose_session(aligned,
             )
 
             # Override Crate with the uncentred close-pair form
-            # `MM - Erate ⊗ Erate` for ALL targets. The §4.6 centred form
+            # `MM - Erate ⊗ Erate` for ALL targets. The centred form
             # in `decompose_trajectory` and the uncentred form here are
             # both consistent for C_rate^q under the corresponding target,
             # but they are DIFFERENT estimators in finite samples (see
-            # writeup §4.6, "centred close-pair second moment" subsection).
+            # note_pipeline.md §7.3, item 6 — centred vs uncentred).
             # We use uncentred for two reasons:
             #
-            #   (1) the §5.2 cell-side analysis (`generate_realdata.py`,
-            #       Fig. 6) used the single-bin `decompose`, which is
+            #   (1) the §4.5 cell-side analysis (`generate_realdata.py`,
+            #       Fig. 5) used the single-bin `decompose`, which is
             #       uncentred -- the methods §7 pipeline numbers must
-            #       align with those §5.2 reference numbers;
+            #       align with those §4.5 reference numbers;
             #   (2) the legacy `compute_conditional_second_moments` /
             #       `estimate_rate_covariance` is uncentred, so for
             #       `target='naive'` this also enables the §7.2 equivalence
@@ -382,11 +385,11 @@ def decompose_session(aligned,
             # The centred form remains the default in
             # `estimators.decompose_trajectory` because its numerical-
             # precision argument holds on the §4.6 synthetic validation.
-            Crate, n_close, p_marg, p_cp_marg = _legacy_compat_crate(
+            Crate, n_close, phat, rho = _legacy_compat_crate(
                 counts, trajectories, T_idx, tgt, threshold,
                 Erate=real["Erate"],
                 time_bin_weighting=time_bin_weighting,
-                weight_clip=1e6, p_marg=p_marg, p_cp_marg=p_cp_marg,
+                weight_clip=1e6, phat=phat, rho=rho,
             )
             if n_close_pairs is None:
                 n_close_pairs = n_close

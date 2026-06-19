@@ -65,16 +65,20 @@ folder, for both the single-bin (main note §4.2) and multi-bin trajectory
   `naive` reproduces the existing pipeline; `full` is Direction 1 (the
   actual-viewing $p$); `central` is Direction 2 ($p^2$).
 - `estimators.decompose_trajectory(target=...)` — multi-bin RMS-trajectory
-  close-pair filter (matching `VisionCore/covariance.py`), with the
-  pooled-per-bin KDE importance weights of main note §4.4.
-- `test_estimators.py` — 21 tests covering correctness (recovery of the
+  close-pair filter (matching `VisionCore/covariance.py`); each trajectory is
+  reduced to its geometric-median representative point and one KDE is fit on
+  those points, reusing the single-bin §4.2 importance weights ($p^2$ implied
+  by $\hat p$), per the main note §4.4 single-point reduction.
+- `test_estimators.py` — 27 tests covering correctness (recovery of the
   closed-form decompositions under each target, finite-threshold-bias
   shrinkage), stability (Direction 2 stabler than Direction 1 for eccentric
   cells), Poisson cancellation (Fano $\to 1$), the pipeline-match
   (`naive` ↔ `pipeline_one_minus_alpha`), Extension 1 (variable-$n_t$
   uniform vs pair-count weighting), and the main note §4.4 multi-bin extension
-  (flat-limit recovery, moderate-drift recovery, strong-drift bias
-  documentation, naive bias on a centrally-modulated cell).
+  (geometric-median reduction unit tests, flat-limit and realistic-drift
+  recovery, geometric-median≈centroid in the flat regime, naive bias on a
+  centrally-modulated cell, and the eigendecomposition field-sampler fallback
+  on dense real eye positions).
 
 §7 rebuilds the entire Figure-2 LOTC pipeline in this folder around
 `decompose_trajectory`. The replacement runs all three targets in parallel on
@@ -193,12 +197,13 @@ legacy snapshot up to a small set of known controlled differences:
      pools all $\Delta e<0.05$ pairs into a single bin and averages with
      uniform per-pair weight; this is identical to the methods close-pair
      estimator at `threshold=0.05` and `time_bin_weighting='pair_count'`.
-  6. **Centred vs uncentred close-pair second moment.** The main note §4.4
+  6. **Centred vs uncentred close-pair second moment.** The
      `decompose_trajectory` estimator computes the close-pair second
-     moment on the *centred* counts $S - \hat r$; the legacy
+     moment on the *centred* counts $S - \hat r$ (for numerical precision when
+     $\hat r\cdot t_\text{window}$ dominates $S$); the legacy
      `compute_conditional_second_moments` accumulates the *uncentred*
      product $S_i S_j^\top$ and subtracts $\hat r\,\hat r^\top$ afterward.
-     The main note §4.4 closing subsection walks through the algebra: the two forms
+     The two forms
      collapse to the same expression iff $\hat r = \bar X_w$, where
      $\bar X_w$ is the weighted close-pair-set sample mean. For the
      consistent targets `full` and `central` the importance reweighting
@@ -206,14 +211,14 @@ legacy snapshot up to a small set of known controlled differences:
      quantity — but they are distinct estimators in finite samples, so the
      centred and uncentred forms differ on real data by a non-negligible
      amount (e.g. at $t_\text{count}=2$, $\text{median}(1-\alpha_\text{full})
-     = 0.71$ centred vs $0.77$ uncentred). For the inconsistent target
+     = 0.71$ centred vs $0.76$ uncentred). For the inconsistent target
      `naive` the gap is also nonzero, and there $\hat r$ and $\bar X_w$
      do not even share a limit. The §7 pipeline overrides Crate with the
      uncentred form via `pipeline._legacy_compat_crate` for **all three
      targets**, so that (a) the equivalence audit against the legacy
      uncentred form is exact for naive, and (b) the full/central numbers
      extend the main note §4.5 cell-side reference (Fig. 5) — which also used the
-     uncentred form via single-bin `estimators.decompose`. The main note §4.4
+     uncentred form via single-bin `estimators.decompose`. The
      centred form remains the default inside `decompose_trajectory` for
      its synthetic precision benefits, but the two estimators are *not*
      interchangeable on real data.
@@ -267,16 +272,16 @@ At the canonical window $t_\text{count} = 2$ bins ($n = 1313$ included
 cells, 25 sessions):
 
   * $\text{median}(1-\alpha)$: naive $0.793$, Direction 1 (full)
-    $0.773$, Direction 2 (central) $0.601$. The Direction-1 vs naive
-    shift is the same $\sim -0.02$ headline number that the cell-side
-    `generate_realdata.py` reported in the main note §4.5 — recovered here at full
-    multi-cell, multi-window scope. The Direction-2 shift to $0.601$ is
-    larger because the close-pair eye distribution $p^2$ concentrates
-    on the central fixation peak, where the cell's mean rate is least
-    eye-modulated; this is the same close-pair-density mechanism that
-    the synthetic-data mechanism the main note's §4.1 exhibits.
+    $0.756$, Direction 2 (central) $0.657$. The Direction-1 vs naive
+    shift ($\sim -0.04$) has the same sign and order as the $-0.022$ the
+    cell-side `generate_realdata.py` reported in the main note §4.5 —
+    recovered here at full multi-cell, multi-window scope. The Direction-2
+    shift to $0.657$ is larger because the close-pair eye distribution $p^2$
+    concentrates on the central fixation peak, where the cell's mean rate is
+    least eye-modulated; this is the same close-pair-density mechanism that
+    the main note's §4.1 exhibits.
   * $\text{median}(\text{Fano}_\text{cor})$: naive $0.931$, full
-    $0.949$, central $0.900$. The Direction-1 Fano is *higher* than
+    $0.956$, central $0.910$. The Direction-1 Fano is *higher* than
     naive (the $C_\text{noise}$ numerator gains the cross-term
     correction) and the Direction-2 Fano is *lower* by a similar
     margin — both directions move the Fano factor *away* from the
@@ -307,14 +312,15 @@ session cache); only the decomposition runtime is timed.
 Two numbers are relevant:
 
   * **Per-session, sequential, CPU.** On a 6-session benchmark with
-    20 shuffles, methods runs at $1$–$3$ s per session per window vs
-    legacy $1.2$–$9.7$ s. Pooled across the four windows the methods
-    pipeline is $\boldsymbol{1.91\times}$ faster than the legacy snapshot
-    (methods $47.7$ s, legacy $91.1$ s). The speedup is larger for the
-    smaller windows ($2.14\times$ at $t_\text{count} = 1$) where the
-    legacy GPU pipeline's torch-tensor overhead dominates and smaller
-    for the larger windows ($1.46\times$ at $t_\text{count} = 6$) where
-    the close-pair enumeration is the limiting step in both.
+    20 shuffles, methods runs at $0.4$–$3$ s per session per window vs
+    legacy $0.8$–$9.1$ s. Pooled across the four windows the methods
+    pipeline is $\boldsymbol{2.94\times}$ faster than the legacy snapshot
+    (methods $29.4$ s, legacy $86.6$ s; the single-point reduction's one
+    KDE is cheaper than the previous two pooled-per-bin KDEs). The speedup
+    is larger for the smaller windows ($3.69\times$ at $t_\text{count} = 1$)
+    where the legacy GPU pipeline's torch-tensor overhead dominates and
+    smaller for the larger windows ($1.53\times$ at $t_\text{count} = 6$)
+    where the close-pair enumeration is the limiting step in both.
   * **Pipeline-wide, parallel.** The orchestrator (`compute_methods_data
     --both`) processes all 25 sessions across 4 windows + 3 targets +
     20 shuffles via `joblib.Parallel(n_jobs=-1, backend="loky")` with
@@ -331,19 +337,19 @@ Two numbers are relevant:
 
 Profiling a single session (`profile_pipeline.py`, $t_\text{count} = 2$,
 all three targets, 10 shuffles) confirms the expected hotspot:
-`scipy.stats.gaussian_kde.evaluate` accounts for 64% of the methods CPU
-time, dominated by the per-session pooled-per-bin KDE for $\hat p_\text{marg}$
-and $\hat p_\text{cp,marg}$. Close-pair enumeration is the next 10%; the
-split-half PSTH covariance is 8%. The KDE could be replaced with a
-gridded 2-D histogram (the only thing the importance weights use is the
-density ratio at the trajectory centroids) for an additional ~3$\times$
-speedup, but that's a refinement, not a correctness issue.
+`scipy.stats.gaussian_kde.evaluate` accounts for the bulk of the methods CPU
+time, dominated by the per-session KDE $\hat p$ fit on the trajectory
+geometric-median representative points. Close-pair enumeration and the
+split-half PSTH covariance are the next contributors. The KDE could be replaced
+with a gridded 2-D histogram (the importance weights only need the density
+evaluated at the representative points and their pair midpoints) for an
+additional speedup, but that's a refinement, not a correctness issue.
 
 ![**Figure 9 — Per-session wall-time, methods vs legacy snapshot, CPU vs CPU
 (6 sessions, 20 shuffles, all 4 windows).** **(A)** Per-session bars at the
 canonical window $t_\text{count} = 2$, sorted by methods runtime. **(B)**
 Per-window mean ± sd across sessions; legend shows total wall-time per
-pipeline. The methods pipeline is $1.91\times$ faster than the legacy
+pipeline. The methods pipeline is $2.94\times$ faster than the legacy
 snapshot pooled across windows, with the largest gap at the smallest
 windows (where legacy torch overhead dominates). The 64-worker parallel
 orchestrator extends this to a $3.2\times$ pipeline-wide

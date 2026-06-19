@@ -87,11 +87,11 @@ PROFILE_KINDS = ("flat", "central", "eccentric")
 
 
 def _default_sigma_M(sigma_eye):
-    """Default mask length scale; 0.6 * sigma_eye keeps the central/eccentric
-    profile narrow enough that the close-pair (p^2) and full-p moments differ
-    meaningfully -- which is the regime the (A2) demo lives in. Tunable via
-    the make_session(sigma_M=...) argument when needed."""
-    return 0.6 * float(sigma_eye)
+    """Default mask length scale; sigma_M = sigma_eye places the mask on the
+    fixation scale, which is where the close-pair (p^2) vs full-p spread peaks
+    (Fig. 0a) -- the regime the (A2) demo lives in, and the width used by the
+    Fig. 2/3 figures. Tunable via the make_session(sigma_M=...) argument."""
+    return 1.0 * float(sigma_eye)
 
 
 def profile_M(e, kind, sigma_eye, sigma_M=None):
@@ -304,13 +304,27 @@ def _resolve_n_t(n_trials_per_time_bin, n_trials, n_time_bins):
     return arr
 
 
-def _draw_field_at(eyes, ell, tau, rng, n_cells, jitter=1e-8):
+def _draw_field_at(eyes, ell, tau, rng, n_cells):
     """Sample one time bin's stationary GP field at `n` observed eye positions for
     each of `n_cells` cells.
 
     Per-time-bin covariance Sigma[i,j] = tau^2 * exp(-||e_i - e_j||^2 / (2 ell^2));
-    sample s = L @ z with z N(0, I_n) per cell (independent across cells), retry
-    Cholesky with growing jitter on the (rare) near-singular case.
+    sample s = A @ z with z ~ N(0, I_n) per cell (independent across cells).
+
+    The square root A is obtained by Cholesky with a SMALL FIXED jitter (1e-8),
+    falling back to the eigendecomposition square root (clipping tiny negative
+    eigenvalues) when Cholesky fails. For distinct, continuously-sampled eye
+    positions (the synthetic sessions) Sigma is only roundoff-singular
+    (min eigenvalue ~ -1e-13), so Cholesky + 1e-8 succeeds and the path is fast
+    and accurate. For densely-packed / near-coincident eye positions -- real
+    fixational trajectories pooled per analysis bin, whose Gram matrix has
+    min eigenvalue ~ -1e-6 -- Cholesky + 1e-8 fails; the previous code GREW the
+    jitter (x100 up to ~1e-4), and that diagonal noise decorrelated close pairs
+    and collapsed the close-pair rate covariance Crate (faking FEM variance,
+    inflating 1-alpha). The eigendecomposition fallback is exact (A A^T = Sigma
+    up to the tiny-negative clip) and injects no such noise. The fallback is
+    exercised on real eye traces in ``fig_trajectory.py`` (Crate recovers from
+    ~3 to ~10 at ell/sigma=3); it is rarely hit by the synthetic test suite.
     """
     n = eyes.shape[0]
     if n == 0:
@@ -318,19 +332,13 @@ def _draw_field_at(eyes, ell, tau, rng, n_cells, jitter=1e-8):
     diff = eyes[:, None, :] - eyes[None, :, :]
     Sigma = (float(tau) ** 2) * np.exp(-(diff ** 2).sum(-1)
                                        / (2.0 * float(ell) ** 2))
-    eye_n = np.eye(n)
-    j = jitter
-    for _ in range(6):
-        try:
-            L = np.linalg.cholesky(Sigma + j * eye_n)
-            break
-        except np.linalg.LinAlgError:
-            j *= 100.0
-    else:
-        raise np.linalg.LinAlgError(
-            f"Cholesky failed up to jitter {j}; bad covariance configuration")
+    try:
+        A = np.linalg.cholesky(Sigma + 1e-8 * np.eye(n))
+    except np.linalg.LinAlgError:
+        w, V = np.linalg.eigh(Sigma)
+        A = V * np.sqrt(np.clip(w, 0.0, None))      # A @ A.T = Sigma
     z = rng.standard_normal((n, n_cells))
-    return L @ z  # (n, n_cells)
+    return A @ z  # (n, n_cells)
 
 
 def make_session(kinds, n_trials=600, n_time_bins=100, sigma_eye=0.15,
@@ -462,7 +470,18 @@ def make_trajectory_session(kinds, n_samples_per_time_bin=30, n_time_bins=40,
                             t_window=5, sigma_eye=0.15, sigma_drift=0.0,
                             ell=None, tau=1.0, mu_0=6.0, sigma_M=None,
                             psth_envelope=None, seed=0, return_rate=True):
-    """Generate a trajectory-mode synthetic session for §4.6 validation.
+    """Generate a trajectory-mode synthetic session.
+
+    Retained as the trajectory-mode TEST fixture (flat-limit and small-drift
+    recovery in ``test_estimators.py``). The ``sigma_drift`` sweep and the
+    per-bin-marginal closed-form truth at ``sigma_traj = sqrt(sigma_eye^2 +
+    sigma_drift^2)`` (``traj_truth`` below) are DEPRECATED and no longer
+    referenced by the writeup: §4.4 now reduces each trajectory to a single
+    representative point and validates the approximation directly on real
+    fixational eye traces (``fig_trajectory.py``) rather than on a synthetic
+    drift sweep. ``centroid_truth`` (the representative-point-distribution
+    truth) is the relevant reference; ``traj_truth`` is kept only for backward
+    compatibility.
 
     Each sample is one window of ``t_window`` contiguous bins of eye trajectory,
     assigned to one analysis time bin ``T_idx``. The trajectory is parameterised
