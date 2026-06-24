@@ -51,7 +51,10 @@ from pipeline import decompose_session, DT as PIPE_DT               # noqa: E402
 from _style import configure, save, C_FULL, C_CLOSE, C_TRUTH       # noqa: E402
 
 CACHE = THIS_DIR / "realdata_results.pkl"
-SCHEMA_VERSION = 3                       # 3 = self-contained, production estimator
+# 4 = directly-estimated close-pair density (the estimator's new default since
+#     2026-06-24; see note_closepair_density.md). decompose_session inherits
+#     closepair_density='direct'.
+SCHEMA_VERSION = 4
 
 # --- estimator window (the §4.4 t_hist/t_count decoupling) ----------------
 # The close-pair match is on the WHOLE eye-trajectory window (the neuron's

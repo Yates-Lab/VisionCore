@@ -78,7 +78,7 @@ def _weighted_cov(S, w):
 
 
 def _all_pairs_second_moment(S, E, T, phat, target,
-                             time_bin_weighting="pair_count"):
+                             time_bin_weighting="pair_count", phat_pair=None):
     """McFarland M6/M12 all-distinct-pair second moment, target-reweighted.
 
     At each time bin t, every distinct trial pair (i, j) with i<j is included
@@ -118,7 +118,15 @@ def _all_pairs_second_moment(S, E, T, phat, target,
     same-trial cross-cell noise correlations leak into the average.
     """
     if target == "central":
-        w_trial = np.clip(phat(E), 1e-12, None)
+        # central reweights every single-trial term from p to the close-pair
+        # distribution: w_i = p_pair(e_i)/p(e_i). 'squared' substitutes
+        # p_pair = p_hat^2 (so w_i = p_hat(e_i)); 'direct' uses the directly
+        # estimated p_hat_pair.
+        if phat_pair is None:
+            w_trial = np.clip(phat(E), 1e-12, None)
+        else:
+            w_trial = (np.clip(phat_pair(E), 1e-12, None)
+                       / np.clip(phat(E), 1e-12, None))
     else:                                # 'naive' and 'full' -- q = p marginal
         w_trial = np.ones(len(S))
 
@@ -223,8 +231,33 @@ def _split_half_psth_cov(S, T, sw, n_boot, seed, min_tpp,
     return C / n_boot
 
 
+def _close_pair_midpoints(E, T, threshold):
+    """Midpoints of all distinct same-time-bin close pairs (|e_i-e_j|<threshold).
+
+    The realized sample from the close-pair density. Fitting a KDE on these
+    points gives p_hat_pair directly (``closepair_density='direct'``), instead
+    of the §A.5 squared-marginal assumption p_hat_pair = p_hat^2.
+    """
+    acc = []
+    for t in np.unique(T):
+        ix = np.where(T == t)[0]
+        if len(ix) < 2:
+            continue
+        Et = E[ix]
+        i, j = np.triu_indices(len(ix), k=1)
+        d = np.linalg.norm(Et[i] - Et[j], axis=1)
+        close = d < threshold
+        if not close.any():
+            continue
+        gi, gj = ix[i[close]], ix[j[close]]
+        acc.append(0.5 * (E[gi] + E[gj]))
+    if not acc:
+        return np.zeros((0, 2))
+    return np.concatenate(acc)
+
+
 def _close_pair_second_moment(S, E, T, phat, target, threshold, weight_clip,
-                              time_bin_weighting="pair_count"):
+                              time_bin_weighting="pair_count", phat_pair=None):
     """Importance-reweighted close-pair second moment MM (C, C).
 
     All distinct same-time-bin trial pairs with |e_i - e_j| < threshold are
@@ -271,7 +304,13 @@ def _close_pair_second_moment(S, E, T, phat, target, threshold, weight_clip,
     tpair = np.concatenate(t_acc)
 
     if target == "full":
-        pw_q = 1.0 / np.clip(phat(mid), 1e-12, None)
+        # close-pair weight q/p_pair with q = p: 'squared' uses p_pair = p_hat^2
+        # (so weight 1/p_hat); 'direct' uses the directly estimated p_hat_pair.
+        if phat_pair is None:
+            pw_q = 1.0 / np.clip(phat(mid), 1e-12, None)
+        else:
+            pw_q = (np.clip(phat(mid), 1e-12, None)
+                    / np.clip(phat_pair(mid), 1e-12, None))
         pw_q = np.clip(pw_q, None, weight_clip * np.median(pw_q))
     else:
         pw_q = np.ones(len(gi))
@@ -304,7 +343,7 @@ def _close_pair_second_moment(S, E, T, phat, target, threshold, weight_clip,
 def decompose(counts, eye, target="full", valid=None, threshold=0.05,
               density="kde", weight_clip=1e6, n_boot=20, seed=42,
               min_trials_per_time_bin=10, time_bin_weighting="pair_count",
-              cpsth_method="mcfarland"):
+              cpsth_method="mcfarland", closepair_density="direct"):
     """Distribution-matched LOTC decomposition of a multi-cell session.
 
     Parameters
@@ -360,6 +399,22 @@ def decompose(counts, eye, target="full", valid=None, threshold=0.05,
             the same population quantity in expectation; converges to
             'mcfarland' as n_boot → ∞.
         See writeup §A.7 for the comparison.
+    closepair_density : {'direct', 'squared'}
+        How the close-pair midpoint density (the sampling density of the
+        Crate second moment) is estimated for the importance weights.
+          * 'direct' (default): fit a separate KDE p_hat_pair on the realized
+            close-pair midpoints. Direction 1's close-pair weight is
+            p_hat/p_hat_pair; Direction 2's per-sample weight is
+            p_hat_pair/p_hat. The principled choice on real data, where neither
+            the finite threshold nor (in trajectory mode) the representative-
+            point reduction leaves the close-pair density equal to p_hat^2; see
+            note_closepair_density.md.
+          * 'squared': assume the close-pair density equals p_hat^2 -- the §A.5
+            single-bin Δe → 0 identity (Direction 1 weight 1/p_hat, Direction 2
+            weight ∝ p_hat). Exact for single-bin Gaussian-eye synthetic data,
+            so it is the natural choice for the closed-form synthetic
+            validation; reproduces the pre-2026-06-24 behaviour. The two
+            coincide iff p_hat_pair = p_hat^2.
     n_boot, seed, min_trials_per_time_bin : see helpers.
 
     Returns
@@ -384,9 +439,26 @@ def decompose(counts, eye, target="full", valid=None, threshold=0.05,
     phat = _density_fn(E, density)
     p_samp = np.clip(phat(E), 1e-12, None)
 
-    # per-sample target weight: 'central' reweights p -> p^2 (weight prop to p_hat)
+    # close-pair density estimate. 'squared': p_pair = p_hat^2 (the §A.5
+    # single-bin Δe → 0 identity, used implicitly via the legacy weights).
+    # 'direct': fit a KDE on the realized close-pair midpoints, so neither the
+    # finite-threshold smoothing nor (in trajectory mode) the representative-
+    # point reduction is assumed away.
+    if closepair_density == "direct":
+        mid_cp = _close_pair_midpoints(E, T, threshold)
+        phat_pair = _density_fn(mid_cp, density) if len(mid_cp) >= 2 else None
+    elif closepair_density == "squared":
+        phat_pair = None
+    else:
+        raise ValueError(f"unknown closepair_density: {closepair_density!r}")
+
+    # per-sample target weight: 'central' reweights p -> the close-pair density.
+    # 'squared': weight prop to p_hat (p_pair = p_hat^2). 'direct': p_pair/p.
     if target == "central":
-        tw = p_samp.copy()
+        if phat_pair is None:
+            tw = p_samp.copy()
+        else:
+            tw = np.clip(phat_pair(E), 1e-12, None) / p_samp
     else:                            # 'naive' and 'full' keep full-p sampling
         tw = np.ones(len(S))
 
@@ -412,7 +484,8 @@ def decompose(counts, eye, target="full", valid=None, threshold=0.05,
     Ctotal = _weighted_cov(S, sw)
     if cpsth_method == "mcfarland":
         MM_psth = _all_pairs_second_moment(S, E, T, phat, target,
-                                           time_bin_weighting=time_bin_weighting)
+                                           time_bin_weighting=time_bin_weighting,
+                                           phat_pair=phat_pair)
         Cpsth = MM_psth - np.outer(Erate, Erate)
     elif cpsth_method == "split_half":
         Cpsth = _split_half_psth_cov(S, T, sw, n_boot, seed,
@@ -421,7 +494,8 @@ def decompose(counts, eye, target="full", valid=None, threshold=0.05,
     else:
         raise ValueError(f"unknown cpsth_method: {cpsth_method!r}")
     MM = _close_pair_second_moment(S, E, T, phat, target, threshold, weight_clip,
-                                   time_bin_weighting=time_bin_weighting)
+                                   time_bin_weighting=time_bin_weighting,
+                                   phat_pair=phat_pair)
     Crate = MM - np.outer(Erate, Erate)
 
     CnoiseC = 0.5 * ((Ctotal - Crate) + (Ctotal - Crate).T)
@@ -535,7 +609,8 @@ def decompose_trajectory(counts, trajectories, T_idx, target="full",
                          n_boot=20, seed=42, min_trials_per_time_bin=10,
                          time_bin_weighting="pair_count",
                          cpsth_method="mcfarland",
-                         reduction="geometric_median"):
+                         reduction="geometric_median",
+                         closepair_density="direct"):
     """Trajectory-mode distribution-matched LOTC decomposition (writeup §4.4).
 
     The multi-bin extension of :func:`decompose`. Each sample is a window of
@@ -580,7 +655,9 @@ def decompose_trajectory(counts, trajectories, T_idx, target="full",
         Close-pair RMS trajectory threshold (per-bin distance units; see
         :func:`_rms_traj_close_pairs`).
     weight_clip, time_bin_weighting, cpsth_method, n_boot, seed,
-    min_trials_per_time_bin : see :func:`decompose`.
+    min_trials_per_time_bin, closepair_density : see :func:`decompose`.
+        For ``closepair_density='direct'`` the close-pair KDE is fit on the
+        close-pair *representative-point* midpoints ``½(ρ_i+ρ_j)``.
 
     Returns
     -------
@@ -632,9 +709,28 @@ def decompose_trajectory(counts, trajectories, T_idx, target="full",
     gi, gj, tpair, _mid_traj = _rms_traj_close_pairs(Tr, T, threshold)
     n_pairs = len(gi)
 
-    # per-sample target weight (representative-point-evaluated, as in §4.2)
+    # close-pair density estimate (§4.2 weights). 'squared': p_pair = p_hat^2
+    # implied by the representative-point KDE. 'direct': fit a KDE on the
+    # realized close-pair representative-midpoints, so the RMS-trajectory close-
+    # pair selection and geometric-median reduction are not assumed to leave the
+    # p^2 identity intact.
+    if closepair_density == "direct":
+        rho_mid_cp = 0.5 * (rho[gi] + rho[gj]) if n_pairs >= 2 else None
+        phat_pair = (_density_fn(rho_mid_cp, "kde")
+                     if rho_mid_cp is not None else None)
+    elif closepair_density == "squared":
+        phat_pair = None
+    else:
+        raise ValueError(f"unknown closepair_density: {closepair_density!r}")
+
+    # per-sample target weight (representative-point-evaluated, as in §4.2).
+    # central reweights p -> the close-pair density: 'squared' uses p_hat (since
+    # p_pair = p_hat^2), 'direct' uses p_hat_pair/p_hat.
     if target == "central":
-        tw = p_rho.copy()
+        if phat_pair is None:
+            tw = p_rho.copy()
+        else:
+            tw = np.clip(phat_pair(rho), 1e-12, None) / p_rho
     elif target in ("naive", "full"):
         tw = np.ones(len(S))
     else:
@@ -670,7 +766,8 @@ def decompose_trajectory(counts, trajectories, T_idx, target="full",
 
     # Cpsth: McFarland M6 / split-half, with representative-point w_trial
     if target == "central":
-        w_trial = p_rho.copy()
+        w_trial = (p_rho.copy() if phat_pair is None
+                   else np.clip(phat_pair(rho), 1e-12, None) / p_rho)
     else:
         w_trial = np.ones(len(S))
 
@@ -692,7 +789,11 @@ def decompose_trajectory(counts, trajectories, T_idx, target="full",
     else:
         rho_mid = 0.5 * (rho[gi] + rho[gj])                          # (P, 2)
         if target == "full":
-            pw_q = 1.0 / np.clip(phat(rho_mid), 1e-12, None)
+            if phat_pair is None:
+                pw_q = 1.0 / np.clip(phat(rho_mid), 1e-12, None)
+            else:
+                pw_q = (np.clip(phat(rho_mid), 1e-12, None)
+                        / np.clip(phat_pair(rho_mid), 1e-12, None))
             pw_q = np.clip(pw_q, None, weight_clip * np.median(pw_q))
         else:                                                        # naive / central
             pw_q = np.ones(n_pairs)

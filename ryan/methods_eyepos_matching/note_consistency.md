@@ -188,12 +188,12 @@ standard `compute_methods_data` windows used here.
 |---|---|---|---|---|
 | 8.3 | PROD | 0.04211 | 0.00322 | −0.03888 |
 | 8.3 | NAIVE | 0.04210 | 0.00325 | −0.03886 |
-| 8.3 | FULL | 0.04210 | 0.01087 | −0.03124 |
+| 8.3 | FULL | 0.04210 | 0.01169 | −0.03041 |
 | 16.7 | PROD | 0.06941 | 0.00124 | −0.06818 |
 | 16.7 | NAIVE | 0.06966 | 0.00135 | −0.06831 |
 | 25.0 | PROD | 0.08823 | −0.00014 | −0.08837 |
 | 25.0 | NAIVE | 0.08966 | 0.00045 | −0.08921 |
-| 25.0 | FULL | 0.08966 | 0.01975 | −0.06991 |
+| 25.0 | FULL | 0.08966 | 0.01095 | −0.07871 |
 | 50.0 | PROD | 0.12114 | 0.03394 | −0.08720 |
 | 50.0 | NAIVE | 0.12636 | 0.02829 | −0.09807 |
 
@@ -317,20 +317,22 @@ window.](figures/consistency/cmp_fig3d.png)
 
 | window | slope_cor (naive / full / central) | dz_mean (naive / full / central) |
 |---|---|---|
-| 8.3 ms | 0.796 / 0.856 / 0.827 | −0.039 / −0.031 / −0.026 |
-| 16.7 ms | 0.748 / 0.847 / 0.835 | −0.068 / −0.053 / −0.047 |
-| 25.0 ms | 0.714 / 0.856 / 0.837 | −0.089 / −0.070 / −0.063 |
-| 50.0 ms | 0.913 / 1.039 / 1.041 | −0.098 / −0.064 / −0.049 |
+| 8.3 ms | 0.796 / 0.853 / 0.834 | −0.039 / −0.030 / −0.019 |
+| 16.7 ms | 0.748 / 0.816 / 0.861 | −0.068 / −0.059 / −0.040 |
+| 25.0 ms | 0.714 / 0.789 / 0.874 | −0.089 / −0.079 / −0.054 |
+| 50.0 ms | 0.913 / 0.941 / 1.069 | −0.098 / −0.088 / −0.033 |
 
 Consistently, **FULL and CENTRAL apply less correction than NAIVE**: corrected
-Fano slopes rise (e.g. +0.14 / +0.12 at 25 ms for full / central) and the
-noise-correlation reduction shrinks (e.g. −0.089 → −0.070 / −0.063 at 25 ms, ~21
-/ 29% less). Mechanistically, the naive estimator pools only close eye-position
+Fano slopes rise (e.g. +0.08 / +0.16 at 25 ms for full / central) and the
+noise-correlation reduction shrinks (e.g. −0.089 → −0.079 / −0.054 at 25 ms, ~11
+/ 39% less). Mechanistically, the naive estimator pools only close eye-position
 pairs and so attributes *more* of the across-trial covariance to rate (FEM),
 over-subtracting it; matching to a broader eye-position distribution recovers a
 more faithful — smaller — rate component, leaving more residual noise
 covariance. This is the §4 thesis of `writeup.md`, here quantified on every
-fig2/fig3 panel.
+fig2/fig3 panel. (FULL/CENTRAL use the directly-estimated close-pair density,
+the estimator default — `closepair_density='direct'`,
+`note_closepair_density.md`; NAIVE is invariant to it.)
 
 **Panel-D `full`/`central` shuffle-null decision.** The pipeline computes the
 eye-shuffle null for `target='naive'` only. Rather than fabricate a target-
@@ -352,14 +354,14 @@ From the §2.4 table, central sits *beyond* full in the same direction — it
 applies the **least** correction of the three estimators on the NC panels:
 
 - **Noise-correlation reduction (fig 3C/3D):** $|\Delta z|$ orders
-  naive $>$ full $>$ central at every window (e.g. @50 ms: −0.098 / −0.064 /
-  −0.049). The residual corrected correlation $z_c$ is essentially tied between
-  full and central (@25 ms: 0.0197 vs 0.0187), so central does **not** drive the
-  corrected NC closer to zero — if anything it leaves slightly *more* residual
-  positive correlation, and its $\Delta z$ loses significance earliest at the
-  long window (fig 3D, rightmost column).
-- **Fano (fig 2E):** central's corrected slope tracks full closely and even
-  edges above it at 50 ms (1.041 vs 1.039).
+  naive $>$ full $>$ central at every window (e.g. @50 ms: −0.098 / −0.088 /
+  −0.033). The residual corrected correlation $z_c$ orders naive $<$ full $<$
+  central (@25 ms: 0.0004 / 0.011 / 0.027), so central leaves the **most**
+  residual positive correlation — it does not drive the corrected NC toward
+  zero, and its $\Delta z$ loses significance earliest at the long window
+  (fig 3D, rightmost column).
+- **Fano (fig 2E):** central's corrected slope sits at or above full's, most
+  clearly at the long windows (e.g. 1.069 vs 0.941 at 50 ms).
 
 So on the **point estimates**, central is the gentlest correction and does not
 reduce the corrected noise correlation below full. If the motivation for central

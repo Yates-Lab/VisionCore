@@ -222,8 +222,11 @@ def _estimate(traj, tidx, kind, sigma_eye, ell, sigma_M, target,
     vals = []
     for s in seeds:
         counts = synth_counts(traj, tidx, kind, sigma_eye, ell, sigma_M, seed=s)
+        # validates the trajectory reduction against the idealized p / p^2
+        # closed forms on real eye windows; pin to the 'squared' construction.
         d = decompose_trajectory(counts, traj, tidx, target=target,
-                                 threshold=THRESHOLD, reduction=reduction)
+                                 threshold=THRESHOLD, reduction=reduction,
+                                 closepair_density="squared")
         vals.append(float(d["one_minus_alpha"][0]))
     return float(np.nanmean(vals)), float(np.nanstd(vals))
 

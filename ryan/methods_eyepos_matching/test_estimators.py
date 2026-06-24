@@ -44,8 +44,10 @@ def _seed_stats(kinds, target, key, seeds=range(6), deterministic=True,
         sess = make_session(kinds, n_trials=NTR, n_time_bins=NPH, sigma_eye=SIG,
                             seed=s, **mk)
         counts = sess["rate"] if deterministic else sess["spikes"]
+        # synthetic closed-form recovery validates the p^2 construction
+        # (p_pair = p^2 holds for Gaussian-eye synthetic); pin to 'squared'.
         d = decompose(counts, sess["eye"], target=target, density=density,
-                      threshold=threshold)
+                      threshold=threshold, closepair_density="squared")
         vals.append(d[key])
     vals = np.array(vals, float)
     return np.nanmean(vals, 0), np.nanstd(vals, 0), sess
@@ -394,7 +396,8 @@ def test_estimator_diagonals_recover_closed_form_under_variable_nt():
                             n_trials_per_time_bin=nt, psth_envelope=env)
         for pw in acc:
             d = decompose(sess["rate"], sess["eye"], target="full",
-                          density="gaussian", time_bin_weighting=pw)
+                          density="gaussian", time_bin_weighting=pw,
+                          closepair_density="squared")
             for k in acc[pw]:
                 acc[pw][k].append(float(d[k][0, 0]))
 
@@ -425,7 +428,8 @@ def _seed_stats_sweep(target, key, ell, sigma_eye=SIG, n_trials=NTR,
         sess = make_session(["flat"], n_trials=n_trials, n_time_bins=NPH,
                             sigma_eye=sigma_eye, ell=ell, seed=s)
         d = decompose(sess["rate"], sess["eye"], target=target,
-                      density="gaussian", threshold=threshold)
+                      density="gaussian", threshold=threshold,
+                      closepair_density="squared")
         vals.append(d[key])
     vals = np.array(vals, float)
     gt_p = sess["truth"][0]["p"]["one_minus_alpha"]
@@ -618,7 +622,7 @@ def _traj_seed_stats(kinds, target, sigma_drift, seeds=range(6),
             seed=s, **mk)
         d = decompose_trajectory(sess["counts"], sess["trajectories"],
                                  sess["T_idx"], target=target, threshold=thr,
-                                 reduction=reduction)
+                                 reduction=reduction, closepair_density="squared")
         vals.append(d["one_minus_alpha"])
     vals = np.array(vals, float)
     return np.nanmean(vals, 0), np.nanstd(vals, 0), sess
@@ -754,6 +758,92 @@ def test_trajectory_naive_is_biased_where_matched_is_not_on_central():
     err_full = abs(float(oma_full[0]) - gt_p)
     assert err_full < err_naive, \
         f"matched err {err_full:.3f} !< naive err {err_naive:.3f} (truth {gt_p:.3f})"
+
+
+# ---------------------------------------------------------------------------
+# Directly-estimated close-pair density (p_pair) vs the squared marginal p^2
+#
+# The matched estimator's importance weights assume the close-pair midpoint
+# density equals p_hat^2 (the §A.5 single-bin Δe → 0 result). Once a trajectory
+# is reduced to a representative point and "close" is judged by the whole-window
+# RMS distance, that identity is only approximate. The
+# ``closepair_density='direct'`` path fits a KDE on the realized close-pair
+# midpoints instead of squaring p_hat; ``'squared'`` (default) keeps the legacy
+# p_hat^2 assumption. In the regime where the p^2 identity provably holds
+# (single-bin / zero-drift trajectory limit) the two paths must agree, and the
+# direct path must still recover the flat-mask closed form.
+# ---------------------------------------------------------------------------
+
+def test_closepair_density_default_is_direct():
+    """The default close-pair density is 'direct' (the principled choice on real
+    data; note_closepair_density.md), so an unqualified call equals an explicit
+    ``closepair_density='direct'``. 'squared' remains a distinct, valid path."""
+    sess = make_session(["central", "eccentric"], n_trials=NTR, n_time_bins=NPH,
+                        sigma_eye=SIG, seed=1)
+    d_default = decompose(sess["rate"], sess["eye"], target="full",
+                          density="gaussian")
+    d_direct = decompose(sess["rate"], sess["eye"], target="full",
+                         density="gaussian", closepair_density="direct")
+    a, b = d_default["one_minus_alpha"], d_direct["one_minus_alpha"]
+    ok = np.isfinite(a) & np.isfinite(b)
+    assert np.array_equal(a[ok], b[ok]), "default must equal closepair_density='direct'"
+    d_sq = decompose(sess["rate"], sess["eye"], target="full",
+                     density="gaussian", closepair_density="squared")
+    assert np.all(np.isfinite(d_sq["one_minus_alpha"][ok])), "squared path broken"
+
+
+def test_direct_closepair_density_recovers_flat_truth_and_matches_squared_full():
+    """In the single-bin regime the close-pair midpoint density IS p^2 (§A.5),
+    so the directly-estimated-p_pair weights recover the same flat-mask
+    1-alpha^p as the squared-marginal weights. Direction 1 (full) targets p
+    under either close-pair-density estimate, so the two must agree and both
+    sit on gt_p. Seed-averaged: single-seed KDE-on-midpoints is noisy."""
+    gt = None
+    direct_vals, squared_vals = [], []
+    for s in range(6):
+        sess = make_session(["flat"], n_trials=NTR, n_time_bins=NPH,
+                            sigma_eye=SIG, seed=s)
+        if gt is None:
+            gt = sess["truth"][0]["p"]["one_minus_alpha"]
+        direct_vals.append(decompose(
+            sess["rate"], sess["eye"], target="full", density="gaussian",
+            closepair_density="direct")["one_minus_alpha"][0])
+        squared_vals.append(decompose(
+            sess["rate"], sess["eye"], target="full", density="gaussian",
+            closepair_density="squared")["one_minus_alpha"][0])
+    m_direct = float(np.nanmean(direct_vals))
+    m_squared = float(np.nanmean(squared_vals))
+    assert abs(m_direct - gt) < 0.06, f"direct {m_direct} not near gt_p {gt}"
+    assert abs(m_direct - m_squared) < 0.05, \
+        f"direct {m_direct} should match squared {m_squared} in single-bin limit"
+
+
+def test_trajectory_direct_closepair_density_recovers_flat_limit_full():
+    """sigma_drift = 0: the trajectory collapses to its representative point and
+    the close-pair midpoint density is p^2 exactly, so
+    ``closepair_density='direct'`` recovers the same centroid-truth 1-alpha^p as
+    ``'squared'`` for Direction 1 (full)."""
+    kinds = ["flat", "central"]
+    thr = _traj_threshold(0.0)
+    direct_vals, squared_vals, sess = [], [], None
+    for s in range(6):
+        sess = make_trajectory_session(kinds, n_samples_per_time_bin=T_NPER,
+                                       n_time_bins=T_NPH, t_window=T_TWIN,
+                                       sigma_eye=SIG, sigma_drift=0.0, seed=s)
+        direct_vals.append(decompose_trajectory(
+            sess["counts"], sess["trajectories"], sess["T_idx"], target="full",
+            threshold=thr, closepair_density="direct")["one_minus_alpha"])
+        squared_vals.append(decompose_trajectory(
+            sess["counts"], sess["trajectories"], sess["T_idx"], target="full",
+            threshold=thr, closepair_density="squared")["one_minus_alpha"])
+    m_direct = np.nanmean(direct_vals, 0)
+    m_squared = np.nanmean(squared_vals, 0)
+    gt_p = np.array([sess["centroid_truth"][c]["p"]["one_minus_alpha"]
+                     for c in range(len(kinds))])
+    assert np.allclose(m_direct, gt_p, atol=0.10), \
+        f"direct {m_direct} not near centroid truth {gt_p}"
+    assert np.allclose(m_direct, m_squared, atol=0.06), \
+        f"direct {m_direct} should match squared {m_squared} at zero drift"
 
 
 def test_t_floor_on_sd_one_minus_alpha():

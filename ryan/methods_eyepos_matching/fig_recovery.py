@@ -53,8 +53,11 @@ def _empirical(kind, ratios, seeds=range(6), sigma_M=SIGMA_M):
             sess = make_session([kind], n_trials=NTR, n_time_bins=NPH,
                                 sigma_eye=SIG, ell=ell, sigma_M=sigma_M, seed=s)
             for t in out:
+                # synthetic Gaussian-eye closed-form recovery validates the p^2
+                # construction (p_pair = p^2 holds here); pin to 'squared'.
                 d = decompose(sess["rate"], sess["eye"], target=t,
-                              density="gaussian", threshold=THR)
+                              density="gaussian", threshold=THR,
+                              closepair_density="squared")
                 vals[t].append(float(d["one_minus_alpha"][0]))
         for t in out:
             out[t][0].append(np.nanmean(vals[t]))

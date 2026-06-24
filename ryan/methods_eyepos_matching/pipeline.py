@@ -144,13 +144,17 @@ def _ctotal_unweighted(counts):
 
 def _legacy_compat_crate(counts, trajectories, T_idx, target, threshold,
                          Erate, time_bin_weighting, weight_clip,
-                         phat=None, rho=None, reduction="geometric_median"):
+                         phat=None, rho=None, reduction="geometric_median",
+                         closepair_density="direct", phat_pair=None):
     """Recompute the close-pair Crate as ``MM - Erate ⊗ Erate`` (legacy form).
 
     Re-enumerates close pairs and applies the §4.4 single-point-reduction
-    importance weights. Returns (Crate, n_pairs, phat, rho) where the
-    representative points ``rho`` and KDE ``phat`` are computed on-demand if not
-    supplied (so callers can share them across targets for free).
+    importance weights. Returns (Crate, n_pairs, phat, rho, phat_pair) where the
+    representative points ``rho``, the KDE ``phat`` and (for
+    ``closepair_density='direct'``) the close-pair KDE ``phat_pair`` are computed
+    on-demand if not supplied (so callers can share them across targets for
+    free). ``closepair_density='direct'`` only affects the Direction-1 (full)
+    close-pair weight; central's close-pair weight is 1 regardless.
     """
     n_cells = counts.shape[1]
     gi, gj, tpair, _mid_traj = _rms_traj_close_pairs(
@@ -158,17 +162,23 @@ def _legacy_compat_crate(counts, trajectories, T_idx, target, threshold,
     )
     n_pairs = len(gi)
     if n_pairs == 0:
-        return np.full((n_cells, n_cells), np.nan), 0, phat, rho
+        return np.full((n_cells, n_cells), np.nan), 0, phat, rho, phat_pair
 
     if rho is None:
         rho = (_geometric_median(trajectories) if reduction == "geometric_median"
                else trajectories.mean(axis=1))
     if phat is None:
         phat = _density_fn(rho, "kde")
+    if closepair_density == "direct" and phat_pair is None:
+        phat_pair = _density_fn(0.5 * (rho[gi] + rho[gj]), "kde")
 
     if target == "full":
         rho_mid = 0.5 * (rho[gi] + rho[gj])
-        pw_q = 1.0 / np.clip(phat(rho_mid), 1e-12, None)
+        if phat_pair is not None:
+            pw_q = (np.clip(phat(rho_mid), 1e-12, None)
+                    / np.clip(phat_pair(rho_mid), 1e-12, None))
+        else:
+            pw_q = 1.0 / np.clip(phat(rho_mid), 1e-12, None)
         pw_q = np.clip(pw_q, None, weight_clip * np.median(pw_q))
     else:
         pw_q = np.ones(n_pairs)
@@ -194,7 +204,7 @@ def _legacy_compat_crate(counts, trajectories, T_idx, target, threshold,
     prod = (counts[gi].T * pw) @ counts[gj]
     MM = 0.5 * (prod + prod.T)
     Crate = MM - np.outer(Erate, Erate)
-    return Crate, n_pairs, phat, rho
+    return Crate, n_pairs, phat, rho, phat_pair
 
 
 def _enumerate_close_pairs(trajectories, T_idx, threshold):
@@ -313,6 +323,7 @@ def decompose_session(aligned,
                       n_shuffles: int = N_SHUFFLES_DEFAULT,
                       min_trials_per_time_bin: int = MIN_TRIALS_PER_TIME_BIN_DEFAULT,
                       seed: int = 42,
+                      closepair_density: str = "direct",
                       verbose: bool = False):
     """Run the methods LOTC decomposition on one aligned-session record.
 
@@ -352,9 +363,9 @@ def decompose_session(aligned,
 
         per_target = {}
         n_close_pairs = None
-        # representative points + KDE are eye-only and target-independent;
+        # representative points + KDE(s) are eye-only and target-independent;
         # compute once per window and share across targets
-        phat = rho = None
+        phat = rho = phat_pair = None
         for tgt in targets:
             real = decompose_trajectory(
                 counts, trajectories, T_idx, target=tgt,
@@ -363,6 +374,7 @@ def decompose_session(aligned,
                 cpsth_method=cpsth_method, n_boot=n_boot,
                 seed=seed,
                 min_trials_per_time_bin=min_trials_per_time_bin,
+                closepair_density=closepair_density,
             )
 
             # Override Crate with the uncentred close-pair form
@@ -385,11 +397,12 @@ def decompose_session(aligned,
             # The centred form remains the default in
             # `estimators.decompose_trajectory` because its numerical-
             # precision argument holds on the §4.6 synthetic validation.
-            Crate, n_close, phat, rho = _legacy_compat_crate(
+            Crate, n_close, phat, rho, phat_pair = _legacy_compat_crate(
                 counts, trajectories, T_idx, tgt, threshold,
                 Erate=real["Erate"],
                 time_bin_weighting=time_bin_weighting,
                 weight_clip=1e6, phat=phat, rho=rho,
+                closepair_density=closepair_density, phat_pair=phat_pair,
             )
             if n_close_pairs is None:
                 n_close_pairs = n_close

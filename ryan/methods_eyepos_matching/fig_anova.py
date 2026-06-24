@@ -67,7 +67,7 @@ def _direction1_estimate(sess, cell_idx=0):
     out = decompose(sess["rate"], sess["eye"], target="full",
                     density="gaussian", threshold=THR,
                     time_bin_weighting="pair_count",
-                    cpsth_method="mcfarland")
+                    cpsth_method="mcfarland", closepair_density="squared")
     return float(out["one_minus_alpha"][cell_idx])
 
 

@@ -57,6 +57,9 @@ sentence the §4.3 reframe targets).
 | `writeup.md` | Main methods writeup source. §4 = Ext-2: 4.1 naive failures (merged old 4.1–4.3, concl. Fig 2), 4.2 corrected estimator (concl. Fig 3), 4.3 Dir-1/2 tradeoff+gap, 4.4 multi-bin trajectory (Fig 4), 4.5 real data (Fig 5). Old §5 deleted; §6–§7 moved to note_pipeline.md (2026-06-18 restructure). |
 | `note_pipeline.md` | Implementation note: production-pipeline state (§6) + CPU-parallel Figure-2 reimplementation/validation (§7, Figs 7–9), moved out of writeup.md. Section/figure numbers retained from the main note. Builds to note_pipeline.html. |
 | `writeup.html` | Build output (committed; pandoc --mathml --self-contained). |
+| `compute_closepair_density.py` | Cache-only driver (all 25 sessions): directly-estimated close-pair density `p_pair` (KDE on close-pair representative-midpoints) vs the squared marginal `p̂²`, + re-runs §4.5 decomposition under `closepair_density ∈ {squared,direct}`. Writes `cache/closepair_density.pkl`. For `note_closepair_density.md`. |
+| `fig_closepair_density.py` | Figure for `note_closepair_density.md`: A `p` / `p²` / `p_pair` x-marginal overlay; B per-session close-pair variance ratio vs ideal 0.5; C/D per-cell 1-α full/central squared-vs-direct. |
+| `note_closepair_density.md` | Side note: directly estimating `p_pair` vs the §A.5 `p̂²` assumption. Real close pairs are MORE central than `p²` (var ratio med 0.42 vs 0.5, KL 0.16); full 1-α robust (+0.017), central −0.060, gap 0.119→0.183, naive/Fano invariant. Builds to note_closepair_density.html. |
 | `note_anova.md` | Side note: one-way ANOVA on known rates + fig4 panel D investigation. Tangential to main writeup. |
 | `note_anova.html` | Build output (committed; pandoc --mathml --self-contained). |
 | `fig_anova.py` | Synthetic validation for `note_anova.md` §5 (ANOVA recovers $1-\alpha^p$ across all three masks). |
@@ -150,6 +153,19 @@ constant n_t the two coincide; under variable n_t with envelope correlated
 to n_t they differ, and only `pair_count` matches `Crate`'s intrinsic
 weighting.
 
+`closepair_density` ∈ {`direct` (default since 2026-06-24), `squared`} — how the
+close-pair midpoint density (the Crate sampling density) is estimated for the
+importance weights. `direct` (default): fit a separate KDE on the realized
+close-pair midpoints. `squared`: assume `p_pair = p̂²` (the §A.5 Δe→0 identity;
+pre-2026-06-24 behavior, bit-for-bit). `full`'s close-pair weight is
+`p̂/p̂_pair` (`1/p̂` under squared); `central`'s per-sample weight is `p̂_pair/p̂`
+(`p̂` under squared) — its close-pair weight stays 1. Threaded through
+`decompose`, `decompose_trajectory`, and `pipeline.decompose_session`. The
+synthetic closed-form validation figures/tests (fig_recovery, fig_trajectory,
+fig_anova; `_seed_stats*` helpers) pin `squared` (p_pair=p² holds on Gaussian-eye
+synthetic); the real-data Ext-2 drivers (generate_realdata, compute_methods_data)
+use the `direct` default. See `note_closepair_density.md`.
+
 `cpsth_method` ∈ {`mcfarland`, `split_half`} — how Cpsth is debiased
 against same-time-bin observation noise (Poisson + simultaneous cross-cell
 noise correlations).
@@ -202,6 +218,20 @@ estimators agree within bootstrap noise at our (N, T, C) scales.
 - **Real data (397 good cells, cached).** Naive median 1-α 0.734 reproduces
   fig2's 0.732; Direction 1 0.702 (population bias −0.022); Direction 2
   0.608; gap median 0.089; Fano 0.846 → 0.875.
+- **Close-pair density `p_pair` vs `p̂²` (`note_closepair_density.md`).** The
+  trajectory-mode weights assume the close-pair midpoint density = `p̂²` (§A.5,
+  exact only single-bin Δe→0). Directly estimating it (KDE on close-pair
+  representative-midpoints, `closepair_density='direct'`): real close pairs are
+  MORE central than `p²` (population-median variance ratio 0.42 vs ideal 0.5;
+  KL 0.16) — leptokurtic fixations + RMS-trajectory match keep central
+  fixations. Effect on §4.5 (1359 cells): full 1-α 0.692→0.709 (+0.017,
+  per-cell median +0.001 — robust); central 0.537→0.477 (−0.060); gap
+  0.119→0.183; naive & Fano invariant (no importance weights). Headline (full,
+  Direction 1) holds by measurement, not just the Δe→0 identity. **`direct` is
+  now the estimator default (2026-06-24) and the main writeup reports it
+  throughout** — §4.5 Figure 5 (realdata_results.pkl schema 4), §4.5 NC + Figure
+  6 (methods bundle regenerated direct), note_pipeline §7.3 Fig 8, note_consistency
+  tables all regenerated/updated to direct. Fig 7 equivalence (naive) still PASSES.
 - **Gap reframe (§4.3).** Gap = 0.089 in real data means the cell rate has
   spatial structure on the fixation scale (expected for any cell with a
   finite RF), NOT (A2) violation. The (A2) baseline for the random field
@@ -291,11 +321,16 @@ Run from this folder. Workspace `.venv` is at the v1-fovea repo root;
     uv run python fig_panel_d_anova.py          # cell-side matching, ANOVA on twin
     uv run python fig_panel_d_closepair.py      # Fig. 2 of note_anova.md
 
+    # Close-pair-density side note (note_closepair_density.md)
+    uv run python compute_closepair_density.py --recompute   # cache-only, all sessions
+    uv run python fig_closepair_density.py
+
     # Writeup (number-eqs.lua re-adds equation numbers; pandoc --mathml
     # drops amsmath \tag{})
     pandoc writeup.md      -s --mathml --self-contained --lua-filter=number-eqs.lua -o writeup.html
     pandoc note_pipeline.md -s --mathml --self-contained --lua-filter=number-eqs.lua -o note_pipeline.html
     pandoc note_anova.md    -s --mathml --self-contained --lua-filter=number-eqs.lua -o note_anova.html
+    pandoc note_closepair_density.md -s --mathml --self-contained --lua-filter=number-eqs.lua -o note_closepair_density.html
 
 ## External pointers
 

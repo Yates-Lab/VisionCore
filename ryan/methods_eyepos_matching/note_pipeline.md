@@ -272,16 +272,19 @@ At the canonical window $t_\text{count} = 2$ bins ($n = 1313$ included
 cells, 25 sessions):
 
   * $\text{median}(1-\alpha)$: naive $0.793$, Direction 1 (full)
-    $0.756$, Direction 2 (central) $0.657$. The Direction-1 vs naive
-    shift ($\sim -0.04$) has the same sign and order as the $-0.022$ the
-    cell-side `generate_realdata.py` reported in the main note §4.5 —
-    recovered here at full multi-cell, multi-window scope. The Direction-2
-    shift to $0.657$ is larger because the close-pair eye distribution $p^2$
+    $0.771$, Direction 2 (central) $0.605$. The Direction-1 vs naive
+    shift ($-0.022$) has the same sign and order as the cell-side
+    `generate_realdata.py` result in the main note §4.5 — recovered here at
+    full multi-cell, multi-window scope. The Direction-2
+    shift to $0.605$ is larger because the close-pair eye distribution
     concentrates on the central fixation peak, where the cell's mean rate is
     least eye-modulated; this is the same close-pair-density mechanism that
-    the main note's §4.1 exhibits.
+    the main note's §4.1 exhibits. (These numbers use the directly-estimated
+    close-pair density, the estimator default — `closepair_density='direct'`,
+    `note_closepair_density.md`; the short 4-bin trajectory window here makes
+    the direct-vs-squared shift small relative to the 12-bin §4.5 window.)
   * $\text{median}(\text{Fano}_\text{cor})$: naive $0.931$, full
-    $0.956$, central $0.910$. The Direction-1 Fano is *higher* than
+    $0.951$, central $0.900$. The Direction-1 Fano is *higher* than
     naive (the $C_\text{noise}$ numerator gains the cross-term
     correction) and the Direction-2 Fano is *lower* by a similar
     margin — both directions move the Fano factor *away* from the
@@ -289,9 +292,9 @@ cells, 25 sessions):
     suggests.
   * Per-session noise-correlation shift $\Delta\bar z =
     \bar z_\text{cor} - \bar z_\text{unc}$: naive $-0.0683$,
-    full $-0.0591$, central $-0.0386$. The eye-distribution-matched
+    full $-0.0590$, central $-0.0399$. The eye-distribution-matched
     estimators reduce the apparent noise-correlation suppression by
-    $\sim 15\text{–}45\%$ (naive over-suppresses, as predicted in §4
+    $\sim 14\text{–}42\%$ (naive over-suppresses, as predicted in §4
     by the close-pair-vs-marginal density mismatch).
 
 ![**Figure 8 — Eye-distribution-matching corrections at population scale

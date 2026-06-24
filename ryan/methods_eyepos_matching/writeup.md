@@ -980,10 +980,27 @@ $\{\rho_i\}$ and apply the §4.2 importance weights:
 
 (`estimators.decompose_trajectory`, `reduction='geometric_median'`). The
 close-pair filter remains the whole-trajectory RMS distance (17) — two trials
-are "close" only when their entire windows match — but the importance density is
-built from the reduced points, so the separate close-pair KDE is unnecessary:
-$p^2$ is implied by $\hat p$ exactly as in §4.2 (no density estimate in
-$\mathbb R^{2T}$, sidestepping the curse of dimensionality).
+are "close" only when their entire windows match — and the importance density is
+built from the reduced points (no density estimate in $\mathbb R^{2T}$,
+sidestepping the curse of dimensionality).
+
+The weights in the table above substitute the §A.5 identity $p_{\mathrm{pair}} =
+\hat p^2$ for the close-pair density (so Direction 1's per-pair weight is
+$1/\hat p$ and Direction 2's per-sample weight is $\hat p$). That identity is
+exact for single-bin close pairs as $\Delta e\to 0$, but the finite RMS
+threshold and the geometric-median reduction make it only approximate here.
+We therefore **estimate the close-pair density directly** — a second KDE
+$\hat p_{\mathrm{pair}}$ fit on the realized close-pair representative-midpoints,
+giving per-pair weight $\hat p/\hat p_{\mathrm{pair}}$ (Direction 1) and
+per-sample weight $\hat p_{\mathrm{pair}}/\hat p$ (Direction 2). This is the
+estimator default (`closepair_density='direct'`) and the one all real-data
+results below use; the squared-marginal form is retained as the closed-form
+synthetic-validation special case (it is exact there). We checked both on the
+real recordings: the directly-estimated $p_{\mathrm{pair}}$ is measurably more
+central than $\hat p^2$, but the reported Direction-1 $1-\alpha$ moves
+negligibly, so estimating the distribution directly is the more principled
+choice and leaves the headline robust by measurement. The comparison is the
+subject of a companion note (`note_closepair_density.md`).
 
 In the exactly-flat limit ($\sigma_{\mathrm{drift}}\to 0$) the trajectory
 collapses to its representative point, the reduction is exact, and Directions 1
@@ -1053,8 +1070,10 @@ estimator applied to the real spikes without modification, using the
 $t_{\mathrm{hist}}/t_{\mathrm{count}}$ window split exactly as §4.4 describes:
 the close-pair match is on the whole $\approx 100$ ms ($12$-bin) eye-trajectory
 window — the neuron's integration context — reduced to its **geometric median**
-and filtered on the RMS trajectory distance (17), with a single KDE $\hat p$
-supplying the §4.2 importance weights ($p^2$ implied); the spike **count** that
+and filtered on the RMS trajectory distance (17), with the §4.4 importance
+weights built from a representative-point KDE $\hat p$ and a **directly-estimated
+close-pair density** $\hat p_{\mathrm{pair}}$ (`closepair_density='direct'`, the
+default; `note_closepair_density.md`); the spike **count** that
 enters $C_{\text{total}}$, $C_{\text{rate}}$ and the Fano factor is the single
 $\approx 8$ ms ($t_{\mathrm{count}}=1$) bin at the end of that window. Keeping
 the count window small matters: $1-\alpha$ is a ratio of two rate variances and
@@ -1071,13 +1090,13 @@ arbitrary fixational trajectories. Pooled over **1359 good cells** (2 monkeys,
 
 | quantity | naive | Direction 1 ($p$, `full`) | Direction 2 ($p^2$, `central`) |
 |---|---|---|---|
-| median $1-\alpha$ | 0.728 | **0.692** | 0.537 |
-| median Fano | 0.943 | 0.954 | — |
+| median $1-\alpha$ | 0.728 | **0.709** | 0.477 |
+| median Fano | 0.943 | 0.953 | — |
 
 - **The headline: the reported results barely move.** On the actual-viewing
   target $p$ — the scientifically correct one (§4.3) — the matched
   $1-\alpha$ tracks the naive estimate cell-by-cell: the per-cell median shift
-  naive$\,\to\,$full is $+0.018$ (the matched value sits just below the naive
+  naive$\,\to\,$full is $+0.013$ (the matched value sits just below the naive
   one), and the scatter clusters on the identity line (Fig. 5A). The naive
   population median (0.728) reproduces the Figure-2 value ($\approx 0.73$). So
   the existing Figure-2 / Figure-4 panel-D $1-\alpha$ conclusions are
@@ -1093,20 +1112,21 @@ arbitrary fixational trajectories. Pooled over **1359 good cells** (2 monkeys,
   correction rather than an uncontrolled one — and the size of the
   distribution-dependence is visible directly: pulling everything in to the
   close-pair density $p^2$ (Direction 2) moves the population median down to
-  0.537 (Fig. 5B, C), $\approx 0.16$ below Direction 1.
+  0.477 (Fig. 5B, C), $\approx 0.23$ below Direction 1.
 - **The gap measures fixation-scale spatial structure.** The per-cell gap
   $\lvert(1-\alpha)_{\text{full}} - (1-\alpha)_{\text{central}}\rvert$ has a
-  population **median of 0.119** (90th percentile 0.354; Fig. 5E). Under the
+  population **median of 0.183** (90th percentile 0.447; Fig. 5E). Under the
   unified random-field model the gap is non-zero under (A2) itself when
   $\ell\sim\sigma_e$ (Eq. 16) — peaking at $\approx 0.17$ — so a gap of this
-  size is *expected* for any cell with a finite spatial RF, not evidence that
-  (A2) is violated. What it does say is that the **choice** of eye-position
+  size is *comparable to* the (A2) random-field baseline for a cell with a
+  finite spatial RF, not evidence that (A2) is violated. What it does say is
+  that the **choice** of eye-position
   distribution materially changes the reported $1-\alpha$ at the fixation
   scale, which is exactly why a principled, consistent choice (Direction 1)
   matters even though it leaves the headline number intact.
 - **The Fano factor stays sub-Poisson and barely shifts.** The FEM-corrected
-  Fano factor is $0.943$ naive $\to 0.954$ matched (Direction 1), a per-cell
-  median shift of $+0.011$ that leaves it comfortably below $1$ (Fig. 5F) — the
+  Fano factor is $0.943$ naive $\to 0.953$ matched (Direction 1), a per-cell
+  median shift of $+0.009$ that leaves it comfortably below $1$ (Fig. 5F) — the
   sub-Poisson regime the uncorrected Fano is reported in. The shift is
   consistent with the synthetic prediction that the Fano factor inherits the
   rate-variance distribution mismatch; per-cell shifts are larger than the
@@ -1116,14 +1136,14 @@ arbitrary fixational trajectories. Pooled over **1359 good cells** (2 monkeys,
 cells, 2 monkeys, 25 sessions; trajectory-mode, geometric-median reduction).**
 *Top row — the three pairwise comparisons of the naive and two matched
 $1-\alpha$ estimates.* **(A)** naive vs Direction 1 (`full`, target $p$): on the
-identity line (per-cell median shift $-0.018$) — matching to the actual viewing
+identity line (per-cell median shift $-0.013$) — matching to the actual viewing
 distribution leaves the reported $1-\alpha$ essentially unchanged. **(B)** naive
 vs Direction 2 (`central`, target $p^2$): systematically lower. **(C)** full vs
 central: the two consistent targets, separated by the distribution-dependence of
 $1-\alpha$. *Bottom row — the reported quantities.* **(D)** the FEM-fraction
-$1-\alpha$ distribution on the headline Direction-1 target (median 0.692).
+$1-\alpha$ distribution on the headline Direction-1 target (median 0.709).
 **(E)** the full-vs-central gap, a fixation-scale spatial-structure measure
-(median 0.119, heavy tail). **(F)** Fano factor, naive vs matched (`full`):
+(median 0.183, heavy tail). **(F)** Fano factor, naive vs matched (`full`):
 sub-Poisson ($\approx 0.95$, below $1$) with a small median shift and larger
 per-cell changes.](figures/fig_realdata.png)
 
@@ -1146,7 +1166,7 @@ the same shift Fig 5A/D shows cell by cell.](figures/consistency/cmp_fig2c.png)
 ![**Figure 6B (Fig 2E)** — population Fano slope-through-origin vs counting
 window (open/dashed uncorrected, filled/solid corrected). The corrected `full`
 and `central` slopes sit just above `naive` — less correction — matching the
-small $0.943\to0.954$ Fano shift of Fig 5F.](figures/consistency/cmp_fig2e.png)
+small $0.943\to0.953$ Fano shift of Fig 5F.](figures/consistency/cmp_fig2e.png)
 
 ![**Figure 6C (Fig 3B)** — corrected vs uncorrected noise-correlation scatter at
 8.3 ms, one panel per monkey. The matched corrected values sit above the naive
@@ -1168,12 +1188,13 @@ $1-\alpha$ (Fig 6A) and the Fano factor (Fig 6B) the matched estimators barely
 move the published curves, as Figure 5 already showed cell by cell. The noise
 correlation behaves differently. The naive close-pair estimator drives the
 FEM-corrected correlation to essentially zero — population mean Fisher-$z$
-$z_c = 0.003$ at 8.3 ms and $0.0005$ at 25 ms — while matching to the actual
+$z_c = 0.003$ at 8.3 ms and $0.0004$ at 25 ms — while matching to the actual
 viewing distribution ($p$, `full`) leaves a clearly positive residual,
-$z_c = 0.011$ and $0.020$ at the same two windows (Fig 6C, D). Equivalently the
-FEM correction $\Delta z$ shrinks by roughly a fifth to a third ($-0.089\to-0.070$
-at 25 ms, $-0.098\to-0.064$ at 50 ms; Fig 6E), and `central` moves slightly
-further in the same direction. This is the one place the (A2) mismatch changes a
+$z_c = 0.012$ and $0.011$ at the same two windows (Fig 6C, D). Equivalently the
+FEM correction $\Delta z$ shrinks by roughly a tenth ($-0.089\to-0.079$
+at 25 ms, $-0.098\to-0.088$ at 50 ms; Fig 6E), and `central` moves further
+in the same direction (losing significance against the null at the long window).
+This is the one place the (A2) mismatch changes a
 conclusion rather than a number: the naive pipeline reports that the FEM
 correction removes essentially all noise correlation, whereas the consistent
 estimator restores a positive residual — §4.1's over-subtraction acting on the
@@ -1188,11 +1209,11 @@ weighting; Extension 2 (§4) pins the eye-position distribution; each is validat
 against closed-form ground truth and against the production filter's multi-bin
 trajectories. On the real recordings the per-cell quantities stand: the
 $1-\alpha$ distribution shifts by $\approx 0.02$ at the median and the Fano
-factor stays sub-Poisson ($0.943\to0.954$), so the Figure-2 and Figure-4
+factor stays sub-Poisson ($0.943\to0.953$), so the Figure-2 and Figure-4
 conclusions built on them are unchanged. The quantity that moves is the corrected
 noise correlation — the naive close-pair estimator subtracts too much shared rate
 variance and drives it to zero, and the consistent estimator restores a positive
-residual (mean Fisher-$z$ from near $0$ to $\approx 0.01$–$0.02$). That is the
+residual (mean Fisher-$z$ from near $0$ to $\approx 0.01$). That is the
 largest consequence of matching the eye-position distribution, and the reason the
 correction earns its place even where the headline numbers hold: it carries
 McFarland's estimator from his translation-invariant special case to the
