@@ -48,11 +48,14 @@ md = load_methods_bundle()
 DATA = {
     "PROD": load_fig2_data(refresh=False),
     "NAIVE": methods_to_fig2_schema(md, "naive"),
-    # FULL and CENTRAL borrow the naive eye-shuffle null for panel 3D's reference
-    # band (the pipeline only runs shuffles for naive); observed values stay
-    # each target's own.
-    "FULL": methods_to_fig2_schema(md, "full", null_from="naive"),
-    "CENTRAL": methods_to_fig2_schema(md, "central", null_from="naive"),
+    # FULL and CENTRAL use their OWN eye-shuffle null for panel 3D's reference
+    # band: the pipeline now re-runs the target-reweighted close-pair estimator
+    # on each shuffle (pipeline._run_corrected_shuffles), so each target's null
+    # carries its own eye-distribution structure (central's band picks up the
+    # p^2 offset; writeup §4.3). This supersedes the earlier null_from='naive'
+    # borrow.
+    "FULL": methods_to_fig2_schema(md, "full"),
+    "CENTRAL": methods_to_fig2_schema(md, "central"),
 }
 COLS = ["PROD", "NAIVE", "FULL", "CENTRAL"]
 SUB = {

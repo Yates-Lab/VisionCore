@@ -98,8 +98,9 @@ alternate pipeline; import and reuse it:
 - **`consistency/adapter.py::methods_to_fig2_schema(md, target, null_from=)`** —
   maps a `derive_methods` bundle into the exact `load_fig2_data()` schema by
   running the methods `metrics[target]` through the **literal production**
-  Stage-3 functions. Feed it each per-radius `derive_methods` bundle. Use
-  `null_from='naive'` for panel-3D's reference band (see below).
+  Stage-3 functions. Feed it each per-radius `derive_methods` bundle. For
+  panel-3D's reference band use each target's **own** null (see the Panel-D
+  shuffle-null note below; `null_from` is no longer needed).
 - **`consistency/make_panels.py`** — copy its `panel_func()` import-hygiene
   helper and the gridspec/`fig.text` 4-up layout verbatim; just change `COLS`
   and `DATA` to be the radii instead of the targets.
@@ -150,11 +151,15 @@ quantities we care about as $r$ tightens:
   it)? Report with bootstrap CIs so "stable vs drifting" is a statistical
   statement, not eyeballing.
 
-**Panel-D shuffle null.** The pipeline computes the eye-shuffle null for
-`target='naive'` only, and only on each radius's own masked data. Use each
-radius's naive null as that radius's panel-3D band (`null_from='naive'` within
-that radius's bundle) — do **not** borrow the baseline null across radii, since
-the null's width legitimately changes as samples are removed. Document this.
+**Panel-D shuffle null.** *(Updated 2026-06-24: the pipeline now computes a
+target-specific eye-shuffle null for every target via
+`pipeline._run_corrected_shuffles`, not naive only.)* Use each radius's **own
+per-target** null as that radius's panel-3D band (drop `null_from='naive'`;
+`make_panels.py` no longer passes it) — and do **not** borrow the baseline null
+across radii, since the null's width legitimately changes as samples are
+removed. If this sweep only renders the `naive` target, naive's own null is
+still correct; if it renders `full`/`central`, use their own nulls (central's
+carries the $p^2$ offset, writeup §4.3). Document this.
 
 ## Success criteria
 

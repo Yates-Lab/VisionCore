@@ -925,6 +925,55 @@ The gap is still a useful empirical signal — it tells you that the *choice*
 of eye-position distribution $D$ matters for the reported $1-\alpha$ — but
 it is not a clean test of (A2).
 
+**The corrected noise covariance is itself a $q$-average, so it inherits the
+same distribution dependence.** The argument so far has been about the *rate*
+second moment, but the target distribution propagates one step further, into
+the noise correlation the method exists to report. The close-pair restriction
+cancels the simultaneous (same-trial) observation noise regardless of which
+eye positions the pairs land on — distinct trials have independent noise
+(§1.2, §A.10.1) — so $C_{\text{rate}}^q$ converges to the noise-free rate
+covariance under $q$ and the corrected covariance is the *difference of two
+$q$-matched terms*:
+$$
+C_{\text{noise}}^{\text{corr},\,q}
+ = C_{\text{total}}^q - C_{\text{rate}}^q
+ = \mathbb E_{e\sim q}\!\big[\Sigma_{\text{noise}}(e)\big],
+\tag{17}
+$$
+where $\Sigma_{\text{noise}}(e)=\mathrm{Cov}\big[Y_m,Y_n\mid e,t\big]$ is the
+*conditional* same-trial noise covariance at eye position $e$. Equation (17)
+says the corrected noise covariance is not a single number but the conditional
+noise covariance **averaged over whichever eye distribution the estimator is
+pinned to**. Direction 1 reports $\mathbb E_p[\Sigma_{\text{noise}}]$ — the
+noise correlation under the actual viewing distribution; Direction 2 reports
+$\mathbb E_{p^2}[\Sigma_{\text{noise}}]$ — the same quantity weighted toward
+central fixations.
+
+These coincide only when the noise covariance is itself eye-position
+independent, $\Sigma_{\text{noise}}(e)\equiv\Sigma_{\text{noise}}$. That is a
+*separate* assumption from (A2), which constrains only the rate: a stimulus can
+be homogeneous (flat mask, $\mathbb E_{p^2}[M^2]=\mathbb E_p[M^2]$, no $1-\alpha$
+bias) while the shared-variability covariance still depends on absolute eye
+position. In the windowed `fixRSVP` setting eye-dependence of the noise is in
+fact expected on the same mechanism that breaks (A2): once the eye drifts far
+enough to carry the RF off the windowed image the drive collapses to baseline,
+and any drive- or rate-coupled component of the shared variability (the
+dominant regime for V1 noise correlations) collapses with it, so
+$\Sigma_{\text{noise}}(e)$ is larger near fixation than in the periphery. Under
+such eye-dependence Direction 1 and Direction 2 report genuinely different
+noise correlations *even after the rate-distribution mismatch is removed*, and
+the full-vs-central NC gap conflates two sources — the rate's fixation-scale
+spatial structure (Eq. 16) and the eye-dependence of the noise itself. The
+practical consequence mirrors the $1-\alpha$ recommendation: **Direction 1
+($q=p$) is the principled target for any reported noise correlation**, because
+it is the average over the distribution the animal actually viewed under;
+Direction 2 remains the stable cross-check, but a noise correlation reported
+over $p^2$ over-weights central fixations and is not the natural-viewing
+quantity. Validating (17) against a *known, eye-dependent* injected noise
+covariance — the analogue of the closed-form $1-\alpha$ checks above — is the
+clean synthetic test of this claim; the eye-independent case is already
+recovered by all three targets.
+
 ## 4.4 Multi-bin eye trajectories: the production-setting extension
 
 §4.2 framed the close-pair filter as a single-bin condition
@@ -939,7 +988,7 @@ $$
 \big\lVert\tau_i-\tau_j\big\rVert_{\mathrm{RMS}}
  \;=\; \sqrt{\tfrac{1}{T}\sum_{t=1}^{T}\lVert e_{i,t}-e_{j,t}\rVert^2}
  \;<\;\varepsilon
-\tag{17}
+\tag{18}
 $$
 
 so that two trials are "close" only when their *whole* trajectories — not just
@@ -963,7 +1012,7 @@ single-bin §4.2 estimator exactly. We take the representative point to be the
 
 $$
 \rho_i \;=\; \arg\min_{x\in\mathbb R^2}\ \sum_{t=1}^{T}\big\lVert x-e_{i,t}\big\rVert ,
-\tag{18}
+\tag{19}
 $$
 
 which, unlike the centroid, is robust to the occasional within-window
@@ -979,7 +1028,7 @@ $\{\rho_i\}$ and apply the §4.2 importance weights:
 | naive | $1$ | $1$ |
 
 (`estimators.decompose_trajectory`, `reduction='geometric_median'`). The
-close-pair filter remains the whole-trajectory RMS distance (17) — two trials
+close-pair filter remains the whole-trajectory RMS distance (18) — two trials
 are "close" only when their entire windows match — and the importance density is
 built from the reduced points (no density estimate in $\mathbb R^{2T}$,
 sidestepping the curse of dimensionality).
@@ -1070,7 +1119,7 @@ estimator applied to the real spikes without modification, using the
 $t_{\mathrm{hist}}/t_{\mathrm{count}}$ window split exactly as §4.4 describes:
 the close-pair match is on the whole $\approx 100$ ms ($12$-bin) eye-trajectory
 window — the neuron's integration context — reduced to its **geometric median**
-and filtered on the RMS trajectory distance (17), with the §4.4 importance
+and filtered on the RMS trajectory distance (18), with the §4.4 importance
 weights built from a representative-point KDE $\hat p$ and a **directly-estimated
 close-pair density** $\hat p_{\mathrm{pair}}$ (`closepair_density='direct'`, the
 default; `note_closepair_density.md`); the spike **count** that
@@ -1179,9 +1228,13 @@ at every window, while the naive corrected curve sits near
 zero.](figures/consistency/cmp_fig3c.png)
 
 ![**Figure 6E (Fig 3D)** — $\Delta z$ (corrected − uncorrected) vs window against
-the eye-shuffle null 95% band (the naive null; `note_consistency.md` §2.4). The
-matched $\Delta z$ is attenuated relative to naive, and `central` loses
-separation from the null first at the long window.](figures/consistency/cmp_fig3d.png)
+**each target's own** eye-shuffle null 95% band. The pipeline re-runs that
+target's reweighted close-pair estimator on every shuffle
+(`pipeline._run_corrected_shuffles`), so `full` and `central` are scored against
+their own null rather than borrowing naive's. The matched $\Delta z$ is
+attenuated relative to naive, and `central` — whose own null band is shifted
+positive by the $p^2$ offset (§4.3) — loses separation from the null first at the
+long window.](figures/consistency/cmp_fig3d.png)
 
 Across the five panels the result is consistent and has one large feature. On
 $1-\alpha$ (Fig 6A) and the Fano factor (Fig 6B) the matched estimators barely

@@ -133,12 +133,14 @@ def test_decompose_session_schema():
         assert block["Erate"].shape == (4,)
         assert block["one_minus_alpha"].shape == (4,)
 
-    # Shuffles only for naive (per spec)
-    assert len(w["targets"]["naive"]["Shuffled_Crates"]) == 3
-    assert len(w["targets"]["full"]["Shuffled_Crates"]) == 0
-    assert len(w["targets"]["central"]["Shuffled_Crates"]) == 0
-    for cs in w["targets"]["naive"]["Shuffled_Crates"]:
-        assert cs.shape == (4, 4)
+    # Shuffles now run for every target (naive fast path; full/central via the
+    # target-reweighted close-pair estimator on shuffled trajectories).
+    for tgt in ("naive", "full", "central"):
+        cs_list = w["targets"][tgt]["Shuffled_Crates"]
+        assert len(cs_list) == 3, f"target={tgt}: expected 3 shuffles"
+        for cs in cs_list:
+            assert cs.shape == (4, 4)
+            assert np.isfinite(cs).all(), f"target={tgt}: non-finite shuffled Crate"
 
 
 def test_legacy_adapter_runs():

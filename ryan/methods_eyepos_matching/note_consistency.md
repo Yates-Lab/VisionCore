@@ -224,7 +224,7 @@ difference of §1.5.
 | 6 | Per-window finiteness inclusion | upstream | expected — prod drops 5/22/84 units at 16.7/25/50 ms; benign for pooled stats |
 | 7 | `fano_stats['per_subject']` missing in methods bundle | Stage 3 | reconstructed via production fn in adapter |
 | 8 | `nc_stats['null_dz_ci_by_subject']` missing in methods bundle | Stage 3 | reconstructed via production fn in adapter |
-| 9 | Shuffle null computed for `naive` target only | `pipeline.py` | by design — panel-D `full` band reuses the naive null (see Phase 2) |
+| 9 | ~~Shuffle null computed for `naive` target only~~ | `pipeline.py` | RESOLVED 2026-06-24 — each target re-runs its own reweighted shuffle (`_run_corrected_shuffles`); panel-D uses each target's own null (§2.4) |
 
 Differences 1–4 are non-issues; 5–6 are the genuine (and small) upstream
 effects of the new estimator; 7–9 are handled in the adapter. **No item is a
@@ -250,9 +250,10 @@ nc_stats   = _compute_nc_stats(metrics, windows_ms)     # incl. null_dz_ci_by_su
 This both **eliminates statistic-function divergence** and **reconstructs** the
 two per-subject sub-keys the methods bundle omitted
 (`fano_stats[w]['per_subject']`, `nc_stats[w]['null_dz_ci_by_subject']`). The
-`null_from='naive'` option borrows the naive eye-shuffle null into the `full`
-and `central` targets so panel 3D's reference band is defined for them (see
-§2.4).
+`null_from` option (borrow another target's eye-shuffle null) is retained for
+diagnostics but is no longer used by the figures: each target now carries its
+own reweighted shuffle null, so panel 3D's reference band is each target's own
+(see §2.4).
 
 Adapter verification (`uv run python consistency/verify_adapter.py`) confirms:
 **every** panel-required key is present; the adapter `fano_stats`/`nc_stats`
@@ -307,11 +308,11 @@ values sit slightly higher (less correction).](figures/consistency/cmp_fig3b.png
 FULL and CENTRAL corrected curves are pulled up toward the uncorrected curve at
 every window (CENTRAL marginally above FULL).](figures/consistency/cmp_fig3c.png)
 
-![Fig 3D — $\Delta z$ (corrected − uncorrected) vs window against the shuffle
-null 95% band. PROD and NAIVE match. FULL and CENTRAL are attenuated and reuse
-the naive null band as their reference (§2.4); CENTRAL shows the smallest
-reduction and loses significance earliest at the long
-window.](figures/consistency/cmp_fig3d.png)
+![Fig 3D — $\Delta z$ (corrected − uncorrected) vs window against **each
+target's own** shuffle null 95% band (§2.4). PROD and NAIVE match. FULL and
+CENTRAL are attenuated; CENTRAL's own null is shifted positive by the $p^2$
+offset, so it shows the smallest reduction and loses significance earliest at
+the long window.](figures/consistency/cmp_fig3d.png)
 
 ## 2.4 Target movement — NAIVE → FULL → CENTRAL
 
@@ -334,16 +335,22 @@ fig2/fig3 panel. (FULL/CENTRAL use the directly-estimated close-pair density,
 the estimator default — `closepair_density='direct'`,
 `note_closepair_density.md`; NAIVE is invariant to it.)
 
-**Panel-D `full`/`central` shuffle-null decision.** The pipeline computes the
-eye-shuffle null for `target='naive'` only. Rather than fabricate a target-
-specific null (which would require re-running the shuffle under each target's
-reweighting — out of scope for a vetting pass), the FULL and CENTRAL panel-3D
-plots show each target's observed $\Delta z$ against the **naive** null band
-(`null_from='naive'`). This is the correct reference: the null answers "how much
-$\Delta z$ does eye-shuffling produce by chance under the same close-pair
-procedure," and that band is a property of the shuffle, not of the target
-reweighting. Target-specific nulls are flagged as future work for the production
-swap.
+**Panel-D `full`/`central` shuffle-null decision.** *(Updated 2026-06-24:
+target-specific nulls implemented.)* The pipeline now re-runs each target's
+reweighted close-pair estimator on every shuffle
+(`pipeline._run_corrected_shuffles`), so FULL and CENTRAL are scored against
+**their own** eye-shuffle null (`make_panels.py` no longer passes
+`null_from='naive'`). The earlier reasoning — that the null band is "a property
+of the shuffle, not of the target reweighting" — was wrong for `central`: once
+the eye–spike coupling is destroyed, central's close pairs revert to the
+uniform (over-$p$) second moment while its $C_\text{psth}$ stays on $p^2$, so
+its null band is shifted **positive** by the same $p^2$ offset that governs the
+observed quantity (writeup §4.3). Borrowing naive's (≈zero-centred) band would
+therefore have *understated* central's reference and overstated its
+significance. The per-target null is the honest reference; `full`'s band stays
+near naive's (its $C_\text{psth}$ already lives on $p$), while `central` loses
+separation from its own null first at the long window. The `null_from` option in
+`adapter.py` is retained for diagnostics but is no longer used by the figures.
 
 ## 2.5 The central condition
 
@@ -384,7 +391,7 @@ estimate.
 | Corrected Fano slope < 0.8 @ 25 ms once exclude-not-clip + statistic matched | done — PROD 0.707 / NAIVE 0.714 (§1.6, §2.2) |
 | `1-α`-clip pile-up explained and resolved | done — clip never reaches panel; bundle excludes raw, counts in §1.4–1.5 |
 | NC panels (fig3 B/C/D) validated for the first time | done (§2.2–2.3) |
-| Panel-D `full` shuffle-null handling decided and documented | done — reuse naive null (§2.4) |
+| Panel-D `full`/`central` shuffle-null handling decided and documented | done — each target re-runs its own reweighted shuffle null (§2.4) |
 | Comparison figures for fig2 C/E and fig3 B/C/D saved | done — 4-up PROD/NAIVE/FULL/CENTRAL (§2.3, `figures/consistency/`) |
 | Production untouched | verified — only `consistency/` added |
 

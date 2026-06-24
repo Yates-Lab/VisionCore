@@ -365,13 +365,14 @@ speedup.](figures/fig_pipeline_speed.png)
     $C_\text{fem}$ exactly as in legacy stage 2 and can be lifted verbatim
     when needed; the equivalence demonstrated here transfers to those
     panels with zero additional estimator work.
-  * **Eye-shuffle nulls for the `full` and `central` targets**. The
-    Stage-1 implementation runs nulls for `naive` only (the legacy
-    semantic). Full/central nulls would require re-fitting
-    $\hat p_\text{cp,marg}$ on each shuffle's close-pair midpoints and re-
-    computing the per-sample $\hat p_\text{cp,marg}/\hat p_\text{marg}$
-    ratio under the shuffled eye assignment — straightforward but not
-    needed for the equivalence assertion in §7.2.
+  * ~~**Eye-shuffle nulls for the `full` and `central` targets**.~~
+    *Done (2026-06-24).* `pipeline._run_corrected_shuffles` re-runs each
+    target's reweighted close-pair estimator on every shuffle — re-fitting
+    $\hat p_\text{cp,marg}$ on the shuffle's close-pair midpoints and
+    evaluating the importance weights at the shuffled positions ($\hat p$ on
+    the representative points is invariant under the permutation, so it is
+    reused). `make_panels.py` now scores `full`/`central` against their own
+    null (writeup Fig 6E, §4.3); the central band picks up the $p^2$ offset.
   * **Production GPU cache regeneration** (`fig2_decomposition.pkl`). The
     on-disk fig2 cache that `VisionCore/ryan/fig2/generate_fig2*.py` reads
     still ships with `target='naive'` numbers. Swapping it to `target='full'`

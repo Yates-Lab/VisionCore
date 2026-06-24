@@ -7,15 +7,27 @@ trajectory of max(t_hist_bins, t_count) + t_count = 2*t_count for t_count>=1
 at the default t_hist_ms=10), same segmentation, same Ctotal definition.
 
 For each (session, window) we run all three targets (naive / full / central) in
-one pass. Shuffle nulls are run for target='naive' only -- that is enough to
-reproduce the legacy alpha/Fano/NC empirical-p values for the equivalence
-check; full/central nulls are deferred (writeup §7.5).
+one pass, each with its own eye-shuffle null.
 
 Shuffle semantic: permute the (sample -> trajectory) row map, re-enumerate
-close pairs, recompute the close-pair second moment. ``Erate`` (under
-target='naive', sw=1) is invariant under row permutation, so the shuffle
-output is Crate_shuf = MM_shuf - Erate Erate^T -- close-pair-only, matching
-legacy `Shuffled_Intercepts`.
+close pairs, recompute that target's reweighted close-pair second moment.
+
+  * ``naive``: ``Erate`` is invariant under the row permutation (sw=1, so it
+    is a function of (counts, T_idx) only), so the shuffle output is
+    Crate_shuf = MM_shuf - Erate Erate^T -- close-pair-only, matching legacy
+    `Shuffled_Intercepts`. Computed via the fast ``_run_naive_shuffles`` path
+    (no KDE), preserving the byte-for-byte §7.2 equivalence audit.
+  * ``full`` / ``central``: the null re-runs the SAME target-reweighted
+    close-pair estimator the real path uses (``_legacy_compat_crate``) on the
+    shuffled trajectories (``_run_corrected_shuffles``). The eye-density KDE
+    ``p_hat`` on representative points is invariant under the permutation (the
+    point SET is unchanged, only relabeled) so it is reused; the close-pair-
+    midpoint density ``p_hat_pair`` IS re-fit on each shuffle's close pairs.
+    ``Erate`` is held at the real per-target value (the mean rate is
+    eye-independent to leading order, so recomputing it under the permutation
+    only adds variance). The null thus reflects the estimator's own behavior
+    under destroyed eye-spike coupling, including any residual p-vs-p^2 offset
+    in ``central`` (whose close-pair weight stays 1 under the shuffle).
 """
 from __future__ import annotations
 
@@ -292,6 +304,43 @@ def _run_naive_shuffles(counts, trajectories, T_idx, threshold, n_shuffles,
     return out
 
 
+def _run_corrected_shuffles(counts, trajectories, T_idx, threshold, n_shuffles,
+                            time_bin_weighting, seed, Erate, target, phat, rho,
+                            weight_clip, closepair_density):
+    """Eye-shuffle null for ``target`` in {'full', 'central'}.
+
+    Permute the (sample -> trajectory) row map, then recompute the SAME
+    target-reweighted close-pair Crate the real path uses
+    (``_legacy_compat_crate``) on the shuffled trajectories. Counts (and their
+    T_idx) are NOT permuted, so the close pairs -- selected by shuffled-
+    trajectory proximity -- pair counts whose true eye positions are unrelated:
+    the eye-spike coupling is destroyed exactly as in the naive null.
+
+    ``phat`` (the eye-density KDE on representative points) is invariant under
+    the permutation -- the point SET {rho_i} is unchanged, only relabeled -- so
+    it is reused. ``rho`` is permuted to follow its trajectory so the close-pair
+    midpoints and importance weights are evaluated at the shuffled positions.
+    The close-pair-midpoint density ``p_hat_pair`` is re-fit on each shuffle's
+    close pairs (passed as None). ``Erate`` is the real per-target mean (held
+    fixed; eye-independent to leading order, matching the naive convention).
+    """
+    rng = np.random.default_rng(seed)
+    N = counts.shape[0]
+    out = []
+    for _ in range(n_shuffles):
+        perm = rng.permutation(N)
+        traj_shuf = trajectories[perm]
+        rho_shuf = rho[perm]
+        Crate_shuf, _n, _phat, _rho, _phat_pair = _legacy_compat_crate(
+            counts, traj_shuf, T_idx, target, threshold,
+            Erate=Erate, time_bin_weighting=time_bin_weighting,
+            weight_clip=weight_clip, phat=phat, rho=rho_shuf,
+            closepair_density=closepair_density, phat_pair=None,
+        )
+        out.append(Crate_shuf)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Per-session driver
 # ---------------------------------------------------------------------------
@@ -414,12 +463,27 @@ def decompose_session(aligned,
             one_minus_alpha[~(np.diag(Crate) > 0)] = np.nan
 
             shuffled_crates = []
-            if tgt == "naive" and n_shuffles > 0:
-                shuffled_crates = _run_naive_shuffles(
-                    counts, trajectories, T_idx, threshold, n_shuffles,
-                    time_bin_weighting, seed=seed,
-                    Erate=real["Erate"],
-                )
+            if n_shuffles > 0:
+                if tgt == "naive":
+                    # fast path (no KDE) -- keeps the §7.2 equivalence audit
+                    # byte-for-byte identical to the legacy `Shuffled_Intercepts`.
+                    shuffled_crates = _run_naive_shuffles(
+                        counts, trajectories, T_idx, threshold, n_shuffles,
+                        time_bin_weighting, seed=seed,
+                        Erate=real["Erate"],
+                    )
+                else:
+                    # full / central: re-run that target's reweighted close-pair
+                    # estimator on the shuffled trajectories. phat + rho were
+                    # computed by this iteration's real `_legacy_compat_crate`
+                    # call above and are shared (rho permuted per shuffle).
+                    shuffled_crates = _run_corrected_shuffles(
+                        counts, trajectories, T_idx, threshold, n_shuffles,
+                        time_bin_weighting, seed=seed,
+                        Erate=real["Erate"], target=tgt,
+                        phat=phat, rho=rho, weight_clip=1e6,
+                        closepair_density=closepair_density,
+                    )
 
             per_target[tgt] = {
                 "Crate": Crate,
