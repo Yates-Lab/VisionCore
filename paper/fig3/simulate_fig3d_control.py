@@ -61,7 +61,7 @@ import matplotlib.pyplot as plt
 from scipy.stats import spearmanr, pearsonr
 
 from VisionCore.covariance import (
-    run_covariance_decomposition, rate_variance_components,
+    pipeline_one_minus_alpha, rate_variance_components,
 )
 from _fig3_data import (
     DT, FIG_DIR, CACHE_DIR, SUBJECTS, SUBJECT_COLORS, CCMAX_THRESHOLD,
@@ -84,17 +84,17 @@ def _alpha_from_mats(mats0):
 
 
 def _decompose(spikes, eyepos, valid_mask, seed=42):
-    """Run the empirical pipeline once; return per-cell 1-alpha for window 0."""
-    _, mats = run_covariance_decomposition(
-        spikes, eyepos, valid_mask,
-        window_sizes_bins=WINDOW_BINS, dt=DT, n_shuffles=0,
-        intercept_mode="below_threshold",
-        intercept_kwargs={"threshold": THRESHOLD},
-        seed=seed, device="cuda",
+    """Run the matched empirical pipeline once; per-cell 1-alpha (target='full').
+
+    The 1-bin counting window means each (trial, time-bin) is one sample and the
+    time bin is the phase -- exactly what ``pipeline_one_minus_alpha`` computes on
+    the full (trials, time, cells) arrays.
+    """
+    out = pipeline_one_minus_alpha(
+        spikes, eyepos, valid=valid_mask, threshold=THRESHOLD,
+        min_trials_per_phase=MIN_TRIALS_PER_PHASE, seed=seed,
     )
-    if not mats:
-        return None
-    return _alpha_from_mats(mats[0])
+    return out["one_minus_alpha"]
 
 
 def compute_control(data, n_sim=5, seed=0):

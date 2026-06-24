@@ -43,7 +43,10 @@ FIG_DIR.mkdir(parents=True, exist_ok=True)
 STAT_DIR.mkdir(parents=True, exist_ok=True)
 
 CACHE_PATH = CACHE_DIR / "fig3_digitaltwin.pkl"
-FIG2_CACHE_PATH = CACHE_DIR / "fig2_decomposition.pkl"
+# Empirical covariance-decomposition cache (shared package). Per-session schema:
+#   sr["windows"][w]["targets"]["full"]["Cpsth"/"Crate"], sr["neuron_mask"].
+COVDECOMP_CACHE_PATH = CACHE_DIR / "covdecomp_empirical.pkl"
+COVDECOMP_TARGET = "full"
 
 
 def configure_matplotlib():
@@ -60,25 +63,29 @@ def subject_from_session(session_name):
 
 
 def _load_fig2_alpha_by_session():
-    """Load fig2 α-per-session lookup (only needed during inference)."""
-    if not FIG2_CACHE_PATH.exists():
+    """Load empirical α-per-session lookup (only needed during inference).
+
+    Reads the shared covariance-decomposition cache (target='full') and the
+    first counting window, mirroring the empirical 1-α the fig2 panels report.
+    """
+    if not COVDECOMP_CACHE_PATH.exists():
         raise FileNotFoundError(
-            f"Figure 2 cache not found at {FIG2_CACHE_PATH}. "
-            "Run generate_figure2.py first to compute the covariance decomposition."
+            f"Covariance-decomposition cache not found at {COVDECOMP_CACHE_PATH}. "
+            "Run `uv run python paper/covariance_decomposition/decompose.py` first."
         )
-    print(f"Loading figure 2 cache from {FIG2_CACHE_PATH}")
-    with open(FIG2_CACHE_PATH, "rb") as f:
-        fig2_session_results = dill.load(f)
+    print(f"Loading covariance-decomposition cache from {COVDECOMP_CACHE_PATH}")
+    with open(COVDECOMP_CACHE_PATH, "rb") as f:
+        session_results = dill.load(f)
 
     out = {}
-    for sr in fig2_session_results:
+    for sr in session_results:
         sess_name = sr["session"]
         subject = sr["subject"]
         if subject not in SUBJECTS:
             continue
-        mats_w0 = sr["mats"][0]  # first counting window
-        diag_psth = np.diag(mats_w0["PSTH"])
-        diag_rate = np.diag(mats_w0["Intercept"])
+        block = sr["windows"][0]["targets"][COVDECOMP_TARGET]  # first counting window
+        diag_psth = np.diag(block["Cpsth"])
+        diag_rate = np.diag(block["Crate"])
         alpha = np.clip(diag_psth / diag_rate, 0, 1)
         out[sess_name] = {
             "alpha": alpha,

@@ -1,15 +1,39 @@
 """
-Figure 3 panel C: mean Fisher z noise correlation vs counting window,
-per subject, uncorrected (dashed, open markers) and FEM-corrected (solid,
-filled markers). Subjects are dodged in x to disambiguate overlap.
-Styled to match fig2 panel E (population Fano factor).
+Figure 2 noise correlation panels.
+
+    plot_nc_box       per-pair noise correlation (rho) at one window as a box
+                      (uncorrected vs FEM-corrected). Main-figure Panel F.
+    plot_panel_c      mean Fisher-z noise correlation vs counting window, per
+                      subject. Window-robustness supplemental.
 """
 import numpy as np
 import matplotlib.pyplot as plt
 
 from VisionCore.stats import bootstrap_mean_ci
-from _panel_common import standalone_save
+from _panel_common import standalone_save, nearest_window, pair_box
 from compute_fig2_data import load_fig2_data
+
+
+def plot_nc_box(ax=None, refresh=False, data=None, window_ms=25.0):
+    """Single-window per-pair noise correlation (rho) as box-and-whisker (5-95
+    percentile whiskers, no fliers) for uncorrected vs FEM-corrected, with the
+    independence (rho = 0) reference dotted and a significance bracket."""
+    if data is None:
+        data = load_fig2_data(refresh=refresh)
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(2.4, 3.0))
+    else:
+        fig = ax.figure
+
+    w = nearest_window(data["WINDOWS_MS"], window_ms)
+    s = data["nc_stats"][w]
+    pair_box(
+        ax,
+        np.asarray(s["rho_u"], dtype=float),
+        np.asarray(s["rho_c"], dtype=float),
+        ref=0.0, p=s["p_wil"], ylabel="Noise correlation (ρ)",
+    )
+    return fig, ax
 
 
 def plot_panel_c(ax=None, refresh=False, data=None):

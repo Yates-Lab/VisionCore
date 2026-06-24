@@ -47,7 +47,13 @@ GEOM_DIR = VISIONCORE_ROOT / "declan" / "fig4_cov_TFTS"
 if str(GEOM_DIR) not in sys.path:
     sys.path.insert(0, str(GEOM_DIR))
 
-import generate_covTFTS_figure as geom  # noqa: E402
+try:
+    import generate_covTFTS_figure as geom  # noqa: E402
+except ImportError:
+    # The reafferent-geometry module (panels F-I) lives in the declan/ TFTS
+    # pipeline and may be absent. The digital-twin row (panels B-E) does not
+    # need it; drivers that only build B-E import this module with geom=None.
+    geom = None
 
 
 POOLED_COLOR = "0.25"

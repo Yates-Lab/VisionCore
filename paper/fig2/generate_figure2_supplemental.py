@@ -51,7 +51,7 @@ def write_covariance_heatmaps(data=None, window_idx=HEATMAP_WINDOW_IDX):
                       vmin=-v * vscale, vmax=v * vscale)
             ax.set_title(title)
             ax.axis("off")
-        out = FIG_DIR / f"cov_decomp_session{ds_idx}.pdf"
+        out = FIG_DIR / f"figure2_cov_decomp_session{ds_idx}.pdf"
         fig.savefig(out, bbox_inches="tight", dpi=300)
         plt.close(fig)
         print(f"Saved {out}")
@@ -87,7 +87,7 @@ def write_stats_report(data=None):
     var_p_given_f = data["var_p_given_f"]
     var_f_given_p = data["var_f_given_p"]
 
-    stats_file = STAT_DIR / "fig2_stats.txt"
+    stats_file = STAT_DIR / "figure2_stats.txt"
     with open(stats_file, "w") as f:
         old_stdout = sys.stdout
         sys.stdout = _Tee(f, old_stdout)
