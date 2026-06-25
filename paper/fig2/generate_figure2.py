@@ -753,32 +753,11 @@ def _plot_subspace_schematic(fig, subplot_spec):
     ax.add_collection3d(Line3DCollection(
         drops, colors="0.35", linewidths=0.7, linestyles=":"))
 
-    # --- Ambient neural-space axes (neurons 1,2,3). Under elev=18/azim=-60 the
-    # data directions render as: -y -> down-left (out of the page, toward the
-    # reader), +x -> right, +z -> up. The frame is placed so the vertical line
-    # (neuron 3) rises just left of the FEM ellipse's left edge and the
-    # horizontal line (neuron 2) runs just above the plane's front edge. Faint,
-    # so it reads as ambient scaffolding rather than a foreground element. ---
-    fem_left = float(rim[:, 0].min())
-    o = np.array([fem_left - 0.18, -1.6, 0.0])
-    axis_specs = (
-        (np.array([0.0, -1.0, 0.0]), 1.9, "1"),   # toward viewer (down-left)
-        (np.array([1.0, 0.0, 0.0]), 3.0, "2"),    # right
-        (np.array([0.0, 0.0, 1.0]), 3.0, "3"),    # up
-    )
-    for d, Lax, name in axis_specs:
-        end = o + d * Lax
-        ax.plot([o[0], end[0]], [o[1], end[1]], [o[2], end[2]],
-                color="0.6", lw=1.0, alpha=0.5, zorder=0)
-        lbl = end + d * 0.28
-        ax.text(lbl[0], lbl[1], lbl[2], name, color="0.55", fontsize=7.5,
-                ha="center", va="center", alpha=0.75, zorder=1)
-    ax.text2D(0.05, 0.14, "neurons", transform=ax.transAxes, color="0.6",
-              fontsize=7, ha="left", va="center", alpha=0.8)
-
     # --- Leading PSTH eigenvectors, drawn parallel to the subspace edges
     # (+x and +y), in the lower-right of the plane. ---
-    origin = np.array([1.3, -0.8, 0.0])
+    # Lowered toward the front edge and shifted so the u1 arrow tip lands on the
+    # plane's right edge (x = px), keeping the u1 label clear of the boundary.
+    origin = np.array([px - 1.7, -1.35, 0.0])
     for vec, name, off in (
         (np.array([1.7, 0.0, 0.0]), r"$\mathbf{u}_1^{\mathrm{PSTH}}$", (0.22, -0.12, 0.0)),
         (np.array([0.0, 1.4, 0.0]), r"$\mathbf{u}_2^{\mathrm{PSTH}}$", (0.0, 0.28, 0.0)),
@@ -801,7 +780,11 @@ def _plot_subspace_schematic(fig, subplot_spec):
             bbox=dict(boxstyle="round,pad=0.25", fc="white",
                       ec=plane_color, lw=0.7, alpha=0.9))
 
-    ax.set_xlim(-3.9, px); ax.set_ylim(-3.8, py); ax.set_zlim(0, cz + 0.9)
+    # Limit windows are shifted (without changing their span, so scale is
+    # preserved) to slide the projected 3D diagram up and to the left, centering
+    # it in the panel within the gnomon frame: +x window -> content moves left,
+    # -z window -> content moves up.
+    ax.set_xlim(-2.75, px + 1.15); ax.set_ylim(-3.8, py); ax.set_zlim(-0.55, cz + 0.35)
     ax.view_init(elev=18, azim=-60)
     try:
         ax.set_box_aspect((px + 0.5, py + 1.0, cz * 0.62))
@@ -813,6 +796,49 @@ def _plot_subspace_schematic(fig, subplot_spec):
     pos = ax.get_position()
     ax.set_position([pos.x0 - 0.018, pos.y0 - 0.030,
                      pos.width * 1.14, pos.height * 1.20])
+
+    # --- Ambient neural-space axes (neurons 1, 2, 3), drawn as a 2D gnomon in
+    # screen (axes-fraction) space so the frame orients cleanly regardless of the
+    # 3D projection: dim 2 horizontal (straight right), dim 3 vertical (up), dim 1
+    # oblique (down-left, toward the viewer). The three arms meet exactly at the
+    # origin (shrink=0); sized large so the frame reads as bounding the scene. ---
+    gnom_o = (0.135, 0.385)
+    arm1_tip = (0.070, 0.225)        # down-left, toward the viewer
+    arm2_tip = (0.585, 0.385)        # right (horizontal)
+    arm3_tip = (0.135, 0.920)        # up (vertical)
+    for tip in (arm1_tip, arm2_tip, arm3_tip):
+        ax.annotate("", xy=tip, xytext=gnom_o,
+                    xycoords="axes fraction", textcoords="axes fraction",
+                    arrowprops=dict(arrowstyle="-", color="0.6", lw=1.0,
+                                    alpha=0.5, shrinkA=0, shrinkB=0), zorder=0)
+
+    # "neurons" runs along the dim-1 axis, just above it (offset up-left). The
+    # rotation is the on-screen angle of that axis, aspect-corrected from the
+    # final panel box so it tracks the line exactly.
+    bb_g = ax.get_position(); _fw, _fh = fig.get_size_inches()
+    _asp = (bb_g.width * _fw) / (bb_g.height * _fh)
+    _up = (gnom_o[0] - arm1_tip[0], gnom_o[1] - arm1_tip[1])   # toward the origin
+    _rot = np.degrees(np.arctan2(_up[1], _up[0] * _asp))
+    _mid = (0.5 * (gnom_o[0] + arm1_tip[0]), 0.5 * (gnom_o[1] + arm1_tip[1]))
+    ax.text2D(_mid[0] - 0.052, _mid[1] + 0.028, "neurons",
+              transform=ax.transAxes, color="0.6", fontsize=7, alpha=0.8,
+              ha="center", va="center", rotation=_rot, rotation_mode="anchor")
+
+    # --- Variance-captured definition, filling the empty lower band of the
+    # panel: the fraction of FEM variance lying in the leading PSTH subspace,
+    # f = projected variance / total variance. U holds the leading PSTH
+    # eigenvectors that span the subspace. ---
+    ax.text2D(0.5, 0.135,
+              "Fraction of FEM variance in the PSTH subspace",
+              transform=ax.transAxes, fontsize=8.5, color="0.20",
+              ha="center", va="center")
+    ax.text2D(0.5, 0.045,
+              r"$f \;=\; \frac{\mathrm{projected\ variance}}"
+              r"{\mathrm{total\ variance}} \;=\; "
+              r"\frac{\mathrm{tr}\!\left(U^{\top}\Sigma_{\mathrm{FEM}}\,U\right)}"
+              r"{\mathrm{tr}\!\left(\Sigma_{\mathrm{FEM}}\right)}$",
+              transform=ax.transAxes, fontsize=11.5, color="0.10",
+              ha="center", va="center")
     return ax
 
 
