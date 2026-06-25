@@ -38,6 +38,9 @@ HERE = Path(__file__).resolve().parent
 FIG_DIR = FIGURES_DIR / "fig1"
 FIG_DIR.mkdir(parents=True, exist_ok=True)
 
+# fixRSVP face shown behind panel B's gaze cloud in the image-backdrop variant.
+PANEL_B_IMAGE_ID = 18
+
 # Layout in inches.
 ROW_HEIGHT_IN = 3.0
 PANEL_C_W_IN = 2.0
@@ -171,10 +174,22 @@ def _add_panel_labels(elements):
         ))
 
 
-def _render_main_svg(out_path, recalc_c=False, recalc_d=False, recalc_f=False):
+def _render_main_svg(out_path, recalc_c=False, recalc_d=False, recalc_f=False,
+                     panel_b_show_image=False, panel_c_show_image=False):
     """Render B-I together as a single full-width matplotlib
-    figure. The top-left cell is left empty for panel A (composited later)."""
+    figure. The top-left cell is left empty for panel A (composited later).
+
+    ``panel_b_show_image`` / ``panel_c_show_image`` draw a sample fixRSVP face
+    (``PANEL_B_IMAGE_ID``) behind the gaze cloud (B) and the RF contours (C).
+    The face is drawn at its true on-screen extent (``±faceRadius``) and the
+    view is set to that extent so it fills the panel; the 3°-image circle is
+    dropped since the face itself conveys the stimulus footprint."""
     fig = plt.figure(figsize=(TOTAL_W_IN, CANVAS_H_IN), layout=None)
+
+    # Representative session + the fixRSVP image extent (faceRadius). Cheap
+    # (cached); needed for both the panel-C extent circle and the image lims.
+    _b_name, _ = pick_representative_session()
+    _, _face_radius = _load_all_fixrsvp_stimuli(_b_name)
 
     ax_trial_order = fig.add_axes(_box_to_fig(PANEL_BOXES_PX["G"]))
     plot_panel_trial_order_raster(
@@ -190,20 +205,36 @@ def _render_main_svg(out_path, recalc_c=False, recalc_d=False, recalc_f=False):
     plot_panel_d_gaze(ax=ax_d_gaze, refresh=recalc_d)
 
     ax_b = fig.add_axes(_box_to_fig(PANEL_BOXES_PX["B"]))
-    plot_panel_b(ax=ax_b)
+    if panel_b_show_image:
+        # The gaze cloud overlaid on a sample fixRSVP face at its true
+        # on-screen extent; the view fills to ±faceRadius and the 3° circle is
+        # dropped (the face conveys the footprint). Gaze density outside the
+        # analysis window is greyed (grey_outside_analysis default) to show
+        # external gaze is not considered.
+        plot_panel_b(ax=ax_b, image_id=PANEL_B_IMAGE_ID, show_stimulus=True,
+                     show_extent_circle=False, lim=_face_radius)
+    else:
+        plot_panel_b(ax=ax_b)
     ax_b.set_title("Eye position", fontsize=8.5, pad=7)
 
     ax_c = fig.add_axes(_box_to_fig(PANEL_BOXES_PX["C"]))
-    # Match panel B's zoom and 3° image-extent circle so the B/C row is
-    # consistent (B now defaults to the no-image extent version). The bold
-    # example-cell contour and ROI box are omitted — they read as distracting.
-    _b_name, _ = pick_representative_session()
-    _, _face_radius = _load_all_fixrsvp_stimuli(_b_name)
-    plot_panel_c(
-        ax=ax_c, refresh=recalc_c,
-        show_extent_circle=True, extent_radius_deg=_face_radius,
-        lim=_face_radius + EXTENT_VIEW_MARGIN_DEG,
-    )
+    # The bold example-cell contour and ROI box are omitted — they read as
+    # distracting.
+    if panel_c_show_image:
+        # Match panel B: the face backdrop at true extent, view filled to
+        # ±faceRadius, no 3° image circle.
+        plot_panel_c(
+            ax=ax_c, refresh=recalc_c, show_extent_circle=False,
+            lim=_face_radius, show_stimulus=True, image_id=PANEL_B_IMAGE_ID,
+            session_name=_b_name,
+        )
+    else:
+        # No-image baseline: 3° image-extent circle with the matched margin.
+        plot_panel_c(
+            ax=ax_c, refresh=recalc_c,
+            show_extent_circle=True, extent_radius_deg=_face_radius,
+            lim=_face_radius + EXTENT_VIEW_MARGIN_DEG,
+        )
     ax_c.set_title("Receptive fields", fontsize=8.5, pad=7)
 
     _, pop_axes = plot_panel_f(
@@ -310,9 +341,13 @@ def _panel_a_inset_border():
     """).getroot()
 
 
-def compose(recalc_c=False, recalc_d=False, recalc_f=False):
-    main_svg = FIG_DIR / "_fig1_main.svg"
-    _render_main_svg(main_svg, recalc_c=recalc_c, recalc_d=recalc_d, recalc_f=recalc_f)
+def compose(recalc_c=False, recalc_d=False, recalc_f=False,
+            panel_b_show_image=False, panel_c_show_image=False,
+            out_stem="fig1"):
+    main_svg = FIG_DIR / f"_{out_stem}_main.svg"
+    _render_main_svg(main_svg, recalc_c=recalc_c, recalc_d=recalc_d,
+                     recalc_f=recalc_f, panel_b_show_image=panel_b_show_image,
+                     panel_c_show_image=panel_c_show_image)
 
     fig = sg.SVGFigure(f"{TOTAL_W_IN}in", f"{CANVAS_H_IN}in")
     fig.root.set("viewBox", f"0 0 {TOTAL_W_IN * PPI} {CANVAS_H_IN * PPI}")
@@ -336,20 +371,24 @@ def compose(recalc_c=False, recalc_d=False, recalc_f=False):
     _add_panel_labels(elements)
     fig.append(elements)
 
-    out_svg = FIG_DIR / "fig1.svg"
+    out_svg = FIG_DIR / f"{out_stem}.svg"
     fig.save(str(out_svg))
 
-    out_pdf = FIG_DIR / "fig1.pdf"
-    out_png = FIG_DIR / "fig1.png"
+    out_pdf = FIG_DIR / f"{out_stem}.pdf"
+    out_png = FIG_DIR / f"{out_stem}.png"
     cairosvg.svg2pdf(url=str(out_svg), write_to=str(out_pdf))
     cairosvg.svg2png(url=str(out_svg), write_to=str(out_png), dpi=300)
-    _write_caption_files()
 
     print(f"Saved {out_svg}")
     print(f"Saved {out_pdf}")
     print(f"Saved {out_png}")
-    print(f"Saved {FIG_DIR / 'fig1_caption.md'}")
-    print(f"Saved {FIG_DIR / 'fig1_legend.md'}")
+
+    # The caption text is identical across variants — write it once, with the
+    # canonical figure.
+    if out_stem == "fig1":
+        _write_caption_files()
+        print(f"Saved {FIG_DIR / 'fig1_caption.md'}")
+        print(f"Saved {FIG_DIR / 'fig1_legend.md'}")
 
 
 def _viewbox_size(root_element):
@@ -388,8 +427,19 @@ def _parse_args():
 
 if __name__ == "__main__":
     args = _parse_args()
+    # Canonical figure: plain white backgrounds behind panels B and C.
     compose(
         recalc_c=args.recalc or args.recalc_c,
         recalc_d=args.recalc or args.recalc_d,
         recalc_f=args.recalc or args.recalc_f,
+        panel_b_show_image=False, panel_c_show_image=False,
+        out_stem="fig1",
+    )
+    # Face-backdrop variant: the sample fixRSVP face behind both panel B and
+    # panel C, drawn at its true on-screen extent and filling each panel.
+    # Reuses the cached panels (recalc, if requested, already ran above).
+    compose(
+        recalc_c=False, recalc_d=False, recalc_f=False,
+        panel_b_show_image=True, panel_c_show_image=True,
+        out_stem="fig1_imageBC",
     )

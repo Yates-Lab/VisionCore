@@ -39,7 +39,7 @@ PLOT_LIM_DEG = 1.5
 # Extra view margin (deg) beyond the 3° extent circle when it is shown — gives
 # headroom for the "3° image" label above the arc and a gap for the colorbar
 # inside the right spine. Shared by fig1c so the B/C row stays matched.
-EXTENT_VIEW_MARGIN_DEG = 0.45
+EXTENT_VIEW_MARGIN_DEG = 0.38
 
 FIG_DIR = FIGURES_DIR / "fig1"
 CACHE_FIG_DIR = CACHE_DIR / "fig1_gaze"
@@ -235,7 +235,9 @@ def plot_panel_b(ax=None, session_name=None, eyepos=None, *,
     show_stimulus : bool
         If True, draw the fixRSVP face behind the gaze cloud (mid-gray
         backdrop, white rings). If False (default), the gaze cloud sits on a
-        plain white background with dark rings.
+        plain white background with dark rings. The face is drawn at its true
+        on-screen extent (``±half_deg``); set ``lim`` to that extent so it
+        fills the panel.
     show_fix_ring : bool
         Draw the 1° fixation-constraint ring (off by default — the face
         backdrop / extent circle already convey scale).
@@ -244,9 +246,9 @@ def plot_panel_b(ax=None, session_name=None, eyepos=None, *,
         i.e. a 3° diameter circle). Used by the no-image version.
     grey_outside_analysis : bool
         Render the gaze density outside the analysis window
-        (``ANALYSIS_RADIUS_DEG``) in greyscale rather than the warm map, so
-        it reads as excluded from analysis. Intended for the no-image
-        version (greyscale over a face backdrop would be invisible).
+        (``ANALYSIS_RADIUS_DEG``) in greyscale rather than the warm map, so it
+        reads as excluded from analysis. The greyscale and warm layers are
+        translucent over a face backdrop so the stimulus stays visible.
     lim : float, optional
         Half-width of the plotted field of view in degrees. ``None`` (default)
         auto-selects: wide enough for the extent circle when shown, else the
@@ -327,16 +329,17 @@ def plot_panel_b(ax=None, session_name=None, eyepos=None, *,
                  for i in range(n_bands - 1)]
         return [(0.0, 0.0, 0.0, 0.0)] + [(c[0], c[1], c[2], alpha) for c in inner]
 
-    # Warm map is the colorbar reference. Opaque when it must fully cover the
-    # greyscale layer (no-image split); translucent to overlay a face.
-    warm_alpha = 1.0 if grey_outside_analysis else 0.8
-    fill_colors = _band_colors(plt.cm.YlOrRd, warm_alpha)
+    # Warm map is the colorbar reference. Translucent over a face backdrop so
+    # the stimulus stays visible; opaque over the plain white background. The
+    # greyscale layer matches this alpha so it, too, lets the face show through.
+    layer_alpha = 0.8 if show_stimulus else 1.0
+    fill_colors = _band_colors(plt.cm.YlOrRd, layer_alpha)
 
     if grey_outside_analysis:
         # Greyscale density everywhere marks "not analysed"; warm density,
         # clipped to the analysis window, marks what is. Drawn on top so the
         # circular clip boundary reads as the analysis edge.
-        grey_colors = _band_colors(plt.cm.Greys, 1.0, lo=0.25, hi=0.65)
+        grey_colors = _band_colors(plt.cm.Greys, layer_alpha, lo=0.25, hi=0.65)
         ax.contourf(X, Y, Hn, levels=fill_levels, colors=grey_colors, zorder=1)
         warm_cf = ax.contourf(X, Y, Hn, levels=fill_levels, colors=fill_colors,
                               zorder=1.05)
@@ -415,10 +418,12 @@ def plot_panel_b(ax=None, session_name=None, eyepos=None, *,
             bbox_transform=ax.transData, loc="center", borderpad=0,
         )
     else:
-        # Face versions (no extent circle): hug the inside of the right spine.
+        # Face versions (no extent circle): sit just inside the right spine.
+        # The right edge is pulled in from 1.0 so the bar clears the spine the
+        # tighter ±faceRadius limits push it against.
         cax = inset_axes(
             ax, width="4%", height="68%", loc="center right",
-            bbox_to_anchor=(0.0, 0.0, 1.0, 1.0),
+            bbox_to_anchor=(0.0, 0.0, 0.95, 1.0),
             bbox_transform=ax.transAxes, borderpad=0.1,
         )
     boundaries_pct = [0] + list(PERCENTILE_LEVELS) + [100]
@@ -432,10 +437,12 @@ def plot_panel_b(ax=None, session_name=None, eyepos=None, *,
     cb.ax.tick_params(length=0)
     cb.ax.minorticks_off()
     cb.outline.set_linewidth(0.5)
+    # Black glyphs with a white halo so the ends stay legible over the face.
+    end_fx = [pe.withStroke(linewidth=1.6, foreground="white")]
     cax.text(0.5, 1.04, "1", transform=cax.transAxes, ha="center", va="bottom",
-             fontsize=7)
+             fontsize=7, color="black").set_path_effects(end_fx)
     cax.text(0.5, -0.04, "0", transform=cax.transAxes, ha="center", va="top",
-             fontsize=7)
+             fontsize=7, color="black").set_path_effects(end_fx)
 
     return fig, ax, session_name
 

@@ -163,7 +163,8 @@ def _load_all_contours(recalc=False):
 def plot_panel_c(ax=None, refresh=None, roi_extent=None,
                  highlight_session=None, highlight_cell=None,
                  show_extent_circle=False, extent_radius_deg=None,
-                 lim=1.5, scale_bar=True):
+                 lim=1.5, scale_bar=True,
+                 show_stimulus=False, image_id=None, session_name=None):
     """Plot foveal RF contours.
 
     ``show_extent_circle`` overlays the fixRSVP image maximum extent (a solid
@@ -172,6 +173,12 @@ def plot_panel_c(ax=None, refresh=None, roi_extent=None,
     half-width of the field of view in degrees. ``scale_bar`` draws a 0→1°
     bar with edge ticks under the "1°" label so it reads as the *radius* of
     the dashed circle (not the diameter).
+
+    ``show_stimulus`` draws the fixRSVP face (``image_id``, from
+    ``session_name`` or the representative session) behind the contours at its
+    true on-screen extent, so the RF locations can be read against the
+    stimulus; set ``lim`` to that extent so the face fills the panel. Over the
+    face, the rings and scale bar switch to white-with-stroke for legibility.
     """
     if refresh is None:
         refresh = RECALC
@@ -179,6 +186,29 @@ def plot_panel_c(ax=None, refresh=None, roi_extent=None,
         fig, ax = plt.subplots(figsize=(3, 3))
     else:
         fig = ax.figure
+
+    import matplotlib.patheffects as pe
+    if show_stimulus:
+        anno_color = "white"
+        anno_fx = [pe.withStroke(linewidth=1.8, foreground="black")]
+    else:
+        anno_color = "k"
+        anno_fx = []
+
+    # Stimulus backdrop behind the contours, matching the fig1b face.
+    if show_stimulus:
+        if session_name is None:
+            session_name, _ = pick_representative_session()
+        stimuli, _ = _load_all_fixrsvp_stimuli(session_name)
+        if image_id is not None:
+            stim_img, stim_half = stimuli[image_id]
+        else:
+            stim_img, stim_half = next(iter(stimuli.values()))
+        s_lo, s_hi = np.percentile(stim_img, [2, 98])
+        ax.imshow(stim_img,
+                  extent=[-stim_half, stim_half, -stim_half, stim_half],
+                  origin="upper", cmap="gray", vmin=s_lo, vmax=s_hi,
+                  interpolation="bilinear", zorder=-2)
 
     by_subject = _load_all_contours(recalc=refresh)
 
@@ -200,31 +230,35 @@ def plot_panel_c(ax=None, refresh=None, roi_extent=None,
                    label=f"{subject} ({len(sessions)} sess)")
         )
 
-    circle = plt.Circle((0, 0), 1.0, color="k", ls="--", lw=0.8, fill=False, zorder=5)
+    circle = plt.Circle((0, 0), 1.0, color=anno_color, ls="--", lw=0.8,
+                        fill=False, zorder=5)
+    circle.set_path_effects(anno_fx)
     ax.add_artist(circle)
     if scale_bar:
-        # 0→1° bar (= the dashed circle's radius) with edge ticks, so "1°"
-        # is unambiguously the radius rather than the diameter.
-        bar_y, tick_h = 0.06, 0.05
-        ax.plot([0, 1], [bar_y, bar_y], color="k", lw=1.5,
-                solid_capstyle="butt", zorder=6)
-        for xt in (0.0, 1.0):
-            ax.plot([xt, xt], [bar_y - tick_h, bar_y + tick_h], color="k",
-                    lw=1.5, solid_capstyle="butt", zorder=6)
-        ax.text(0.5, bar_y + 0.04, "1°", color="k", fontsize=9,
-                ha="center", va="bottom", zorder=6)
+        # 0→1° bar (= the dashed circle's radius) lying on the horizontal
+        # meridian; the "1°" label reads as the radius.
+        bar_y = 0.0
+        bar = ax.plot([0, 1], [bar_y, bar_y], color=anno_color, lw=1.5,
+                      solid_capstyle="butt", zorder=6)[0]
+        bar.set_path_effects(anno_fx)
+        ax.text(0.5, bar_y + 0.04, "1°", color=anno_color, fontsize=9,
+                ha="center", va="bottom", zorder=6).set_path_effects(anno_fx)
     else:
-        ax.text(0.5, 0.05, "1°", color="k", fontsize=9, ha="center", va="bottom")
+        ax.text(0.5, 0.05, "1°", color=anno_color, fontsize=9, ha="center",
+                va="bottom").set_path_effects(anno_fx)
 
     # fixRSVP image maximum extent (solid circle, unlabelled), matching the
     # fig1b image-extent version.
     if show_extent_circle and extent_radius_deg is not None:
-        ext = plt.Circle((0, 0), extent_radius_deg, color="k", ls="-", lw=1.0,
-                         fill=False, zorder=5)
+        ext = plt.Circle((0, 0), extent_radius_deg, color=anno_color, ls="-",
+                         lw=1.0, fill=False, zorder=5)
+        ext.set_path_effects(anno_fx)
         ax.add_artist(ext)
 
-    ax.axhline(0, color="k", lw=0.8, ls="--", zorder=0)
-    ax.axvline(0, color="k", lw=0.8, ls="--", zorder=0)
+    # Meridians: match panel B's lighter dotted style for a consistent B/C row.
+    cross_color = "white" if show_stimulus else "#888"
+    ax.axhline(0, color=cross_color, lw=0.5, ls=":", alpha=0.5, zorder=4.5)
+    ax.axvline(0, color=cross_color, lw=0.5, ls=":", alpha=0.5, zorder=4.5)
     if roi_extent is not None:
         x0, x1, y0, y1 = map(float, roi_extent)
         ax.add_patch(Rectangle(
