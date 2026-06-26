@@ -49,9 +49,11 @@ HIST_D_MAX = 1.0              # deg
 HIST_N_BINS = int(round(HIST_D_MAX / INTERCEPT_THRESHOLD))
 
 # Decomposition params (mirror visualize_units.py)
-DECOMP_WINDOW_BINS = 2
-DECOMP_T_HIST = 1
+DECOMP_WINDOW_BINS = 3       # 3 bins @ 120 Hz = 25 ms counting window (fig2 standard)
+DECOMP_T_HIST = 1            # t_hist = max(DECOMP_T_HIST, t_count); matches T_HIST_MS=10
 DECOMP_SEG_MIN = 36
+# Spike-rate display bin = the counting window (25 ms), so Panel A matches Panel B.
+RATE_BIN_FACTOR = DECOMP_WINDOW_BINS
 
 UNIT_EXPLORE_CACHE = CACHE_DIR / "fig2_unit_explore.pkl"
 PAIR_SCAN_CACHE = CACHE_DIR / f"fig2_lead_pair_scan_{SESSION}.pkl"
@@ -148,6 +150,126 @@ def _compute_uniform_bins():
 
 
 
+
+
+# Production analysis radius (mirror covariance_decomposition.data_loading.FIXATION_RADIUS).
+PANEL_FIXATION_RADIUS = 0.5
+ALLUNITS_CACHE = CACHE_DIR / f"fig2b_unaccounted_allunits_{SESSION}.pkl"
+
+
+def _decompose_all_units(radius=PANEL_FIXATION_RADIUS, d_max=1.0, n_bins=20,
+                         refresh=False):
+    """0.5°-radius 'unaccounted-for variability' decomposition for *every* unit
+    in the lead example session, computed in one pass from the lead-pair-scan
+    cache.
+
+    Re-filters the aligned session to an eye-position radius < ``radius`` (the
+    production ``FIXATION_RADIUS``) and forms the same close-pair windows the
+    decomposition uses. Because ``rate_variance_by_distance`` already builds the
+    full C×C conditional covariance, every unit costs the same as one. Returns
+    per-unit arrays (indexed by the session's neuron column) plus the shared Δe
+    bin centers:
+
+        bin_centers (n_ok,)        Δe bin centers (deg, RMS-trajectory units)
+        cum_crate   (n_ok, C)      cumulative close-pair rate covariance Crate(Δe)
+        Ctotal, Crate, Cpsth, sigma_int, rate_hz   (C,)
+        neuron_mask (C,)           original unit ids
+
+    Panel B plots U(Δe) = Ctotal - cum_crate, rising from the internal floor
+    sigma_int (perfect matching) to the eye-blind asymptote Ctotal - Cpsth.
+    """
+    if ALLUNITS_CACHE.exists() and not refresh:
+        with open(ALLUNITS_CACHE, "rb") as f:
+            return pickle.load(f)
+
+    pair = _load_trial_pair()
+    eyepos_raw = np.asarray(pair["eyepos"], float)
+    robs = np.nan_to_num(pair["robs"], nan=0.0)
+    eyepos = np.nan_to_num(eyepos_raw, nan=0.0)
+    neuron_mask = np.asarray(pair["neuron_mask"])
+
+    # Tighten the fixation criterion to the production radius: keep only bins
+    # whose eye position lies within `radius` of the origin (the same per-bin
+    # fixation test align_fixrsvp_trials applies, just at a smaller radius).
+    rad = np.hypot(eyepos_raw[..., 0], eyepos_raw[..., 1])
+    fin = np.isfinite(eyepos_raw).all(-1)
+    valid = np.asarray(pair["valid_mask"], bool) & fin & (rad < radius)
+
+    segments = extract_valid_segments(valid, min_len_bins=DECOMP_SEG_MIN)
+    counts, traj, T = extract_windows(
+        robs, eyepos, segments, t_count=DECOMP_WINDOW_BINS,
+        t_hist=max(DECOMP_T_HIST, DECOMP_WINDOW_BINS),
+    )
+    C = counts.shape[1]
+    di = np.arange(C)
+
+    # Pooled total spike-count variance per unit (matches visualize_units' Ctotal).
+    fin_w = np.isfinite(counts.sum(1))
+    Ctotal = np.diag(np.cov(counts[fin_w].T, ddof=1)).copy()
+
+    # Cumulative close-pair rate covariance Crate(Δe), per unit (diagonal).
+    edges = np.linspace(0.0, d_max, n_bins + 1)
+    res = rate_variance_by_distance(counts, traj, T, edges)
+    ceye = np.asarray(res["Ceye"])[:, di, di]            # (n_bins, C)
+    count_e = np.asarray(res["count_e"], float)
+    cum_num = np.cumsum(np.nan_to_num(ceye) * count_e[:, None], axis=0)
+    cum_den = np.cumsum(count_e)
+    ok = cum_den > 0
+    cum_crate = cum_num[ok] / cum_den[ok][:, None]       # (n_ok, C)
+    bin_centers = np.asarray(res["bin_centers"], float)[ok]
+
+    # All-pairs second moment == Cpsth (cumulative over the full Δe support).
+    allp = rate_variance_by_distance(counts, traj, T, np.array([0.0, 1e9]))
+    Cpsth = np.asarray(allp["Ceye"])[0][di, di].copy()
+    Crate = cum_crate[0].copy()
+    sigma_int = Ctotal - Crate
+    rate_hz = counts[fin_w].mean(0) / (DECOMP_WINDOW_BINS * DT)
+
+    out = {
+        "bin_centers": bin_centers,
+        "cum_crate": cum_crate,
+        "Ctotal": Ctotal,
+        "Crate": Crate,
+        "Cpsth": Cpsth,
+        "sigma_int": sigma_int,
+        "rate_hz": rate_hz,
+        "neuron_mask": neuron_mask,
+        "radius": radius,
+    }
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    with open(ALLUNITS_CACHE, "wb") as f:
+        pickle.dump(out, f)
+    return out
+
+
+def _compute_unaccounted_curve(unit_orig=UNIT_ORIG, **kw):
+    """Per-unit slice of :func:`_decompose_all_units` for one unit (default: the
+    example unit). ``kw`` (radius/d_max/n_bins/refresh) are forwarded."""
+    allu = _decompose_all_units(**kw)
+    j = int(np.where(np.asarray(allu["neuron_mask"]) == unit_orig)[0][0])
+    return {
+        "bin_centers": allu["bin_centers"],
+        "cum_crate": allu["cum_crate"][:, j],
+        "Ctotal": float(allu["Ctotal"][j]),
+        "Crate": float(allu["Crate"][j]),
+        "Cpsth": float(allu["Cpsth"][j]),
+        "sigma_int": float(allu["sigma_int"][j]),
+        "radius": allu["radius"],
+    }
+
+
+def _binned_rate(counts_1d, factor=RATE_BIN_FACTOR):
+    """Aggregate per-bin spike counts into ``factor``-bin (25 ms) windows.
+
+    Returns (bin-center times in ms, rate in spk/s) for a step trace, so the
+    displayed spike rate uses the same counting window as the Panel B analysis.
+    """
+    counts_1d = np.asarray(counts_1d, dtype=float)
+    n = (len(counts_1d) // factor) * factor
+    c = counts_1d[:n].reshape(-1, factor).sum(1)
+    rate = c / (factor * DT)
+    t = (np.arange(len(c)) + 0.5) * factor * DT * 1000.0
+    return t, rate
 
 
 def plot_eye_rate_example(ax_eye, ax_spk, arrow_color="tab:blue"):
