@@ -8,8 +8,11 @@ Compose the combined Figure 2 main figure:
     C: FEM fraction of rate modulation (1 - alpha)
     D: covariance decomposition (total = stimulus + FEM + corrected residual)
     E: population Fano factor at 25 ms, per-session lines (uncorrected ->
-       corrected) with across-session mean +/- SD overlaid
-    F: per-pair noise correlation at 25 ms, uncorrected vs FEM-corrected (box)
+       corrected) with across-session mean +/- SD overlaid, shuffle-null band
+       + shuffle-null p
+    F: per-pair noise correlation at 25 ms, grey violins (uncorrected vs
+       FEM-corrected) with across-dataset mean +/- SD marker, shuffle-null band
+       + shuffle-null p
     G: participation ratio across corrected-residual / stimulus / FEM
        components (residual high-rank, stimulus + FEM low-rank)
     H: illustrative 3D schematic of the subspace-alignment test (Sigma_FEM
@@ -45,7 +48,7 @@ from generate_panel_example import (
 )
 from generate_panel_femfraction import plot_panel_c as plot_fem_fraction
 from generate_panel_fano import plot_fano_population
-from generate_panel_noisecorr import plot_nc_box
+from generate_panel_noisecorr import plot_nc_violin
 
 TARGET_SESSION = "Allen_2022-02-16"
 WINDOW_IDX = 0
@@ -149,7 +152,7 @@ def _filter_subjects(data, omit=OMIT_SUBJECTS):
                     m[key] = values[ds_mask].tolist()
 
             for key in ("shuff_rho_delta_meanz", "shuff_rho_c_meanz",
-                        "shuff_rho_subject"):
+                        "shuff_rho_subject", "shuff_rho_session"):
                 if key in m_dict:
                     m[key] = np.asarray(m_dict[key])[shuff_mask]
 
@@ -646,8 +649,7 @@ def _plot_pr_comparison(fig, subplot_spec, data):
     ax.plot(x, mu, "-", color=POOLED_COLOR, lw=2.0, zorder=4)
     yerr_lo = np.minimum(sd, mu * 0.85)   # keep the lower whisker positive on log
     ax.errorbar(x, mu, yerr=np.vstack([yerr_lo, sd]), fmt="none",
-                ecolor=POOLED_COLOR, elinewidth=1.5, capsize=4, capthick=1.5,
-                zorder=5)
+                ecolor=POOLED_COLOR, elinewidth=1.5, capsize=0, zorder=5)
     ax.plot(x, mu, "o", mfc=POOLED_COLOR, mec=POOLED_COLOR, ms=7, mew=1.6,
             zorder=6)
 
@@ -1030,7 +1032,7 @@ def compose(refresh=False, split_subjects=False, *,
         _label(e_ax, "E")
 
         f_ax = fig.add_subplot(gs_mid[0, 2])
-        plot_nc_box(ax=f_ax, data=data)
+        plot_nc_violin(ax=f_ax, data=data)
         _normalize_axis_text(f_ax)
         _label(f_ax, "F")
 

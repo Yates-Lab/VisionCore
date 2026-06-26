@@ -150,6 +150,7 @@ def _metrics_one(sr, w_idx):
     ds_shuff_var_c = []
     shuff_rho_c_meanz_list, shuff_rho_delta_meanz_list = [], []
     shuff_rho_subject_list = []
+    shuff_rho_session_list = []
     if "Shuffled_Intercepts" in mats and len(mats["Shuffled_Intercepts"]) > 0:
         for Crate_shuf in mats["Shuffled_Intercepts"]:
             diag_rate_shuf = np.diag(Crate_shuf)[valid]
@@ -175,6 +176,7 @@ def _metrics_one(sr, w_idx):
                     - fisher_z_mean(rho_u_full[ok[:len(rho_u_full)]], eps=EPS_RHO)
                 )
                 shuff_rho_subject_list.append(sr["subject"])
+                shuff_rho_session_list.append(sr["session"])
 
     return dict(
         subject=sr["subject"],
@@ -200,6 +202,7 @@ def _metrics_one(sr, w_idx):
         shuff_rho_c_meanz=shuff_rho_c_meanz_list,
         shuff_rho_delta_meanz=shuff_rho_delta_meanz_list,
         shuff_rho_subject=shuff_rho_subject_list,
+        shuff_rho_session=shuff_rho_session_list,
     )
 
 
@@ -228,6 +231,7 @@ def _compute_metrics(session_results, windows_ms, windows_bins, n_jobs=-1):
         )
         shuff_alphas = []
         shuff_rho_delta_meanz, shuff_rho_c_meanz, shuff_rho_subject = [], [], []
+        shuff_rho_session = []
         subject_by_ds, subject_per_neuron, subject_per_pair = [], [], []
         session_per_neuron = []
         shuff_var_c_blocks, shuff_var_c_nvalid = [], []
@@ -262,6 +266,7 @@ def _compute_metrics(session_results, windows_ms, windows_bins, n_jobs=-1):
             shuff_rho_c_meanz.extend(r["shuff_rho_c_meanz"])
             shuff_rho_delta_meanz.extend(r["shuff_rho_delta_meanz"])
             shuff_rho_subject.extend(r["shuff_rho_subject"])
+            shuff_rho_session.extend(r["shuff_rho_session"])
 
             shuff_var_c_blocks.append(r["ds_shuff_var_c"])
             shuff_var_c_nvalid.append(r["n_valid"])
@@ -310,6 +315,7 @@ def _compute_metrics(session_results, windows_ms, windows_bins, n_jobs=-1):
             "shuff_rho_delta_meanz": np.array(shuff_rho_delta_meanz),
             "shuff_rho_c_meanz": np.array(shuff_rho_c_meanz),
             "shuff_rho_subject": np.array(shuff_rho_subject),
+            "shuff_rho_session": np.array(shuff_rho_session),
         })
 
         m = metrics[-1]
@@ -507,6 +513,61 @@ def _compute_fano_stats(metrics, windows_ms):
             slope_cor_null_ci = (np.nan, np.nan)
             p_emp_slope = np.nan
 
+        # --- Per-session slopes + session-matched shuffle null (panel E) ---
+        # The panel draws one line per session and a marker at the across-
+        # session mean, so the null band must be the null of *that* statistic
+        # (mean across sessions of per-session slope), not the pooled slope.
+        # A session is kept only where both observed slopes are defined; the
+        # null reuses the same kept sessions.
+        sessions = np.unique(session_labels_v)
+        sess_masks = {s: (session_labels_v == s) for s in sessions}
+        sess_slope_unc, sess_slope_cor, kept_sessions = [], [], []
+        for s in sessions:
+            m_s = sess_masks[s]
+            a = _slope_through_origin(erate_v[m_s], var_u[m_s])
+            b = _slope_through_origin(erate_v[m_s], var_c[m_s])
+            if np.isfinite(a) and np.isfinite(b):
+                sess_slope_unc.append(a)
+                sess_slope_cor.append(b)
+                kept_sessions.append(s)
+        sess_slope_unc = np.asarray(sess_slope_unc, dtype=float)
+        sess_slope_cor = np.asarray(sess_slope_cor, dtype=float)
+
+        if (shuff_var_c.size and shuff_var_c.shape[0] == mask.shape[0]
+                and len(kept_sessions)):
+            svc = shuff_var_c[mask]
+            null_mean_sess_cor = []
+            for bb in range(svc.shape[1]):
+                col = svc[:, bb]
+                vals = [
+                    _slope_through_origin(erate_v[sess_masks[s]], col[sess_masks[s]])
+                    for s in kept_sessions
+                ]
+                vals = [v for v in vals if np.isfinite(v)]
+                if vals:
+                    null_mean_sess_cor.append(float(np.mean(vals)))
+            null_mean_sess_cor = np.asarray(null_mean_sess_cor, dtype=float)
+        else:
+            null_mean_sess_cor = np.array([])
+
+        if null_mean_sess_cor.size and sess_slope_unc.size:
+            obs_mean_unc = float(np.mean(sess_slope_unc))
+            obs_mean_cor = float(np.mean(sess_slope_cor))
+            mean_sess_cor_null_ci = (
+                float(np.percentile(null_mean_sess_cor, 2.5)),
+                float(np.percentile(null_mean_sess_cor, 97.5)),
+            )
+            p_emp_mean_sess = emp_p_one_sided(
+                obs_mean_unc - null_mean_sess_cor,
+                obs_mean_unc - obs_mean_cor,
+                direction="greater",
+            )
+            n_shuff_sess = int(null_mean_sess_cor.size)
+        else:
+            mean_sess_cor_null_ci = (np.nan, np.nan)
+            p_emp_mean_sess = np.nan
+            n_shuff_sess = 0
+
         fano_stats[windows_ms[w_idx]] = {
             "n": n_valid, "g_unc": g_unc, "g_cor": g_cor,
             "ratio": ratio, "pct_red": pct_red, "p_wil": p_wil,
@@ -515,6 +576,9 @@ def _compute_fano_stats(metrics, windows_ms):
             "slope_diff": slope_diff, "slope_diff_ci": slope_diff_ci,
             "p_slope": p_slope, "n_sessions": boot["n_sessions"],
             "slope_cor_null_ci": slope_cor_null_ci, "p_emp_slope": p_emp_slope,
+            "sess_slope_unc": sess_slope_unc, "sess_slope_cor": sess_slope_cor,
+            "mean_sess_cor_null_ci": mean_sess_cor_null_ci,
+            "p_emp_mean_sess": p_emp_mean_sess, "n_shuff_sess": n_shuff_sess,
             "null_ratio_ci": (np.nan, np.nan),
             "per_subject": per_subject,
             "erate": erate_v, "var_u": var_u, "var_c": var_c,
@@ -522,6 +586,28 @@ def _compute_fano_stats(metrics, windows_ms):
             "session_per_neuron": session_labels_v,
         }
     return fano_stats
+
+
+def _cross_session_mean_null(values, session_labels):
+    """Null distribution of the across-session MEAN delta-z. Group the
+    per-(session, shuffle) values by session, align to the common shuffle count,
+    and average across sessions within each shuffle iteration. This matches the
+    aggregation level of the observed across-session mean; pooling the individual
+    per-session shuffles instead would compare a 1/sqrt(n_sessions)-narrowed mean
+    against the much wider single-session spread (a conservative, ill-posed test).
+    """
+    values = np.asarray(values, dtype=float)
+    session_labels = np.asarray(session_labels)
+    groups = []
+    for s in np.unique(session_labels):
+        v = values[session_labels == s]
+        v = v[np.isfinite(v)]
+        if v.size:
+            groups.append(v)
+    if not groups:
+        return np.array([])
+    L = min(g.size for g in groups)
+    return np.vstack([g[:L] for g in groups]).mean(axis=0)
 
 
 def _compute_nc_stats(metrics, windows_ms):
@@ -540,40 +626,63 @@ def _compute_nc_stats(metrics, windows_ms):
         z_c_mean, z_c_ci = bootstrap_mean_ci(z_c_ds, nboot=5000, seed=0)
         dz_mean, dz_ci = bootstrap_mean_ci(dz_ds, nboot=5000, seed=0)
 
+        # Across-dataset SD of the per-dataset mean (Fisher-z); the marker
+        # whiskers in panel F use these (back-transformed to rho for display).
+        z_u_sd = float(np.std(z_u_ds, ddof=1)) if n_ds >= 2 else np.nan
+        z_c_sd = float(np.std(z_c_ds, ddof=1)) if n_ds >= 2 else np.nan
+
         if n_ds >= 5:
             _, p_wil = wilcoxon_signed_rank(z_c_ds, z_u_ds, alternative="less")
         else:
             p_wil = np.nan
 
-        shuff_dz = m_dict["shuff_rho_delta_meanz"]
-        shuff_subj = m_dict["shuff_rho_subject"]
-        if len(shuff_dz) > 0:
+        # Null for the observed across-session mean delta-z, built at the SAME
+        # aggregation level: average each shuffle's per-session delta-z across
+        # sessions, then take percentiles / the empirical p of that. (The legacy
+        # null pooled individual per-session shuffles, mixing aggregation levels
+        # and badly inflating the reference spread; see note below.)
+        shuff_dz = np.asarray(m_dict["shuff_rho_delta_meanz"], dtype=float)
+        shuff_subj = np.asarray(m_dict["shuff_rho_subject"])
+        shuff_sess = m_dict.get("shuff_rho_session")
+        if shuff_sess is not None and shuff_dz.size > 0:
+            shuff_sess = np.asarray(shuff_sess)
+            null_dz = _cross_session_mean_null(shuff_dz, shuff_sess)
+        else:  # legacy fallback if session tags are absent (old caches)
+            shuff_sess = None
+            null_dz = shuff_dz
+
+        if null_dz.size > 0:
             null_dz_ci = (
-                float(np.percentile(shuff_dz, 2.5)),
-                float(np.percentile(shuff_dz, 97.5)),
+                float(np.percentile(null_dz, 2.5)),
+                float(np.percentile(null_dz, 97.5)),
             )
-            p_emp_dz = emp_p_one_sided(shuff_dz, dz_mean, direction="less")
+            p_emp_dz = emp_p_one_sided(null_dz, dz_mean, direction="less")
+            n_shuff_dz = int(null_dz.size)
         else:
             null_dz_ci = (np.nan, np.nan)
             p_emp_dz = np.nan
+            n_shuff_dz = 0
 
         null_dz_ci_by_subject = {}
         for subj in SUBJECTS:
             s_mask = shuff_subj == subj
-            if s_mask.sum() > 0:
-                null_dz_ci_by_subject[subj] = (
-                    float(np.percentile(shuff_dz[s_mask], 2.5)),
-                    float(np.percentile(shuff_dz[s_mask], 97.5)),
-                )
-            else:
+            if s_mask.sum() == 0:
                 null_dz_ci_by_subject[subj] = (np.nan, np.nan)
+                continue
+            nd = (_cross_session_mean_null(shuff_dz[s_mask], shuff_sess[s_mask])
+                  if shuff_sess is not None else shuff_dz[s_mask])
+            null_dz_ci_by_subject[subj] = (
+                (float(np.percentile(nd, 2.5)), float(np.percentile(nd, 97.5)))
+                if nd.size else (np.nan, np.nan)
+            )
 
         nc_stats[windows_ms[w_idx]] = {
             "n_pairs": n_pairs, "n_ds": n_ds,
-            "z_u_mean": z_u_mean, "z_u_ci": z_u_ci,
-            "z_c_mean": z_c_mean, "z_c_ci": z_c_ci,
+            "z_u_mean": z_u_mean, "z_u_ci": z_u_ci, "z_u_sd": z_u_sd,
+            "z_c_mean": z_c_mean, "z_c_ci": z_c_ci, "z_c_sd": z_c_sd,
             "dz_mean": dz_mean, "dz_ci": dz_ci,
             "p_wil": p_wil, "null_dz_ci": null_dz_ci, "p_emp_dz": p_emp_dz,
+            "n_shuff_dz": n_shuff_dz,
             "null_dz_ci_by_subject": null_dz_ci_by_subject,
             "rho_u": rho_u, "rho_c": rho_c,
         }

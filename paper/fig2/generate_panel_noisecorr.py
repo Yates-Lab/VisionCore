@@ -1,8 +1,10 @@
 """
 Figure 2 noise correlation panels.
 
-    plot_nc_box       per-pair noise correlation (rho) at one window as a box
-                      (uncorrected vs FEM-corrected). Main-figure Panel F.
+    plot_nc_violin    per-pair noise correlation (rho) at one window as grey
+                      violins (uncorrected vs FEM-corrected) with the across-
+                      dataset mean +/- SD marker, a shuffle-null band, and the
+                      shuffle-null p-value. Main-figure Panel F.
     plot_panel_c      mean Fisher-z noise correlation vs counting window, per
                       subject. Window-robustness supplemental.
 """
@@ -10,14 +12,18 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from VisionCore.stats import bootstrap_mean_ci
-from _panel_common import standalone_save, nearest_window, pair_box
+from _panel_common import standalone_save, nearest_window, pair_violin
 from compute_fig2_data import load_fig2_data
 
 
-def plot_nc_box(ax=None, refresh=False, data=None, window_ms=25.0):
-    """Single-window per-pair noise correlation (rho) as box-and-whisker (5-95
-    percentile whiskers, no fliers) for uncorrected vs FEM-corrected, with the
-    independence (rho = 0) reference dotted and a significance bracket."""
+def plot_nc_violin(ax=None, refresh=False, data=None, window_ms=25.0):
+    """Single-window per-pair noise correlation (rho), matching panel E's
+    grammar: grey violins of the per-pair distribution (uncorrected vs
+    FEM-corrected) with the across-dataset mean noise correlation overlaid as
+    open->filled markers +/- SD (computed in Fisher-z, shown in rho), joined by
+    a line. A grey shuffle-null band at the corrected marker shows where the
+    corrected mean would fall under the principled delta-correlation shuffle,
+    and the bracket carries stars + the explicit shuffle-null p-value."""
     if data is None:
         data = load_fig2_data(refresh=refresh)
     if ax is None:
@@ -27,11 +33,31 @@ def plot_nc_box(ax=None, refresh=False, data=None, window_ms=25.0):
 
     w = nearest_window(data["WINDOWS_MS"], window_ms)
     s = data["nc_stats"][w]
-    pair_box(
+
+    # Markers: across-dataset mean per-dataset mean correlation, in Fisher-z
+    # (the entity the shuffle null is defined on), back-transformed to rho.
+    # SD whiskers are likewise z -> tanh, hence asymmetric in rho.
+    zu, zc = s["z_u_mean"], s["z_c_mean"]
+    su, sc = s["z_u_sd"], s["z_c_sd"]
+    mean_u, mean_c = float(np.tanh(zu)), float(np.tanh(zc))
+    err_u = (float(np.tanh(zu - su)), float(np.tanh(zu + su)))
+    err_c = (float(np.tanh(zc - sc)), float(np.tanh(zc + sc)))
+
+    # Shuffle-null band (2.5-97.5%) for the corrected mean = uncorrected mean +
+    # null delta-z. The null is the across-session-mean delta-z under the
+    # eye-trajectory shuffle (same aggregation level as the observed mean).
+    dz_lo, dz_hi = s["null_dz_ci"]
+    null_lo = float(np.tanh(zu + dz_lo))
+    null_hi = float(np.tanh(zu + dz_hi))
+
+    pair_violin(
         ax,
         np.asarray(s["rho_u"], dtype=float),
         np.asarray(s["rho_c"], dtype=float),
-        ref=0.0, p=s["p_wil"], ylabel="Noise correlation (ρ)",
+        mean_u=mean_u, mean_c=mean_c, err_u=err_u, err_c=err_c,
+        null_lo=null_lo, null_hi=null_hi,
+        p=s["p_emp_dz"], n_shuff=s.get("n_shuff_dz"),
+        ref=0.0, ylabel="Noise correlation (ρ)",
     )
     return fig, ax
 
