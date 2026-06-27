@@ -20,6 +20,7 @@ if _PKG not in _sys.path:
 
 from derive import (  # noqa: E402,F401
     load_empirical_data as load_fig2_data,
+    compute_alignment_aggregate,
     _compute_alpha_stats,
     _compute_fano_stats,
     _compute_nc_stats,

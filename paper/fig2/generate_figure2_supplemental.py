@@ -12,7 +12,8 @@ import matplotlib.pyplot as plt
 
 from VisionCore.covariance import project_to_psd
 from _panel_common import FIG_DIR, STAT_DIR
-from compute_fig2_data import load_fig2_data
+from compute_fig2_data import load_fig2_data, compute_alignment_aggregate
+from generate_figure2 import _filter_subjects
 
 
 HEATMAP_WINDOW_IDX = 3  # 80 ms
@@ -153,6 +154,27 @@ def write_stats_report(data=None):
             print(f"  PR(PSTH): mean={np.mean(pr_psth_list):.3f}")
             print(f"  X: mean={np.mean(var_p_given_f):.3f}")
             print(f"  Y: mean={np.mean(var_f_given_p):.3f}")
+
+            # Panel-I alignment, on the same included-subject set the figure
+            # plots (Luke omitted). The figure's claim is the aggregate
+            # across-session mean beating the shuffle null; the per-session
+            # counts below are the robustness statement for the manuscript text.
+            agg = compute_alignment_aggregate(_filter_subjects(data))
+            n = agg["n_sessions"]
+            print(f"\n  Panel I -- subspace alignment (K={data.get('SUBSPACE_K')}, "
+                  f"N={n} sessions, included subjects only)")
+            for tag, name in (("x", "Stimulus variance in FEM subspace"),
+                              ("y", "FEM variance in stimulus subspace")):
+                a = agg[tag]
+                print(f"  {name}:")
+                print(f"    observed mean={a['mean']:.3f} +/- {a['sd']:.3f} (SD)")
+                print(f"    shuffle-null-of-mean p={a['p']:.4g} "
+                      f"(n_shuff={a['n_shuff']})")
+                print(f"    individually significant: {a['n_sig05']}/{n} at "
+                      f"p<0.05, {a['n_sig01']}/{n} at p<0.01")
+            print(f"  Individually significant in BOTH directions: "
+                  f"{agg['n_sig05_joint']}/{n} at p<0.05, "
+                  f"{agg['n_sig01_joint']}/{n} at p<0.01")
 
             print("\n" + "=" * 80)
             print("END OF STATISTICS")

@@ -809,6 +809,9 @@ def _compute_subspace(session_results, session_names, subjects, n_jobs=-1):
         null_session_idx.extend([sess_pos] * n_draws)
         null_subjects.extend([r["subject"]] * n_draws)
 
+    print(f"Subspace alignment: {len(sub_names)} sessions retained "
+          f"(>= {SUBSPACE_K + 1} valid units, K={SUBSPACE_K})")
+
     return dict(
         sub_names=sub_names,
         sub_subjects=sub_subjects,
@@ -828,6 +831,61 @@ def _compute_subspace(session_results, session_names, subjects, n_jobs=-1):
         null_session_idx=null_session_idx,
         null_subjects=null_subjects,
     )
+
+
+def compute_alignment_aggregate(data):
+    """Aggregate panel-I subspace-alignment inference, computed from the
+    per-session observed values and per-(session, shuffle) nulls present in
+    ``data``. Derived on demand (not baked into the cached bundle) so it always
+    reflects whatever subject filtering the caller has already applied.
+
+    The headline test is on the ACROSS-SESSION MEAN variance captured: the null
+    is the distribution of that mean under the eye-trajectory shuffle, built at
+    the matching aggregation level via :func:`_cross_session_mean_null` (average
+    the shuffled values within each session, then across sessions), exactly as
+    panels E/F do for their mean statistics. Per-session p-values are also
+    returned, but only to report how many sessions clear significance on their
+    own -- they are not the inferential claim.
+
+    Returns a dict keyed by direction tag ``x`` (stimulus variance in the FEM
+    subspace, ``var_p_given_f``) and ``y`` (FEM variance in the stimulus
+    subspace, ``var_f_given_p``).
+    """
+    sess_idx = np.asarray(data.get("null_session_idx", []), dtype=int)
+    out = {"n_sessions": int(len(data.get("var_p_given_f", [])))}
+    per_p = {}
+    for tag, obs_key, null_key in (
+        ("x", "var_p_given_f", "null_var_p_given_f"),
+        ("y", "var_f_given_p", "null_var_f_given_p"),
+    ):
+        obs = np.asarray(data.get(obs_key, []), dtype=float)
+        null_vals = np.asarray(data.get(null_key, []), dtype=float)
+        ok = np.isfinite(obs)
+        mean_obs = float(np.mean(obs[ok])) if ok.any() else np.nan
+        sd_obs = float(np.std(obs[ok], ddof=1)) if ok.sum() > 1 else np.nan
+        null_mean = _cross_session_mean_null(null_vals, sess_idx)
+        p_agg = emp_p_one_sided(null_mean, mean_obs, direction="greater")
+
+        pp = np.full(obs.size, np.nan)
+        for i in range(obs.size):
+            m = sess_idx == i
+            if m.any() and np.isfinite(obs[i]):
+                pp[i] = emp_p_one_sided(null_vals[m], obs[i], direction="greater")
+        per_p[tag] = pp
+        out[tag] = dict(
+            observed=obs,
+            mean=mean_obs,
+            sd=sd_obs,
+            null_mean=null_mean,
+            p=p_agg,
+            n_shuff=int(null_mean.size),
+            per_session_p=pp,
+            n_sig05=int(np.sum(pp < 0.05)),
+            n_sig01=int(np.sum(pp < 0.01)),
+        )
+    out["n_sig05_joint"] = int(np.sum((per_p["x"] < 0.05) & (per_p["y"] < 0.05)))
+    out["n_sig01_joint"] = int(np.sum((per_p["x"] < 0.01) & (per_p["y"] < 0.01)))
+    return out
 
 
 # ---------------------------------------------------------------------------

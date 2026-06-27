@@ -38,8 +38,11 @@ from matplotlib.gridspec import GridSpecFromSubplotSpec
 from matplotlib.patches import ConnectionPatch
 
 from VisionCore.covariance import project_to_psd
-from _panel_common import FIG_DIR, sig_bracket, pstars
-from compute_fig2_data import load_fig2_data, _compute_fano_stats, _compute_nc_stats
+from _panel_common import FIG_DIR, sig_bracket, pstars, fmt_emp_p
+from compute_fig2_data import (
+    load_fig2_data, _compute_fano_stats, _compute_nc_stats,
+    compute_alignment_aggregate,
+)
 from generate_panel_example import (
     _compute_unaccounted_curve,
     plot_eye_rate_example,
@@ -54,9 +57,6 @@ WINDOW_IDX = 0
 OMIT_SUBJECTS = {"Luke"}
 POOLED_SUBJECT = "Pooled"
 POOLED_COLOR = "tab:blue"
-SIG_ALPHA = 0.01
-SIG01_COLOR = "crimson"      # marker edge: joint p < 0.01
-SIG05_COLOR = "darkorange"   # marker edge: joint p < 0.05 (but not < 0.01)
 
 
 def _label(ax, letter):
@@ -773,102 +773,80 @@ def _plot_subspace_schematic(fig, subplot_spec):
     return ax
 
 
-def _emp_p_greater(null_vals, observed):
-    null_vals = np.asarray(null_vals, dtype=float)
-    null_vals = null_vals[np.isfinite(null_vals)]
-    if null_vals.size == 0 or not np.isfinite(observed):
-        return np.nan
-    return (np.sum(null_vals >= observed) + 1) / (null_vals.size + 1)
-
-
 def _plot_subspace_alignment_vs_shuffle(fig, subplot_spec, data):
+    """Panel I (E/F panel grammar): for each direction, a grey violin of the
+    SHUFFLE NULL OF THE ACROSS-SESSION MEAN variance captured, the per-session
+    observed values as faint blue points (descriptive -- they show the effect is
+    consistent, not outlier-driven), and the observed across-session mean +/- SD
+    as a filled blue marker. One aggregate shuffle-null p-value per direction;
+    per-session significance is reported in the supplemental stats, not here."""
     ax = fig.add_subplot(subplot_spec)
-    observed = np.column_stack([
-        np.asarray(data.get("var_p_given_f", []), dtype=float),
-        np.asarray(data.get("var_f_given_p", []), dtype=float),
-    ])
-    null_session_idx = np.asarray(data.get("null_session_idx", []), dtype=int)
-    null_x = np.asarray(data.get("null_var_p_given_f", []), dtype=float)
-    null_y = np.asarray(data.get("null_var_f_given_p", []), dtype=float)
-    nulls = [
-        null_x[np.isfinite(null_x)],
-        null_y[np.isfinite(null_y)],
-    ]
+    agg = compute_alignment_aggregate(data)
+    tags = ("x", "y")
 
-    if observed.size == 0 or not all(n.size for n in nulls):
+    if any(not np.isfinite(agg[t]["mean"]) for t in tags) \
+            or any(agg[t]["n_shuff"] == 0 for t in tags):
         ax.text(0.5, 0.5, "No alignment data", transform=ax.transAxes,
                 ha="center", va="center", fontsize=8)
         ax.set_axis_off()
         return ax
 
-    px = np.full(observed.shape[0], np.nan)
-    py = np.full(observed.shape[0], np.nan)
-    for i in range(observed.shape[0]):
-        m = null_session_idx == i
-        if not np.any(m):
-            continue
-        px[i] = _emp_p_greater(null_x[m], observed[i, 0])
-        py[i] = _emp_p_greater(null_y[m], observed[i, 1])
-
-    # Two-tier per-session significance (joint over both directions): the
-    # strongest tier that a session clears sets its marker edge.
-    sig01 = (px < 0.01) & (py < 0.01)
-    sig05 = (px < 0.05) & (py < 0.05)
-    edge_by_session = np.where(
-        sig01, SIG01_COLOR, np.where(sig05, SIG05_COLOR, "black")
-    )
-    lw_by_session = np.where(sig01, 1.3, np.where(sig05, 1.1, 0.45))
-
-    viol = ax.violinplot(
-        nulls,
-        positions=[0, 1],
-        widths=0.55,
-        showmeans=False,
-        showmedians=False,
-        showextrema=False,
-    )
+    # Grey violins: the null of the across-session MEAN (a single shared
+    # distribution that the single observed mean marker is tested against).
+    null_means = [agg[t]["null_mean"][np.isfinite(agg[t]["null_mean"])]
+                  for t in tags]
+    viol = ax.violinplot(null_means, positions=[0, 1], widths=0.7,
+                         showmeans=False, showmedians=False, showextrema=False)
     for body in viol["bodies"]:
-        body.set_facecolor("#d7e6ef")
+        body.set_facecolor("0.8")
         body.set_edgecolor("none")
-        body.set_alpha(0.9)
+        body.set_alpha(0.85)
+        body.set_zorder(1)
 
     rng = np.random.default_rng(11)
-    for j in range(2):
-        ok = np.isfinite(observed[:, j])
-        jitter = rng.normal(0, 0.055, ok.sum())
-        ax.scatter(
-            np.full(ok.sum(), j) + jitter,
-            observed[ok, j],
-            s=28,
-            color=POOLED_COLOR,
-            edgecolor=edge_by_session[ok],
-            linewidth=lw_by_session[ok],
-            zorder=3,
-        )
-        ax.plot([j - 0.22, j + 0.22], [np.nanmedian(observed[:, j])] * 2,
-                color=POOLED_COLOR, lw=2.0, zorder=4)
-        ax.plot([j - 0.22, j + 0.22], [np.nanmedian(nulls[j])] * 2,
-                color="0.35", lw=1.1, zorder=4)
+    ybr_top = 0.0
+    for j, t in enumerate(tags):
+        obs = agg[t]["observed"]
+        ok = np.isfinite(obs)
+        # Descriptive per-session points (faint, single colour, no per-session
+        # significance encoding).
+        jitter = rng.normal(0, 0.05, int(ok.sum()))
+        ax.scatter(np.full(int(ok.sum()), j) + jitter, obs[ok], s=18,
+                   color=POOLED_COLOR, alpha=0.45, edgecolor="none", zorder=3)
+        # Observed across-session mean +/- SD.
+        mean, sd = agg[t]["mean"], agg[t]["sd"]
+        ax.errorbar(j, mean, yerr=sd, fmt="none", ecolor=POOLED_COLOR,
+                    elinewidth=1.6, capsize=0, zorder=5)
+        ax.plot(j, mean, "o", mfc=POOLED_COLOR, mec=POOLED_COLOR, ms=8,
+                mew=1.6, zorder=6)
+        # Aggregate shuffle-null significance, annotated per direction.
+        ytxt = mean + (sd if np.isfinite(sd) else 0.0) + 0.06
+        ax.text(j, ytxt, pstars(agg[t]["p"]), ha="center", va="bottom",
+                color="k", fontsize=9)
+        ax.text(j, ytxt + 0.075, fmt_emp_p(agg[t]["p"], agg[t]["n_shuff"]),
+                ha="center", va="bottom", color="k", fontsize=7)
+        ybr_top = max(ybr_top, ytxt + 0.075)
 
-    # Significance-tier legend (marker edge color).
+    # Legend distinguishing the three elements (the null violin is of the MEAN,
+    # the points are individual sessions).
     from matplotlib.lines import Line2D
+    from matplotlib.patches import Patch
     handles = [
-        Line2D([0], [0], marker="o", ls="none", ms=6, mfc=POOLED_COLOR,
-               mec=SIG01_COLOR, mew=1.3, label="p < 0.01"),
-        Line2D([0], [0], marker="o", ls="none", ms=6, mfc=POOLED_COLOR,
-               mec=SIG05_COLOR, mew=1.1, label="p < 0.05"),
-        Line2D([0], [0], marker="o", ls="none", ms=6, mfc=POOLED_COLOR,
-               mec="black", mew=0.45, label="n.s."),
+        Line2D([0], [0], marker="o", ls="none", ms=4, mfc=POOLED_COLOR,
+               mec="none", alpha=0.45, label="session"),
+        Line2D([0], [0], marker="o", ls="none", ms=7, mfc=POOLED_COLOR,
+               mec=POOLED_COLOR, label="mean ± SD"),
+        Patch(facecolor="0.8", edgecolor="none", label="shuffle null\n(of mean)"),
     ]
-    ax.legend(handles=handles, frameon=False, fontsize=6, loc="lower center",
-              ncol=3, handletextpad=0.2, columnspacing=0.8,
-              borderpad=0.1)
+    ax.legend(handles=handles, frameon=False, fontsize=6, loc="lower left",
+              handletextpad=0.4, labelspacing=0.5, borderpad=0.2)
 
     ax.set_xticks([0, 1])
     ax.set_xticklabels(["Stimulus in\nFEM subspace",
                         "FEM in\nstimulus subspace"])
     ax.set_ylabel("Variance captured")
-    ax.set_ylim(0, 1)
+    ax.set_ylim(0, max(1.0, ybr_top + 0.05))
+    ax.set_xlim(-0.6, 1.6)
     ax.grid(axis="y", alpha=0.25, linewidth=0.6)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
