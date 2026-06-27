@@ -774,12 +774,15 @@ def _plot_subspace_schematic(fig, subplot_spec):
 
 
 def _plot_subspace_alignment_vs_shuffle(fig, subplot_spec, data):
-    """Panel I (E/F panel grammar): for each direction, a grey violin of the
-    SHUFFLE NULL OF THE ACROSS-SESSION MEAN variance captured, the per-session
-    observed values as faint blue points (descriptive -- they show the effect is
-    consistent, not outlier-driven), and the observed across-session mean +/- SD
-    as a filled blue marker. One aggregate shuffle-null p-value per direction;
-    per-session significance is reported in the supplemental stats, not here."""
+    """Panel I (E/F panel grammar): for each direction, the per-session observed
+    values as blue points (the data), the observed across-session mean +/- SD as
+    a filled blue marker, and a grey dashed band giving the shuffle null of that
+    mean -- matching E/F, where grey filled = data and the grey dashed band =
+    shuffle null. One aggregate shuffle-null p-value per direction; per-session
+    significance is reported in the supplemental stats, not here."""
+    from matplotlib.patches import Rectangle, Patch
+    from matplotlib.lines import Line2D
+
     ax = fig.add_subplot(subplot_spec)
     agg = compute_alignment_aggregate(data)
     tags = ("x", "y")
@@ -791,28 +794,23 @@ def _plot_subspace_alignment_vs_shuffle(fig, subplot_spec, data):
         ax.set_axis_off()
         return ax
 
-    # Grey violins: the null of the across-session MEAN (a single shared
-    # distribution that the single observed mean marker is tested against).
-    null_means = [agg[t]["null_mean"][np.isfinite(agg[t]["null_mean"])]
-                  for t in tags]
-    viol = ax.violinplot(null_means, positions=[0, 1], widths=0.7,
-                         showmeans=False, showmedians=False, showextrema=False)
-    for body in viol["bodies"]:
-        body.set_facecolor("0.8")
-        body.set_edgecolor("none")
-        body.set_alpha(0.85)
-        body.set_zorder(1)
-
     rng = np.random.default_rng(11)
     ybr_top = 0.0
     for j, t in enumerate(tags):
+        # Grey dashed band = shuffle null of the across-session mean (95% of the
+        # null-of-mean distribution), drawn exactly like the E/F null band.
+        null_mean = agg[t]["null_mean"][np.isfinite(agg[t]["null_mean"])]
+        null_lo, null_hi = np.percentile(null_mean, [2.5, 97.5])
+        ax.add_patch(Rectangle((j - 0.2, null_lo), 0.4, null_hi - null_lo,
+                               facecolor="0.6", alpha=0.30, edgecolor="0.35",
+                               lw=0.7, linestyle="--", zorder=1))
+
         obs = agg[t]["observed"]
         ok = np.isfinite(obs)
-        # Descriptive per-session points (faint, single colour, no per-session
-        # significance encoding).
+        # Per-session points (the data).
         jitter = rng.normal(0, 0.05, int(ok.sum()))
         ax.scatter(np.full(int(ok.sum()), j) + jitter, obs[ok], s=18,
-                   color=POOLED_COLOR, alpha=0.45, edgecolor="none", zorder=3)
+                   color=POOLED_COLOR, alpha=0.5, edgecolor="none", zorder=3)
         # Observed across-session mean +/- SD.
         mean, sd = agg[t]["mean"], agg[t]["sd"]
         ax.errorbar(j, mean, yerr=sd, fmt="none", ecolor=POOLED_COLOR,
@@ -827,16 +825,15 @@ def _plot_subspace_alignment_vs_shuffle(fig, subplot_spec, data):
                 ha="center", va="bottom", color="k", fontsize=7)
         ybr_top = max(ybr_top, ytxt + 0.075)
 
-    # Legend distinguishing the three elements (the null violin is of the MEAN,
-    # the points are individual sessions).
-    from matplotlib.lines import Line2D
-    from matplotlib.patches import Patch
+    # Legend: blue points are sessions, blue marker the mean, grey dashed band
+    # the shuffle null -- the same null styling used in panels E/F.
     handles = [
         Line2D([0], [0], marker="o", ls="none", ms=4, mfc=POOLED_COLOR,
-               mec="none", alpha=0.45, label="session"),
+               mec="none", alpha=0.5, label="session"),
         Line2D([0], [0], marker="o", ls="none", ms=7, mfc=POOLED_COLOR,
                mec=POOLED_COLOR, label="mean ± SD"),
-        Patch(facecolor="0.8", edgecolor="none", label="shuffle null\n(of mean)"),
+        Patch(facecolor="0.6", alpha=0.30, edgecolor="0.35", lw=0.7,
+              linestyle="--", label="shuffle null"),
     ]
     ax.legend(handles=handles, frameon=False, fontsize=6, loc="lower left",
               handletextpad=0.4, labelspacing=0.5, borderpad=0.2)
