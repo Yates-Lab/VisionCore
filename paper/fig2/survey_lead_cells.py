@@ -25,9 +25,9 @@ from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.gridspec import GridSpecFromSubplotSpec
 
 from _panel_common import FIG_DIR
-from generate_panel_example import SESSION, _decompose_all_units
-from generate_panels_ab_debug import (
-    _FIG2_RC, plot_eye_rate_example_v2, plot_unaccounted_variance_panel,
+from generate_panel_example import (
+    SESSION, _FIG2_RC, _decompose_all_units,
+    plot_eye_rate_example, plot_unaccounted_variance_panel,
 )
 
 
@@ -88,7 +88,7 @@ def _render_unit_page(pdf, allu, j, rank, score, fem_frac, int_frac):
     )
     ax_eye = fig.add_subplot(gs_a[0, 0])
     ax_spk = fig.add_subplot(gs_a[1, 0], sharex=ax_eye)
-    plot_eye_rate_example_v2(ax_eye, ax_spk, unit_orig=unit_id)
+    plot_eye_rate_example(ax_eye, ax_spk, unit_orig=unit_id)
     ax_eye.text(-0.20, 1.12, "A", transform=ax_eye.transAxes,
                 fontweight="bold", fontsize=10, va="top", ha="left")
 

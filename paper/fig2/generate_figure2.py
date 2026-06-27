@@ -41,10 +41,9 @@ from VisionCore.covariance import project_to_psd
 from _panel_common import FIG_DIR, sig_bracket, pstars
 from compute_fig2_data import load_fig2_data, _compute_fano_stats, _compute_nc_stats
 from generate_panel_example import (
-    UNIT_ORIG,
-    _compute_uniform_bins,
-    _load_unit_payload,
+    _compute_unaccounted_curve,
     plot_eye_rate_example,
+    plot_unaccounted_variance_panel,
 )
 from generate_panel_femfraction import plot_panel_c as plot_fem_fraction
 from generate_panel_fano import plot_fano_population
@@ -275,76 +274,6 @@ def _pool_subjects_for_plotting(data, label=POOLED_SUBJECT):
     return pooled
 
 
-def _plot_covariance_mismatch_panel(ax, divergent_de=None):
-    payload = _load_unit_payload()
-    uniform = _compute_uniform_bins()
-
-    neuron_mask = np.asarray(payload["neuron_mask"])
-    j = int(np.where(neuron_mask == UNIT_ORIG)[0][0])
-    bin_centers = np.asarray(uniform["bin_centers"], dtype=float)
-    count_e = np.asarray(uniform["count_e"], dtype=float)
-    ceye = np.asarray(uniform["Ceye"], dtype=float)
-    var_by_bin = ceye[:, j, j]
-    ok = np.isfinite(var_by_bin) & (count_e > 0)
-    var_psth = float(payload["Cpsth"][j, j])
-    first_x = float(bin_centers[ok][0])
-    first_y = float(var_by_bin[ok][0])
-
-    ax.axhline(0.0, color="0.55", lw=1.0, zorder=-1)
-    ax.axhline(var_psth, color="k", ls="--", lw=1.0, zorder=1)
-    ax.plot(bin_centers[ok], var_by_bin[ok], color="k", lw=1.4,
-            marker="o", ms=2.8, markerfacecolor="k", markeredgecolor="k",
-            zorder=3)
-
-    ax.annotate(
-        "Matched-trajectory variance",
-        xy=(first_x, first_y),
-        xytext=(0.24, 0.84),
-        textcoords=ax.transAxes,
-        arrowprops=dict(arrowstyle="->", color="k", lw=0.9),
-        fontsize=7.5,
-        ha="left",
-        va="center",
-    )
-    ax.text(0.58, var_psth + 0.012, "PSTH variance",
-            fontsize=7.5, ha="left", va="bottom")
-    ax.annotate(
-        "",
-        xy=(0.02, first_y),
-        xytext=(0.02, var_psth),
-        arrowprops=dict(arrowstyle="<->", color=POOLED_COLOR, lw=2.0),
-    )
-    ax.text(0.055, 0.2, "FEM\nvariance",
-            color="k", fontsize=7.5, ha="left", va="top")
-
-    # Red arrow at the divergent Δe (mirrors the red eye-trace arrow in the
-    # example panel): cross-trial variance has dropped below stimulus variance.
-    if divergent_de is not None:
-        xc = bin_centers[ok]
-        yc = var_by_bin[ok]
-        di = int(np.argmin(np.abs(xc - divergent_de)))
-        x_div, y_div = float(xc[di]), float(yc[di])
-        ax.annotate(
-            "", xy=(x_div, y_div), xytext=(x_div, var_psth),
-            arrowprops=dict(arrowstyle="<->", color="crimson", lw=2.0),
-        )
-        ax.text(0.485, -0.38,
-                "Variance decreases as\neye trajectories diverge",
-                color="k", fontsize=7.5, ha="center", va="bottom")
-    else:
-        ax.text(0.13, -0.32, "Variance decreases as\neye trajectories diverge",
-                fontsize=7.5, ha="left", va="center")
-
-    ax.set_xlim(-0.06, 1.03)
-    ax.set_ylim(-0.40, 0.52)
-    ax.set_xlabel("Eye-trajectory mismatch, Δe (°)")
-    ax.set_ylabel("Cross-trial rate variance (spk²)")
-    ax.set_yticks(np.arange(-0.4, 0.6, 0.2))
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    return ax
-
-
 def _plot_eye_rate_panel(fig, subplot_spec, label="A"):
     """Panel A: two-trial eye-position traces (with matched/divergent Δe
     arrows) above the per-bin spike rates for the example unit. Returns the
@@ -355,7 +284,7 @@ def _plot_eye_rate_panel(fig, subplot_spec, label="A"):
     )
     ax_eye = fig.add_subplot(gs[0, 0])
     ax_spk = fig.add_subplot(gs[1, 0], sharex=ax_eye)
-    d_vals = plot_eye_rate_example(ax_eye, ax_spk, arrow_color=POOLED_COLOR)
+    d_vals = plot_eye_rate_example(ax_eye, ax_spk)
     _normalize_axis_text(ax_spk)
     ax_eye.text(-0.20, 1.16, label, transform=ax_eye.transAxes,
                 fontweight="bold", fontsize=10, va="top", ha="left")
@@ -1001,10 +930,10 @@ def compose(refresh=False, split_subjects=False, *,
         )
 
         # --- Row 0: A eye/rate example, B mismatch curve, C 1-alpha
-        d_vals = _plot_eye_rate_panel(fig, gs[0, 0:2], label="A")
+        _plot_eye_rate_panel(fig, gs[0, 0:2], label="A")
 
         b_ax = fig.add_subplot(gs[0, 2:4])
-        _plot_covariance_mismatch_panel(b_ax, divergent_de=d_vals["divergent"])
+        plot_unaccounted_variance_panel(b_ax, decomp=_compute_unaccounted_curve())
         _normalize_axis_text(b_ax)
         _label(b_ax, "B")
 

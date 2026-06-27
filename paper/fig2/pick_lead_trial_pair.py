@@ -27,7 +27,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 
 from VisionCore.paths import CACHE_DIR
 from _panel_common import FIG_DIR
-from generate_panel_example import SESSION, UNIT_ORIG, _binned_rate
+from generate_panel_example import SESSION, _binned_rate
 
 WINDOW_BINS = 72              # 600 ms @ 120 Hz -- matches the plotted panel
 DT = 1.0 / 120.0
