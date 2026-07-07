@@ -36,6 +36,11 @@ from decompose import compute_decomposition, DT, WINDOW_BINS_DEFAULT, N_SHUFFLES
 MIN_RATE_HZ = 2.0
 MIN_PSTH_R2 = 0.05
 MIN_VAR = 0
+# Session-level floor: drop sessions with too few analyzed units, since
+# population-dimensionality estimates (Fig. 2F/G) are noisy with few neurons.
+# Counted on the window-independent inclusion set (rate > MIN_RATE_HZ and
+# split-half PSTH R^2 > MIN_PSTH_R2).
+MIN_SESSION_UNITS = 10
 EPS_RHO = 1e-3
 SUBJECTS = ["Allen", "Logan"]
 SUBJECT_COLORS = {"Allen": "tab:blue", "Logan": "tab:green"}
@@ -356,19 +361,33 @@ def _compute_alpha_stats(metrics, windows_ms):
         shuff_m = [s for s in shuff_m if s.size > 0]
         if len(shuff_m) > 0:
             null_means = np.array([np.nanmean(s) for s in shuff_m])
+            null_medians = np.array([np.nanmedian(s) for s in shuff_m])
             null_mean_ci = (
                 float(np.percentile(null_means, 2.5)),
                 float(np.percentile(null_means, 97.5)),
             )
-            p_emp = emp_p_one_sided(null_means, mean_m, direction="less")
+            null_median_ci = (
+                float(np.percentile(null_medians, 2.5)),
+                float(np.percentile(null_medians, 97.5)),
+            )
+            # 1 - alpha is a FEM *gain*: the observed value exceeds the
+            # trajectory-shuffled null, so the one-sided test is P(null >= obs).
+            # Test the same statistic that is reported (the median), with the
+            # mean kept for reference.
+            p_emp = emp_p_one_sided(null_means, mean_m, direction="greater")
+            p_emp_median = emp_p_one_sided(null_medians, med_m,
+                                           direction="greater")
         else:
             null_mean_ci = (np.nan, np.nan)
+            null_median_ci = (np.nan, np.nan)
             p_emp = np.nan
+            p_emp_median = np.nan
 
         alpha_stats[windows_ms[w_idx]] = {
             "n": len(m), "mean": mean_m, "ci": (ci_lo, ci_hi),
             "median": med_m, "iqr": (q25, q75),
             "null_ci": null_mean_ci, "p_emp": p_emp,
+            "null_median_ci": null_median_ci, "p_emp_median": p_emp_median,
             "n_dropped": n_dropped, "n_total": n_total,
         }
     return m_by_window, subject_per_neuron_by_window, alpha_stats
@@ -496,8 +515,18 @@ def _compute_fano_stats(metrics, windows_ms):
                 for b in range(svc.shape[1])
             ])
             null_slope_cor = null_slope_cor[np.isfinite(null_slope_cor)]
+            # Single-neuron geometric-mean Fano under the trajectory shuffle:
+            # null-corrected Fano per neuron = shuffled corrected variance / rate.
+            null_g_cor = []
+            for b in range(svc.shape[1]):
+                ff_c_null = svc[:, b] / erate_v
+                ff_c_null = ff_c_null[np.isfinite(ff_c_null) & (ff_c_null > 0)]
+                if ff_c_null.size:
+                    null_g_cor.append(geomean(ff_c_null))
+            null_g_cor = np.asarray(null_g_cor, dtype=float)
         else:
             null_slope_cor = np.array([])
+            null_g_cor = np.array([])
 
         if null_slope_cor.size:
             null_reduction = slope_unc - null_slope_cor
@@ -512,6 +541,18 @@ def _compute_fano_stats(metrics, windows_ms):
         else:
             slope_cor_null_ci = (np.nan, np.nan)
             p_emp_slope = np.nan
+
+        # FEM correction lowers the single-neuron geometric-mean Fano below the
+        # shuffle null (one-sided P(null <= obs)).
+        if null_g_cor.size:
+            g_cor_null_ci = (
+                float(np.percentile(null_g_cor, 2.5)),
+                float(np.percentile(null_g_cor, 97.5)),
+            )
+            p_emp_geomean = emp_p_one_sided(null_g_cor, g_cor, direction="less")
+        else:
+            g_cor_null_ci = (np.nan, np.nan)
+            p_emp_geomean = np.nan
 
         # --- Per-session slopes + session-matched shuffle null (panel E) ---
         # The panel draws one line per session and a marker at the across-
@@ -571,6 +612,7 @@ def _compute_fano_stats(metrics, windows_ms):
         fano_stats[windows_ms[w_idx]] = {
             "n": n_valid, "g_unc": g_unc, "g_cor": g_cor,
             "ratio": ratio, "pct_red": pct_red, "p_wil": p_wil,
+            "g_cor_null_ci": g_cor_null_ci, "p_emp_geomean": p_emp_geomean,
             "slope_unc": slope_unc, "slope_cor": slope_cor,
             "slope_unc_ci": slope_unc_ci, "slope_cor_ci": slope_cor_ci,
             "slope_diff": slope_diff, "slope_diff_ci": slope_diff_ci,
@@ -892,6 +934,32 @@ def compute_alignment_aggregate(data):
 # Public entry point
 # ---------------------------------------------------------------------------
 
+def _analyzed_unit_count(sr):
+    """Window-independent inclusion count for one session (rate + PSTH R^2)."""
+    rate = np.asarray(sr["rate_hz"])
+    r2 = np.asarray(sr["psth_r2"])
+    return int(
+        (
+            np.isfinite(rate) & (rate > MIN_RATE_HZ)
+            & np.isfinite(r2) & (r2 > MIN_PSTH_R2)
+        ).sum()
+    )
+
+
+def _apply_session_unit_floor(session_results, min_units=MIN_SESSION_UNITS):
+    """Drop sessions with fewer than ``min_units`` analyzed units."""
+    kept, dropped = [], []
+    for sr in session_results:
+        n = _analyzed_unit_count(sr)
+        (kept if n >= min_units else dropped).append((sr, n))
+    if dropped:
+        print(f"\nSession unit floor (>= {min_units} analyzed units): "
+              f"dropping {len(dropped)} session(s):")
+        for sr, n in dropped:
+            print(f"  - {sr['session']} ({sr['subject']}): {n} units")
+    return [sr for sr, _ in kept]
+
+
 def load_empirical_data(refresh=False, refresh_decomposition=False):
     """Load the derived empirical bundle, recomputing if needed.
 
@@ -905,6 +973,7 @@ def load_empirical_data(refresh=False, refresh_decomposition=False):
 
     raw = compute_decomposition(refresh=refresh_decomposition)
     session_results = _to_mats_schema(raw, target=TARGET)
+    session_results = _apply_session_unit_floor(session_results)
 
     windows_ms = [r["window_ms"] for r in session_results[0]["results"]]
     windows_bins = [r["window_bins"] for r in session_results[0]["results"]]
@@ -941,6 +1010,7 @@ def load_empirical_data(refresh=False, refresh_decomposition=False):
         config=dict(
             DT=DT, WINDOW_BINS=list(WINDOW_BINS_DEFAULT), N_SHUFFLES=N_SHUFFLES_DEFAULT,
             MIN_RATE_HZ=MIN_RATE_HZ, MIN_PSTH_R2=MIN_PSTH_R2,
+            MIN_SESSION_UNITS=MIN_SESSION_UNITS,
             MIN_VAR=MIN_VAR, EPS_RHO=EPS_RHO,
             TARGET=TARGET, THRESHOLD=0.05, TIME_BIN_WEIGHTING="pair_count",
             CPSTH_METHOD="mcfarland", CLOSEPAIR_DENSITY="direct",

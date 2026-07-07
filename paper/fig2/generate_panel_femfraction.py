@@ -60,8 +60,10 @@ def plot_panel_c(ax=None, refresh=False, data=None):
     SUBJECTS = data["SUBJECTS"]
     SUBJECT_COLORS = data["SUBJECT_COLORS"]
 
-    m0_full = data["m_by_window"][0]
-    labels = data["subject_per_neuron_by_window"][0]
+    # 25 ms (3-bin) counting window, the fig2 standard used across all panels.
+    w_idx = int(np.argmin(np.abs(np.asarray(data["WINDOWS_MS"], float) - 25.0)))
+    m0_full = data["m_by_window"][w_idx]
+    labels = data["subject_per_neuron_by_window"][w_idx]
 
     valid_m0 = m0_full[np.isfinite(m0_full)]
     bins = np.linspace(np.nanmin(valid_m0), np.nanmax(valid_m0), 31)

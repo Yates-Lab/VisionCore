@@ -122,19 +122,27 @@ def get_spatial_readout(model, outputs):
     readout = PopulationReadout(feat_weights, biases, space_weights)
     return readout
 
-def compute_rate_map(model, readout, stim):
-    """Compute rate map from stimulus and behavior."""
-    x = model.model.core_forward(stim, None)
+def compute_rate_map(model, readout, stim, behavior=None):
+    """Compute rate map from stimulus and optional behavior.
+
+    ``behavior`` (N, n_vars) is required for behavior-conditioned twins
+    (e.g. concat/FiLM modulators); leave it None for none-modulator twins.
+    """
+    x = model.model.core_forward(stim, behavior)
     y_batch = readout(x[:,:,-1])
 
     return model.model.activation(y_batch)
 
-def compute_rate_map_batched(model, readout, stim, batch_size=32):
-    """Compute rate map from stimulus and behavior in batches."""
+def compute_rate_map_batched(model, readout, stim, batch_size=32, behavior=None):
+    """Compute rate map from stimulus and optional behavior in batches.
+
+    When ``behavior`` (N, n_vars) is provided it is chunked in lockstep with
+    ``stim`` along the leading (time) axis.
+    """
     device = next(model.model.parameters()).device
     T = stim.shape[0]
     y_chunks = []
-    
+
     model.model.eval()
     readout.eval()
 
@@ -144,8 +152,9 @@ def compute_rate_map_batched(model, readout, stim, batch_size=32):
 
             # Move batch to GPU
             x = stim[t_start:t_end].to(device)
+            beh = behavior[t_start:t_end].to(device) if behavior is not None else None
 
-            y_batch = compute_rate_map(model,readout, x)
+            y_batch = compute_rate_map(model, readout, x, behavior=beh)
 
             # Move to CPU immediately
             y_chunks.append(y_batch.cpu())

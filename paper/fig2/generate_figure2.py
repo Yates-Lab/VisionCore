@@ -53,7 +53,7 @@ from generate_panel_fano import plot_fano_population
 from generate_panel_noisecorr import plot_nc_violin
 
 TARGET_SESSION = "Allen_2022-02-16"
-WINDOW_IDX = 0
+WINDOW_IDX = 2          # 25 ms (3 bins), the fig2 standard counting window
 OMIT_SUBJECTS = {"Luke"}
 POOLED_SUBJECT = "Pooled"
 POOLED_COLOR = "tab:blue"
