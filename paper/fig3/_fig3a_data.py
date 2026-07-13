@@ -19,7 +19,7 @@ from _fig3_data import CACHE_DIR
 from _fig3_helpers import PANEL_B_SESSION
 
 
-PANEL_A_CACHE_PATH = CACHE_DIR / "fig4a_assets.pkl"
+PANEL_A_CACHE_PATH = CACHE_DIR / "fig3a_assets.pkl"
 
 # Preferred fixRSVP image IDs, tried in order. The first one with frames in
 # the session is used. Edit if the chosen image is unappealing (some IDs in

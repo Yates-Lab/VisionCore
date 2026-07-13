@@ -1,247 +1,402 @@
-"""Figure 3: Digital Twin Performance — orchestrator.
+"""Figure 3: a retinal-input digital twin captures FEM-linked V1 variability.
 
-Renders each panel's standalone PDF, then assembles the composite figure
-with the native schematic (Panel A) and result panels B-J.
+Renders the digital-twin mechanism figure:
 
-Panels:
-  A  Architecture schematic (stimulus + model, drawn natively)   -> generate_fig3a
-  B  Example neuron PSTH overlay (observed + twin)               -> generate_fig3b
-  C  Histogram of normalized correlation (ccnorm)                -> generate_fig3c
-  D  (reserved) per-cell rate-fluctuation decomposition vs 1-α   -> TODO
-  E  Single-trial rasters: observed | twin (same neuron as B)    -> generate_fig3e
-  F  Single-trial r^2 scatter: model vs PSTH                     -> generate_fig3f
-  G  Improvement over PSTH vs FEM modulation (1-α)               -> generate_fig3g
-  H  Ablation rasters: twin | ablated | residual                 -> generate_fig3h
-  I  Single-trial r^2: ablated vs intact                         -> generate_fig3i
-  J  Ablation cost (Δr^2) vs FEM modulation (1-α)                -> generate_fig3j
-
-Layout (8 x 10.5 in):
-  row 0  A           full-width schematic
-  row 1  B  C  D     phenomenology (PSTH, ccnorm, rate-fluctuation decomp)
-  row 2  E  F  G     single-trial structure (rasters, r^2 scatter, improvement)
-  row 3  H  I  J     extraretinal ablation
+  A  Digital twin schematic (native stimulus + architecture render)
+  B  Example neuron PSTH: observed vs intact and behavior-zeroed twin
+  C  Held-out response validation (intact vs zeroed ccnorm)
+  D  Extraretinal-pathway zeroing control (single-trial r^2)
+  E  FEM-linked model gain over a PSTH baseline
 
 Usage:
-    uv run declan/fig3/generate_figure3.py [--recompute]
+    uv run python paper/fig3/generate_figure3.py [--recompute]
 """
+from __future__ import annotations
+
 import argparse
+import json
+from pathlib import Path
+
+import dill
 import matplotlib.pyplot as plt
+from matplotlib.gridspec import GridSpec
+import numpy as np
+from scipy.stats import spearmanr
+
+from VisionCore.paths import VISIONCORE_ROOT
 
 from _fig3_data import FIG_DIR, configure_matplotlib, load_fig3_data
-from _fig3_ablation_data import load_ablation_data, print_ablation_stats
+from _fig3_ablation_data import CACHE_PATH as ABLATION_CACHE_PATH
+from _fig3_ablation_data import load_ablation_data
 from _fig3_helpers import select_example_neuron
 from _fig3a_data import load_panel_a_assets
-from generate_fig3a import render_panel_a, _plot_halves, _fit_two_axes_in_rect
-from generate_fig3b import plot_panel_b
-from generate_fig3c import plot_panel_c
-from generate_fig3e import plot_panel_e
-from generate_fig3f import plot_panel_f
-from generate_fig3g import plot_panel_g
-from generate_fig3h import plot_panel_h
-from generate_fig3i import plot_panel_i
-from generate_fig3j import plot_panel_j
+from generate_fig3a import plot_panel_a
+from generate_fig3b import plot_panel_b as plot_example_psth
 
 
-def _placeholder_panel(ax, text):
-    """Reserve an empty slot for a panel that has not been built yet."""
-    ax.text(0.5, 0.5, text, transform=ax.transAxes, ha="center", va="center",
-            fontsize=8, color="0.6", style="italic")
-    ax.set_xticks([])
-    ax.set_yticks([])
-    for side in ("top", "right", "left", "bottom"):
-        ax.spines[side].set_visible(False)
+POOLED_COLOR = "0.25"
+POOLED_FILL = "0.55"
+BEHAVIOR_COLOR = "#d62728"
+ZEROED_COLOR = "#1f77b4"
+ACCENT = "#c0392b"
+WITHIN_MODEL_CACHE = VISIONCORE_ROOT / "outputs" / "cache" / "behavior_vs_vision_within_model.pkl"
+PANEL_LETTER_SIZE = 11
+PANEL_TITLE_SIZE = 9.0
+SUBJECT_COLORS = {"Allen": "tab:blue", "Logan": "tab:green"}
 
 
-def _place_schematic(fig, rect, assets):
-    """Fit the two-half schematic to fill `rect` (a figure-fraction Bbox).
-
-    `rect` should be the *settled* extent of the schematic's row, read back
-    via `ax.get_position()` after constrained_layout has run — the subplotspec
-    position uses default margins and leaves the schematic inset.
-    """
-    ax_stim = fig.add_axes([rect.x0, rect.y0, rect.width / 2, rect.height])
-    ax_arch = fig.add_axes([rect.x0 + rect.width / 2, rect.y0,
-                            rect.width / 2, rect.height])
-    a_stim, a_arch = _plot_halves(fig, ax_stim, ax_arch, assets)
-    _fit_two_axes_in_rect(fig, ax_stim, ax_arch, rect, a_stim, a_arch)
-    return ax_stim, ax_arch
+def _clear_panel_heading(ax):
+    """Remove source-panel headings so the figure can place them uniformly."""
+    ax.set_title("", loc="left")
+    ax.set_title("", loc="center")
+    ax.set_title("", loc="right")
+    for txt in list(ax.texts):
+        if txt.get_transform() == ax.transAxes:
+            x, y = txt.get_position()
+            if y >= 0.98 and x <= 0.28:
+                txt.remove()
 
 
-def _save_standalone_panels(data, example, abl):
-    fig_a, _ = render_panel_a()
-    fig_a.savefig(FIG_DIR / "panel_a_schematic.pdf", bbox_inches="tight", dpi=300)
-    plt.close(fig_a)
-
-    fig_b, _, _ = plot_panel_b(data=data, example=example)
-    fig_b.tight_layout()
-    fig_b.savefig(FIG_DIR / "panel_b_psth.pdf", bbox_inches="tight", dpi=300)
-    plt.close(fig_b)
-
-    fig_c, _ = plot_panel_c(data=data)
-    fig_c.tight_layout()
-    fig_c.savefig(FIG_DIR / "panel_c_ccnorm_hist.pdf", bbox_inches="tight", dpi=300)
-    plt.close(fig_c)
-
-    fig_e, _, _, _ = plot_panel_e(data=data, example=example)
-    fig_e.savefig(FIG_DIR / "panel_e_rasters.pdf", bbox_inches="tight", dpi=300)
-    plt.close(fig_e)
-
-    fig_f, _ = plot_panel_f(data=data)
-    fig_f.tight_layout()
-    fig_f.savefig(FIG_DIR / "panel_f_r2_scatter.pdf", bbox_inches="tight", dpi=300)
-    plt.close(fig_f)
-
-    fig_g, _ = plot_panel_g(data=data)
-    fig_g.tight_layout()
-    fig_g.savefig(FIG_DIR / "panel_g_improvement_vs_fem.pdf", bbox_inches="tight", dpi=300)
-    plt.close(fig_g)
-
-    # Bottom-row ablation panels, both conditions (zeroed committed, permuted supp.)
-    for cond in ("zeroed", "permuted"):
-        fig_h, ax_h, im_rate, im_resid = plot_panel_h(data=abl, cond=cond)
-        if im_resid is not None:
-            fig_h.colorbar(im_rate, ax=ax_h, shrink=0.7, pad=0.02, label="rate (sp/s)")
-            fig_h.colorbar(im_resid, ax=ax_h, shrink=0.7, pad=0.08, label="Δ rate")
-        fig_h.savefig(FIG_DIR / f"panel_h_rasters_{cond}.pdf", bbox_inches="tight", dpi=300)
-        plt.close(fig_h)
-
-        fig_i, _ = plot_panel_i(data=abl, cond=cond, print_stats=False)
-        fig_i.tight_layout()
-        fig_i.savefig(FIG_DIR / f"panel_i_r2_ablated_{cond}.pdf", bbox_inches="tight", dpi=300)
-        plt.close(fig_i)
-
-        fig_j, _ = plot_panel_j(data=abl, cond=cond, print_stats=False)
-        fig_j.tight_layout()
-        fig_j.savefig(FIG_DIR / f"panel_j_cost_vs_fem_{cond}.pdf", bbox_inches="tight", dpi=300)
-        plt.close(fig_j)
-
-
-def _build_composite(data, example, abl):
-    assets = load_panel_a_assets()
-    fig = plt.figure(figsize=(8, 10.5), constrained_layout=True)
-    gs_outer = fig.add_gridspec(4, 1, height_ratios=[2.7, 2.6, 2.6, 2.6])
-
-    # Row 0 reserves the full-width schematic slot. We leave it bare and fit
-    # the schematic into its settled extent after layout (see below).
-    ax_a = fig.add_subplot(gs_outer[0])
-    ax_a.set_xticks([])
-    ax_a.set_yticks([])
-    for side in ("top", "right", "left", "bottom"):
-        ax_a.spines[side].set_visible(False)
-
-    # --- Row 1 — phenomenology: B (PSTH), C (ccnorm), D (reserved) ---
-    gs_r1 = gs_outer[1].subgridspec(1, 3, width_ratios=[1, 1, 1], wspace=0.2)
-
-    ax_b = fig.add_subplot(gs_r1[0, 0])
-    plot_panel_b(ax=ax_b, data=data, example=example,
-                 legend_fontsize=7, show_ccnorm_title=False)
-    ax_b.set_title("B", fontweight="bold", loc="left")
-
-    ax_c = fig.add_subplot(gs_r1[0, 1])
-    plot_panel_c(ax=ax_c, data=data, legend_fontsize=7)
-    ax_c.set_title("C", fontweight="bold", loc="left")
-
-    ax_d = fig.add_subplot(gs_r1[0, 2])
-    _placeholder_panel(ax_d, "rate-fluctuation\ndecomposition\nvs 1−α\n(to add)")
-    ax_d.set_title("D", fontweight="bold", loc="left")
-
-    # --- Row 2 — single-trial structure: E (rasters), F (scatter), G (improvement) ---
-    gs_r2 = gs_outer[2].subgridspec(1, 3, width_ratios=[1.2, 1, 1], wspace=0.2)
-
-    ax_e = fig.add_subplot(gs_r2[0, 0])
-    _, _, im_e, _ = plot_panel_e(
-        ax=ax_e, data=data, example=example,
-        label_fontsize=8, scale_fontsize=7, colorbar=False,
+def _standard_panel_heading(ax, letter: str, title: str):
+    """Place a consistent panel letter/title just above the axes."""
+    _clear_panel_heading(ax)
+    ax.text(
+        -0.035,
+        1.045,
+        letter,
+        transform=ax.transAxes,
+        ha="left",
+        va="bottom",
+        fontsize=PANEL_LETTER_SIZE,
+        fontweight="bold",
+        color="#202124",
+        clip_on=False,
     )
-    ax_e.set_title("E", fontweight="bold", loc="left")
-    fig.colorbar(im_e, ax=ax_e, shrink=0.8, pad=0.02, label="sp/s")
-
-    ax_f = fig.add_subplot(gs_r2[0, 1])
-    plot_panel_f(ax=ax_f, data=data, legend_fontsize=7, print_stats=False)
-    ax_f.set_title("F", fontweight="bold", loc="left")
-
-    ax_g = fig.add_subplot(gs_r2[0, 2])
-    plot_panel_g(ax=ax_g, data=data, legend_fontsize=7, print_stats=False)
-    ax_g.set_title("G", fontweight="bold", loc="left")
-
-    # --- Row 3 — extraretinal ablation: H (rasters), I (r2), J (cost) ---
-    gs_r3 = gs_outer[3].subgridspec(1, 3, width_ratios=[1.3, 1, 1], wspace=0.2)
-
-    ax_h = fig.add_subplot(gs_r3[0, 0])
-    _, _, _, im_resid = plot_panel_h(ax=ax_h, data=abl, cond="zeroed",
-                                     label_fontsize=8)
-    ax_h.set_title("H", fontweight="bold", loc="left")
-    if im_resid is not None:
-        fig.colorbar(im_resid, ax=ax_h, shrink=0.8, pad=0.02, label="Δ rate")
-
-    ax_i = fig.add_subplot(gs_r3[0, 1])
-    plot_panel_i(ax=ax_i, data=abl, cond="zeroed", legend_fontsize=7,
-                 print_stats=False)
-    ax_i.set_title("I", fontweight="bold", loc="left")
-
-    ax_j = fig.add_subplot(gs_r3[0, 2])
-    plot_panel_j(ax=ax_j, data=abl, cond="zeroed", legend_fontsize=7,
-                 print_stats=False)
-    ax_j.set_title("J", fontweight="bold", loc="left")
-
-    # Let constrained_layout settle the result rows, then fill row 0's actual
-    # extent with the schematic (subplotspec position would leave it inset).
-    fig.draw_without_rendering()
-    rect = ax_a.get_position()
-    _place_schematic(fig, rect, assets)
-    fig.text(rect.x0, rect.y1, "A", fontweight="bold", ha="left", va="top",
-             fontsize=plt.rcParams["axes.titlesize"])
-
-    fig.savefig(FIG_DIR / "fig3_composite.pdf", bbox_inches="tight", dpi=300)
-    fig.savefig(FIG_DIR / "fig3_composite.png", bbox_inches="tight", dpi=200)
-    plt.close(fig)
+    ax.text(
+        0.08,
+        1.045,
+        title,
+        transform=ax.transAxes,
+        ha="left",
+        va="bottom",
+        fontsize=PANEL_TITLE_SIZE,
+        fontweight="bold",
+        color="#202124",
+        linespacing=0.9,
+        clip_on=False,
+    )
 
 
-def _build_supplement_permuted(abl):
-    """Supplementary figure: the permuted (adversarial) ablation control."""
-    fig = plt.figure(figsize=(11, 3.2), constrained_layout=True)
-    gs = fig.add_gridspec(1, 3, width_ratios=[1.5, 1, 1], wspace=0.35)
+def _plot_example_psth_intact_vs_zeroed(ax, abl_data, *, fallback_data, fallback_example):
+    """Example PSTH with behavior-input and zeroed-behavior predictions."""
+    ex = None if abl_data is None else abl_data.get("example")
+    if ex is None:
+        plot_example_psth(
+            ax=ax,
+            data=fallback_data,
+            example=fallback_example,
+            legend_fontsize=6.0,
+            show_ccnorm_title=False,
+        )
+        if len(ax.lines) >= 2:
+            ax.lines[1].set_label("Intact")
+            ax.lines[1].set_color(BEHAVIOR_COLOR)
+            ax.legend(frameon=False, fontsize=6.0)
+        return
 
-    ax_a = fig.add_subplot(gs[0, 0])
-    _, _, _, im_resid = plot_panel_h(ax=ax_a, data=abl, cond="permuted")
-    ax_a.set_title("A", fontweight="bold", loc="left")
-    if im_resid is not None:
-        fig.colorbar(im_resid, ax=ax_a, shrink=0.8, pad=0.02, label="Δ rate")
-
-    ax_b = fig.add_subplot(gs[0, 1])
-    plot_panel_i(ax=ax_b, data=abl, cond="permuted", legend_fontsize=7,
-                 print_stats=False)
-    ax_b.set_title("B", fontweight="bold", loc="left")
-
-    ax_c = fig.add_subplot(gs[0, 2])
-    plot_panel_j(ax=ax_c, data=abl, cond="permuted", legend_fontsize=7,
-                 print_stats=False)
-    ax_c.set_title("C", fontweight="bold", loc="left")
-
-    fig.suptitle("Fig 3 supplement — extraretinal ablation, permuted control")
-    fig.savefig(FIG_DIR / "fig3_supp_permuted.pdf", bbox_inches="tight", dpi=300)
-    fig.savefig(FIG_DIR / "fig3_supp_permuted.png", bbox_inches="tight", dpi=200)
-    plt.close(fig)
+    obs = np.nanmean(ex["obs_rate"], axis=0)
+    intact = np.nanmean(ex["rate"]["intact"], axis=0)
+    zeroed = np.nanmean(ex["rate"]["zeroed"], axis=0)
+    t = np.linspace(0, float(ex["window_s"]), obs.size, endpoint=False)
+    ax.plot(t, obs, color="k", lw=1.0, label="Observed")
+    ax.plot(t, intact, color=BEHAVIOR_COLOR, lw=1.0, label="Intact")
+    ax.plot(t, zeroed, color=ZEROED_COLOR, lw=1.0, label="Zeroed")
+    ax.set_xlim(0, float(ex["window_s"]))
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Rate (sp/s)")
+    ax.legend(frameon=False, fontsize=5.8, loc="upper right")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
 
 
-def main(recompute=False):
+def _load_within_model_ccnorm(data):
+    """Load matched intact-vs-zeroed ccnorm arrays from the within-model cache."""
+    if not WITHIN_MODEL_CACHE.exists():
+        return None
+    with open(WITHIN_MODEL_CACHE, "rb") as f:
+        rows = dill.load(f)
+
+    intact = np.concatenate([np.asarray(r["cc_norm"]["beh_intact"], dtype=float) for r in rows])
+    zeroed = np.concatenate([np.asarray(r["cc_norm"]["beh_zeroed"], dtype=float) for r in rows])
+    ccmax = np.concatenate([np.asarray(r["cc_max"]["beh_intact"], dtype=float) for r in rows])
+    good = ccmax > 0.85
+    return {"intact": intact, "zeroed": zeroed, "good": good}
+
+
+def _plot_ccnorm_hist_intact_vs_zeroed(ax, data, *, letter: str = "C"):
+    """Overlaid normalized-correlation histograms for intact and zeroed inputs."""
+    matched = _load_within_model_ccnorm(data)
+    if matched is None:
+        intact = data["ccnorm"]
+        zeroed = None
+        good = np.asarray(data["good"], dtype=bool)
+    else:
+        intact = matched["intact"]
+        zeroed = matched["zeroed"]
+        good = matched["good"]
+
+    m_intact = good & np.isfinite(intact)
+    bins = np.linspace(0, 1, 21)
+    ax.hist(intact[m_intact], bins=bins, color=BEHAVIOR_COLOR, alpha=0.32,
+            edgecolor="none", label="Intact")
+    ax.axvline(float(np.nanmedian(intact[m_intact])), color=BEHAVIOR_COLOR, lw=1.4)
+
+    if zeroed is not None and len(zeroed) == len(intact):
+        both = good & np.isfinite(intact) & np.isfinite(zeroed)
+        ax.hist(zeroed[both], bins=bins, color=ZEROED_COLOR, alpha=0.32,
+                edgecolor="none", label="Zeroed")
+        ax.axvline(float(np.nanmedian(zeroed[both])), color=ZEROED_COLOR, lw=1.4)
+        note = f"median Δ={np.nanmedian(zeroed[both] - intact[both]):+.3f}"
+        print(f"Panel {letter} — intact/zeroed ccnorm (N={both.sum()}): {note}")
+    else:
+        note = "zeroed ccnorm\nnot cached"
+        ax.text(0.97, 0.92, note, transform=ax.transAxes,
+                ha="right", va="top", fontsize=6.0, color=ZEROED_COLOR)
+        print(f"Panel {letter} — intact ccnorm only; zeroed ccnorm not cached")
+
+    ax.set_xlim(0, 1)
+    ax.set_xlabel("Normalized correlation (ccnorm)")
+    ax.set_ylabel("Count")
+    ax.legend(frameon=False, fontsize=5.8, loc="upper left")
+    ax.text(0.97, 0.08,
+            f"intact median {np.nanmedian(intact[m_intact]):.2f}"
+            if zeroed is None else note,
+            transform=ax.transAxes, ha="right", va="bottom",
+            fontsize=6.0, color="0.25")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+
+def _plot_ablation_r2_pooled(ax, data, *, cond: str = "zeroed", letter: str = "D"):
+    """Pooled intact-vs-zeroed single-trial r2 scatter."""
+    x = data["ve"]["intact"]
+    y = data["ve"][cond]
+    good = data["good"]
+    m = good & np.isfinite(x) & np.isfinite(y)
+    ax.scatter(x[m], y[m], s=5, alpha=0.38, color=POOLED_COLOR)
+    lims = [0, 0.35]
+    ax.plot(lims, lims, "k--", lw=0.5, alpha=0.5)
+    ax.set_xlim(lims)
+    ax.set_ylim(lims)
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_xlabel("Single-trial $r^2$ (intact)")
+    ax.set_ylabel("Single-trial $r^2$ (zeroed)")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    d = y[m] - x[m]
+    med_delta = float(np.nanmedian(d))
+    pct = 100.0 * med_delta / float(np.nanmedian(x[m]))
+    ax.text(0.97, 0.08,
+            f"{pct:+.0f}% of intact median\nmedian Δ$r^2$={med_delta:+.3f}",
+            transform=ax.transAxes, ha="right", va="bottom",
+            fontsize=7, color="0.25")
+    print(f"Panel {letter} — pooled (N={m.sum()}): median Δr²={med_delta:+.4f}")
+
+
+def _plot_ablation_placeholder(ax):
+    ax.set_axis_off()
+    ax.text(0.5, 0.58, "ablation cache not found",
+            transform=ax.transAxes, ha="center", va="center",
+            fontsize=8.5, color=ACCENT, fontweight="bold")
+    ax.text(0.5, 0.42, f"Missing: {ABLATION_CACHE_PATH.name}",
+            transform=ax.transAxes, ha="center", va="center",
+            fontsize=7.0, color="0.45")
+
+
+def _plot_improvement_vs_fem_modulation(ax, data, *, legend_fontsize: float = 5.8):
+    """Model/PSTH single-trial r2 improvement vs empirical FEM modulation."""
+    ve_model = np.asarray(data["ve_model"], dtype=float)
+    ve_psth = np.asarray(data["ve_psth"], dtype=float)
+    alpha = np.asarray(data["alpha"], dtype=float)
+    subjects = np.asarray(data["subjects"])
+    good = np.asarray(data["good"], dtype=bool)
+    has_alpha = good & np.isfinite(alpha) & np.isfinite(ve_model) & np.isfinite(ve_psth) & (ve_psth > 0)
+
+    plotted = False
+    for subj, color in SUBJECT_COLORS.items():
+        mask = has_alpha & (subjects == subj)
+        if not mask.any():
+            continue
+        fem_mod = 1.0 - alpha[mask]
+        improvement = ve_model[mask] / ve_psth[mask]
+        ax.scatter(
+            fem_mod,
+            improvement,
+            s=5,
+            alpha=0.5,
+            color=color,
+            linewidths=0,
+            label=subj,
+        )
+        plotted = True
+
+    ax.axhline(1, color="k", linestyle="--", linewidth=0.5, alpha=0.5)
+    ax.set_xlabel(r"FEM modulation ($1-\alpha$)")
+    ax.set_ylabel("$r^2$ improvement\n(Model / PSTH)")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 5)
+    if plotted:
+        ax.legend(frameon=False, fontsize=legend_fontsize, loc="upper left")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    fem_all = 1.0 - alpha[has_alpha]
+    improvement_all = ve_model[has_alpha] / ve_psth[has_alpha]
+    ok = np.isfinite(fem_all) & np.isfinite(improvement_all)
+    rho = spearmanr(fem_all[ok], improvement_all[ok]).correlation if ok.sum() >= 3 else np.nan
+    ax.text(0.97, 0.92, f"ρ={rho:.2f}",
+            transform=ax.transAxes, ha="right", va="top",
+            fontsize=5.8, color="0.25")
+    print(
+        f"Panel E — improvement vs FEM modulation "
+        f"(N={ok.sum()}): Spearman ρ={rho:.3f}"
+    )
+
+
+def _load_ablation_cache():
+    """Load ablation data without triggering a heavy inference run."""
+    if not ABLATION_CACHE_PATH.exists():
+        return None
+    return load_ablation_data(recompute=False)
+
+
+def _write_sidecars(out_dir, manifest: dict):
+    caption = """Figure 3. A retinal-input digital twin captures FEM-linked V1 response variability.
+
+(A) Gaze-contingent digital twin architecture. The model receives the retinal stimulus history and an optional extraretinal behavior input, then predicts simultaneously recorded V1 responses. (B) Observed PSTH for an example reliable neuron, overlaid with predictions from the intact behavior-input twin and the same twin with the separate behavior input zeroed. (C) Held-out stimulus-locked response prediction across pooled Allen and Logan cells, shown as normalized-correlation (ccnorm) distributions for intact and behavior-zeroed predictions from the same twin. (D) Single-trial prediction is nearly unchanged when the separate extraretinal eye-state pathway is zeroed, pooled across Allen and Logan, supporting a retinal-input route for FEM-linked variability. (E) The twin's single-trial improvement over a PSTH baseline is largest for cells with stronger empirical FEM modulation, measured as \\(1-\\alpha\\).
+"""
+    (out_dir / "figure3_caption.md").write_text(caption, encoding="utf-8")
+
+    readme = """# Figure 3
+
+Generated by `paper/fig3/generate_figure3.py`.
+
+The digital-twin mechanism figure: a retinal-input twin whose held-out response
+prediction survives zeroing the extraretinal eye-state pathway, with the largest
+prediction gains over a PSTH baseline for cells with stronger empirical FEM
+modulation.
+
+## Outputs
+- `figure3.png`
+- `figure3.pdf`
+- `figure3.svg`
+- `figure3_caption.md`
+- `figure3_manifest.json`
+"""
+    (out_dir / "figure3_README.md").write_text(readme, encoding="utf-8")
+
+    with open(out_dir / "figure3_manifest.json", "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2, default=str)
+
+
+def compose(*, recompute: bool = False, out_dir=FIG_DIR, dpi: int = 300):
     configure_matplotlib()
+    out_dir.mkdir(parents=True, exist_ok=True)
+
     data = load_fig3_data(recompute=recompute)
     example = select_example_neuron(data)
-    abl = load_ablation_data(recompute=recompute)
-    print_ablation_stats(abl)
+    abl = _load_ablation_cache()
+    assets = load_panel_a_assets(recompute=recompute)
 
-    _save_standalone_panels(data, example, abl)
-    _build_composite(data, example, abl)
-    _build_supplement_permuted(abl)
+    fig = plt.figure(figsize=(13.2, 7.4), constrained_layout=False)
+    gs = GridSpec(
+        2, 1,
+        figure=fig,
+        left=0.055,
+        right=0.985,
+        bottom=0.09,
+        top=0.93,
+        height_ratios=[2.25, 1.0],
+        hspace=0.30,
+    )
 
-    print(f"\nAll panel figures saved to: {FIG_DIR}")
-    print("Done.")
+    # Row 1. Native schematic (stimulus + architecture), fitted into the slot.
+    ax_a = fig.add_subplot(gs[0, 0])
+    rect = ax_a.get_position()
+    plot_panel_a(ax=ax_a, assets=assets)
+    fig.text(rect.x0, rect.y1, "A", fontweight="bold", ha="left", va="top",
+             fontsize=PANEL_LETTER_SIZE, color="#202124")
+
+    # Row 2. Digital-twin example, validation, ablation control, FEM-linked gain.
+    gs_mid = gs[1, 0].subgridspec(
+        1,
+        6,
+        width_ratios=[0.15, 1.0, 1.0, 1.0, 1.0, 0.15],
+        wspace=0.36,
+    )
+    ax_b = fig.add_subplot(gs_mid[0, 1])
+    _plot_example_psth_intact_vs_zeroed(
+        ax_b,
+        abl,
+        fallback_data=data,
+        fallback_example=example,
+    )
+    _standard_panel_heading(ax_b, "B", "Example PSTH")
+
+    ax_c = fig.add_subplot(gs_mid[0, 2])
+    _plot_ccnorm_hist_intact_vs_zeroed(ax_c, data, letter="C")
+    _standard_panel_heading(ax_c, "C", "Held-out responses")
+
+    ax_d = fig.add_subplot(gs_mid[0, 3])
+    if abl is not None:
+        _plot_ablation_r2_pooled(ax_d, abl, cond="zeroed", letter="D")
+    else:
+        _plot_ablation_placeholder(ax_d)
+    _standard_panel_heading(ax_d, "D", "Eye-state zeroing")
+
+    ax_e = fig.add_subplot(gs_mid[0, 4])
+    _plot_improvement_vs_fem_modulation(ax_e, data)
+    _standard_panel_heading(ax_e, "E", "FEM-linked model gain")
+
+    for ext in ("png", "pdf", "svg"):
+        fig.savefig(out_dir / f"figure3.{ext}", dpi=dpi, bbox_inches="tight")
+
+    manifest = {
+        "figure": "figure3",
+        "digital_twin_cache": str(VISIONCORE_ROOT / "outputs" / "cache" / "fig3_digitaltwin.pkl"),
+        "ablation_cache": str(ABLATION_CACHE_PATH),
+        "ablation_cache_present": abl is not None,
+        "within_model_cache": str(WITHIN_MODEL_CACHE),
+        "source_script": str(__file__),
+        "panel_mapping": {
+            "A": "native digital-twin schematic (stimulus + architecture)",
+            "B": "example reliable-neuron PSTH with intact and zeroed-behavior predictions",
+            "C": "intact and behavior-zeroed ccnorm histograms from behavior_vs_vision_within_model cache",
+            "D": "zeroed extraretinal input vs intact single-trial r2",
+            "E": "model/PSTH single-trial r2 improvement vs empirical 1-alpha",
+        },
+    }
+    _write_sidecars(out_dir, manifest)
+    return fig, manifest
+
+
+def parse_args():
+    p = argparse.ArgumentParser(description="Generate digital-twin mechanism Figure 3.")
+    p.add_argument("--recompute", action="store_true",
+                   help="Force digital-twin recomputation instead of cached results.")
+    p.add_argument("--out-dir", type=str, default=None,
+                   help="Directory for figure outputs (default: canonical fig3 dir).")
+    p.add_argument("--dpi", type=int, default=300)
+    return p.parse_args()
+
+
+def main():
+    args = parse_args()
+    out_dir = FIG_DIR if args.out_dir is None else Path(args.out_dir)
+    fig, _manifest = compose(recompute=args.recompute, out_dir=out_dir, dpi=args.dpi)
+    plt.close(fig)
+    print(f"Saved Figure 3 to: {out_dir}")
 
 
 if __name__ == "__main__":
-    p = argparse.ArgumentParser(description="Compose figure 3.")
-    p.add_argument("--recompute", action="store_true",
-                   help="Force model re-inference (skip cache).")
-    args = p.parse_args()
-    main(recompute=args.recompute)
+    main()

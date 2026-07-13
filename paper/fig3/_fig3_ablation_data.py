@@ -14,7 +14,7 @@ movements are already in the visual stream; the behavior tensor is the only
 ablation, the trial-to-trial variability the twin captures is explained by the
 moving retinal image, not by extraretinal modulation of V1.
 
-Self-contained: owns cache `outputs/cache/fig4_bottomrow_ablation.pkl` (no
+Self-contained: owns cache `outputs/cache/fig3_bottomrow_ablation.pkl` (no
 dependency on the behavior-vs-vision within-model cache or the fig3 top-row
 cache). Single-trial r^2 (ve) and 1-alpha definitions match panels E/F; 1-alpha
 is read from `fig2_decomposition.pkl` via `_fig3_data._load_fig2_alpha_by_session`.
@@ -39,7 +39,7 @@ from _fig3_helpers import (
 )
 
 
-CACHE_PATH = CACHE_DIR / "fig4_bottomrow_ablation.pkl"
+CACHE_PATH = CACHE_DIR / "fig3_bottomrow_ablation.pkl"
 
 CONDS = ["intact", "zeroed", "permuted"]
 ABLATIONS = ["zeroed", "permuted"]            # committed lead first
