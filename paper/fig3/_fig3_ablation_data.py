@@ -1,4 +1,4 @@
-"""Ablation data loader for figure 3 bottom row (panels G/H/I).
+"""Unified data loader for figure 3's analysis row (panels C/D/E).
 
 Within-model behavior ablation on fixRSVP: hold the trained concat-model weights
 fixed and, at inference, ablate only the extraretinal `behavior` input
@@ -14,10 +14,19 @@ movements are already in the visual stream; the behavior tensor is the only
 ablation, the trial-to-trial variability the twin captures is explained by the
 moving retinal image, not by extraretinal modulation of V1.
 
+This cache is the single source for all three analysis panels, so every panel
+draws on the same sessions, neurons, and `good` mask:
+
+  - panel C : trial-averaged held-out prediction, `ccnorm[intact]` vs
+              `ccnorm[zeroed]` (normalized correlation; ccmax is shared).
+  - panel D : single-trial r^2, `ve_psth` vs `ve[intact]` vs `ve[zeroed]`.
+  - panel E : empirical FEM modulation (1 - `alpha`) vs single-trial r^2 gain
+              over the PSTH baseline (`ve[zeroed]` / `ve_psth`).
+
 Self-contained: owns cache `outputs/cache/fig3_bottomrow_ablation.pkl` (no
 dependency on the behavior-vs-vision within-model cache or the fig3 top-row
-cache). Single-trial r^2 (ve) and 1-alpha definitions match panels E/F; 1-alpha
-is read from `fig2_decomposition.pkl` via `_fig3_data._load_fig2_alpha_by_session`.
+cache). 1-alpha is read from the covariance-decomposition cache via
+`_fig3_data._load_fig2_alpha_by_session`.
 """
 import sys
 
@@ -46,7 +55,7 @@ ABLATIONS = ["zeroed", "permuted"]            # committed lead first
 COND_LABEL = {"intact": "intact", "zeroed": "zeroed", "permuted": "permuted"}
 
 PERM_SEED = 42
-CCMAX_N_SPLITS = 200
+CCNORM_N_SPLITS = 200
 MIN_TRIALS_PER_PHASE = 10
 
 
@@ -91,6 +100,32 @@ def _var_explained(pred, true, axis=None):
     return 1 - np.nanvar(pred - true, axis=axis) / np.nanvar(true, axis=axis)
 
 
+def _compute_ccnorm_by_condition(robs, rhat_rs, dfs, n_splits=CCNORM_N_SPLITS):
+    """Per-neuron trial-averaged ccnorm for each behavior condition.
+
+    ccmax is the split-half reliability of the observed responses, so it is a
+    property of `robs` alone and identical across conditions; we compute it once
+    and return it alongside a {cond: ccnorm} dict. Each condition's ccnorm is
+    averaged over two split-half seeds and neurons whose two estimates disagree
+    (squared diff > 0.01) are dropped, mirroring the fig3 top-row loader.
+    """
+    from eval.eval_stack_utils import ccnorm_split_half_variable_trials
+
+    ccnorm = {}
+    ccmax = None
+    for c, r in rhat_rs.items():
+        cn1, _, cm1, _, _ = ccnorm_split_half_variable_trials(
+            robs, r, dfs, n_splits=n_splits, return_components=True, rng=42)
+        cn2, _, cm2, _, _ = ccnorm_split_half_variable_trials(
+            robs, r, dfs, n_splits=n_splits, return_components=True, rng=43)
+        cn = 0.5 * (cn1 + cn2)
+        cn[(cn1 - cn2) ** 2 > 0.01] = np.nan
+        ccnorm[c] = cn
+        if ccmax is None:
+            ccmax = 0.5 * (cm1 + cm2)
+    return ccnorm, ccmax
+
+
 def _compute_model_one_minus_alpha_by_condition(rhat_rs, dfs):
     """Per-neuron model 1-alpha for each behavior condition."""
     n_neurons = dfs.shape[2]
@@ -115,7 +150,6 @@ def _run_inference():
     from eval.eval_stack_multidataset import load_model
     from eval.eval_stack_utils import (
         load_single_dataset, run_model, rescale_rhat,
-        ccnorm_split_half_variable_trials,
     )
 
     if str(VISIONCORE_ROOT) not in sys.path:
@@ -230,10 +264,7 @@ def _run_inference():
             rbar[i] = np.nanmean(robs_m[other], axis=0)
         ve_psth = _var_explained(rbar, robs_m, axis=(0, 1))
 
-        _, _, ccmax, _, _ = ccnorm_split_half_variable_trials(
-            robs, rhat_rs['intact'], dfs,
-            n_splits=CCMAX_N_SPLITS, return_components=True,
-        )
+        ccnorm, ccmax = _compute_ccnorm_by_condition(robs, rhat_rs, dfs)
 
         alpha = np.full(n_neurons, np.nan)
         if session_name in fig2_alpha_by_session:
@@ -277,7 +308,8 @@ def _run_inference():
         results.append({
             "session": session_name, "subject": subject,
             "neuron_mask": neuron_mask, "n_neurons": n_neurons,
-            "ve": ve, "ve_psth": ve_psth, "ccmax": ccmax, "alpha": alpha,
+            "ve": ve, "ve_psth": ve_psth, "ccnorm": ccnorm, "ccmax": ccmax,
+            "alpha": alpha,
             "model_one_minus_alpha": model_one_minus_alpha,
             "example": example,
         })
@@ -292,11 +324,14 @@ def _run_inference():
 def aggregate(results):
     """Flatten per-cell arrays across sessions; `good` = ccmax > threshold."""
     ve = {c: [] for c in CONDS}
+    ccnorm = {c: [] for c in CONDS}
     model_one_minus_alpha = {c: [] for c in CONDS}
     ve_psth, ccmax, alpha, subjects = [], [], [], []
     for r in results:
         for c in CONDS:
             ve[c].append(r["ve"][c])
+            if "ccnorm" in r:
+                ccnorm[c].append(r["ccnorm"][c])
             if "model_one_minus_alpha" in r:
                 model_one_minus_alpha[c].append(r["model_one_minus_alpha"][c])
         ve_psth.append(r["ve_psth"])
@@ -304,6 +339,8 @@ def aggregate(results):
         alpha.append(r["alpha"])
         subjects.extend([r["subject"]] * r["n_neurons"])
     agg = {"ve": {c: np.concatenate(ve[c]) for c in CONDS}}
+    if all(ccnorm[c] for c in CONDS):
+        agg["ccnorm"] = {c: np.concatenate(ccnorm[c]) for c in CONDS}
     if all(model_one_minus_alpha[c] for c in CONDS):
         agg["model_one_minus_alpha"] = {
             c: np.concatenate(model_one_minus_alpha[c]) for c in CONDS
