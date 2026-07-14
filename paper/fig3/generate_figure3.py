@@ -42,7 +42,7 @@ ABLATED_COLOR = "#d62728"
 PSTH_COLOR = "0.55"
 SCATTER_COLOR = "0.35"
 ACCENT = "#c0392b"
-PANEL_LETTER_SIZE = 9
+PANEL_LETTER_SIZE = 10   # match fig2's panel-letter size
 PANEL_TITLE_SIZE = 8.0
 
 
@@ -59,32 +59,23 @@ def _clear_panel_heading(ax):
 
 
 def _standard_panel_heading(ax, letter: str, title: str):
-    """Place a consistent panel letter/title just above the axes."""
+    """Place a consistent panel letter/title just above the axes. Titles may
+    contain a newline to wrap; the block is top-anchored so the bold letter
+    aligns with the first title line. Title is regular weight, matching fig2's
+    declarative panel titles (only the letter is bold)."""
     _clear_panel_heading(ax)
+    y_top = 1.14
     ax.text(
-        -0.035,
-        1.045,
-        letter,
-        transform=ax.transAxes,
-        ha="left",
-        va="bottom",
-        fontsize=PANEL_LETTER_SIZE,
-        fontweight="bold",
-        color="#202124",
+        -0.035, y_top, letter,
+        transform=ax.transAxes, ha="left", va="top",
+        fontsize=PANEL_LETTER_SIZE, fontweight="bold", color="#202124",
         clip_on=False,
     )
     ax.text(
-        0.08,
-        1.045,
-        title,
-        transform=ax.transAxes,
-        ha="left",
-        va="bottom",
-        fontsize=PANEL_TITLE_SIZE,
-        fontweight="bold",
-        color="#202124",
-        linespacing=0.9,
-        clip_on=False,
+        0.085, y_top, title,
+        transform=ax.transAxes, ha="left", va="top",
+        fontsize=PANEL_TITLE_SIZE, color="#202124",
+        linespacing=1.05, clip_on=False,
     )
 
 
@@ -103,38 +94,60 @@ def _stars(p):
     return "n.s."
 
 
-def _violin_bodies(ax, groups, positions, colors, *, width=0.72):
-    """Draw filled violins with a horizontal median tick in each body."""
+def _fmt_p(p):
+    """Explicit p-value string in fig2's format (matches _panel_common.fmt_emp_p
+    for the analytic-p case)."""
+    if not np.isfinite(p):
+        return "p = n/a"
+    if p < 1e-3:
+        return "p < 0.001"
+    return f"p = {p:.3g}"
+
+
+def _violin_box(ax, groups, positions, colors, *, width=0.72, box_width=0.16):
+    """Grey violin bodies (fig2's neutral grammar) with a per-condition cross
+    overlay: a vertical stroke spanning the IQR (25-75) and a horizontal median
+    tick, coloured by condition. Robust median/IQR analog of fig2's
+    marker+errorbar violin grammar. Returns the violin parts."""
     parts = ax.violinplot(groups, positions=positions, widths=width,
                           showextrema=False, showmedians=False)
-    for body, color in zip(parts["bodies"], colors):
-        body.set_facecolor(color)
-        body.set_alpha(0.42)
-        body.set_edgecolor(color)
-        body.set_linewidth(0.9)
-    for g, x, color in zip(groups, positions, colors):
-        med = float(np.median(g))
-        ax.hlines(med, x - 0.32 * width, x + 0.32 * width,
-                  color=color, lw=1.8, zorder=6)
+    for body in parts["bodies"]:
+        body.set_facecolor("0.82")
+        body.set_edgecolor("none")
+        body.set_alpha(0.9)
+        body.set_zorder(1)
+    for grp, pos, color in zip(groups, positions, colors):
+        arr = np.asarray(grp, dtype=float)
+        arr = arr[np.isfinite(arr)]
+        q1, med, q3 = np.percentile(arr, [25, 50, 75])
+        # Vertical stroke = interquartile range (25-75).
+        ax.plot([pos, pos], [q1, q3], color=color, lw=1.4,
+                solid_capstyle="round", zorder=3)
+        # Horizontal stroke = median.
+        ax.plot([pos - box_width, pos + box_width], [med, med], color=color,
+                lw=2.0, solid_capstyle="round", zorder=4)
     return parts
 
 
 def _sig_bracket(ax, x1, x2, y, p, *, h, gap, color="k", fontsize=7.5,
                  delta=None):
-    """Significance bracket at height y. Stars sit on top; when `delta` (a
-    preformatted effect-size string) is given it is drawn just above the bracket
-    line, below the stars, in a smaller grey font. `gap` is the extra height (in
-    data units) added between the delta line and the stars."""
+    """Significance bracket at height y. Reading upward from the bracket line:
+    optional `delta` (effect-size string; may contain a newline to add a second
+    line below it), then the significance stars. The p-value is intentionally
+    omitted — it is redundant with the stars. `delta` carries the same weight as
+    the stars (matched font/colour). `gap` is the per-line vertical step; the
+    stars clear a multi-line delta. Returns the top y."""
     ax.plot([x1, x1, x2, x2], [y, y + h, y + h, y],
             color=color, lw=0.9, clip_on=False)
     xc = (x1 + x2) / 2
-    star_y = y + h
+    yc = y + h
     if delta is not None:
-        ax.text(xc, y + h, delta, ha="center", va="bottom",
-                fontsize=fontsize - 1.8, color="0.4", clip_on=False)
-        star_y = y + h + gap
-    ax.text(xc, star_y, _stars(p), ha="center", va="bottom",
+        ax.text(xc, yc, delta, ha="center", va="bottom",
+                fontsize=fontsize - 0.5, color=color, clip_on=False)
+        yc += gap * (delta.count("\n") + 1)
+    ax.text(xc, yc, _stars(p), ha="center", va="bottom",
             fontsize=fontsize, color=color, clip_on=False)
+    return yc
 
 
 def _finite_mask(*arrays):
@@ -154,19 +167,20 @@ def _plot_ccnorm_violins(ax, abl):
     m = good & _finite_mask(intact, ablated)
     gi, ga = intact[m], ablated[m]
 
-    _violin_bodies(ax, [gi, ga], [0, 1], [INTACT_COLOR, ABLATED_COLOR])
+    _violin_box(ax, [gi, ga], [0, 1], [INTACT_COLOR, ABLATED_COLOR])
 
     p = wilcoxon(gi, ga).pvalue
-    d = float(np.median(gi - ga))
-    ceil = float(np.nanpercentile(np.concatenate([gi, ga]), 99))
-    ax.set_ylim(0, ceil + 0.30 * ceil)
-    ybr = ceil + 0.04 * ceil
-    _sig_bracket(ax, 0, 1, ybr, p, h=0.02 * ceil, gap=0.055 * ceil,
-                 delta=f"Δ={d:+.3f}")
+    d = float(np.median(ga - gi))   # Ablated - Full: a decrease under ablation
+    # ccnorm is bounded at 1 (normalized correlation): keep 1.0 as the top tick,
+    # but extend the axis above it so the significance connector sits clear above
+    # the distributions rather than crowding them.
+    ax.set_ylim(0, 1.16)
+    ax.set_yticks(np.arange(0, 1.001, 0.2))
+    _sig_bracket(ax, 0, 1, 1.02, p, h=0.014, gap=0.045, delta=f"Δ={d:+.3f}")
 
     ax.set_xlim(-0.6, 1.6)
     ax.set_xticks([0, 1])
-    ax.set_xticklabels(["Intact", "Ablated"])
+    ax.set_xticklabels(["Full", "Ablated"])
     ax.set_ylabel("Held-out prediction\n(ccnorm)")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -185,30 +199,45 @@ def _plot_singletrial_r2_violins(ax, abl):
     m = good & _finite_mask(psth, full, ablated)
     gp, gf, ga = psth[m], full[m], ablated[m]
 
-    _violin_bodies(ax, [gp, gf, ga], [0, 1, 2],
-                   [PSTH_COLOR, INTACT_COLOR, ABLATED_COLOR])
+    _violin_box(ax, [gp, gf, ga], [0, 1, 2],
+                [PSTH_COLOR, INTACT_COLOR, ABLATED_COLOR])
 
     lo = float(np.nanpercentile(np.concatenate([gp, gf, ga]), 1))
     hi = float(np.nanpercentile(np.concatenate([gp, gf, ga]), 99))
     rng = hi - lo
     ax.set_ylim(min(0.0, lo), hi + 0.66 * rng)
 
+    # Baseline: the PSTH-ceiling median that the twin conditions beat.
+    psth_med = float(np.median(gp))
+    ax.axhline(psth_med, color="0.55", lw=0.8, ls="--", alpha=0.8, zorder=0)
+    ax.text(2.58, psth_med, "PSTH\nmedian", color="0.5", fontsize=5.6,
+            va="center", ha="left", clip_on=False)
+
     # Three paired comparisons, staggered so the brackets never overlap: the
     # adjacent Full-vs-Ablated bracket sits lowest, then the two PSTH contrasts.
-    # Each carries the median paired difference (effect size) below its stars.
+    # Each carries stars + its median Δ (p-values omitted as redundant with the
+    # stars). The Full->Ablated Δ is shown as a decrease (the ablation cost) and
+    # contextualised as a fraction of the full twin's single-trial r^2 that is
+    # lost by ablating — a small effect whose raw star would otherwise over-read
+    # a negligible difference.
     p_fa = wilcoxon(gf, ga).pvalue
     p_pf = wilcoxon(gf, gp).pvalue
     p_pa = wilcoxon(ga, gp).pvalue
-    d_fa = float(np.median(gf - ga))
+    full_med = float(np.median(gf))
+    d_fa = float(np.median(ga - gf))   # Ablated - Full: a decrease under ablation
     d_pf = float(np.median(gf - gp))
     d_pa = float(np.median(ga - gp))
+    pct_fa = 100.0 * abs(d_fa) / full_med if full_med != 0 else np.nan
     y0 = hi + 0.08 * rng
-    step = 0.18 * rng
+    step = 0.20 * rng
     h = 0.016 * rng
-    gap = 0.05 * rng
-    _sig_bracket(ax, 1, 2, y0, p_fa, h=h, gap=gap, delta=f"Δ={d_fa:+.3f}")
-    _sig_bracket(ax, 0, 1, y0 + step, p_pf, h=h, gap=gap, delta=f"Δ={d_pf:+.3f}")
-    _sig_bracket(ax, 0, 2, y0 + 2 * step, p_pa, h=h, gap=gap, delta=f"Δ={d_pa:+.3f}")
+    gap = 0.072 * rng   # clears the taller (larger-font) multi-line Δ labels
+    _sig_bracket(ax, 1, 2, y0, p_fa, h=h, gap=gap,
+                 delta=f"Δ={d_fa:+.3f}\n({pct_fa:.0f}% of total)")
+    _sig_bracket(ax, 0, 1, y0 + step, p_pf, h=h, gap=gap,
+                 delta=f"Δ={d_pf:+.3f}")
+    _sig_bracket(ax, 0, 2, y0 + 2 * step, p_pa, h=h, gap=gap,
+                 delta=f"Δ={d_pa:+.3f}")
 
     ax.axhline(0, color="0.7", lw=0.6, ls=":")
     ax.set_xlim(-0.6, 2.6)
@@ -246,32 +275,56 @@ def _plot_payoff_with_marginal(ax, ax_marg, abl):
     xs = np.linspace(0, 1, 50)
     ax.plot(xs, b * xs + a, color=ACCENT, lw=1.6, zorder=5)
 
-    rho = spearmanr(x, y).correlation
-    ax.text(0.04, 0.94, f"ρ={rho:.2f}", transform=ax.transAxes,
-            ha="left", va="top", fontsize=7.0, color="0.2")
+    sr = spearmanr(x, y)
+    rho, pval = sr.correlation, sr.pvalue
+    # Stars sit above rho, but must stay below y=0.98: _clear_panel_heading()
+    # culls any transAxes text with y >= 0.98 near the left edge.
+    ax.text(0.045, 0.91, _stars(pval), transform=ax.transAxes,
+            ha="left", va="top", fontsize=10, color="0.12")
+    ax.text(0.04, 0.85, f"ρ = {rho:.2f}", transform=ax.transAxes,
+            ha="left", va="top", fontsize=9, color="0.12")
 
     ax.set_xlim(0, 1)
     ax.set_ylim(0, ymax)
-    ax.set_xlabel(r"FEM modulation ($1-\alpha$)")
+    ax.set_xlabel("Fraction of rate modulation\ndue to FEM")
     ax.set_ylabel("Single-trial $r^2$ gain\n(Ablated / PSTH)")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
 
     # Right marginal: distribution of the r^2 gain, sharing the scatter's y.
+    med = float(np.median(y))
     bins = np.linspace(0, ymax, 31)
-    ax_marg.hist(np.clip(y, 0, ymax), bins=bins, orientation="horizontal",
-                 color=SCATTER_COLOR, alpha=0.55, edgecolor="none")
+    counts, _, _ = ax_marg.hist(np.clip(y, 0, ymax), bins=bins,
+                                orientation="horizontal",
+                                color=SCATTER_COLOR, alpha=0.55, edgecolor="none")
+    cmax = float(counts.max())
     ax_marg.axhline(1, color="k", ls="--", lw=0.5, alpha=0.5)
-    ax_marg.axhline(float(np.median(y)), color=ACCENT, lw=1.4)
+    # Median: dark-grey dashed line ending exactly at a left-pointing triangle
+    # (so the line never pokes past the marker), with the value in black to the
+    # marker's right (the triangle is identified as the median in the caption).
+    tri_x = cmax * 1.18
+    ax_marg.plot([0, tri_x], [med, med], color="0.3", ls="--", lw=1.2, zorder=5)
+    ax_marg.plot(tri_x, med, marker="<", ms=6, color="0.3", mec="0.3",
+                 clip_on=False, zorder=6)
+    ax_marg.text(tri_x + cmax * 0.26, med, f"{med:.2f}", color="black",
+                 fontsize=6.5, va="center", ha="left", clip_on=False)
     ax_marg.set_ylim(0, ymax)
-    ax_marg.set_xticks([])
-    ax_marg.tick_params(axis="y", labelleft=False, left=False)
-    for side in ("top", "right", "bottom"):
+    ax_marg.set_xlim(0, cmax * 1.55)
+    # Count axis (shared y with the scatter, ticks kept but unlabelled to show
+    # the shared axis; x labelled 'Units', re-centred under the bars). Drop the
+    # 0 tick (it collides with the scatter's 1.0 x-label); keep a single rounded
+    # tick near the max count.
+    ax_marg.set_xticks([int(round(cmax / 10.0) * 10)])
+    ax_marg.set_xlabel("Units")
+    ax_marg.xaxis.set_label_coords(0.38, -0.16)
+    ax_marg.tick_params(axis="y", labelleft=False, left=True)
+    for side in ("top", "right"):
         ax_marg.spines[side].set_visible(False)
-    ax_marg.spines["left"].set_visible(False)
+    ax_marg.spines["left"].set_visible(True)
+    ax_marg.spines["bottom"].set_visible(True)
 
-    print(f"Panel E — payoff (N={m.sum()}): Spearman ρ={rho:.3f}; "
-          f"gain median={np.median(y):.2f}, frac>1={np.mean(y > 1):.2f}, "
+    print(f"Panel E — payoff (N={m.sum()}): Spearman ρ={rho:.3f} (p={pval:.2e}); "
+          f"gain median={med:.2f}, frac>1={np.mean(y > 1):.2f}, "
           f"OLS slope={b:.2f}")
 
 
@@ -295,7 +348,7 @@ def _load_ablation_cache():
 def _write_sidecars(out_dir, manifest: dict):
     caption = """Figure 3. A retinal-input digital twin captures FEM-linked V1 response variability.
 
-(A) Training and test stimuli. The twin is trained on gratings, gabors, and natural images, and evaluated on fixated flashed images; the retinal model input is a space × space × time crop of the gaze-contingent stimulus history. (B) Gaze-contingent digital twin architecture. The model receives the retinal stimulus history and an optional extraretinal behavior input, then predicts simultaneously recorded V1 responses. (C) Held-out, trial-averaged response prediction (normalized correlation, ccnorm) for the intact twin and the same twin with the separate extraretinal behavior input ablated (zeroed), pooled across reliable Allen and Logan cells. Ablating the extraretinal pathway costs only a small, though significant, amount of trial-averaged prediction, confirming the twin is competitive at the PSTH level and that extraretinal signals contribute little on average. (D) Single-trial prediction (r^2) for the leave-one-out PSTH baseline, the full twin, and the behavior-ablated twin. The twin predicts single trials better than the PSTH ceiling even with the extraretinal pathway zeroed, so its trial-to-trial predictive power comes from the moving retinal image. (E) The behavior-ablated twin's single-trial r^2 gain over the PSTH baseline grows with a cell's empirical FEM modulation \\(1-\\alpha\\) (OLS fit; right marginal shows the gain distribution). Retinal-input prediction alone tracks the empirically measured increase in apparent rate variance under fixational eye movements.
+(A) Training and test stimuli. The twin is trained on gratings, gabors, and natural images, and evaluated on fixated flashed images; the retinal model input is a space × space × time crop of the gaze-contingent stimulus history. (B) Gaze-contingent digital twin architecture. The model receives the retinal stimulus history and an optional extraretinal behavior input, then predicts simultaneously recorded V1 responses. (C) Held-out, trial-averaged response prediction (normalized correlation, ccnorm) for the full twin and the same twin with the separate extraretinal behavior input ablated (zeroed), pooled across reliable Allen and Logan cells (matching the fig. 2 session population, >=10 analyzed units/session). Ablating the extraretinal pathway costs only a small, though significant, amount of trial-averaged prediction, confirming the twin is competitive at the PSTH level and that extraretinal signals contribute little on average. (D) Single-trial prediction (r^2) for the leave-one-out PSTH baseline, the full twin, and the behavior-ablated twin. The twin predicts single trials better than the PSTH ceiling even with the extraretinal pathway zeroed, so its trial-to-trial predictive power comes from the moving retinal image. (E) The behavior-ablated twin's single-trial r^2 gain over the PSTH baseline grows with a cell's empirical FEM modulation \\(1-\\alpha\\), the fraction of rate modulation due to FEM (OLS fit; Spearman rho with p-value inset; right marginal shows the per-unit gain distribution, with the left-pointing triangle marking the median). Retinal-input prediction alone tracks the empirically measured increase in apparent rate variance under fixational eye movements.
 """
     (out_dir / "figure3_caption.md").write_text(caption, encoding="utf-8")
 
@@ -383,9 +436,9 @@ def compose(*, recompute: bool = False, out_dir=FIG_DIR, dpi: int = 300):
             _plot_missing_cache(a)
         ax_e_marg.set_axis_off()
 
-    _standard_panel_heading(ax_c, "C", "Held-out response")
-    _standard_panel_heading(ax_d, "D", "Single-trial prediction")
-    _standard_panel_heading(ax_e, "E", "FEM-linked model gain")
+    _standard_panel_heading(ax_c, "C", "Ablation minimally affects\ntrial-averaged predictions")
+    _standard_panel_heading(ax_d, "D", "Ablated model beats\nthe PSTH ceiling")
+    _standard_panel_heading(ax_e, "E", "Reafference alone recovers\nFEM-linked variability")
 
     # No bbox_inches="tight": keep the canvas at exactly the intended
     # page-width figsize (8.5 in) rather than cropping to the ink bounds.

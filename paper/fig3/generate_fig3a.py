@@ -1207,9 +1207,9 @@ def _draw_all(ax, assets):
     # ── Panel letters A (stimuli) / B (twin) ────────────────────────────────
     letter_x = min(min(bot_xs), top["x_left"])
     ax.text(letter_x, top["y_top"] + 0.35, "A", ha="left", va="top",
-            fontsize=9, fontweight="bold", color="#202124")
+            fontsize=10, fontweight="bold", color="#202124")
     ax.text(letter_x, bot_y_top + 0.35, "B", ha="left", va="top",
-            fontsize=9, fontweight="bold", color="#202124")
+            fontsize=10, fontweight="bold", color="#202124")
 
     xs = bot_xs + [top["x_left"], top["x_right"]]
     ys = bot_ys + [top["y_bottom"], top["y_top"], top["y_top"] + 0.35]

@@ -40,6 +40,7 @@ from _fig3_data import (
     DT, VALID_TIME_BINS, MIN_FIX_DUR, MIN_TOTAL_SPIKES, CCMAX_THRESHOLD,
     SUBJECTS, CHECKPOINT_PATH,
     subject_from_session, _load_fig2_alpha_by_session,
+    _load_fig2_included_sessions,
 )
 from _fig3_helpers import (
     order_single_neuron_by_seriation,
@@ -374,6 +375,18 @@ def load_ablation_data(recompute=False):
             results = dill.load(f)
     else:
         results = _run_inference()
+
+    # Restrict to fig2's floored population (>=10 analyzed units/session) so
+    # panels C/D/E describe the exact same sessions/neurons fig2 reports. The
+    # only discrepancy is session-level (fig3 otherwise keeps one sub-floor
+    # session with zero unit leakage in shared sessions).
+    included = _load_fig2_included_sessions()
+    kept = [r for r in results if r["session"] in included]
+    dropped = [r["session"] for r in results if r["session"] not in included]
+    if dropped:
+        print(f"Session floor (fig2 population): dropping {len(dropped)} "
+              f"sub-floor session(s): {dropped}")
+    results = kept
 
     agg = aggregate(results)
     n_good = int(agg["good"].sum())

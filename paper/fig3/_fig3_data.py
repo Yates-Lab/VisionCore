@@ -47,6 +47,10 @@ CACHE_PATH = CACHE_DIR / "fig3_digitaltwin.pkl"
 #   sr["windows"][w]["targets"]["full"]["Cpsth"/"Crate"], sr["neuron_mask"].
 COVDECOMP_CACHE_PATH = CACHE_DIR / "covdecomp_empirical.pkl"
 COVDECOMP_TARGET = "full"
+# Derived (floored) fig2 bundle: `session_names` is the population fig2 actually
+# reports, after the >=10-analyzed-unit session floor (covariance_decomposition/
+# derive.py MIN_SESSION_UNITS). Used to keep fig3's C/D/E population identical.
+COVDECOMP_DERIVED_CACHE_PATH = CACHE_DIR / "covdecomp_derived.pkl"
 
 
 def configure_matplotlib():
@@ -94,6 +98,28 @@ def _load_fig2_alpha_by_session():
         }
     print(f"  Loaded 1-α for {len(out)} sessions")
     return out
+
+
+def _load_fig2_included_sessions():
+    """Return the set of session names fig2 reports, i.e. the population after
+    fig2's >=10-analyzed-unit session floor.
+
+    Reads the derived (floored) covariance-decomposition bundle's
+    `session_names`. Falls back to computing it via the shared loader if the
+    derived cache is missing. Fig3 intersects its sessions with this set so
+    panels C/D/E describe the exact same population fig2 does.
+    """
+    if COVDECOMP_DERIVED_CACHE_PATH.exists():
+        with open(COVDECOMP_DERIVED_CACHE_PATH, "rb") as f:
+            bundle = dill.load(f)
+        return set(bundle["session_names"])
+
+    # Fallback: derive it (heavier; only if the cache was never built).
+    if str(VISIONCORE_ROOT) not in sys.path:
+        sys.path.insert(0, str(VISIONCORE_ROOT))
+    sys.path.insert(0, str(VISIONCORE_ROOT / "paper" / "covariance_decomposition"))
+    from derive import load_empirical_data
+    return set(load_empirical_data()["session_names"])
 
 
 def _run_inference():
