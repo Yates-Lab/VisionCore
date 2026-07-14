@@ -2,11 +2,12 @@
 
 Renders the digital-twin mechanism figure:
 
-  A  Digital twin schematic (native stimulus + architecture render)
-  B  Example neuron PSTH: observed vs intact and behavior-zeroed twin
-  C  Held-out response validation (intact vs zeroed ccnorm)
-  D  Extraretinal-pathway zeroing control (single-trial r^2)
-  E  FEM-linked model gain over a PSTH baseline
+  A  Training and test stimuli (schematic provenance row)
+  B  Digital twin schematic (architecture render)
+  C  Example neuron PSTH: observed vs intact and behavior-zeroed twin
+  D  Held-out response validation (intact vs zeroed ccnorm)
+  E  Extraretinal-pathway zeroing control (single-trial r^2)
+  F  FEM-linked model gain over a PSTH baseline
 
 Usage:
     uv run python paper/fig3/generate_figure3.py [--recompute]
@@ -258,7 +259,7 @@ def _plot_improvement_vs_fem_modulation(ax, data, *, legend_fontsize: float = 5.
             transform=ax.transAxes, ha="right", va="top",
             fontsize=5.8, color="0.25")
     print(
-        f"Panel E — improvement vs FEM modulation "
+        f"Panel F — improvement vs FEM modulation "
         f"(N={ok.sum()}): Spearman ρ={rho:.3f}"
     )
 
@@ -273,7 +274,7 @@ def _load_ablation_cache():
 def _write_sidecars(out_dir, manifest: dict):
     caption = """Figure 3. A retinal-input digital twin captures FEM-linked V1 response variability.
 
-(A) Gaze-contingent digital twin architecture. The model receives the retinal stimulus history and an optional extraretinal behavior input, then predicts simultaneously recorded V1 responses. (B) Observed PSTH for an example reliable neuron, overlaid with predictions from the intact behavior-input twin and the same twin with the separate behavior input zeroed. (C) Held-out stimulus-locked response prediction across pooled Allen and Logan cells, shown as normalized-correlation (ccnorm) distributions for intact and behavior-zeroed predictions from the same twin. (D) Single-trial prediction is nearly unchanged when the separate extraretinal eye-state pathway is zeroed, pooled across Allen and Logan, supporting a retinal-input route for FEM-linked variability. (E) The twin's single-trial improvement over a PSTH baseline is largest for cells with stronger empirical FEM modulation, measured as \\(1-\\alpha\\).
+(A) Training and test stimuli. The twin is trained on gratings, gabors, and natural images, and evaluated on fixated flashed images; the retinal model input is a space × space × time crop of the gaze-contingent stimulus history. (B) Gaze-contingent digital twin architecture. The model receives the retinal stimulus history and an optional extraretinal behavior input, then predicts simultaneously recorded V1 responses. (C) Observed PSTH for an example reliable neuron, overlaid with predictions from the intact behavior-input twin and the same twin with the separate behavior input zeroed. (D) Held-out stimulus-locked response prediction across pooled Allen and Logan cells, shown as normalized-correlation (ccnorm) distributions for intact and behavior-zeroed predictions from the same twin. (E) Single-trial prediction is nearly unchanged when the separate extraretinal eye-state pathway is zeroed, pooled across Allen and Logan, supporting a retinal-input route for FEM-linked variability. (F) The twin's single-trial improvement over a PSTH baseline is largest for cells with stronger empirical FEM modulation, measured as \\(1-\\alpha\\).
 """
     (out_dir / "figure3_caption.md").write_text(caption, encoding="utf-8")
 
@@ -322,7 +323,7 @@ def compose(*, recompute: bool = False, out_dir=FIG_DIR, dpi: int = 300):
 
     # Panel A is now a two-row schematic (aspect ≈ 1.1), so it needs a taller
     # top slot to render wide enough for its architecture labels to breathe.
-    fig = plt.figure(figsize=(8.5, 8.1), constrained_layout=False)
+    fig = plt.figure(figsize=(8.5, 8.9), constrained_layout=False)
     gs = GridSpec(
         2, 1,
         figure=fig,
@@ -330,16 +331,15 @@ def compose(*, recompute: bool = False, out_dir=FIG_DIR, dpi: int = 300):
         right=0.985,
         bottom=0.052,
         top=0.955,
-        height_ratios=[2.45, 1.0],
+        height_ratios=[2.7, 1.0],
         hspace=0.11,
     )
 
     # Row 1. Native schematic (stimulus + architecture), fitted into the slot.
+    # The A/B panel letters and the grey divider are drawn inside the schematic
+    # (see generate_fig3a._draw_all), so no composite letter is placed here.
     ax_a = fig.add_subplot(gs[0, 0])
-    rect = ax_a.get_position()
     plot_panel_a(ax=ax_a, assets=assets)
-    fig.text(rect.x0, rect.y1, "A", fontweight="bold", ha="left", va="top",
-             fontsize=PANEL_LETTER_SIZE, color="#202124")
 
     # Row 2. Digital-twin example, validation, ablation control, FEM-linked gain.
     gs_mid = gs[1, 0].subgridspec(
@@ -355,22 +355,22 @@ def compose(*, recompute: bool = False, out_dir=FIG_DIR, dpi: int = 300):
         fallback_data=data,
         fallback_example=example,
     )
-    _standard_panel_heading(ax_b, "B", "Example PSTH")
+    _standard_panel_heading(ax_b, "C", "Example PSTH")
 
     ax_c = fig.add_subplot(gs_mid[0, 2])
-    _plot_ccnorm_hist_intact_vs_zeroed(ax_c, data, letter="C")
-    _standard_panel_heading(ax_c, "C", "Held-out responses")
+    _plot_ccnorm_hist_intact_vs_zeroed(ax_c, data, letter="D")
+    _standard_panel_heading(ax_c, "D", "Held-out responses")
 
     ax_d = fig.add_subplot(gs_mid[0, 3])
     if abl is not None:
-        _plot_ablation_r2_pooled(ax_d, abl, cond="zeroed", letter="D")
+        _plot_ablation_r2_pooled(ax_d, abl, cond="zeroed", letter="E")
     else:
         _plot_ablation_placeholder(ax_d)
-    _standard_panel_heading(ax_d, "D", "Eye-state zeroing")
+    _standard_panel_heading(ax_d, "E", "Eye-state zeroing")
 
     ax_e = fig.add_subplot(gs_mid[0, 4])
     _plot_improvement_vs_fem_modulation(ax_e, data)
-    _standard_panel_heading(ax_e, "E", "FEM-linked model gain")
+    _standard_panel_heading(ax_e, "F", "FEM-linked model gain")
 
     # No bbox_inches="tight": keep the canvas at exactly the intended
     # page-width figsize (8.5 in) rather than cropping to the ink bounds.
@@ -385,11 +385,12 @@ def compose(*, recompute: bool = False, out_dir=FIG_DIR, dpi: int = 300):
         "within_model_cache": str(WITHIN_MODEL_CACHE),
         "source_script": str(__file__),
         "panel_mapping": {
-            "A": "native digital-twin schematic (stimulus + architecture)",
-            "B": "example reliable-neuron PSTH with intact and zeroed-behavior predictions",
-            "C": "intact and behavior-zeroed ccnorm histograms from behavior_vs_vision_within_model cache",
-            "D": "zeroed extraretinal input vs intact single-trial r2",
-            "E": "model/PSTH single-trial r2 improvement vs empirical 1-alpha",
+            "A": "training and test stimuli (schematic provenance row)",
+            "B": "digital-twin architecture schematic",
+            "C": "example reliable-neuron PSTH with intact and zeroed-behavior predictions",
+            "D": "intact and behavior-zeroed ccnorm histograms from behavior_vs_vision_within_model cache",
+            "E": "zeroed extraretinal input vs intact single-trial r2",
+            "F": "model/PSTH single-trial r2 improvement vs empirical 1-alpha",
         },
     }
     _write_sidecars(out_dir, manifest)

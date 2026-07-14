@@ -308,14 +308,13 @@ def _load_example_neurons(n=3, window_s=0.5, min_rho=0.85):
     return out
 
 
-def _extract_psth_snippet(sr, ni, n_bins, sigma_bins):
+def _extract_psth_snippet(sr, ni, n_bins, sigma_bins=None):
     """Trial-averaged observed/predicted PSTH (sp/s) for neuron `ni` in
     session-result `sr`, restricted to a `n_bins` window starting at the first
     well-covered bin. Returns (t_axis, robs_rate, rhat_rate) or None when no
-    bin has adequate trial coverage. Mirrors the snippet logic in
-    `_load_example_neurons` so both selections read identically."""
-    from scipy.ndimage import gaussian_filter1d
-
+    bin has adequate trial coverage. With `sigma_bins` falsy the raw per-bin
+    rates are returned unsmoothed (an honest representation of the model
+    output); pass a bin sigma only for optional display smoothing."""
     robs_psth = np.asarray(sr["robs_mean"][:, ni], dtype=float)
     rhat_psth = np.asarray(sr["rhat_mean"][:, ni], dtype=float)
     dfs = np.asarray(sr["dfs_used"][:, :, ni], dtype=float)
@@ -346,18 +345,31 @@ def _extract_psth_snippet(sr, ni, n_bins, sigma_bins):
                     arr[i] = last
                 else:
                     last = arr[i]
-    robs_snip = gaussian_filter1d(robs_snip, sigma=sigma_bins, mode="nearest")
-    rhat_snip = gaussian_filter1d(rhat_snip, sigma=sigma_bins, mode="nearest")
+    if sigma_bins:
+        from scipy.ndimage import gaussian_filter1d
+        robs_snip = gaussian_filter1d(robs_snip, sigma=sigma_bins, mode="nearest")
+        rhat_snip = gaussian_filter1d(rhat_snip, sigma=sigma_bins, mode="nearest")
     t_axis = np.arange(n_bins) * DT
     return t_axis, robs_snip, rhat_snip
 
 
+# Manual curation of the panel-B prediction units. Each entry is
+# (session, neuron_id) chosen from the select_psth_units.py contact sheet. When
+# None, the top-`n` reliable units by ccnorm are used automatically.
+MANUAL_PSTH_UNITS = [
+    ("Allen_2022-04-06", 76),   # ccnorm 0.97, r 0.82
+    ("Logan_2020-01-07", 16),   # ccnorm 0.94, r 0.89
+    ("Logan_2020-01-09", 10),   # ccnorm 0.89, r 0.82
+]
+
+
 def _load_best_ccnorm_psths(n=3, window_s=0.5):
-    """Return observed/predicted PSTHs for the `n` highest-ccnorm reliable
-    units, for display beside the readouts. Reads only the fig3 inference
-    cache (no checkpoint or raw-session load), so it can be backfilled into an
-    existing asset cache cheaply. Neurons need not match the readout units —
-    these just showcase the best-fit PSTHs. Sorted high → low ccnorm."""
+    """Return observed/predicted PSTHs for the panel-B prediction column, for
+    display beside the readouts. Reads only the fig3 inference cache (no
+    checkpoint or raw-session load), so it can be backfilled into an existing
+    asset cache cheaply. Units are the `n` highest-ccnorm reliable cells, or
+    the hand-picked `MANUAL_PSTH_UNITS` when set. Predictions are drawn
+    unsmoothed (raw per-bin model output)."""
     from _fig3_data import CACHE_PATH
 
     if not CACHE_PATH.exists():
@@ -370,7 +382,7 @@ def _load_best_ccnorm_psths(n=3, window_s=0.5):
         session_results = dill.load(f)
 
     n_bins = int(round(window_s / DT))
-    sigma_bins = max(0.015 / DT, 1e-6)
+    sigma_bins = None  # predictions shown unsmoothed (raw per-bin model output)
 
     cand = []
     from _fig3_data import CCMAX_THRESHOLD
@@ -394,6 +406,14 @@ def _load_best_ccnorm_psths(n=3, window_s=0.5):
                 "neuron_id": int(nmask[ni]),
             })
     cand.sort(key=lambda c: c["ccnorm"], reverse=True)
+
+    if MANUAL_PSTH_UNITS:
+        by_key = {(c["session"], c["neuron_id"]): c for c in cand}
+        missing = [k for k in MANUAL_PSTH_UNITS if k not in by_key]
+        if missing:
+            print(f"  WARNING: manual PSTH units not in candidate pool: {missing}")
+        cand = [by_key[k] for k in MANUAL_PSTH_UNITS if k in by_key]
+        n = len(cand)
 
     out = []
     for c in cand:

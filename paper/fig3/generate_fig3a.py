@@ -328,8 +328,8 @@ def _draw_lag_cube(ax, cube, corners3d, *, outline=CYAN, edge_width=1.4,
 #    S_PIX = 0.03 world units/tap, so screens are sized to read at a matched
 #    scale). Training screens now match the test screen and stagger widely so
 #    the top row fills horizontally. ─────────────────────────────────────────
-TEST_W = 3.35               # screens enlarged to fill the top row vertically
-TEST_H = 2.55
+TEST_W = 3.35 * 0.9         # screens shrunk ~10% (smaller panel A vs panel B)
+TEST_H = 2.55 * 0.9
 SCR_W = TEST_W              # training screens match the test screen size
 SCR_H = TEST_H
 TRAIN_CX_FRONT = 4.2        # world x of the front (natural-image) screen
@@ -350,20 +350,25 @@ CUBE_GAP = 1.7
 TRAIN_SCALEBAR_DEG = 10.0
 TEST_SCALEBAR_DEG = 2.0
 SCALEBAR_FONTSIZE = 6.0
-STIM_HEADER_FS = 6.5
-STIM_SUB_FS = 5.0
+STIM_HEADER_FS = 7.5        # match panel B stage names (ARCH_NAME_FS)
+STIM_SUB_FS = 6.0           # match panel B stage sub-captions (ARCH_SUB_FS)
 
 
 def _draw_cube_block(ax, assets, front_center_2d, *, roi_quad_2d=None,
-                     draw_header=True, draw_dims=True):
+                     draw_header=True, draw_dims=True, draw_time=None,
+                     time_label=None):
     """Draw the model-input lag cube with its front-face centre at
     `front_center_2d` (2D world coords).
 
     Optionally draws magnification lines from a test-ROI quad to the cube back
-    face, the "Model input" header, and the space/time dimension labels. The
-    cube's 3D pose (yaw/pitch/roll, W/H/D) is fixed so it reads identically
-    wherever it is placed. Returns an anchor dict.
+    face, the "Model input" header, the depth (time) arrow, and the spatial
+    dimension labels. `draw_time` toggles the time arrow (defaults to
+    `draw_dims`); `time_label` overrides its caption (defaults to the cube's
+    duration). The cube's 3D pose is fixed so it reads identically wherever it
+    is placed. Returns an anchor dict.
     """
+    if draw_time is None:
+        draw_time = draw_dims
     ppd = assets.pix_per_deg
     fcx, fcy = float(front_center_2d[0]), float(front_center_2d[1])
     cube = assets.lag_cube[::-1]
@@ -394,17 +399,31 @@ def _draw_cube_block(ax, assets, front_center_2d, *, roi_quad_2d=None,
         y_top = cube_top_2d + 1.05
 
     y_bottom = float(cube_p2[:, 1].min()) - 0.05
-    if draw_dims:
-        n_lags = cube.shape[0]
-        ms = n_lags / 120.0 * 1000.0
+    if draw_time:
+        if time_label is None:
+            time_label = f"{cube.shape[0] / 120.0 * 1000.0:.0f} ms (120 Hz)"
         p_front_bot = cube_p2[0] + np.array([0.0, -0.22])
         p_back_bot = cube_p2[4] + np.array([0.0, -0.22])
         ax.annotate("", xy=p_back_bot, xytext=p_front_bot,
                     arrowprops=dict(arrowstyle="<-", lw=0.8, color=ARROW_COLOR))
-        mid = 0.5 * (p_front_bot + p_back_bot) + np.array([0.0, -0.12])
-        ax.text(mid[0], mid[1], f"{ms:.0f} ms (120 Hz)", ha="center", va="top",
+        # Rotate the caption to the arrow's angle and sit it just below the shaft.
+        d = p_back_bot - p_front_bot
+        L = float(np.hypot(d[0], d[1])) or 1.0
+        perp = np.array([d[1], -d[0]]) / L
+        if perp[1] > 0:
+            perp = -perp
+        angle = float(np.degrees(np.arctan2(d[1], d[0])))
+        if angle > 90:
+            angle -= 180
+        elif angle < -90:
+            angle += 180
+        label_pos = 0.5 * (p_front_bot + p_back_bot) + perp * 0.20
+        ax.text(label_pos[0], label_pos[1], time_label, ha="center",
+                va="center", rotation=angle, rotation_mode="anchor",
                 fontsize=6.0, color="#555", style="italic")
+        y_bottom = float(label_pos[1] - 0.20)
 
+    if draw_dims:
         cube_w_deg = cube.shape[2] / ppd
         cube_h_deg = cube.shape[1] / ppd
         fLL, fLR, fUR = cube_p2[0], cube_p2[1], cube_p2[2]
@@ -415,7 +434,6 @@ def _draw_cube_block(ax, assets, front_center_2d, *, roi_quad_2d=None,
         ax.text(height_mid[0], height_mid[1], f"{cube_h_deg:.1f}°", ha="left",
                 va="center", fontsize=6.0, color=TEXT_COLOR, style="italic",
                 rotation=90)
-        y_bottom = float(mid[1] - 0.20)
 
     return {
         "cube_p2": cube_p2,
@@ -742,27 +760,6 @@ def _draw_architecture(ax, assets, *, x_start, gaps=None):
         cols=1, kt=fe_kt, kh=fe_kh, kw=fe_kw, gap=FE_GAP, palette=PAL_FRONTEND,
         base_zorder=2.0, edge_width=0.45)
 
-    fe_weights = np.asarray(assets.frontend_weights)
-    w_min = float(fe_weights.min())
-    w_max = float(fe_weights.max())
-    if w_max == w_min:
-        w_max = w_min + 1.0
-    pad = 0.10 * (w_max - w_min)
-    w_min -= pad
-    w_max += pad
-    K = fe_weights.shape[1]
-    ts = np.linspace(1, 0, K)
-    for c in range(fe_n):
-        y_cell = fe_y0 + c * (fe_kh + FE_GAP)
-        xs = x_cursor + ts * fe_kt
-        ys = y_cell + (fe_weights[c] - w_min) / (w_max - w_min) * fe_kh
-        if w_min < 0 < w_max:
-            y_zero = y_cell + (0 - w_min) / (w_max - w_min) * fe_kh
-            ax.plot([x_cursor, x_cursor + fe_kt], [y_zero, y_zero],
-                    color="#bbb", lw=0.4, zorder=3.6)
-        ax.plot(xs, ys, color="#3a2406", lw=1.0, zorder=3.8,
-                solid_capstyle="round")
-
     label_tops.append(_stage_label_top(
         ax, fe_grid, name="Frontend", sub=f"{fe_n} ch · k={arch['frontend_k']}"))
     stage_records.append({"name": "frontend", "grid": fe_grid})
@@ -868,8 +865,7 @@ def _draw_architecture(ax, assets, *, x_start, gaps=None):
     col_y_bottom = min(r["sp"]["y_bottom"] for r in readout_records)
     col_y_top = max(r["sp"]["y_top"] for r in readout_records)
 
-    n_units = assets.arch.get("n_trained_units")
-    sub = f"factorized · N={n_units}" if n_units else "factorized"
+    sub = "factorized"
     title_x = 0.5 * (col_x_left + col_x_right)
     y_sub = col_y_top + LABEL_GAP
     y_title = y_sub + SUB_GAP
@@ -918,14 +914,6 @@ def _draw_architecture(ax, assets, *, x_start, gaps=None):
     draw_op_marker(ax, x_concat, y_concat, color="#222", radius=0.10, lw=1.0,
                    zorder=12.5, symbol="||")
 
-    # ── Header ──────────────────────────────────────────────────────────────
-    body_x_lo = stage_records[1]["grid"]["bbox2d"][0]
-    body_x_hi = stage_records[4]["grid"]["bbox2d"][1]
-    header_y = max(label_tops) + HEADER_GAP
-    ax.text(0.5 * (body_x_lo + body_x_hi), header_y, "Digital twin",
-            ha="center", va="baseline", fontsize=ARCH_TITLE_FS, color=TEXT_COLOR,
-            fontweight="bold")
-
     # ── bbox ────────────────────────────────────────────────────────────────
     all_xs, all_ys = [], []
     for s in stage_records:
@@ -936,7 +924,7 @@ def _draw_architecture(ax, assets, *, x_start, gaps=None):
         elif "ro" in s:
             all_xs.extend([s["ro"]["x_left"], s["ro"]["x_right"]])
             all_ys.extend([s["ro"]["y_bottom"], s["ro"]["y_top"]])
-    all_ys.extend([col_y_bottom, y_title + 0.35, header_y + 0.35,
+    all_ys.extend([col_y_bottom, y_title + 0.35, max(label_tops) + 0.35,
                    ARCH_CENTER_Y - SKIP_DEPTH - 0.20])
 
     return {
@@ -945,6 +933,7 @@ def _draw_architecture(ax, assets, *, x_start, gaps=None):
         "y_bottom": float(min(all_ys)),
         "y_top": float(max(all_ys)),
         "frontend_left_xy": _stage_left_anchor(stage_records[0]),
+        "frontend_right_x": float(stage_records[0]["grid"]["bbox2d"][1]),
         "concat_xy": (float(x_concat), float(y_concat)),
         "readout_rows": [r["center_y"] for r in readout_records],
         "readout_x_right": float(col_x_right),
@@ -1075,10 +1064,6 @@ def _route_behavior_to_concat(ax, bracket_x, bracket_mid_y, concat_xy):
     elbow_x = cx
     ax.add_line(Line2D([bracket_x, elbow_x], [br_mid, br_mid], color="#333",
                        lw=1.1, zorder=6))
-    # Label the behavior signal above the horizontal run into the concat icon.
-    ax.text(0.5 * (bracket_x + elbow_x), br_mid + 0.10, "Extraretinal behavior",
-            ha="center", va="bottom", fontsize=STIM_HEADER_FS, color=TEXT_COLOR,
-            fontweight="bold")
     ax.add_patch(FancyArrowPatch((elbow_x, br_mid), (cx, cy - 0.11),
                                  arrowstyle="-|>", lw=1.1, color="#333",
                                  mutation_scale=10, zorder=6,
@@ -1094,7 +1079,7 @@ def _route_behavior_to_concat(ax, bracket_x, bracket_mid_y, concat_xy):
     ax.add_line(Line2D([zx - 0.13 * np.cos(ang), zx + 0.13 * np.cos(ang)],
                        [zy - 0.13 * np.sin(ang), zy + 0.13 * np.sin(ang)],
                        color="#c0392b", lw=1.1, zorder=13.1))
-    ax.text(zx + 0.20, zy, "ablate\n→ 0", ha="left", va="center", fontsize=5.8,
+    ax.text(zx + 0.20, zy, "ablate\n→ 0", ha="left", va="center", fontsize=7.5,
             color="#c0392b", style="italic", linespacing=1.0, zorder=13.1)
 
 
@@ -1177,7 +1162,8 @@ def _draw_all(ax, assets):
 
     # ── Bottom row: model input (cube + behavior) → architecture → PSTHs ────
     cube_in = _draw_cube_block(ax, assets, (BOT_CUBE_CX, ARCH_CENTER_Y),
-                               draw_header=False, draw_dims=False)
+                               draw_header=False, draw_dims=False,
+                               draw_time=True, time_label="time")
     # Title the retinal pathway (mirrors the "Extraretinal behavior" label).
     ax.text(0.5 * (cube_in["x_left"] + cube_in["x_right"]),
             cube_in["top_y"] + 0.10, "Retinal input", ha="center", va="bottom",
@@ -1194,10 +1180,14 @@ def _draw_all(ax, assets):
     # Behavioral path: labelled covariates beneath the input cube, bracketed
     # and routed across to the concat marker.
     beh_x0 = cube_in["x_left"]
-    beh_w = cube_in["x_right"] - cube_in["x_left"]
+    beh_w = arch["frontend_right_x"] - beh_x0
     beh_top = cube_in["bottom_y"] - BOT_BEH_GAP
     beh = _draw_behavior_traces(ax, assets, beh_x0, beh_top, beh_w,
                                 labeled=True, scale_bar=True, bracket=True)
+    # Bold title above the traces (mirrors the "Retinal input" title).
+    ax.text(beh_x0 + beh_w / 2, beh_top + 0.10, "Extraretinal behavior",
+            ha="center", va="bottom", fontsize=STIM_HEADER_FS, color=TEXT_COLOR,
+            fontweight="bold")
     _route_behavior_to_concat(ax, beh["bracket_x"], beh["bracket_mid_y"],
                               arch["concat_xy"])
 
@@ -1214,8 +1204,15 @@ def _draw_all(ax, assets):
     row_cy = bot_y_top + ROW_GAP + TOP_ROW_BELOW
     top = _draw_top_row(ax, assets, row_cy)
 
+    # ── Panel letters A (stimuli) / B (twin) ────────────────────────────────
+    letter_x = min(min(bot_xs), top["x_left"])
+    ax.text(letter_x, top["y_top"] + 0.35, "A", ha="left", va="top",
+            fontsize=9, fontweight="bold", color="#202124")
+    ax.text(letter_x, bot_y_top + 0.35, "B", ha="left", va="top",
+            fontsize=9, fontweight="bold", color="#202124")
+
     xs = bot_xs + [top["x_left"], top["x_right"]]
-    ys = bot_ys + [top["y_bottom"], top["y_top"]]
+    ys = bot_ys + [top["y_bottom"], top["y_top"], top["y_top"] + 0.35]
     pad_x, pad_y = 0.3, 0.2
     ax.set_xlim(min(xs) - pad_x, max(xs) + pad_x)
     ax.set_ylim(min(ys) - pad_y, max(ys) + pad_y)
