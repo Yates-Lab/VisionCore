@@ -27,7 +27,7 @@ TEXT_COLOR = "#222222"
 # ──────────────────────────────────────────────────────────────────────────
 # Cabinet projection (architecture half)
 # +x right, +y up, +z INTO the page → projects to (Δx, Δy) per unit z.
-# The stimulus half (_fig3a_stimulus.py) keeps its own CABINET_ALPHA /
+# The stimulus block (generate_fig3a.py) keeps its own CABINET_ALPHA /
 # CABINET_DEPTH so the two halves can be tuned independently. Classical
 # cabinet projection: depth is foreshortened to half so cube-shaped kernels
 # read as square-fronted blocks (slant edge ≈ ½ vertical edge) instead of
@@ -969,7 +969,8 @@ def draw_neuron_trace_panel(ax, t, robs_rate, rhat_rate, x0, y0, w, h, *,
 
     `robs_rate` and `rhat_rate` are 1D arrays in sp/s sampled at `t` seconds.
     The panel occupies the data-coord rectangle (x0, y0, w, h). Observed is
-    drawn first (in `obs_color`) and predicted is overlaid (in `pred_color`).
+    drawn as bars (in `obs_color`) and predicted is overlaid as a line (in
+    `pred_color`).
 
     A faint frame is drawn around the panel; optional inline labels and
     scale bars can be enabled for the bottom-most panel.
@@ -995,9 +996,11 @@ def draw_neuron_trace_panel(ax, t, robs_rate, rhat_rate, x0, y0, w, h, *,
     xs = x0 + (t - t0) / (t1 - t0) * w
     ys_obs = y0 + (r - ymin) / (ymax - ymin) * h
     ys_pred = y0 + (p - ymin) / (ymax - ymin) * h
-    ax.plot(xs, ys_obs, color=obs_color, lw=obs_lw, zorder=zorder,
-            solid_capstyle="round")
-    ax.plot(xs, ys_pred, color=pred_color, lw=pred_lw, zorder=zorder + 0.1,
+    # Observed PSTH as bars; prediction overlaid as a line.
+    bar_w = (w / max(len(t), 1)) * 0.92
+    ax.bar(xs, ys_obs - y0, width=bar_w, bottom=y0, align="center",
+           color=obs_color, edgecolor="none", zorder=zorder)
+    ax.plot(xs, ys_pred, color=pred_color, lw=pred_lw, zorder=zorder + 0.2,
             solid_capstyle="round")
 
     if label is not None:
@@ -1034,10 +1037,10 @@ def draw_neuron_trace_panel(ax, t, robs_rate, rhat_rate, x0, y0, w, h, *,
 
 
 def draw_pool_glyph(ax, x, y, *, color="#222", fontsize=7.5, zorder=12.0):
-    """Small '↓2×' badge marking a 2× spatial downsample on a flow arrow.
+    """Small '↓2' badge marking a 2× spatial downsample on a flow arrow.
     Default zorder sits above kernel back-layers so the white bbox cleanly
     obscures any kernels behind the badge."""
-    ax.text(x, y, "↓2×", ha="center", va="center",
+    ax.text(x, y, "↓2", ha="center", va="center",
             fontsize=fontsize, color=color, fontweight="bold",
             zorder=zorder,
             bbox=dict(boxstyle="round,pad=0.18",

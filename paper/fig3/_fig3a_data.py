@@ -15,7 +15,7 @@ from typing import Optional
 import dill
 import numpy as np
 
-from _fig3_data import CACHE_DIR
+from _fig3_data import CACHE_DIR, DT
 from _fig3_helpers import PANEL_B_SESSION
 
 
@@ -55,6 +55,7 @@ class PanelAAssets:
     freeview_trace_px: np.ndarray       # (N, 2) pixel coords on backimage screen
     freeview_roi_seq_px: np.ndarray     # (N, 2, 2) backimage dset rois for pinned window
     example_neurons: list = None        # list of 3 dicts: per-neuron readout + trace snippet
+    psth_neurons: list = None            # list of dicts: best-ccnorm units' observed/predicted PSTHs
 
 
 # ----------------------------------------------------------------------------
@@ -304,6 +305,118 @@ def _load_example_neurons(n=3, window_s=0.5, min_rho=0.85):
 
     if not out:
         raise RuntimeError("Failed to extract any example-neuron snippets.")
+    return out
+
+
+def _extract_psth_snippet(sr, ni, n_bins, sigma_bins):
+    """Trial-averaged observed/predicted PSTH (sp/s) for neuron `ni` in
+    session-result `sr`, restricted to a `n_bins` window starting at the first
+    well-covered bin. Returns (t_axis, robs_rate, rhat_rate) or None when no
+    bin has adequate trial coverage. Mirrors the snippet logic in
+    `_load_example_neurons` so both selections read identically."""
+    from scipy.ndimage import gaussian_filter1d
+
+    robs_psth = np.asarray(sr["robs_mean"][:, ni], dtype=float)
+    rhat_psth = np.asarray(sr["rhat_mean"][:, ni], dtype=float)
+    dfs = np.asarray(sr["dfs_used"][:, :, ni], dtype=float)
+
+    n_per_bin = (dfs > 0).sum(axis=0)
+    min_trials = max(5, int(0.25 * dfs.shape[0]))
+    valid = n_per_bin >= min_trials
+    if not valid.any():
+        return None
+    first_bin = int(np.argmax(valid))
+    end_bin = first_bin + n_bins
+    if end_bin > robs_psth.shape[0]:
+        end_bin = robs_psth.shape[0]
+        first_bin = end_bin - n_bins
+        if first_bin < 0:
+            return None
+
+    robs_snip = robs_psth[first_bin:end_bin] / DT
+    rhat_snip = rhat_psth[first_bin:end_bin] / DT
+    # Carry the last finite value forward across residual nan bins so the
+    # displayed line stays connected.
+    for arr in (robs_snip, rhat_snip):
+        nan_mask = ~np.isfinite(arr)
+        if nan_mask.any():
+            last = 0.0
+            for i in range(len(arr)):
+                if nan_mask[i]:
+                    arr[i] = last
+                else:
+                    last = arr[i]
+    robs_snip = gaussian_filter1d(robs_snip, sigma=sigma_bins, mode="nearest")
+    rhat_snip = gaussian_filter1d(rhat_snip, sigma=sigma_bins, mode="nearest")
+    t_axis = np.arange(n_bins) * DT
+    return t_axis, robs_snip, rhat_snip
+
+
+def _load_best_ccnorm_psths(n=3, window_s=0.5):
+    """Return observed/predicted PSTHs for the `n` highest-ccnorm reliable
+    units, for display beside the readouts. Reads only the fig3 inference
+    cache (no checkpoint or raw-session load), so it can be backfilled into an
+    existing asset cache cheaply. Neurons need not match the readout units —
+    these just showcase the best-fit PSTHs. Sorted high → low ccnorm."""
+    from _fig3_data import CACHE_PATH
+
+    if not CACHE_PATH.exists():
+        raise FileNotFoundError(
+            f"fig3 inference cache missing at {CACHE_PATH} — "
+            "run load_fig3_data() first so best-ccnorm PSTHs can be picked."
+        )
+    print(f"  loading fig3 inference cache from {CACHE_PATH}")
+    with open(CACHE_PATH, "rb") as f:
+        session_results = dill.load(f)
+
+    n_bins = int(round(window_s / DT))
+    sigma_bins = max(0.015 / DT, 1e-6)
+
+    cand = []
+    from _fig3_data import CCMAX_THRESHOLD
+
+    for si, sr in enumerate(session_results):
+        ccn = np.asarray(sr["ccnorm"])
+        ccm = np.asarray(sr["ccmax"])
+        nmask = np.asarray(sr["neuron_mask"])
+        for ni in range(sr["n_neurons"]):
+            # Gate on the split-half reliability ceiling (ccmax) and drop
+            # ccnorm > 1 — those are normalization artifacts on low-reliability
+            # units, not genuinely best-fit cells. Rank the survivors by ccnorm.
+            if not (np.isfinite(ccn[ni]) and np.isfinite(ccm[ni])):
+                continue
+            if ccm[ni] < CCMAX_THRESHOLD or ccn[ni] > 1.0:
+                continue
+            cand.append({
+                "si": si, "ni": ni,
+                "ccnorm": float(ccn[ni]),
+                "session": sr["session"],
+                "neuron_id": int(nmask[ni]),
+            })
+    cand.sort(key=lambda c: c["ccnorm"], reverse=True)
+
+    out = []
+    for c in cand:
+        snip = _extract_psth_snippet(session_results[c["si"]], c["ni"],
+                                     n_bins, sigma_bins)
+        if snip is None:
+            continue
+        t_axis, robs_snip, rhat_snip = snip
+        out.append({
+            "session": c["session"],
+            "neuron_id": c["neuron_id"],
+            "ccnorm": c["ccnorm"],
+            "t": t_axis.astype(np.float32),
+            "robs_rate": robs_snip.astype(np.float32),
+            "rhat_rate": rhat_snip.astype(np.float32),
+        })
+        print(f"    psth[{len(out)}] {c['session']} n{c['neuron_id']}: "
+              f"ccnorm={c['ccnorm']:.2f}")
+        if len(out) >= n:
+            break
+
+    if not out:
+        raise RuntimeError("No best-ccnorm PSTH snippets could be extracted.")
     return out
 
 
@@ -767,14 +880,21 @@ def load_panel_a_assets(recompute: bool = False) -> PanelAAssets:
         print(f"Loading fig3a assets from {PANEL_A_CACHE_PATH}")
         with open(PANEL_A_CACHE_PATH, "rb") as f:
             assets = dill.load(f)
-        # One-time backfill so existing caches gain the trained-unit count
-        # without a full session recompute (arch is a plain dict).
+        # One-time backfills so existing caches gain fields added after they
+        # were written, without a full raw-session recompute.
+        dirty = False
         if "n_trained_units" not in assets.arch:
             assets.arch["n_trained_units"] = _load_n_trained_units()
-            with open(PANEL_A_CACHE_PATH, "wb") as f:
-                dill.dump(assets, f)
+            dirty = True
             print(f"  backfilled n_trained_units="
                   f"{assets.arch['n_trained_units']} into cache")
+        if getattr(assets, "psth_neurons", None) is None:
+            print("  backfilling best-ccnorm PSTHs into cache...")
+            assets.psth_neurons = _load_best_ccnorm_psths(n=3)
+            dirty = True
+        if dirty:
+            with open(PANEL_A_CACHE_PATH, "wb") as f:
+                dill.dump(assets, f)
         return assets
 
     from DataYatesV1.utils.io import get_session
@@ -877,6 +997,8 @@ def load_panel_a_assets(recompute: bool = False) -> PanelAAssets:
     rd_mean, rd_std, rd_feats = _load_readout_example()
     print("  loading example neurons (readouts + trace snippets)...")
     example_neurons = _load_example_neurons(n=3)
+    print("  loading best-ccnorm PSTH neurons...")
+    psth_neurons = _load_best_ccnorm_psths(n=3)
 
     assets = PanelAAssets(
         session=PANEL_B_SESSION,
@@ -898,6 +1020,7 @@ def load_panel_a_assets(recompute: bool = False) -> PanelAAssets:
         freeview_trace_px=freeview_trace_px,
         freeview_roi_seq_px=freeview_roi_seq,
         example_neurons=example_neurons,
+        psth_neurons=psth_neurons,
     )
 
     CACHE_DIR.mkdir(parents=True, exist_ok=True)

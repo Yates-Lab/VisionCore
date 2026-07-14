@@ -40,8 +40,8 @@ BEHAVIOR_COLOR = "#d62728"
 ZEROED_COLOR = "#1f77b4"
 ACCENT = "#c0392b"
 WITHIN_MODEL_CACHE = VISIONCORE_ROOT / "outputs" / "cache" / "behavior_vs_vision_within_model.pkl"
-PANEL_LETTER_SIZE = 11
-PANEL_TITLE_SIZE = 9.0
+PANEL_LETTER_SIZE = 9
+PANEL_TITLE_SIZE = 8.0
 SUBJECT_COLORS = {"Allen": "tab:blue", "Logan": "tab:green"}
 
 
@@ -301,6 +301,18 @@ modulation.
 
 def compose(*, recompute: bool = False, out_dir=FIG_DIR, dpi: int = 300):
     configure_matplotlib()
+    # Font sizes tuned for the final 8.5-inch-wide (page-width) render. Applied
+    # after configure_matplotlib() so only figure 3's main composite is
+    # affected, not other scripts that share the style helper.
+    import matplotlib as mpl
+    mpl.rcParams.update({
+        "font.size": 7.0,
+        "axes.titlesize": 8.0,
+        "axes.labelsize": 7.5,
+        "xtick.labelsize": 6.5,
+        "ytick.labelsize": 6.5,
+        "legend.fontsize": 6.0,
+    })
     out_dir.mkdir(parents=True, exist_ok=True)
 
     data = load_fig3_data(recompute=recompute)
@@ -308,16 +320,18 @@ def compose(*, recompute: bool = False, out_dir=FIG_DIR, dpi: int = 300):
     abl = _load_ablation_cache()
     assets = load_panel_a_assets(recompute=recompute)
 
-    fig = plt.figure(figsize=(13.2, 7.4), constrained_layout=False)
+    # Panel A is now a two-row schematic (aspect ≈ 1.1), so it needs a taller
+    # top slot to render wide enough for its architecture labels to breathe.
+    fig = plt.figure(figsize=(8.5, 8.1), constrained_layout=False)
     gs = GridSpec(
         2, 1,
         figure=fig,
         left=0.055,
         right=0.985,
-        bottom=0.09,
-        top=0.93,
-        height_ratios=[2.25, 1.0],
-        hspace=0.30,
+        bottom=0.052,
+        top=0.955,
+        height_ratios=[2.45, 1.0],
+        hspace=0.11,
     )
 
     # Row 1. Native schematic (stimulus + architecture), fitted into the slot.
@@ -358,8 +372,10 @@ def compose(*, recompute: bool = False, out_dir=FIG_DIR, dpi: int = 300):
     _plot_improvement_vs_fem_modulation(ax_e, data)
     _standard_panel_heading(ax_e, "E", "FEM-linked model gain")
 
+    # No bbox_inches="tight": keep the canvas at exactly the intended
+    # page-width figsize (8.5 in) rather than cropping to the ink bounds.
     for ext in ("png", "pdf", "svg"):
-        fig.savefig(out_dir / f"figure3.{ext}", dpi=dpi, bbox_inches="tight")
+        fig.savefig(out_dir / f"figure3.{ext}", dpi=dpi)
 
     manifest = {
         "figure": "figure3",
