@@ -1073,14 +1073,19 @@ def draw_op_marker(ax, x, y, *, color="#222", radius=0.10, lw=0.9,
 
 
 def draw_arrow_skip(ax, x0, x1, y_top, *, depth=0.6, corner_r=0.12,
-                    color="#222", lw=1.0, zorder=4.7, mutation_scale=10):
+                    color="#222", lw=1.0, zorder=4.7, mutation_scale=10,
+                    y_end=None):
     """⊔-style residual that taps off (x0, y_top), drops, runs across the
-    bottom, and climbs UP to (x1, y_top) with an arrowhead at the (x1,
-    y_top) end. Use to wire a block's residual from a fork point on one
-    flow arrow into a '+' (sum) marker on the next flow arrow."""
+    bottom, and climbs UP to (x1, y_end) with an arrowhead at that end. Use
+    to wire a block's residual from a fork point on one flow arrow into a '+'
+    (sum) marker on the next flow arrow. `y_end` defaults to `y_top`; set it
+    below `y_top` (e.g. the sum circle's bottom edge) so the arrowhead lands
+    on the marker's rim rather than at its centre."""
     from matplotlib.path import Path
     r = min(corner_r, depth * 0.5, abs(x1 - x0) * 0.45)
     y_bot = y_top - depth
+    if y_end is None:
+        y_end = y_top
     verts = [
         (x0, y_top),
         (x0, y_bot + r),
@@ -1089,7 +1094,7 @@ def draw_arrow_skip(ax, x0, x1, y_top, *, depth=0.6, corner_r=0.12,
         (x1 - r, y_bot),
         (x1, y_bot),
         (x1, y_bot + r),
-        (x1, y_top),
+        (x1, y_end),
     ]
     codes = [Path.MOVETO,
              Path.LINETO,

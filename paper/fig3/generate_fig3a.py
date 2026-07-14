@@ -640,6 +640,11 @@ SKIP_COLOR = "#222"
 SKIP_LW = 1.0
 SKIP_CORNER_R = 0.12
 
+# Circled-operator markers (residual sum + / concat ||) and the zero-ablation
+# indicator — sized up from the original 0.10/0.13 so the glyphs read clearly.
+OP_MARKER_RADIUS = 0.15
+ABLATE_RADIUS = 0.18
+
 PAL_FRONTEND = ("#fff2cc", "#e6c97a", "#c9a945", "#7a5e10")
 PAL_STEM = ("#d8e4f4", "#9fbdda", "#6a8db0", "#1b3a5b")
 PAL_BLOCK1 = ("#cfe2f3", "#7fa4c4", "#4d7396", "#1b3a5b")
@@ -893,9 +898,9 @@ def _draw_architecture(ax, assets, *, x_start, gaps=None):
     x_plus1 = _arrow_frac(a_out1, 1.0 / 5.0)[0]
     draw_arrow_skip(ax, x_fork1, x_plus1, ARCH_CENTER_Y, depth=SKIP_DEPTH,
                     corner_r=SKIP_CORNER_R, color=SKIP_COLOR, lw=SKIP_LW,
-                    zorder=4.7)
-    draw_op_marker(ax, x_plus1, ARCH_CENTER_Y, color=SKIP_COLOR, radius=0.10,
-                   lw=0.9, zorder=12.0)
+                    zorder=4.7, y_end=ARCH_CENTER_Y - OP_MARKER_RADIUS)
+    draw_op_marker(ax, x_plus1, ARCH_CENTER_Y, color=SKIP_COLOR,
+                   radius=OP_MARKER_RADIUS, lw=0.9, zorder=12.0)
     mx, my = _arrow_frac(a_out1, 0.50)
     draw_pool_glyph(ax, mx, my)
 
@@ -904,15 +909,15 @@ def _draw_architecture(ax, assets, *, x_start, gaps=None):
     x_plus2 = _arrow_frac(a_out2, 1.0 / 3.0)[0]
     draw_arrow_skip(ax, x_fork2, x_plus2, ARCH_CENTER_Y, depth=SKIP_DEPTH,
                     corner_r=SKIP_CORNER_R, color=SKIP_COLOR, lw=SKIP_LW,
-                    zorder=4.7)
-    draw_op_marker(ax, x_plus2, ARCH_CENTER_Y, color=SKIP_COLOR, radius=0.10,
-                   lw=0.9, zorder=12.0)
+                    zorder=4.7, y_end=ARCH_CENTER_Y - OP_MARKER_RADIUS)
+    draw_op_marker(ax, x_plus2, ARCH_CENTER_Y, color=SKIP_COLOR,
+                   radius=OP_MARKER_RADIUS, lw=0.9, zorder=12.0)
 
     # Concat marker on the blk2→gru arrow (behavior injected here). The box +
     # vertical stub are intentionally NOT drawn — the trace bridge supplies it.
     x_concat, y_concat = _arrow_frac(a_out2, 2.0 / 3.0)
-    draw_op_marker(ax, x_concat, y_concat, color="#222", radius=0.10, lw=1.0,
-                   zorder=12.5, symbol="||")
+    draw_op_marker(ax, x_concat, y_concat, color="#222", radius=OP_MARKER_RADIUS,
+                   lw=1.0, zorder=12.5, symbol="||")
 
     # ── bbox ────────────────────────────────────────────────────────────────
     all_xs, all_ys = [], []
@@ -1064,7 +1069,7 @@ def _route_behavior_to_concat(ax, bracket_x, bracket_mid_y, concat_xy):
     elbow_x = cx
     ax.add_line(Line2D([bracket_x, elbow_x], [br_mid, br_mid], color="#333",
                        lw=1.1, zorder=6))
-    ax.add_patch(FancyArrowPatch((elbow_x, br_mid), (cx, cy - 0.11),
+    ax.add_patch(FancyArrowPatch((elbow_x, br_mid), (cx, cy - OP_MARKER_RADIUS),
                                  arrowstyle="-|>", lw=1.1, color="#333",
                                  mutation_scale=10, zorder=6,
                                  shrinkA=0, shrinkB=0))
@@ -1073,14 +1078,21 @@ def _route_behavior_to_concat(ax, bracket_x, bracket_mid_y, concat_xy):
     # Placed 3/4 of the way down toward the elbow corner so it clears ConvGRU.
     zx = cx
     zy = 0.75 * br_mid + 0.25 * cy
-    ax.add_patch(Circle((zx, zy), 0.13, facecolor="white", edgecolor="#c0392b",
-                        linewidth=1.1, zorder=13))
+    ax.add_patch(Circle((zx, zy), ABLATE_RADIUS, facecolor="white",
+                        edgecolor="#c0392b", linewidth=1.1, zorder=13))
     ang = np.deg2rad(45)
-    ax.add_line(Line2D([zx - 0.13 * np.cos(ang), zx + 0.13 * np.cos(ang)],
-                       [zy - 0.13 * np.sin(ang), zy + 0.13 * np.sin(ang)],
+    ax.add_line(Line2D([zx - ABLATE_RADIUS * np.cos(ang), zx + ABLATE_RADIUS * np.cos(ang)],
+                       [zy - ABLATE_RADIUS * np.sin(ang), zy + ABLATE_RADIUS * np.sin(ang)],
                        color="#c0392b", lw=1.1, zorder=13.1))
-    ax.text(zx + 0.20, zy, "ablate\n→ 0", ha="left", va="center", fontsize=7.5,
-            color="#c0392b", style="italic", linespacing=1.0, zorder=13.1)
+    # Short arrow from the label pointing back into the ablate glyph.
+    arrow_tail_x = zx + ABLATE_RADIUS + 0.42
+    ax.add_patch(FancyArrowPatch((arrow_tail_x, zy), (zx + ABLATE_RADIUS + 0.03, zy),
+                                 arrowstyle="-|>", lw=1.1, color="#c0392b",
+                                 mutation_scale=9, zorder=13.2,
+                                 shrinkA=0, shrinkB=0))
+    ax.text(arrow_tail_x + 0.08, zy, "Ablate\n(set to 0)", ha="left",
+            va="center", fontsize=9.0, color="#c0392b", style="italic",
+            linespacing=1.0, zorder=13.1)
 
 
 PSTH_GAP = 0.62
