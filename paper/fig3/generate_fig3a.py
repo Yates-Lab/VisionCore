@@ -626,6 +626,11 @@ DEFAULT_GAPS = {
 }
 ARCH_CENTER_Y = 7.0
 
+# Readout column (feature block + prism) and downstream PSTH prediction scale,
+# relative to their base sizes. Enlarged so the stack reads at the full row
+# height; the column is then dropped so its title aligns with ResBlock 2's.
+READOUT_SCALE = 1.5
+
 # Architecture label font sizes (bumped so the row reads at full width).
 ARCH_TITLE_FS = 10.0            # "Digital twin"
 ARCH_NAME_FS = 7.5             # stage names (Frontend, ResBlock 1, …)
@@ -640,10 +645,16 @@ SKIP_COLOR = "#222"
 SKIP_LW = 1.0
 SKIP_CORNER_R = 0.12
 
-# Circled-operator markers (residual sum + / concat ||) and the zero-ablation
+# Circled-operator markers (residual sum + / concat ||) and the ablation-switch
 # indicator — sized up from the original 0.10/0.13 so the glyphs read clearly.
 OP_MARKER_RADIUS = 0.15
 ABLATE_RADIUS = 0.18
+
+# Condition colours for the ablation switch, matched to figure3's INTACT/ABLATED
+# violin colours so the schematic's two switch states read as the same two
+# conditions quantified in panels C/D/E (closed = full, open = ablated).
+COND_FULL_COLOR = "#1f77b4"
+COND_ABLATED_COLOR = "#d62728"
 
 PAL_FRONTEND = ("#fff2cc", "#e6c97a", "#c9a945", "#7a5e10")
 PAL_STEM = ("#d8e4f4", "#9fbdda", "#6a8db0", "#1b3a5b")
@@ -834,18 +845,34 @@ def _draw_architecture(ax, assets, *, x_start, gaps=None):
     x_cursor = _next_x(gru_grid, g["gru_to_readout"])
 
     # ── Readouts (2 on top, ⋮, 1 on bottom) ─────────────────────────────────
+    # Enlarge the readout column (feature block + prism) and, downstream, the
+    # PSTH predictions by READOUT_SCALE, then drop the column so its "Readouts"
+    # title lands even with the ConvGRU title. Both titles clear their reference
+    # top by the same LABEL_GAP + SUB_GAP, so aligning the top prism's top with
+    # the ConvGRU title's reference top (the recurrent-loop top) aligns them.
     examples = assets.example_neurons
     feat_w, feat_h = 0.62, 0.16
     prism_size = 0.50
     feat_to_prism = 0.14
-    row_pitch = prism_size + 0.30
-    ellipsis_gap = 0.60
+    base_row_pitch = prism_size + 0.30
+    base_ellipsis_gap = 0.60
 
-    g_xmin, g_xmax, g_ymin, g_ymax = gru_grid["bbox2d"]
-    gru_center_y = 0.5 * (g_ymin + g_ymax)
+    readout_scale = READOUT_SCALE
+    feat_w *= readout_scale
+    feat_h *= readout_scale
+    prism_size *= readout_scale
+    feat_to_prism *= readout_scale
+    row_pitch = base_row_pitch * readout_scale
+    ellipsis_gap = base_ellipsis_gap * readout_scale
+
     span = 2 * row_pitch + ellipsis_gap
-    centers = [gru_center_y + span / 2, gru_center_y + span / 2 - row_pitch,
-               gru_center_y - span / 2]
+    # Column centre so the top prism's top (prism half-height + top-face depth
+    # above its centre, itself span/2 above the column centre) meets the top of
+    # ResBlock 2's grid.
+    top_offset = span / 2 + prism_size / 2 + prism_size * abs(_CAB_DEPTH_VEC[1])
+    readout_cy = gru_loop_top - top_offset
+    centers = [readout_cy + span / 2, readout_cy + span / 2 - row_pitch,
+               readout_cy - span / 2]
     ellipsis_y = 0.5 * (centers[1] + centers[2])
     slot_neurons = [examples[min(i, len(examples) - 1)] for i in (2, 1, 0)]
 
@@ -861,9 +888,14 @@ def _draw_architecture(ax, assets, *, x_start, gaps=None):
         readout_records.append({"sp": sp, "center_y": cy})
 
     ell_x = 0.5 * (x_cursor + prism_x + prism_size)
-    for dy in (-0.11, 0.0, 0.11):
-        ax.add_patch(Circle((ell_x, ellipsis_y + dy), 0.022, facecolor="#666",
+    for dy in (-0.1485, 0.0, 0.1485):
+        ax.add_patch(Circle((ell_x, ellipsis_y + dy), 0.0297, facecolor="#666",
                             edgecolor="none", zorder=4.6))
+    # Name the repetition index: the ⋮ is "and so on across recorded units", so
+    # one readout head is fit per unit. Grey italic, rotated alongside the dots.
+    ax.text(ell_x - 0.308, ellipsis_y, "per unit", ha="center", va="center",
+            rotation=90, fontsize=ARCH_SUB_FS + 1.0, color="#555", style="italic",
+            zorder=4.6)
 
     col_x_left = x_cursor
     col_x_right = max(r["sp"]["x_right"] for r in readout_records)
@@ -943,6 +975,7 @@ def _draw_architecture(ax, assets, *, x_start, gaps=None):
         "readout_rows": [r["center_y"] for r in readout_records],
         "readout_x_right": float(col_x_right),
         "readout_ellipsis_y": float(ellipsis_y),
+        "readout_scale": float(readout_scale),
     }
 
 
@@ -1064,38 +1097,62 @@ def _draw_behavior_traces(ax, assets, x0, y_top, w, *, labeled=True,
 
 
 def _route_behavior_to_concat(ax, out_x, out_mid_y, concat_xy):
-    """Route the extraretinal signal from the module box rightward, past the
-    ablation gate, then up into the concat marker.
+    """Route the extraretinal signal from the module box rightward, through an
+    ablation SWITCH, then up into the concat marker.
 
-    The ablation gate (red ⊘) sits on the horizontal run with a two-line
-    "Ablated / extraretinal input → 0" label directly above it, so a reader
-    following the arrow rightward meets the ablation in place before the signal
-    turns up into the model flow."""
+    The switch is a single-pole knife switch drawn OPEN (thrown down): the black
+    conductor is broken at two contacts, a faint blue segment bridges them to
+    show the CLOSED "Full" path, and a red lever droops from the left pivot to
+    show the depicted OPEN "Ablated" state. A small double-headed arc marks that
+    the switch flips between the two — the model is run either way. The two
+    states are colour-matched to the Full/Ablated conditions quantified in
+    panels C/D/E and labelled Full (above) / Ablated (below), so the pathway
+    reads as optional and compared rather than permanently deleted."""
     cx, cy = concat_xy
     mid = out_mid_y
     elbow_x = cx
-    ax.add_line(Line2D([out_x, elbow_x], [mid, mid], color="#333",
-                       lw=1.1, zorder=6))
+
+    # Switch geometry: two contacts on the wire separated by a gap, centred at
+    # 55% along the horizontal run (before the elbow that turns up to concat).
+    gx = out_x + 0.55 * (elbow_x - out_x)
+    half = 0.42
+    xL, xR = gx - half, gx + half
+
+    # ── Conductor: solid black up to each contact, broken across the switch ──
+    ax.add_line(Line2D([out_x, xL], [mid, mid], color="#333", lw=1.1, zorder=6))
+    ax.add_line(Line2D([xR, elbow_x], [mid, mid], color="#333", lw=1.1, zorder=6))
     ax.add_patch(FancyArrowPatch((elbow_x, mid), (cx, cy - OP_MARKER_RADIUS),
                                  arrowstyle="-|>", lw=1.1, color="#333",
                                  mutation_scale=10, zorder=6,
                                  shrinkA=0, shrinkB=0))
 
-    # ── Ablation gate on the horizontal run, label stacked above it ─────────
-    gx = out_x + 0.55 * (elbow_x - out_x)
-    gy = mid
-    ax.add_patch(Circle((gx, gy), ABLATE_RADIUS, facecolor="white",
-                        edgecolor="#c0392b", linewidth=1.1, zorder=13))
-    ang = np.deg2rad(45)
-    ax.add_line(Line2D([gx - ABLATE_RADIUS * np.cos(ang), gx + ABLATE_RADIUS * np.cos(ang)],
-                       [gy - ABLATE_RADIUS * np.sin(ang), gy + ABLATE_RADIUS * np.sin(ang)],
-                       color="#c0392b", lw=1.1, zorder=13.1))
-    # Two-line label above the gate: bold condition token + italic clarifier.
-    base_y = gy + ABLATE_RADIUS + 0.07
-    ax.text(gx, base_y, "behavioral input → 0", ha="center", va="bottom",
-            fontsize=8.0, color="#c0392b", style="italic", zorder=13.1)
-    ax.text(gx, base_y + 0.24, "Ablated", ha="center", va="bottom",
-            fontsize=9.5, color="#c0392b", fontweight="bold", zorder=13.1)
+    # ── CLOSED path (Full): solid blue bridge = the alternative (not-thrown)
+    #    position that reconnects the two contacts. ──────────────────────────
+    ax.add_line(Line2D([xL, xR], [mid, mid], color=COND_FULL_COLOR, lw=2.0,
+                       solid_capstyle="round", zorder=6.2))
+
+    # ── OPEN lever (Ablated): red knife thrown down from the right pivot,
+    #    extended as a leader to the vertical middle of the right-justified
+    #    two-line label sitting to the lower-left. ────────────────────────────
+    txt_r = gx - 0.28          # right edge of the right-justified label block
+    txt_cy = mid - 0.70        # vertical centre of the two-line label
+    tip = (txt_r + 0.08, txt_cy)
+    ax.add_line(Line2D([xR, tip[0]], [mid, tip[1]], color=COND_ABLATED_COLOR,
+                       lw=2.2, solid_capstyle="round", zorder=6.4))
+
+    # Contacts: two equal filled circles (the lever hinges on the right one).
+    for tx in (xL, xR):
+        ax.add_patch(Circle((tx, mid), 0.06, facecolor="#333",
+                            edgecolor="none", zorder=6.5))
+
+    # ── Labels: Full above (blue, on the bridge), Ablated to the lower-left
+    #    (red, right-justified at the end of the extended lever). ─────────────
+    ax.text(gx, mid + 0.14, "Full", ha="center", va="bottom",
+            fontsize=8.5, color=COND_FULL_COLOR, fontweight="bold", zorder=7)
+    ax.text(txt_r, txt_cy + 0.13, "Ablated", ha="right", va="center",
+            fontsize=9.0, color=COND_ABLATED_COLOR, fontweight="bold", zorder=7)
+    ax.text(txt_r, txt_cy - 0.13, "behavioral input → 0", ha="right", va="center",
+            fontsize=6.8, color=COND_ABLATED_COLOR, style="italic", zorder=7)
 
 
 PSTH_GAP = 0.62
@@ -1110,11 +1167,16 @@ def _draw_readout_psths(ax, assets, arch):
     using the best-CCnorm units. Returns the panels' bounding box."""
     psths = assets.psth_neurons or []
     rows = arch["readout_rows"]
+    # Match the readout column's scaling so the predictions fill the same full
+    # row height (rows are already spread by the scaled readout layout).
+    scale = arch.get("readout_scale", 1.0)
+    psth_w = PSTH_W * scale
+    psth_h = PSTH_H * scale
     x0 = arch["readout_x_right"] + PSTH_GAP
-    xr = x0 + PSTH_W
+    xr = x0 + psth_w
 
     # Small header over the PSTH column.
-    ax.text(x0 + PSTH_W / 2, max(rows) + PSTH_H / 2 + 0.14,
+    ax.text(x0 + psth_w / 2, max(rows) + psth_h / 2 + 0.14,
             "Predictions", ha="center", va="bottom", fontsize=ARCH_NAME_FS,
             color=TEXT_COLOR, fontweight="bold")
 
@@ -1122,10 +1184,10 @@ def _draw_readout_psths(ax, assets, arch):
     for k in range(n):
         cy = rows[k]
         p = psths[k]
-        y0 = cy - PSTH_H / 2
+        y0 = cy - psth_h / 2
         is_bottom = (k == n - 1)
         draw_neuron_trace_panel(
-            ax, p["t"], p["robs_rate"], p["rhat_rate"], x0, y0, PSTH_W, PSTH_H,
+            ax, p["t"], p["robs_rate"], p["rhat_rate"], x0, y0, psth_w, psth_h,
             obs_color=PSTH_OBS_COLOR, pred_color=PSTH_PRED_COLOR,
             obs_lw=0.8, pred_lw=1.2, zorder=5.0,
             label=None,
@@ -1135,16 +1197,16 @@ def _draw_readout_psths(ax, assets, arch):
     # Matching ⋮ between the second and last PSTH (mirrors the readout ⋮).
     if len(rows) >= 3:
         ell_y = arch["readout_ellipsis_y"]
-        ell_x = x0 + PSTH_W / 2
-        for dy in (-0.11, 0.0, 0.11):
-            ax.add_patch(Circle((ell_x, ell_y + dy), 0.022, facecolor="#666",
+        ell_x = x0 + psth_w / 2
+        for dy in (-0.1485, 0.0, 0.1485):
+            ax.add_patch(Circle((ell_x, ell_y + dy), 0.0297, facecolor="#666",
                                 edgecolor="none", zorder=5.2))
 
     return {
         "x_left": x0,
         "x_right": xr + 0.05,
-        "y_bottom": min(rows) - PSTH_H / 2 - 0.20,
-        "y_top": max(rows) + PSTH_H / 2 + 0.45,
+        "y_bottom": min(rows) - psth_h / 2 - 0.20,
+        "y_top": max(rows) + psth_h / 2 + 0.45,
     }
 
 
