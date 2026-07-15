@@ -171,12 +171,17 @@ def _plot_ccnorm_violins(ax, abl):
 
     p = wilcoxon(gi, ga).pvalue
     d = float(np.median(ga - gi))   # Ablated - Full: a decrease under ablation
+    intact_med = float(np.median(gi))
+    # Ablation cost as a fraction of the full twin's trial-averaged prediction,
+    # matching panel D's "(X% of total)" normalization so C and D read the same.
+    pct = 100.0 * abs(d) / intact_med if intact_med != 0 else np.nan
     # ccnorm is bounded at 1 (normalized correlation): keep 1.0 as the top tick,
     # but extend the axis above it so the significance connector sits clear above
     # the distributions rather than crowding them.
-    ax.set_ylim(0, 1.16)
+    ax.set_ylim(0, 1.20)
     ax.set_yticks(np.arange(0, 1.001, 0.2))
-    _sig_bracket(ax, 0, 1, 1.02, p, h=0.014, gap=0.045, delta=f"Δ={d:+.3f}")
+    _sig_bracket(ax, 0, 1, 1.02, p, h=0.014, gap=0.045,
+                 delta=f"Δ={d:+.3f}\n({pct:.0f}% of total)")
 
     ax.set_xlim(-0.6, 1.6)
     ax.set_xticks([0, 1])
@@ -349,7 +354,7 @@ def _load_ablation_cache():
 def _write_sidecars(out_dir, manifest: dict):
     caption = """Figure 3. A retinal-input digital twin captures FEM-linked V1 response variability.
 
-(A) Training and test stimuli. The twin is trained on gratings, gabors, and natural images, and evaluated on fixated flashed images; the retinal model input is a space × space × time crop of the gaze-contingent stimulus history. (B) Gaze-contingent digital twin architecture. The model receives the retinal stimulus history and an optional extraretinal behavior input, then predicts simultaneously recorded V1 responses. (C) Held-out, trial-averaged response prediction (normalized correlation, ccnorm) for the full twin and the same twin with the separate extraretinal behavior input ablated (zeroed), pooled across reliable Allen and Logan cells (matching the fig. 2 session population, >=10 analyzed units/session). Ablating the extraretinal pathway costs only a small, though significant, amount of trial-averaged prediction, confirming the twin is competitive at the PSTH level and that extraretinal signals contribute little on average. (D) Single-trial prediction (r^2) for the leave-one-out PSTH baseline, the full twin, and the behavior-ablated twin. The twin predicts single trials better than the PSTH ceiling even with the extraretinal pathway zeroed, so its trial-to-trial predictive power comes from the moving retinal image. (E) The behavior-ablated twin's single-trial r^2 gain over the PSTH baseline grows with a cell's empirical FEM modulation \\(1-\\alpha\\), the fraction of rate modulation due to FEM (OLS fit; Spearman rho with p-value inset; right marginal shows the per-unit gain distribution, with the left-pointing triangle marking the median). Retinal-input prediction alone tracks the empirically measured increase in apparent rate variance under fixational eye movements.
+(A) Training and test stimuli. The twin is trained on gratings, gabors, and natural images, and evaluated on fixated flashed images; the retinal model input is a space × space × time crop of the gaze-contingent stimulus history. (B) Gaze-contingent digital twin architecture. The model receives the retinal stimulus history and an optional extraretinal behavior input, then predicts simultaneously recorded V1 responses. (C) Held-out, trial-averaged response prediction (normalized correlation, ccnorm) for the full twin and the same twin with the separate extraretinal behavior input ablated (zeroed), pooled across reliable Allen and Logan cells (matching the fig. 2 session population, >=10 analyzed units/session). Ablating the extraretinal pathway lowers the trial-averaged prediction only slightly (median 0.72 -> 0.70; Δ = -0.011, a 2% reduction; Wilcoxon p = 3e-20), confirming the twin is competitive at the PSTH level and that extraretinal signals contribute little on average. (D) Single-trial prediction (r^2) for the leave-one-out PSTH baseline, the full twin, and the behavior-ablated twin. The twin predicts single trials better than the PSTH ceiling even with the extraretinal pathway zeroed, so its trial-to-trial predictive power comes from the moving retinal image. (E) The behavior-ablated twin's single-trial r^2 gain over the PSTH baseline grows with a cell's empirical FEM modulation \\(1-\\alpha\\), the fraction of rate modulation due to FEM (OLS fit; Spearman rho with p-value inset; right marginal shows the per-unit gain distribution, with the left-pointing triangle marking the median). Retinal-input prediction alone tracks the empirically measured increase in apparent rate variance under fixational eye movements.
 """
     (out_dir / "figure3_caption.md").write_text(caption, encoding="utf-8")
 

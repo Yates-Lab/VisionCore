@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Redundancy-aware population single-spike information</title>
+<script>
+window.MathJax = {
+  tex: { inlineMath: [['$','$'],['\\(','\\)']], displayMath: [['$$','$$'],['\\[','\\]']], tags: 'none' },
+  svg: { fontCache: 'global' }
+};
+</script>
+<script id="mathjax" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+  :root{
+    --ink:#1a1a1a; --muted:#5b6470; --rule:#e2e5ea; --bg:#fbfbf9;
+    --accent:#3a5a8c; --box:#eef3fb; --boxrule:#c3d3ea;
+    --warn:#8a5a00; --warnbg:#fdf6e7; --warnrule:#e8d9a8;
+    --good:#2f6a45; --goodbg:#eef7f0; --goodrule:#bfe0c8;
+  }
+  html{ -webkit-text-size-adjust:100%; }
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family: Georgia,"Iowan Old Style",Cambria,"Times New Roman",serif;
+    font-size:18px; line-height:1.65;
+  }
+  .wrap{ max-width:820px; margin:0 auto; padding:56px 28px 120px; }
+  h1{ font-size:1.85rem; line-height:1.2; margin:0 0 .2em; letter-spacing:-.01em; }
+  h2{ font-size:1.32rem; margin:2.4em 0 .5em; padding-top:.6em; border-top:1px solid var(--rule); letter-spacing:-.01em; }
+  h3{ font-size:1.08rem; margin:1.8em 0 .3em; color:var(--accent); }
+  .sub{ color:var(--muted); font-size:1.02rem; margin:.2em 0 0; }
+  .meta{ color:var(--muted); font-size:.86rem; font-family:ui-monospace,"SF Mono",Menlo,monospace; margin-top:1.4em; }
+  p{ margin:.7em 0; }
+  a{ color:var(--accent); text-decoration:none; border-bottom:1px solid #c9d4e4; }
+  a:hover{ border-bottom-color:var(--accent); }
+  code{ font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:.86em; background:#f0f0ec; padding:.05em .35em; border-radius:3px; }
+  .box{ background:var(--box); border:1px solid var(--boxrule); border-radius:8px; padding:.4em 1.1em; margin:1.2em 0; }
+  .keyresult{ background:var(--box); border:1px solid var(--boxrule); border-left:4px solid var(--accent); border-radius:8px; padding:.8em 1.1em; margin:1.4em 0; }
+  .warn{ background:var(--warnbg); border:1px solid var(--warnrule); border-left:4px solid var(--warn); border-radius:8px; padding:.6em 1.1em; margin:1.3em 0; }
+  .good{ background:var(--goodbg); border:1px solid var(--goodrule); border-left:4px solid var(--good); border-radius:8px; padding:.6em 1.1em; margin:1.3em 0; }
+  .tag{ display:inline-block; font-family:ui-monospace,Menlo,monospace; font-size:.7rem; letter-spacing:.05em; text-transform:uppercase; color:#fff; background:var(--accent); padding:.15em .5em; border-radius:4px; vertical-align:.15em; margin-right:.5em; }
+  .tag.warn{ background:var(--warn); } .tag.good{ background:var(--good); }
+  ul,ol{ padding-left:1.3em; } li{ margin:.35em 0; }
+  table{ border-collapse:collapse; width:100%; font-family:-apple-system,Segoe UI,Roboto,sans-serif; font-size:.82rem; margin:1em 0; }
+  th,td{ text-align:left; padding:.5em .6em; border-bottom:1px solid var(--rule); vertical-align:top; }
+  th{ color:var(--muted); font-weight:600; }
+  td.ck{ font-family:ui-monospace,Menlo,monospace; white-space:nowrap; }
+  .overflow{ overflow-x:auto; }
+  mjx-container{ overflow-x:auto; overflow-y:hidden; max-width:100%; }
+  .small{ font-size:.92rem; color:var(--muted); }
+  hr.soft{ border:none; border-top:1px solid var(--rule); margin:2.4em 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Redundancy-aware population single-spike information across space</h1>
+<p class="sub">Working notes for the <code>rr_population</code> twin analysis — Option A (single-spike decomposition) derived in full, and Option C (eigen-map basis) with its noise-model guarantees, read against the Figure&nbsp;2 independent-Poisson result.</p>
+<p class="meta">VisionCore/ryan/population_information/ · math renders via MathJax (needs network for first load)</p>
+
+<h2>0. What the current pipeline computes, and where redundancy enters</h2>
+
+<p>Per pooled twin unit $n=1\ldots N$ (here $N=756$), the twin gives a deterministic spatial activation map $r_n(x)\ge 0$ over spatial bins $x$ (your $H\times W$). With a stimulus prior $p(x)$ (uniform, or fixation-weighted),</p>
+
+$$\bar r_n=\sum_x p(x)\,r_n(x),\qquad R(x)=\sum_n r_n(x),\qquad \bar R=\sum_x p(x)R(x)=\sum_n \bar r_n.$$
+
+<p>The per-unit spatial single-spike information is the Skaggs functional — the KL divergence between the spike-triggered stimulus distribution and the prior:</p>
+
+$$I_n=D\!\big(p_{\mathrm{spk},n}\,\|\,p\big)=\sum_x p(x)\,\frac{r_n(x)}{\bar r_n}\log_2\frac{r_n(x)}{\bar r_n},\qquad p_{\mathrm{spk},n}(x)=\frac{p(x)\,r_n(x)}{\bar r_n}.$$
+
+<p>Your two aggregations (<code>spatial_ssi_population</code>, <code>spatial_info.py:35</code>) sit at opposite extremes:</p>
+<ul>
+  <li><b>bits/spike</b> $=\dfrac{\sum_n \bar r_n I_n}{\sum_n \bar r_n}$ — a rate-weighted <i>average</i>. <span class="small">Redundancy-invariant (cloning a unit changes nothing) but saturates, so it cannot be a measure of <i>total</i> population information.</span></li>
+  <li><b>bits/sec</b> $=\sum_n \bar r_n I_n$ — a <i>sum</i>. <span class="small">Scales linearly with unit count and is redundancy-blind: ten copies score ten times. This is the quantity the medoid subset-selection is trying to rescue.</span></li>
+</ul>
+
+<div class="keyresult">
+<b>The reframe.</b> The correct target is the joint mutual information between the stimulus and the whole population response,
+$$I(X;\mathbf r)\ \le\ \sum_n I(X;r_n)=\sum_n I_n,$$
+with equality only under conditional independence <i>and</i> non-overlapping tuning. Redundancy is exactly the gap $\sum_n I_n-I(X;\mathbf r)\ge 0$. The principled fix is not to repair the sum — it is to compute the joint. Subset-selection is one crude estimator of the joint (discard units until the survivors are ~independent); the options below do better without discarding.
+</div>
+
+<h2>1. Option A — the pooled / which-unit decomposition</h2>
+<p class="small"><span class="tag good">derived</span> No noise model beyond Poisson superposition. Everything is computable directly from the maps.</p>
+
+<h3>1.1 The single labeled population spike</h3>
+<p>Model the population as a superposition of conditionally-independent inhomogeneous-Poisson processes given $x$. Draw one spike from the whole population; spikes are drawn proportional to rate, so its joint law over (location, unit label) is</p>
+$$P(x,n)=\frac{p(x)\,r_n(x)}{\bar R},$$
+<p>with marginals</p>
+$$P(n)=\frac{\bar r_n}{\bar R}\ \ (\text{spike share of unit }n),\qquad P_{\mathrm{spk}}(x)=\frac{p(x)R(x)}{\bar R}\ \ (\text{pooled spike-triggered stimulus}).$$
+
+<p>The information a <b>labeled</b> spike carries about $X$, measured against the prior, is</p>
+$$I^{\mathrm{lab}}_{\mathrm{spike}}=D\!\big(P(x,n)\,\|\,p(x)P(n)\big)=\sum_{x,n}\frac{p(x)r_n(x)}{\bar R}\log_2\frac{r_n(x)}{\bar r_n}=\sum_n\frac{\bar r_n}{\bar R}\,I_n.$$
+
+<div class="box"><p><b>This is exactly your <code>spike_weighted=True</code> bits/spike.</b> The current metric already <i>is</i> the labeled-line population single-spike information — it just hadn't been read that way.</p></div>
+
+<h3>1.2 The exact decomposition</h3>
+<p>Define the <b>pooled</b> term — Skaggs applied to the summed map $R(x)$, which is what an observer gets who sees only that <i>a</i> spike occurred, not who fired:</p>
+$$I^{\mathrm{pool}}_{\mathrm{spike}}=D\!\big(P_{\mathrm{spk}}\,\|\,p\big)=\sum_x \frac{p(x)R(x)}{\bar R}\log_2\frac{R(x)}{\bar R}.$$
+
+<p>Then the exact KL chain rule $D(P(x,n)\,\|\,p(x)P(n))=D(P_{\mathrm{spk}}\,\|\,p)+D(P(x,n)\,\|\,P_{\mathrm{spk}}P(n))$ gives</p>
+
+<div class="keyresult">
+$$\underbrace{\sum_n\frac{\bar r_n}{\bar R}\,I_n}_{I^{\mathrm{lab}}\ =\ \text{your bits/spike}}\ =\ \underbrace{\mathrm{Skaggs}[R(x)]}_{I^{\mathrm{pool}}\ \ge\ 0}\ +\ \underbrace{I(N;X\mid\text{spike})}_{\text{which-unit}\ \ge\ 0}$$
+</div>
+
+<p>where the which-unit term is a genuine mutual information in the spike-triggered ensemble,</p>
+$$I(N;X\mid\text{spike})=\sum_x P_{\mathrm{spk}}(x)\sum_n P(n\mid x)\log_2\frac{P(n\mid x)}{P(n)},\qquad P(n\mid x)=\frac{r_n(x)}{R(x)}.$$
+
+<p>All three terms are $\ge 0$ (KL / MI). The chain-rule identity is exact, verified term-by-term — not asymptotic.</p>
+
+<h3>1.3 Why this is redundancy-aware</h3>
+<p><b>Interpretation.</b> Observing a labeled spike $=$ (i) learning a spike occurred, which sharpens $p(x)\to P_{\mathrm{spk}}(x)$ and yields $I^{\mathrm{pool}}$ computed on the <i>summed</i> map (duplicate units merely add rate to $R$ and are automatically merged); plus (ii) learning <i>which</i> unit fired, worth $I(N;X\mid\text{spike})$ — the information the population's identity code adds beyond a single pooled detector.</p>
+
+<p><b>Duplication-invariance, proven for all three terms.</b> Take $k$ exact copies of every unit:</p>
+<ul>
+  <li>$I^{\mathrm{pool}}$: $R\to kR$; Skaggs uses only $R/\bar R$ → unchanged.</li>
+  <li>$I^{\mathrm{lab}}$: rate-weighted average of identical $I_n$ → unchanged.</li>
+  <li>which-unit: copy-identity is independent of $x$, so it adds zero MI → unchanged.</li>
+</ul>
+<p>Sharper: for a group with identical tuning shape $r_n(x)=c_n\phi(x)$, $P(n\mid x)=c_n/\sum_m c_m$ is $x$-independent, so that group contributes <b>exactly zero</b> to the which-unit term. Redundant maps cannot inflate any term. Conversely, units tiling <i>distinct</i> locations make $P(n\mid x)$ sharply $x$-dependent and drive the which-unit term up — it is precisely a <b>diversity</b> measure, bounded by $I(N;X\mid\text{spike})\le H(N)\le\log_2 N^{\text{rate}}_{\mathrm{eff}}$ with $N^{\text{rate}}_{\mathrm{eff}}=2^{H(N)}$ the rate-share perplexity.</p>
+
+<div class="good"><b>deWeese additivity check.</b> <a href="http://kamaji:7327/nodes/019f3dc5-06d4-7111-a3d4-386ed9d11489">deweese1999how</a> forbids summing <i>specific surprise</i> across symbols (non-additive). We never do. The decomposition is a chain-rule split of a bona-fide mutual information — the label MI of a single spike in the spike-triggered ensemble — into a marginal MI plus a conditional MI. Each piece averages correctly; the summation hazard he warns about does not arise.</div>
+
+<h3>1.4 The honest limitation of Option A</h3>
+<div class="warn">All three terms are <b>intensive</b> (per spike) and redundancy-invariant — correct for "single-spike information across space." But an <b>extensive</b> bits/sec that <i>grows with diversity</i>, e.g. $\bar R\cdot I(N;X\mid\text{spike})$, re-inflates under duplication (total rate doubles). Going extensive without overcounting requires a noise/independence assumption — the boundary where Option A hands off to Option C (below).</div>
+
+<h3>1.5 Cost to implement</h3>
+<p>You already compute $I^{\mathrm{lab}}$ per frame (<code>_spatial_ssi_single_frame_np</code>). Add two lines: Skaggs on $R(x)=\sum_n r_n(x)$ (pooled), then which-unit $=I^{\mathrm{lab}}-I^{\mathrm{pool}}$. $O(N\,|X|)$, no clustering, no covariance. Positivity of all three terms and invariance under a deliberately-duplicated unit are built-in unit tests.</p>
+
+<h2>2. Option C — an uncorrelated eigen-map basis, and what it assumes about noise</h2>
+<p class="small"><span class="tag">theory</span> This is where the Figure&nbsp;2 result does real work.</p>
+
+<h3>2.1 First: signal redundancy is not noise redundancy</h3>
+<div class="keyresult">
+The entire population-coding literature on "does redundancy limit information" is about <b>noise correlations</b> — the trial-to-trial covariance $\Sigma(x)$ of the response at fixed stimulus. Your "redundancy in the activation maps" is <b>signal correlation</b> — the similarity of the mean tuning maps $r_n(x)$. These are orthogonal, and conflating them is the classic trap (<a href="http://kamaji:7327/nodes/019f11e5-307c-79b2-b2e3-d94c58e3a062">averbeck2006neural</a>).
+</div>
+
+<p>The decisive theoretical results, all in your graph:</p>
+<ul>
+  <li><a href="http://kamaji:7327/nodes/019f11eb-0b83-7ce0-97aa-4645fbbce00c">abbott1999effect</a> — <i>"correlations in the variabilities of neuronal firing rates do not, in general, limit the increase in coding accuracy provided by using large populations."</i> With independent noise, accuracy keeps growing with $N$.</li>
+  <li><a href="http://kamaji:7327/nodes/019eb7bc-7a2e-7613-b50a-16d014e2e21a">morenobote2014informationlimiting</a> — only <b>differential (information-limiting) correlations</b>, noise aligned with the signal gradient $\partial r/\partial x$, bound Fisher information at a finite ceiling as $N\to\infty$. Absent them, information is unbounded in $N$.</li>
+  <li><a href="http://kamaji:7327/nodes/019f11e5-408f-7e31-98f2-50c7e365dd5a">sompolinsky2001population</a>, <a href="http://kamaji:7327/nodes/019f1201-284d-7ba0-8116-8d8fa49c048c">ecker2011effect</a> — the Fisher-information machinery for correlated, heterogeneously-tuned populations.</li>
+</ul>
+
+<div class="good">
+<b>Consequence for your project.</b> Figure 2's claim — neurons are essentially independent Poisson once eye-position differences are accounted for — places you in the <b>no-information-limiting-correlations</b> regime. In that regime the theorems above say redundant tuning maps with independent noise <b>legitimately add information</b> (each is an independent noisy sample; $\sqrt N$ SNR gain). So for a <i>decoding</i> quantity, "the sum overcounts" is not automatically true — under your own Fig 2 finding, the sum of per-unit Fisher contributions is the <b>correct</b> total.
+</div>
+
+<h3>2.2 The correct "total" under independent Poisson: additive Fisher information</h3>
+<p>With counts $k_n\sim\mathrm{Poisson}(r_n(\theta)\tau)$ independent across $n$, the population log-likelihood is a sum, and the Fisher information matrix for a (possibly multi-dimensional) stimulus $\theta$ — e.g. 2-D retinal location, or the full stimulus feature vector — is</p>
+$$J(\theta)=\tau\sum_n \frac{\nabla r_n(\theta)\,\nabla r_n(\theta)^{\!\top}}{r_n(\theta)}.$$
+<p>This is a sum of rank-one PSD terms; Cramér–Rao gives $\mathrm{Cov}(\hat\theta)\succeq J(\theta)^{-1}$. Redundant units add the <i>same</i> rank-one term along a shared gradient direction, sharpening decoding in that direction — legitimate independent-noise averaging, not double counting. In the local-Gaussian (high-count) regime the mutual information reads off the eigenvalues $\lambda_i$ of $\Sigma_0^{1/2}J\,\Sigma_0^{1/2}$ (prior covariance $\Sigma_0$):</p>
+$$I(\theta;\mathbf k)\ \approx\ \tfrac12\sum_i \log_2\!\big(1+\lambda_i\big).$$
+
+<div class="keyresult">
+<b>This is Option C done right.</b> The eigendecomposition of the <b>Fisher information matrix</b> $J$ gives, in one object: (i) the redundancy-aware <b>total information</b> $\tfrac12\sum_i\log_2(1+\lambda_i)$, and (ii) the <b>effective dimensionality</b> — the number of modes with $\lambda_i\gtrsim 1$, or the participation ratio $N_{\mathrm{eff}}=(\sum_i\lambda_i)^2/\sum_i\lambda_i^2$. Redundant maps concentrate Fisher information along shared eigen-directions rather than opening new ones, so they are counted correctly, automatically, with no clustering.
+</div>
+
+<h3>2.3 Why raw fingerprint PCA is <i>not</i> the same thing</h3>
+<p>Declan's redundancy code builds a correlation matrix $C_{mn}=\mathrm{corr}\!\big(r_m(\cdot),r_n(\cdot)\big)$ from z-scored fingerprints (<code>FINGERPRINT_NORMALIZATION="zscore"</code>). Its eigendecomposition is a decomposition of the <b>signal</b> covariance of the maps. That equals the Fisher-information geometry <b>only if the noise is homoscedastic Gaussian</b> — constant variance across units and across space — because then Fisher information is proportional to the signal second-moment.</p>
+
+<div class="warn">
+Under Poisson the noise variance equals the mean, so the information-correct object weights each unit and each location by $1/r_n(x)$ — the <b>Poisson-whitened</b> map $r_n(x)/\sqrt{r_n(x)}$, equivalently the $\nabla r_n\nabla r_n^\top/r_n$ terms of $J$. Raw z-scored fingerprint PCA silently swaps Fig 2's Poisson noise model for a homoscedastic-Gaussian one. It is a fine <b>descriptive</b> measure of representational dimensionality — but do not read its eigen-spectrum as information.
+</div>
+
+<table class="overflow">
+<thead><tr><th>Version of Option C</th><th>Object decomposed</th><th>Noise model it assumes</th><th>Reads as</th></tr></thead>
+<tbody>
+<tr><td>z-scored fingerprint PCA <span class="small">(current code)</span></td><td>signal correlation $C$</td><td>homoscedastic Gaussian (implicit)</td><td>representational dimensionality — descriptive only</td></tr>
+<tr><td>Poisson-whitened / Fisher eigendecomposition</td><td>Fisher info matrix $J=\sum_n \nabla r_n\nabla r_n^{\!\top}/r_n$</td><td>independent Poisson — matches Fig 2</td><td>total information + effective dimensionality, in bits</td></tr>
+<tr><td>Full $\Sigma(x)$-whitened Fisher</td><td>$J=\sum r'\Sigma^{-1}r'$</td><td>arbitrary measured noise covariance</td><td>total information with real correlations (Option B)</td></tr>
+</tbody>
+</table>
+
+<h3>2.4 The caveat the twin forces on you</h3>
+<div class="warn">
+The 756 units are <b>pooled across sessions</b> — not a simultaneously-recorded population with a joint noise process. Independent-Poisson additivity of $J$ requires the units to be <i>distinct neurons</i> with independent noise. A duplicate map from pooling is either (a) a genuinely distinct neuron (information adds — legitimate) or (b) the same neuron re-instantiated across sessions (information must <b>not</b> be added). The Fisher framework makes this the explicit modeling decision: you sum over the <b>true number of independent neurons under simultaneous viewing</b>, which is a coverage/density question — not something a signal-correlation clustering heuristic answers. This, rather than "signal redundancy," may be the real quantity to pin down.
+</div>
+
+<h2>2.5 What is $\theta$? Fisher forces you to name it — and a fixation names it for you</h2>
+<p class="small"><span class="tag">the parameterization problem</span></p>
+
+<p>The discomfort is real and worth stating precisely: unlike the Skaggs / Option A quantities — which are KL divergences over a <i>discrete</i> stimulus ensemble and need no smooth parameter — the Fisher information $J(\theta)=\sum_n \nabla_\theta r_n\,\nabla_\theta r_n^{\!\top}/r_n$ only exists <b>relative to an explicit continuous parameter $\theta$ you must differentiate against</b>. Fisher cannot hand you a parameterization-free "total information about the stimulus." That is not a technicality to work around; it is the tool telling you it answers a <i>local discrimination</i> question — "how well can nearby values of $\theta$ be told apart" — and you must say what $\theta$ is.</p>
+
+<div class="keyresult">
+<b>In your setting the physics supplies $\theta$.</b> The moment-to-moment stimulus variation the retina actually undergoes within a fixation is dominated by the eye's drift and microsaccades — a 2-D translation $\boldsymbol\delta(t)$ of the image on the retina. So the natural parameter is $\theta=\boldsymbol\delta$, eye/image position, and it is not an artefact imposed for convenience: it is the real, low-dimensional latent of a fixation. $J(\boldsymbol\delta)$ is then a $2\times2$ matrix meaning <i>how precisely the population encodes the instantaneous retinal image shift</i> — how well downstream cortex could read eye position off the spikes in a short window. For a foveal-FEM paper that is arguably the <b>most</b> thesis-relevant information quantity available, not a difficult one.
+</div>
+
+<h3>2.5.1 Fisher is the local face of the single-spike information, not a rival framework</h3>
+<p>A single spike from unit $n$ is an observation whose likelihood over $\theta$ is proportional to $r_n(\theta)$. Its score is $\nabla_\theta\log r_n=\nabla r_n/r_n$, so one spike contributes Fisher (outer product of the score)</p>
+$$\mathcal J_n^{\text{per spike}}(\theta)=\frac{\nabla r_n\,\nabla r_n^{\!\top}}{r_n^{2}}.$$
+<p>Spikes from unit $n$ arrive at rate $r_n(\theta)$, so localization accumulates <i>per unit time</i> at rate $r_n\cdot \nabla r_n\nabla r_n^{\!\top}/r_n^2=\nabla r_n\nabla r_n^{\!\top}/r_n$, and over independent units</p>
+$$J(\theta)=\sum_n \frac{\nabla r_n\,\nabla r_n^{\!\top}}{r_n}\quad=\quad\text{rate-weighted accumulation of single-spike localization.}$$
+
+<div class="good">
+So $J$ and the Skaggs $I_n$ are the <b>same object $r_n(\theta)$ read two ways</b>: $I_n=D(p_{\mathrm{spk},n}\,\|\,p)$ is its <i>global</i> KL against the prior (parameterization-free, per spike); $J(\theta)$ is its <i>local</i> curvature — for a small shift, $D\big(p_{\mathrm{spk}}(\theta)\,\|\,p_{\mathrm{spk}}(\theta+\boldsymbol\delta)\big)\approx\tfrac12\,\boldsymbol\delta^{\!\top}J(\theta)\,\boldsymbol\delta$. You are not switching theories when you go from Option A to Option C — you are moving from the global divergence to its Hessian. The "explicit parameter" is exactly what buys you the <i>local</i>, differential reading; give it up and you are back to the parameterization-free global quantity, which Option A already delivers.
+</div>
+
+<h3>2.5.2 Where the limitation actually bites</h3>
+<div class="warn">
+Because $J$ is defined per named $\theta$, it only ever measures a <b>slice</b>. $J(\boldsymbol\delta)$ is information about the 2-D translation manifold — <i>not</i> about image content, which is astronomically higher-dimensional. If you tried to make $\theta$ the whole image, $J$ would be an enormous matrix of rank $\le N$, ill-conditioned, and its eigenvalues would not be interpretable. The honest rule: use Fisher when you have a <b>specific low-dimensional variable</b> whose local discriminability you care about (eye position during fixation is exactly that); use the discrete single-spike / decoding-MI route when you want "total information about the stimulus in general." Fisher's demand that you name $\theta$ is the same demand, restated, that "total information" is undefined until you say total information <i>about what</i>.
+</div>
+
+<h3>2.5.3 How you would actually compute it</h3>
+<p>You already build retinal stimuli from eye traces (<code>build_retinal_stimulus</code>), so $\nabla_{\boldsymbol\delta} r_n$ is a finite difference the pipeline supports directly: render the image at eye positions $\boldsymbol\delta$ and $\boldsymbol\delta\pm\epsilon\hat e_{x},\ \boldsymbol\delta\pm\epsilon\hat e_{y}$, pass through the twin, difference the rate maps. Per image and per fixation position you get a $2\times2$ $J(\boldsymbol\delta)$; the natural-image prior over content is a <b>nuisance</b> you average over. Eigenvalues of $J$ give the position-coding precision along each retinal axis, $\det J$ the localization-ellipse area (Cramér–Rao), and redundant units contribute correctly under Fig 2's independent-Poisson noise — no clustering, no discarding.</p>
+
+<h2>2.6 From a $2\times2$ matrix to a result: the reference point is the whole game</h2>
+<p class="small"><span class="tag">making it mean something</span></p>
+
+<p>A bare $J(\boldsymbol\delta)$ is a rate of information, not a finding. It becomes a result only against a reference. There are exactly three kinds, and you have all three in hand.</p>
+
+<h3>2.6.1 Physical reference — turn $J$ into a localization precision and compare to a length scale</h3>
+<p>Over a decoding window $\tau$, the population's spike counts bound how well an ideal observer recovers the retinal shift (Cramér–Rao): $\mathrm{Cov}(\hat{\boldsymbol\delta})\succeq (\tau J)^{-1}$. The eigenvalues of $\tau J$ give a $1\sigma$ localization ellipse with semi-axes</p>
+$$\sigma_i=\frac{1}{\sqrt{\lambda_i(\tau J)}}\quad[\text{degrees}],\qquad \text{ellipse area}\propto \big(\det \tau J\big)^{-1/2}.$$
+<p>Now $\sigma_i$ is in <b>arcminutes of visual angle</b> — a physical quantity with hard reference scales, and the result writes itself as an inequality against them:</p>
+<ul>
+  <li><b>Foveal cone spacing</b> ($\approx 0.5'$). Does the population localize to <i>finer than a single cone</i>? That is the definition of hyperacuity, and it is a yes/no headline.</li>
+  <li><b>Fixational drift amplitude</b> ($\approx$ a few arcmin over a fixation). If $\sigma\ll$ drift, the drift trajectory is <i>readable</i> from V1 — directly relevant to whether the system can discount its own eye motion.</li>
+  <li><b>Behavioral hyperacuity / Vernier thresholds</b> ($\approx 5$–$10''$). Does the population carry <i>enough</i> position information to support the animal's psychophysical limit, or is behavior below the neural ceiling?</li>
+  <li><b>Photoreceptor / retinal floor</b> — the hyperacuity endpoint reached in the fly by <a href="http://kamaji:7327/nodes/019f3dc8-1819-71c3-a182-e09b2460571d">bialek1989reading</a> ($\sim0.01^\circ$), and the primate-retina precision of <a href="http://kamaji:7327/nodes/019ecd0d-e072-7421-a8b8-c94dd4ab3810">wu2024fixational</a>. Sets the input-side reference the cortical population is compared against.</li>
+</ul>
+
+<h3>2.6.2 Prior reference — turn $J$ into bits, referenced against eye-position entropy</h3>
+<p>Fisher is local; a scalar bit-count needs a prior over $\boldsymbol\delta$. You <b>measure</b> that prior: it is the fixational eye-position distribution, covariance $\Sigma_0$. In the Gaussian regime</p>
+$$I(\boldsymbol\delta;\text{spikes})\ \approx\ \tfrac12\log_2\det\!\big(\mathbb I+\Sigma_0\,\tau J\big)\quad[\text{bits}],$$
+<p>and the reference is the eye-position entropy $H(\boldsymbol\delta)=\tfrac12\log_2\big((2\pi e)^2\det\Sigma_0\big)$: the population resolves a <b>fraction</b> $I/H$ of the fixational position uncertainty. "V1 pins down where the eye is to $X$% of the drift range in $\tau$&nbsp;ms" is a result a reader can hold onto.</p>
+
+<h3>2.6.3 Comparative reference — the other $J$ is the reference</h3>
+<p>The $2\times2$ becomes a claim the moment it is a contrast. Each of these is a figure panel, and each answers a question the paper already poses:</p>
+<table class="overflow">
+<thead><tr><th>Contrast</th><th>The result it yields</th></tr></thead>
+<tbody>
+<tr><td>drift integrated <b>vs</b> static image</td><td>does fixational motion <i>add</i> or <i>degrade</i> position information — the <a href="http://kamaji:7327/nodes/019ecd0d-e072-7421-a8b8-c94dd4ab3810">wu2024fixational</a> thesis, tested in cortex</td></tr>
+<tr><td>full 756-unit <b>vs</b> redundancy-reduced population</td><td>does Declan's subset <i>preserve</i> the decodable position information, or throw it away — a direct test of subset-selection</td></tr>
+<tr><td>foveal <b>vs</b> parafoveal units</td><td>the eccentricity dependence of position coding — expected to fall off, quantifies how fast</td></tr>
+<tr><td>twin <b>vs</b> recorded population</td><td>does the digital twin's $J$ match the data's $J$ — validation of using the twin for this at all</td></tr>
+</tbody>
+</table>
+
+<h3>2.6.4 Where redundancy re-enters — as efficiency, not as a correction</h3>
+<div class="good">
+Once the result is "the population localizes to $\sigma$ arcmin," redundancy stops being a nuisance to correct and becomes a <b>property to report</b>: what is the effective number of independent channels $N_{\mathrm{eff}}$ (participation ratio of $J$'s eigenspectrum, §2.2) that delivers that precision, versus the nominal 756? A population reaching cone-scale localization with $N_{\mathrm{eff}}\ll N$ is a statement about the <i>efficiency and redundancy</i> of the foveal code — which is the original question, now answered as a finding rather than dodged as an artefact.
+</div>
+
+<h3>2.6.5 The averaging you cannot skip</h3>
+<div class="warn">
+$J(\boldsymbol\delta\,;\,\text{image})$ depends on both the eye position and the image content. A single matrix is one point. The <i>result</i> is the distribution of localization precision over the natural-viewing ensemble — average $J$ (or, more correctly, average the <i>information</i>) over the image prior and report the median $\sigma$ with its spread across images and fixation positions. State the window $\tau$ explicitly; the precision scales as $\tau^{-1/2}$, so every number is "$\sigma$ arcmin in a $\tau$ ms window."
+</div>
+
+<h2>3. How the options relate</h2>
+<ul>
+  <li><b>Option A</b> answers "how many bits does one population spike carry about location, and how much of that is the identity code" — <i>intensive</i>, redundancy-invariant, assumption-light. The which-unit term is a clean diversity readout.</li>
+  <li><b>Option C (Fisher version)</b> answers "how much total information does the population carry, and over how many effective dimensions" — <i>extensive</i>, and under Fig 2's independent-Poisson finding it is the theoretically correct total, with redundancy handled by the eigen-geometry of $J$ rather than by discarding units.</li>
+  <li>They are complementary, not competing: A is the per-spike story, C is the population-decoding story. Together they retire subset-selection as the <i>primary</i> method while keeping the medoid count as one comparison point.</li>
+</ul>
+
+<hr class="soft"/>
+<h2>Citations (all in the graph)</h2>
+<table class="overflow">
+<thead><tr><th>Citekey</th><th>What it licenses here</th></tr></thead>
+<tbody>
+<tr><td class="ck"><a href="http://kamaji:7327/nodes/019f3dc7-c540-7542-9e57-32a2e9fb2090">skaggs1993</a></td><td>Spatial single-spike information $I_n$; the $x\log x$ functional over a rate map.</td></tr>
+<tr><td class="ck"><a href="http://kamaji:7327/nodes/019f39b0-ef8f-7861-b4ad-cba1a98c07b6">brenner2000</a></td><td>Single spike time as mutual information; the Poisson point-process framing.</td></tr>
+<tr><td class="ck"><a href="http://kamaji:7327/nodes/019f3dc5-06d4-7111-a3d4-386ed9d11489">deweese1999</a></td><td>Additive specific information vs. non-additive surprise — validates the Option A decomposition.</td></tr>
+<tr><td class="ck"><a href="http://kamaji:7327/nodes/019f39b1-ff9f-75b2-83c3-addfdfe5b63a">williamson2015</a></td><td>Single-spike information $\equiv$ Poisson log-likelihood — bridges maps to decoding.</td></tr>
+<tr><td class="ck"><a href="http://kamaji:7327/nodes/019f11eb-0b83-7ce0-97aa-4645fbbce00c">abbott1999</a></td><td>Independent noise → coding accuracy grows with $N$; redundant tuning is not information-limiting.</td></tr>
+<tr><td class="ck"><a href="http://kamaji:7327/nodes/019eb7bc-7a2e-7613-b50a-16d014e2e21a">morenobote2014</a></td><td>Only differential correlations bound Fisher info; licenses summing under Fig 2.</td></tr>
+<tr><td class="ck"><a href="http://kamaji:7327/nodes/019f11e5-307c-79b2-b2e3-d94c58e3a062">averbeck2006</a></td><td>Signal- vs noise-correlation distinction — the framing for §2.1.</td></tr>
+<tr><td class="ck"><a href="http://kamaji:7327/nodes/019f11e5-408f-7e31-98f2-50c7e365dd5a">sompolinsky2001</a></td><td>Fisher information with correlated noise — the $\Sigma$-whitened machinery.</td></tr>
+<tr><td class="ck"><a href="http://kamaji:7327/nodes/019f1201-284d-7ba0-8116-8d8fa49c048c">ecker2011</a></td><td>Diversely-tuned heterogeneous populations; Fisher info + ML decoding.</td></tr>
+<tr><td class="ck"><a href="http://kamaji:7327/nodes/019f11c0-2ebb-7d52-a06d-3be8e146c7fa">kanitscheider2015</a></td><td>Origin of information-limiting correlations — what would break the Fig 2 regime.</td></tr>
+<tr><td class="ck"><a href="http://kamaji:7327/nodes/019f11e9-9367-7d93-b805-ed796a3ae98f">zohary1994</a></td><td>Correlated discharge and the $\sqrt N$ saturation of pooled signals.</td></tr>
+<tr><td class="ck"><a href="http://kamaji:7327/nodes/019e15e8-855f-7472-9a8f-75e4c9ac1008">olshausen1996</a></td><td>Signal-redundancy reduction / efficient coding — the "decorrelate the maps" lineage (representation, not decoding).</td></tr>
+</tbody>
+</table>
+
+<p class="meta">Synthesis note on single-spike information: kamaji:7327/notes/019f3df3-4042-71b1-8def-6ee398d8f136</p>
+
+</div>
+</body>
+</html>
