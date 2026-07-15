@@ -180,7 +180,7 @@ def _plot_ccnorm_violins(ax, abl):
 
     ax.set_xlim(-0.6, 1.6)
     ax.set_xticks([0, 1])
-    ax.set_xticklabels(["Full", "Ablated"])
+    ax.set_xticklabels(["Retinal +\nbehavioral\n(full)", "Retinal\nonly\n(ablated)"])
     ax.set_ylabel("Held-out prediction\n(ccnorm)")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -210,7 +210,7 @@ def _plot_singletrial_r2_violins(ax, abl):
     # Baseline: the PSTH-ceiling median that the twin conditions beat.
     psth_med = float(np.median(gp))
     ax.axhline(psth_med, color="0.55", lw=0.8, ls="--", alpha=0.8, zorder=0)
-    ax.text(2.58, psth_med, "PSTH\nmedian", color="0.5", fontsize=5.6,
+    ax.text(2.58, psth_med, "Trial-avg.\nmedian", color="0.5", fontsize=5.6,
             va="center", ha="left", clip_on=False)
 
     # Three paired comparisons, staggered so the brackets never overlap: the
@@ -242,7 +242,8 @@ def _plot_singletrial_r2_violins(ax, abl):
     ax.axhline(0, color="0.7", lw=0.6, ls=":")
     ax.set_xlim(-0.6, 2.6)
     ax.set_xticks([0, 1, 2])
-    ax.set_xticklabels(["PSTH", "Full", "Ablated"])
+    ax.set_xticklabels(["Trial\naverage\n(PSTH)", "Retinal +\nbehavioral\n(full)",
+                        "Retinal\nonly\n(ablated)"], fontsize=5.8)
     ax.set_ylabel("Single-trial $r^2$")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -287,7 +288,7 @@ def _plot_payoff_with_marginal(ax, ax_marg, abl):
     ax.set_xlim(0, 1)
     ax.set_ylim(0, ymax)
     ax.set_xlabel("Fraction of rate modulation\ndue to FEM")
-    ax.set_ylabel("Single-trial $r^2$ gain\n(Ablated / PSTH)")
+    ax.set_ylabel("Single-trial $r^2$ gain\n(Ablated / trial avg.)")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
 

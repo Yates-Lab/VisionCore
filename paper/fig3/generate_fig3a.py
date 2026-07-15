@@ -34,7 +34,7 @@ import argparse
 import numpy as np
 from PIL import Image as PILImage, ImageDraw
 import matplotlib.pyplot as plt
-from matplotlib.patches import Polygon, Circle, FancyArrowPatch
+from matplotlib.patches import Polygon, Circle, FancyArrowPatch, FancyBboxPatch
 from matplotlib.lines import Line2D
 
 from _fig3_data import FIG_DIR, configure_matplotlib
@@ -984,14 +984,15 @@ def _mini_trace(ax, t, y_arr, x, y, w, h, *, color, lw=0.9, y2=None,
 
 
 def _draw_behavior_traces(ax, assets, x0, y_top, w, *, labeled=True,
-                          scale_bar=True, bracket=True):
+                          scale_bar=True, box=True):
     """Draw the eye-position + velocity covariate panels in the rect whose top
     edge is `y_top`, left edge `x0`, width `w`.
 
     `labeled` adds the left-side "eye position / eye velocity" text and the x/y
-    colour key; `scale_bar` adds a 100 ms bar; `bracket` adds the right-side
-    collecting bracket (and returns its output anchor). Returns a bbox +
-    optional bracket anchor dict.
+    colour key; `scale_bar` adds a 100 ms bar; `box` wraps the traces (and their
+    labels) in an unfilled rounded rectangle so the extraretinal covariate reads
+    as a discrete model input — like the retinal-input cube — and returns the
+    box's right-edge output anchor. Returns a bbox + optional output anchor.
     """
     t = np.asarray(assets.behavior_t, float)
     eye = np.asarray(assets.behavior_eyepos, float)
@@ -1038,61 +1039,63 @@ def _draw_behavior_traces(ax, assets, x0, y_top, w, *, labeled=True,
         "y_top": y_top,
     }
 
-    # ── Right bracket collecting both traces into one signal ────────────────
-    if bracket:
-        br_x = x0 + w + 0.14
-        br_y0 = y_speed + 0.02
-        br_y1 = y_eye + panel_h - 0.02
-        br_mid = 0.5 * (br_y0 + br_y1)
-        tick = 0.10
-        ax.add_line(Line2D([br_x, br_x], [br_y0, br_y1], color="#333", lw=1.1,
-                           zorder=6))
-        ax.add_line(Line2D([br_x - tick, br_x], [br_y0, br_y0], color="#333",
-                           lw=1.1, zorder=6))
-        ax.add_line(Line2D([br_x - tick, br_x], [br_y1, br_y1], color="#333",
-                           lw=1.1, zorder=6))
-        ax.add_line(Line2D([br_x, br_x + tick], [br_mid, br_mid], color="#333",
-                           lw=1.1, zorder=6))
-        result["bracket_x"] = br_x + tick
-        result["bracket_mid_y"] = br_mid
-        result["x_right"] = br_x + tick + 0.05
+    # ── Enclosing module box: an unfilled rounded rectangle around the two
+    #    trace panels + their labels, granting the extraretinal covariate the
+    #    same object-status as the retinal-input cube. Signal leaves the box's
+    #    right-edge midpoint (no separate collecting bracket). ────────────────
+    if box:
+        box_left = x_left - 0.40
+        box_right = x0 + w + 0.14
+        box_top = y_top + 0.08
+        box_bottom = (bar_y - 0.26) if scale_bar else (y_speed - 0.12)
+        ax.add_patch(FancyBboxPatch(
+            (box_left, box_bottom), box_right - box_left, box_top - box_bottom,
+            boxstyle="round,pad=0,rounding_size=0.12",
+            facecolor="none", edgecolor="#555", linewidth=1.0, zorder=5))
+        out_mid_y = 0.5 * (y_speed + y_eye + panel_h)
+        result["x_left"] = box_left
+        result["x_right"] = box_right
+        result["y_top"] = box_top
+        result["y_bottom"] = box_bottom
+        result["out_x"] = box_right
+        result["out_mid_y"] = out_mid_y
 
     return result
 
 
-def _route_behavior_to_concat(ax, bracket_x, bracket_mid_y, concat_xy):
-    """Route the collected behavior signal from the trace bracket rightward and
-    up into the concat marker, with the "Extraretinal behavior" label and the
-    zero-ablation indicator on the vertical run."""
+def _route_behavior_to_concat(ax, out_x, out_mid_y, concat_xy):
+    """Route the extraretinal signal from the module box rightward, past the
+    ablation gate, then up into the concat marker.
+
+    The ablation gate (red ⊘) sits on the horizontal run with a two-line
+    "Ablated / extraretinal input → 0" label directly above it, so a reader
+    following the arrow rightward meets the ablation in place before the signal
+    turns up into the model flow."""
     cx, cy = concat_xy
-    br_mid = bracket_mid_y
+    mid = out_mid_y
     elbow_x = cx
-    ax.add_line(Line2D([bracket_x, elbow_x], [br_mid, br_mid], color="#333",
+    ax.add_line(Line2D([out_x, elbow_x], [mid, mid], color="#333",
                        lw=1.1, zorder=6))
-    ax.add_patch(FancyArrowPatch((elbow_x, br_mid), (cx, cy - OP_MARKER_RADIUS),
+    ax.add_patch(FancyArrowPatch((elbow_x, mid), (cx, cy - OP_MARKER_RADIUS),
                                  arrowstyle="-|>", lw=1.1, color="#333",
                                  mutation_scale=10, zorder=6,
                                  shrinkA=0, shrinkB=0))
 
-    # ── Zero-ablation indicator on the vertical segment ─────────────────────
-    # Placed 3/4 of the way down toward the elbow corner so it clears ConvGRU.
-    zx = cx
-    zy = 0.75 * br_mid + 0.25 * cy
-    ax.add_patch(Circle((zx, zy), ABLATE_RADIUS, facecolor="white",
+    # ── Ablation gate on the horizontal run, label stacked above it ─────────
+    gx = out_x + 0.55 * (elbow_x - out_x)
+    gy = mid
+    ax.add_patch(Circle((gx, gy), ABLATE_RADIUS, facecolor="white",
                         edgecolor="#c0392b", linewidth=1.1, zorder=13))
     ang = np.deg2rad(45)
-    ax.add_line(Line2D([zx - ABLATE_RADIUS * np.cos(ang), zx + ABLATE_RADIUS * np.cos(ang)],
-                       [zy - ABLATE_RADIUS * np.sin(ang), zy + ABLATE_RADIUS * np.sin(ang)],
+    ax.add_line(Line2D([gx - ABLATE_RADIUS * np.cos(ang), gx + ABLATE_RADIUS * np.cos(ang)],
+                       [gy - ABLATE_RADIUS * np.sin(ang), gy + ABLATE_RADIUS * np.sin(ang)],
                        color="#c0392b", lw=1.1, zorder=13.1))
-    # Short arrow from the label pointing back into the ablate glyph.
-    arrow_tail_x = zx + ABLATE_RADIUS + 0.42
-    ax.add_patch(FancyArrowPatch((arrow_tail_x, zy), (zx + ABLATE_RADIUS + 0.03, zy),
-                                 arrowstyle="-|>", lw=1.1, color="#c0392b",
-                                 mutation_scale=9, zorder=13.2,
-                                 shrinkA=0, shrinkB=0))
-    ax.text(arrow_tail_x + 0.08, zy, "Ablate\n(set to 0)", ha="left",
-            va="center", fontsize=9.0, color="#c0392b", style="italic",
-            linespacing=1.0, zorder=13.1)
+    # Two-line label above the gate: bold condition token + italic clarifier.
+    base_y = gy + ABLATE_RADIUS + 0.07
+    ax.text(gx, base_y, "behavioral input → 0", ha="center", va="bottom",
+            fontsize=8.0, color="#c0392b", style="italic", zorder=13.1)
+    ax.text(gx, base_y + 0.24, "Ablated", ha="center", va="bottom",
+            fontsize=9.5, color="#c0392b", fontweight="bold", zorder=13.1)
 
 
 PSTH_GAP = 0.62
@@ -1189,18 +1192,18 @@ def _draw_all(ax, assets):
                 arrowprops=dict(arrowstyle="->", lw=1.0, color="#333"),
                 zorder=4.8)
 
-    # Behavioral path: labelled covariates beneath the input cube, bracketed
-    # and routed across to the concat marker.
+    # Behavioral path: labelled covariates beneath the input cube, boxed as a
+    # discrete model input and routed across to the concat marker.
     beh_x0 = cube_in["x_left"]
     beh_w = arch["frontend_right_x"] - beh_x0
     beh_top = cube_in["bottom_y"] - BOT_BEH_GAP
     beh = _draw_behavior_traces(ax, assets, beh_x0, beh_top, beh_w,
-                                labeled=True, scale_bar=True, bracket=True)
-    # Bold title above the traces (mirrors the "Retinal input" title).
-    ax.text(beh_x0 + beh_w / 2, beh_top + 0.10, "Extraretinal behavior",
+                                labeled=True, scale_bar=True, box=True)
+    # Bold title above the box (mirrors the "Retinal input" title over the cube).
+    ax.text(beh_x0 + beh_w / 2, beh["y_top"] + 0.10, "Behavioral input",
             ha="center", va="bottom", fontsize=STIM_HEADER_FS, color=TEXT_COLOR,
             fontweight="bold")
-    _route_behavior_to_concat(ax, beh["bracket_x"], beh["bracket_mid_y"],
+    _route_behavior_to_concat(ax, beh["out_x"], beh["out_mid_y"],
                               arch["concat_xy"])
 
     psth = _draw_readout_psths(ax, assets, arch)
