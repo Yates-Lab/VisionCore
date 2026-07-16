@@ -1,18 +1,29 @@
 """Unified data loader for figure 3's analysis row (panels C/D/E).
 
-Within-model behavior ablation on fixRSVP: hold the trained concat-model weights
-fixed and, at inference, ablate only the extraretinal `behavior` input
-(eye_vel x20, eye_pos x2 feeding the modulator):
+Within-model ablations on fixRSVP: hold the trained concat-model weights fixed
+and, at inference, remove one of the two FEM information routes:
 
-  - intact    : full behavior input (reference)
-  - zeroed    : behavior set to 0 (extraretinal route removed; committed condition)
-  - permuted  : behavior shuffled across trials (in-distribution adversarial control)
+  - intact     : full retinal stimulus + full behavior input (reference)
+  - zeroed     : behavior set to 0 (extraretinal route removed; "retinal only")
+  - stabilized : retinal input frozen at the per-trial MEDOID gaze so the image
+                 no longer moves with the eye (reafferent route removed;
+                 "extraretinal only"), behavior intact.
 
-The fixRSVP stimulus is rendered in retinal (eye-referenced) coordinates, so eye
-movements are already in the visual stream; the behavior tensor is the only
-*separate* extraretinal route. If single-trial prediction is preserved under
-ablation, the trial-to-trial variability the twin captures is explained by the
-moving retinal image, not by extraretinal modulation of V1.
+The two ablations are symmetric counterfactuals. The fixRSVP stimulus is rendered
+in retinal (eye-referenced) coordinates, so fixational eye movements are already
+in the visual stream; the behavior tensor is the only *separate* extraretinal
+route. `zeroed` removes the extraretinal route; `stabilized` removes the reafferent
+(retinal-image-motion) route. If single-trial prediction survives `zeroed` but
+collapses under `stabilized`, the trial-to-trial variability the twin captures is
+carried by the moving retinal image, not by extraretinal modulation of V1.
+
+The stabilized retinal input is rendered pixel-exactly with DataYatesV1
+`FixRsvpTrial.get_rois` at a constant medoid ROI (validated against the native
+grid_sample renderer), in the raw 240 Hz frame, then decimated to the model's
+120 Hz frame exactly as the training pipeline does (`downsample_stimulus` =
+decimation). A per-session alignment gate asserts decimate(raw stored stim) ==
+embedded `dset['stim']` bit-exactly, so the substitution is frame-aligned and the
+intact re-render carries zero rendering artifact.
 
 This cache is the single source for all three analysis panels, so every panel
 draws on the same sessions, neurons, and `good` mask:
@@ -51,50 +62,103 @@ from _fig3_helpers import (
 
 CACHE_PATH = CACHE_DIR / "fig3_bottomrow_ablation.pkl"
 
-CONDS = ["intact", "zeroed", "permuted"]
-ABLATIONS = ["zeroed", "permuted"]            # committed lead first
-COND_LABEL = {"intact": "intact", "zeroed": "zeroed", "permuted": "permuted"}
+CONDS = ["intact", "zeroed", "stabilized"]
+ABLATIONS = ["zeroed", "stabilized"]          # extraretinal-route first
+COND_LABEL = {"intact": "intact", "zeroed": "zeroed", "stabilized": "stabilized"}
+BEHAVIOR_CONDS = ["intact", "zeroed"]         # conditions that keep the stored stim
+STIM_CONDS = ["stabilized"]                   # conditions that replace the stim
+FIX_RADIUS = 1.0                              # deg; fixation = hypot(eyepos) < 1.0
 
-PERM_SEED = 42
 CCNORM_N_SPLITS = 200
 MIN_TRIALS_PER_PHASE = 10
 
 
-def build_modifiers(dset, trials, trial_inds, fixation, NT, seed=PERM_SEED):
-    """Return {cond: behavior_modifier or None}. Each modifier maps
-    (behavior_tensor, itrial) -> tensor of same shape."""
+def build_behavior_modifiers():
+    """Return {cond: behavior_modifier or None} for the behavior-route conditions.
+    Each modifier maps (behavior_tensor, itrial) -> tensor of same shape."""
     import torch
-
-    src = []
-    for t in trials:
-        ix = (trial_inds == t) & fixation
-        src.append(dset['behavior'][ix] if ix.any() else None)
-
-    valid_idx = np.where([s is not None for s in src])[0]
-    rng = np.random.default_rng(seed)
-    perm = np.arange(NT)
-    vperm = rng.permutation(valid_idx)
-    for _ in range(5):
-        if np.any(vperm != valid_idx):
-            break
-        vperm = rng.permutation(valid_idx)
-    perm[valid_idx] = vperm
 
     def zeroed(b, _itrial):
         return torch.zeros_like(b)
 
-    def permuted(b, itrial):
-        s = src[perm[itrial]]
-        if s is None:
-            return torch.zeros_like(b)
-        bn = b.clone()
-        n = min(s.shape[0], b.shape[0])
-        bn[:n] = s[:n]
-        if n < b.shape[0]:
-            bn[n:] = s.mean(dim=0, keepdim=True)
-        return bn
+    return {"intact": None, "zeroed": zeroed}
 
-    return {"intact": None, "zeroed": zeroed, "permuted": permuted}
+
+def _medoid_bin(gaze_xy):
+    """Index (into the passed array) of the sample minimizing summed Euclidean
+    distance to all others. gaze_xy: (n, 2)."""
+    d = np.sqrt(((gaze_xy[:, None, :] - gaze_xy[None, :, :]) ** 2).sum(-1)).sum(1)
+    return int(np.argmin(d))
+
+
+def build_stabilized_stim(session_name, embedded_stim, factor):
+    """Return (stab_stim, align_maxabs, n_trials_stab) for the reafferent ablation.
+
+    stab_stim: float32 array shaped like `embedded_stim` (N_emb, 1, 51, 51),
+    pixel-normalized ((raw-127)/255), a drop-in for dset['stim']; the retinal image
+    is frozen at each trial's medoid gaze while the RSVP images still flash.
+
+    The stim is rendered pixel-exactly via DataYatesV1 `FixRsvpTrial.get_rois` with a
+    constant medoid ROI in the raw 240 Hz frame, then decimated to the model's
+    120 Hz frame (the pipeline's `downsample_stimulus` is decimation). Because the
+    other covariates are average-pooled at downsample time, the render must use the
+    RAW covariates, not the embedded ones.
+
+    align_maxabs: max |decimate(raw stored stim) - embedded_stim| over all bins;
+    MUST be 0 for the substitution to be frame-aligned (also proves the intact
+    re-render is artifact-free).
+    """
+    from DataYatesV1.utils.io import YatesV1Session
+    from DataYatesV1.exp.fix_rsvp import FixRsvpTrial
+    from DataYatesV1.utils.general import get_clock_functions
+    from DataYatesV1.utils.data.datasets import DictDataset
+
+    sess = YatesV1Session(session_name)
+    exp = sess.exp
+    ptb2ephys, _ = get_clock_functions(exp)
+    raw = DictDataset.load(sess.sess_dir / "datasets" / "fixrsvp.dset")
+
+    raw_stim = raw["stim"].numpy()                       # (Nraw,51,51) uint8
+    trial_inds = raw["trial_inds"].numpy().astype(int)
+    t_bins = raw["t_bins"].numpy()
+    roi_all = raw["roi"].numpy()
+    dpi_pix = raw["dpi_pix"].numpy()
+    dpi_valid = raw["dpi_valid"].numpy() > 0
+    eyepos = raw["eyepos"].numpy()
+    fixation = np.hypot(eyepos[:, 0], eyepos[:, 1]) < FIX_RADIUS
+
+    Nraw = raw_stim.shape[0]
+    keep = (Nraw // factor) * factor
+
+    # alignment gate: decimate(raw stored) must equal embedded stim
+    emb = np.asarray(embedded_stim)
+    emb_px = np.rint(emb.reshape(emb.shape[0], *emb.shape[-2:]) * 255 + 127).astype(int)
+    dec = raw_stim[:keep:factor].astype(int)
+    n = min(len(dec), len(emb_px))
+    align_maxabs = int(np.abs(dec[:n] - emb_px[:n]).max())
+
+    # per-trial medoid-stabilized render (raw frame)
+    stab_raw = raw_stim.copy()
+    n_trials_stab = 0
+    for iT in np.unique(trial_inds):
+        m = trial_inds == iT
+        valid = m & fixation & dpi_valid
+        if valid.sum() == 0:
+            continue
+        vidx = np.where(valid)[0]
+        med = vidx[_medoid_bin(dpi_pix[vidx])]
+        trial = FixRsvpTrial(exp["D"][iT], exp["S"])
+        start_idx = np.where(trial.image_ids == 2)[0][0]
+        flip_times = ptb2ephys(trial.flip_times[start_idx:])
+        hist_idx = np.searchsorted(flip_times, t_bins[m], side="right") - 1 + start_idx
+        roi_const = np.repeat(roi_all[med][None], m.sum(), axis=0)
+        stab_raw[m] = trial.get_rois(hist_idx, roi=roi_const)
+        n_trials_stab += 1
+
+    stab_dec = stab_raw[:keep:factor].astype(np.float32)
+    stab_stim = ((stab_dec - 127.0) / 255.0)[:, None]    # (Nemb,1,51,51)
+    stab_stim = stab_stim[:emb.shape[0]]
+    return stab_stim.astype(np.float32), align_maxabs, n_trials_stab
 
 
 def _var_explained(pred, true, axis=None):
@@ -196,7 +260,22 @@ def _run_inference():
         T = int(psth_inds_flat.max()) + 1
         stim_lags = np.array(dataset_config['keys_lags']['stim'])
 
-        modifiers = build_modifiers(dset, trials, trial_inds, fixation, NT)
+        beh_mod = build_behavior_modifiers()
+
+        # Reafferent-ablation stim: retinal image frozen at the per-trial medoid
+        # gaze, rendered from raw data and decimated to the model frame. The
+        # alignment gate must pass (== 0) or the substitution is not frame-aligned.
+        samp = dataset_config.get('sampling', {})
+        factor = (int(samp['source_rate']) // int(samp['target_rate'])) if samp else 1
+        stab_stim_np, align_maxabs, n_tr_stab = build_stabilized_stim(
+            session_name, dset['stim'].numpy(), factor)
+        print(f"  stabilized render: {n_tr_stab} trials, factor={factor}, "
+              f"alignment max-abs(decimate(raw)-embedded)={align_maxabs}")
+        if align_maxabs != 0:
+            print(f"  Skipping: stabilized-stim alignment gate failed "
+                  f"(max-abs={align_maxabs})")
+            continue
+        stab_stim = torch.from_numpy(stab_stim_np)
 
         robs = np.full((NT, T, NC), np.nan)
         dfs = np.full((NT, T, NC), np.nan)
@@ -210,15 +289,20 @@ def _run_inference():
             stim_indices = np.where(ix)[0]
             stim_lag_indices = stim_indices[:, None] - stim_lags[None, :]
             stim = dset['stim'][stim_lag_indices].permute(0, 2, 1, 3, 4)
+            stim_stab = stab_stim[stim_lag_indices].permute(0, 2, 1, 3, 4)
             behavior0 = dset['behavior'][ix]
             t_inds = psth_inds_flat[ix].astype(int)
             fix_dur[itrial] = len(t_inds)
             robs[itrial, t_inds] = robs_flat[ix]
             dfs[itrial, t_inds] = np.asarray(dset['dfs'][ix])
             for c in CONDS:
-                behavior = behavior0 if modifiers[c] is None else modifiers[c](behavior0, itrial)
-                out = run_model(model, {'stim': stim, 'behavior': behavior},
-                                dataset_idx=dataset_idx)
+                if c in STIM_CONDS:            # replace stim, keep behavior intact
+                    batch = {'stim': stim_stab, 'behavior': behavior0}
+                else:                          # keep stored stim, modify behavior
+                    behavior = (behavior0 if beh_mod[c] is None
+                                else beh_mod[c](behavior0, itrial))
+                    batch = {'stim': stim, 'behavior': behavior}
+                out = run_model(model, batch, dataset_idx=dataset_idx)
                 rhat[c][itrial, t_inds] = out['rhat'].detach().cpu().numpy()
 
         good_trials = fix_dur > MIN_FIX_DUR

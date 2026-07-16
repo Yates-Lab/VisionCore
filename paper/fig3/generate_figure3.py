@@ -4,8 +4,10 @@ Renders the digital-twin mechanism figure:
 
   A  Training and test stimuli (schematic provenance row)
   B  Digital twin schematic (architecture render)
-  C  Held-out (trial-averaged) prediction: intact vs behavior-ablated ccnorm
-  D  Single-trial r^2: PSTH baseline vs full twin vs behavior-ablated twin
+  C  Held-out (trial-averaged) ccnorm: full twin vs retinal-only (behavior
+     zeroed) vs extraretinal-only (retina stabilized)
+  D  Single-trial r^2 (vs the PSTH-median reference line): full twin vs
+     retinal-only vs extraretinal-only
   E  Empirical FEM modulation (1-alpha) vs the ablated twin's single-trial
      r^2 gain over the PSTH baseline, with a marginal gain distribution
 
@@ -36,9 +38,11 @@ from _fig3a_data import load_panel_a_assets
 from generate_fig3a import plot_panel_a
 
 
-# Condition colors: intact/full = blue, behavior-ablated = red, PSTH = grey.
+# Condition colors: intact/full = blue, behavior-ablated (retinal only) = red,
+# stabilized (extraretinal only) = purple, PSTH = grey.
 INTACT_COLOR = "#1f77b4"
 ABLATED_COLOR = "#d62728"
+STABILIZED_COLOR = "#9467bd"
 PSTH_COLOR = "0.55"
 SCATTER_COLOR = "0.35"
 ACCENT = "#c0392b"
@@ -164,33 +168,39 @@ def _plot_ccnorm_violins(ax, abl):
     good = np.asarray(abl["good"], dtype=bool)
     intact = np.asarray(abl["ccnorm"]["intact"], dtype=float)
     ablated = np.asarray(abl["ccnorm"]["zeroed"], dtype=float)
-    m = good & _finite_mask(intact, ablated)
-    gi, ga = intact[m], ablated[m]
+    stab = np.asarray(abl["ccnorm"]["stabilized"], dtype=float)
+    m = good & _finite_mask(intact, ablated, stab)
+    gi, ga, gs = intact[m], ablated[m], stab[m]
 
-    _violin_box(ax, [gi, ga], [0, 1], [INTACT_COLOR, ABLATED_COLOR])
+    _violin_box(ax, [gi, ga, gs], [0, 1, 2],
+                [INTACT_COLOR, ABLATED_COLOR, STABILIZED_COLOR])
 
-    p = wilcoxon(gi, ga).pvalue
-    d = float(np.median(ga - gi))   # Ablated - Full: a decrease under ablation
     intact_med = float(np.median(gi))
-    # Ablation cost as a fraction of the full twin's trial-averaged prediction,
-    # matching panel D's "(X% of total)" normalization so C and D read the same.
-    pct = 100.0 * abs(d) / intact_med if intact_med != 0 else np.nan
-    # ccnorm is bounded at 1 (normalized correlation): keep 1.0 as the top tick,
-    # but extend the axis above it so the significance connector sits clear above
-    # the distributions rather than crowding them.
-    ax.set_ylim(0, 1.20)
+    p_z = wilcoxon(gi, ga).pvalue
+    p_s = wilcoxon(gi, gs).pvalue
+    d_z = float(np.median(ga - gi))   # extraretinal ablation cost (retinal only)
+    d_s = float(np.median(gs - gi))   # reafferent ablation cost (extraretinal only)
+    pct_z = 100.0 * abs(d_z) / intact_med if intact_med != 0 else np.nan
+    pct_s = 100.0 * abs(d_s) / intact_med if intact_med != 0 else np.nan
+    # ccnorm is bounded at 1: keep 1.0 as the top tick but extend the axis so the
+    # two stacked significance connectors sit clear above the distributions.
+    ax.set_ylim(0, 1.42)
     ax.set_yticks(np.arange(0, 1.001, 0.2))
-    _sig_bracket(ax, 0, 1, 1.02, p, h=0.014, gap=0.045,
-                 delta=f"Δ={d:+.3f}\n({pct:.0f}% of total)")
+    _sig_bracket(ax, 0, 1, 1.02, p_z, h=0.014, gap=0.045,
+                 delta=f"Δ={d_z:+.3f}\n({pct_z:.0f}% of total)")
+    _sig_bracket(ax, 0, 2, 1.24, p_s, h=0.014, gap=0.045,
+                 delta=f"Δ={d_s:+.3f}\n({pct_s:.0f}% of total)")
 
-    ax.set_xlim(-0.6, 1.6)
-    ax.set_xticks([0, 1])
-    ax.set_xticklabels(["Retinal +\nbehavioral\n(full)", "Retinal\nonly\n(ablated)"])
+    ax.set_xlim(-0.6, 2.6)
+    ax.set_xticks([0, 1, 2])
+    ax.set_xticklabels(["Retinal +\nbehavioral\n(full)", "Retinal\nonly\n(ablated)",
+                        "Extraretinal\nonly\n(stabilized)"], fontsize=5.8)
     ax.set_ylabel("Held-out prediction\n(ccnorm)")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
-    print(f"Panel C — ccnorm (N={m.sum()}): intact med={np.median(gi):.3f}, "
-          f"ablated med={np.median(ga):.3f}, Δ={d:+.3f}, Wilcoxon p={p:.2e}")
+    print(f"Panel C — ccnorm (N={m.sum()}): intact med={intact_med:.3f}, "
+          f"zeroed med={np.median(ga):.3f} (Δ={d_z:+.3f}, p={p_z:.2e}), "
+          f"stabilized med={np.median(gs):.3f} (Δ={d_s:+.3f}, p={p_s:.2e})")
 
 
 # ---------------------------------------------------------------------------
@@ -201,62 +211,65 @@ def _plot_singletrial_r2_violins(ax, abl):
     psth = np.asarray(abl["ve_psth"], dtype=float)
     full = np.asarray(abl["ve"]["intact"], dtype=float)
     ablated = np.asarray(abl["ve"]["zeroed"], dtype=float)
-    m = good & _finite_mask(psth, full, ablated)
-    gp, gf, ga = psth[m], full[m], ablated[m]
+    stab = np.asarray(abl["ve"]["stabilized"], dtype=float)
+    m = good & _finite_mask(psth, full, ablated, stab)
+    gp, gf, ga, gs = psth[m], full[m], ablated[m], stab[m]
 
-    _violin_box(ax, [gp, gf, ga], [0, 1, 2],
-                [PSTH_COLOR, INTACT_COLOR, ABLATED_COLOR])
+    # PSTH is demoted from a violin to just its median reference line (kept as the
+    # "trial-average" baseline); the three model conditions are the violins.
+    _violin_box(ax, [gf, ga, gs], [0, 1, 2],
+                [INTACT_COLOR, ABLATED_COLOR, STABILIZED_COLOR])
 
-    lo = float(np.nanpercentile(np.concatenate([gp, gf, ga]), 1))
-    hi = float(np.nanpercentile(np.concatenate([gp, gf, ga]), 99))
-    rng = hi - lo
-    ax.set_ylim(min(0.0, lo), hi + 0.66 * rng)
-
-    # Baseline: the PSTH-ceiling median that the twin conditions beat.
     psth_med = float(np.median(gp))
+    conc = np.concatenate([gf, ga, gs])
+    lo = float(min(np.nanpercentile(conc, 1), psth_med))
+    hi = float(np.nanpercentile(conc, 99))
+    rng = hi - lo
+    ax.set_ylim(min(0.0, lo), hi + 0.62 * rng)
+
+    # Baseline: the leave-one-out PSTH-ceiling median (kept as a reference line;
+    # the per-condition PSTH contrasts are reported in the printout/text).
     ax.axhline(psth_med, color="0.55", lw=0.8, ls="--", alpha=0.8, zorder=0)
-    ax.text(2.58, psth_med, "Trial-avg.\nmedian", color="0.5", fontsize=5.6,
+    ax.text(2.58, psth_med, "Trial-avg.\nmedian\n(PSTH)", color="0.5", fontsize=5.6,
             va="center", ha="left", clip_on=False)
 
-    # Three paired comparisons, staggered so the brackets never overlap: the
-    # adjacent Full-vs-Ablated bracket sits lowest, then the two PSTH contrasts.
-    # Each carries stars + its median Δ (p-values omitted as redundant with the
-    # stars). The Full->Ablated Δ is shown as a decrease (the ablation cost) and
-    # contextualised as a fraction of the full twin's single-trial r^2 that is
-    # lost by ablating — a small effect whose raw star would otherwise over-read
-    # a negligible difference.
-    p_fa = wilcoxon(gf, ga).pvalue
-    p_pf = wilcoxon(gf, gp).pvalue
-    p_pa = wilcoxon(ga, gp).pvalue
+    # Two ablation contrasts vs the full twin, staggered so the brackets never
+    # overlap: the small extraretinal (zeroed) cost sits lower, the large
+    # reafferent (stabilized) cost above it. Each carries stars + its median Δ,
+    # contextualised as a fraction of the full twin's single-trial r^2 lost.
+    p_fz = wilcoxon(gf, ga).pvalue
+    p_fs = wilcoxon(gf, gs).pvalue
     full_med = float(np.median(gf))
-    d_fa = float(np.median(ga - gf))   # Ablated - Full: a decrease under ablation
-    d_pf = float(np.median(gf - gp))
-    d_pa = float(np.median(ga - gp))
-    pct_fa = 100.0 * abs(d_fa) / full_med if full_med != 0 else np.nan
-    y0 = hi + 0.08 * rng
-    step = 0.20 * rng
+    d_fz = float(np.median(ga - gf))   # zeroed - full: extraretinal ablation cost
+    d_fs = float(np.median(gs - gf))   # stabilized - full: reafferent ablation cost
+    pct_fz = 100.0 * abs(d_fz) / full_med if full_med != 0 else np.nan
+    pct_fs = 100.0 * abs(d_fs) / full_med if full_med != 0 else np.nan
+    y0 = hi + 0.06 * rng
+    step = 0.24 * rng
     h = 0.016 * rng
-    gap = 0.072 * rng   # clears the taller (larger-font) multi-line Δ labels
-    _sig_bracket(ax, 1, 2, y0, p_fa, h=h, gap=gap,
-                 delta=f"Δ={d_fa:+.3f}\n({pct_fa:.0f}% of total)")
-    _sig_bracket(ax, 0, 1, y0 + step, p_pf, h=h, gap=gap,
-                 delta=f"Δ={d_pf:+.3f}")
-    _sig_bracket(ax, 0, 2, y0 + 2 * step, p_pa, h=h, gap=gap,
-                 delta=f"Δ={d_pa:+.3f}")
+    gap = 0.072 * rng
+    _sig_bracket(ax, 0, 1, y0, p_fz, h=h, gap=gap,
+                 delta=f"Δ={d_fz:+.3f}\n({pct_fz:.0f}% of total)")
+    _sig_bracket(ax, 0, 2, y0 + step, p_fs, h=h, gap=gap,
+                 delta=f"Δ={d_fs:+.3f}\n({pct_fs:.0f}% of total)")
 
     ax.axhline(0, color="0.7", lw=0.6, ls=":")
     ax.set_xlim(-0.6, 2.6)
     ax.set_xticks([0, 1, 2])
-    ax.set_xticklabels(["Trial\naverage\n(PSTH)", "Retinal +\nbehavioral\n(full)",
-                        "Retinal\nonly\n(ablated)"], fontsize=5.8)
+    ax.set_xticklabels(["Retinal +\nbehavioral\n(full)", "Retinal\nonly\n(ablated)",
+                        "Extraretinal\nonly\n(stabilized)"], fontsize=5.8)
     ax.set_ylabel("Single-trial $r^2$")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
-    print(f"Panel D — single-trial r² (N={m.sum()}): PSTH med={np.median(gp):.4f}, "
-          f"full med={np.median(gf):.4f}, ablated med={np.median(ga):.4f}; "
-          f"full-vs-PSTH Δ={d_pf:+.4f} p={p_pf:.2e}, "
-          f"ablated-vs-PSTH Δ={d_pa:+.4f} p={p_pa:.2e}, "
-          f"full-vs-ablated Δ={d_fa:+.4f} p={p_fa:.2e}")
+    # PSTH contrasts (line, not violins) reported here for the text.
+    p_pf = wilcoxon(gf, gp).pvalue
+    p_ps = wilcoxon(gs, gp).pvalue
+    print(f"Panel D — single-trial r² (N={m.sum()}): PSTH med={psth_med:.4f}, "
+          f"full med={full_med:.4f}, zeroed med={np.median(ga):.4f}, "
+          f"stabilized med={np.median(gs):.4f}; "
+          f"full-vs-zeroed Δ={d_fz:+.4f} p={p_fz:.2e}, "
+          f"full-vs-stabilized Δ={d_fs:+.4f} p={p_fs:.2e}; "
+          f"full-vs-PSTH p={p_pf:.2e}, stabilized-vs-PSTH p={p_ps:.2e}")
 
 
 # ---------------------------------------------------------------------------
@@ -354,7 +367,7 @@ def _load_ablation_cache():
 def _write_sidecars(out_dir, manifest: dict):
     caption = """Figure 3. A retinal-input digital twin captures FEM-linked V1 response variability.
 
-(A) Training and test stimuli. The twin is trained on gratings, gabors, and natural images, and evaluated on fixated flashed images; the retinal model input is a space × space × time crop of the gaze-contingent stimulus history. (B) Gaze-contingent digital twin architecture. The model receives the retinal stimulus history and an optional extraretinal behavior input, then predicts simultaneously recorded V1 responses. (C) Held-out, trial-averaged response prediction (normalized correlation, ccnorm) for the full twin and the same twin with the separate extraretinal behavior input ablated (zeroed), pooled across reliable Allen and Logan cells (matching the fig. 2 session population, >=10 analyzed units/session). Ablating the extraretinal pathway lowers the trial-averaged prediction only slightly (median 0.72 -> 0.70; Δ = -0.011, a 2% reduction; Wilcoxon p = 3e-20), confirming the twin is competitive at the PSTH level and that extraretinal signals contribute little on average. (D) Single-trial prediction (r^2) for the leave-one-out PSTH baseline, the full twin, and the behavior-ablated twin. The twin predicts single trials better than the PSTH ceiling even with the extraretinal pathway zeroed, so its trial-to-trial predictive power comes from the moving retinal image. (E) The behavior-ablated twin's single-trial r^2 gain over the PSTH baseline grows with a cell's empirical FEM modulation \\(1-\\alpha\\), the fraction of rate modulation due to FEM (OLS fit; Spearman rho with p-value inset; right marginal shows the per-unit gain distribution, with the left-pointing triangle marking the median). Retinal-input prediction alone tracks the empirically measured increase in apparent rate variance under fixational eye movements.
+(A) Training and test stimuli. The twin is trained on gratings, gabors, and natural images, and evaluated on fixated flashed images; the retinal model input is a space × space × time crop of the gaze-contingent stimulus history. (B) Gaze-contingent digital twin architecture. The model receives the retinal stimulus history and an optional extraretinal behavior input, then predicts simultaneously recorded V1 responses. (C, D) Two symmetric within-model ablations isolate the twin's two FEM information routes, pooled across reliable Allen and Logan cells (matching the fig. 2 session population, >=10 analyzed units/session): retinal-only zeroes the separate extraretinal behavior input, and extraretinal-only stabilizes the retinal input by freezing it at each trial's medoid gaze so the image no longer moves with the eye (behavior intact). (C) Held-out, trial-averaged prediction (normalized correlation, ccnorm). Removing the extraretinal pathway lowers the trial-averaged prediction only slightly, whereas stabilizing the retinal input lowers it more, though much of the mean response survives. (D) Single-trial prediction (r^2) against the leave-one-out PSTH median (dashed reference line). The twin predicts single trials well above the PSTH ceiling with the extraretinal pathway zeroed, but stabilizing the retinal input collapses single-trial prediction to at or below the PSTH baseline — so the twin's trial-to-trial predictive power is carried by the moving retinal image (reafference), not by extraretinal modulation. (E) The retinal-only twin's single-trial r^2 gain over the PSTH baseline grows with a cell's empirical FEM modulation \\(1-\\alpha\\), the fraction of rate modulation due to FEM (OLS fit; Spearman rho with p-value inset; right marginal shows the per-unit gain distribution, with the left-pointing triangle marking the median). Retinal-input prediction alone tracks the empirically measured increase in apparent rate variance under fixational eye movements.
 """
     (out_dir / "figure3_caption.md").write_text(caption, encoding="utf-8")
 
@@ -442,8 +455,8 @@ def compose(*, recompute: bool = False, out_dir=FIG_DIR, dpi: int = 300):
             _plot_missing_cache(a)
         ax_e_marg.set_axis_off()
 
-    _standard_panel_heading(ax_c, "C", "Ablation minimally affects\ntrial-averaged predictions")
-    _standard_panel_heading(ax_d, "D", "Ablated model beats\nthe PSTH ceiling")
+    _standard_panel_heading(ax_c, "C", "Ablations modestly reduce\ntrial-averaged predictions")
+    _standard_panel_heading(ax_d, "D", "Single-trial prediction needs\nthe moving retinal image")
     _standard_panel_heading(ax_e, "E", "Reafference alone recovers\nFEM-linked variability")
 
     # No bbox_inches="tight": keep the canvas at exactly the intended
@@ -459,8 +472,10 @@ def compose(*, recompute: bool = False, out_dir=FIG_DIR, dpi: int = 300):
         "panel_mapping": {
             "A": "training and test stimuli (schematic provenance row)",
             "B": "digital-twin architecture schematic",
-            "C": "trial-averaged held-out ccnorm, intact vs behavior-ablated",
-            "D": "single-trial r2: PSTH baseline vs full twin vs ablated twin",
+            "C": "trial-averaged held-out ccnorm: full vs retinal-only (zeroed) "
+                 "vs extraretinal-only (stabilized)",
+            "D": "single-trial r2 vs PSTH-median line: full vs retinal-only "
+                 "vs extraretinal-only (stabilized)",
             "E": "empirical 1-alpha vs ablated single-trial r2 gain over PSTH, "
                  "with marginal gain distribution",
         },
