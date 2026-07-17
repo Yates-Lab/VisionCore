@@ -56,6 +56,10 @@ class PanelAAssets:
     freeview_roi_seq_px: np.ndarray     # (N, 2, 2) backimage dset rois for pinned window
     example_neurons: list = None        # list of 3 dicts: per-neuron readout + trace snippet
     psth_neurons: list = None            # list of dicts: best-ccnorm units' observed/predicted PSTHs
+    stab_lag_cube: Optional[np.ndarray] = None  # (n_lags, h, w) reafferent-ablated
+                                        # ("stabilized") copy of lag_cube: same RSVP
+                                        # frames, retinal ROI frozen at the trial
+                                        # medoid gaze (flashes kept, motion removed)
 
 
 # ----------------------------------------------------------------------------
@@ -657,6 +661,34 @@ def _representative_roi(dset_path: Path):
 # ----------------------------------------------------------------------------
 # Lag cube
 # ----------------------------------------------------------------------------
+def _pick_lag_window(stim, trial_inds, n_lags):
+    """Pick the highest-contrast contiguous `n_lags` window inside one trial.
+
+    Deterministic (seeded). Returns `(chosen_trial, win_idxs)` where `win_idxs`
+    are ascending (chronological) frame indices into `stim`. Shared by the
+    moving lag cube and its stabilized counterpart so both describe the exact
+    same frames.
+    """
+    unique_trials, counts = np.unique(trial_inds, return_counts=True)
+    long_trials = unique_trials[counts >= n_lags]
+    rng = np.random.default_rng(0)
+    best = None
+    best_var = -np.inf
+    for t in long_trials:
+        idxs = np.where(trial_inds == t)[0]
+        if len(idxs) < n_lags:
+            continue
+        start = (len(idxs) - n_lags) // 2
+        window = idxs[start:start + n_lags]
+        var = stim[window].var()
+        if var > best_var:
+            best_var = var + rng.uniform(0, 1e-3)
+            best = (int(t), window)
+    if best is None:
+        raise RuntimeError(f"No fixrsvp trial long enough for a {n_lags}-lag window")
+    return best
+
+
 def _lag_cube_from_fixrsvp(session_dir: Path, n_lags: int = 33):
     """Pull the exact stimulus context the model sees at one inference time.
 
@@ -675,35 +707,82 @@ def _lag_cube_from_fixrsvp(session_dir: Path, n_lags: int = 33):
         raise ValueError(f"Unexpected stim shape {stim.shape}")
 
     trial_inds = np.asarray(dset.covariates["trial_inds"]).ravel().astype(int)
-    unique_trials, counts = np.unique(trial_inds, return_counts=True)
-    long_trials = unique_trials[counts >= n_lags]
-    rng = np.random.default_rng(0)
-
-    # Score candidate windows by within-window contrast so we pick a context
-    # with visible structure (skip pure-background blanks).
-    best = None
-    best_var = -np.inf
-    for t in long_trials:
-        mask = trial_inds == t
-        idxs = np.where(mask)[0]
-        # Take the central n_lags window of this trial.
-        if len(idxs) < n_lags:
-            continue
-        start = (len(idxs) - n_lags) // 2
-        window = stim[idxs[start:start + n_lags]]
-        var = window.var()
-        if var > best_var:
-            best_var = var + rng.uniform(0, 1e-3)
-            best = (t, idxs[start:start + n_lags])
-
-    if best is None:
-        raise RuntimeError("No fixrsvp trial long enough for a 33-lag window")
-    chosen_trial, win_idxs = best
+    chosen_trial, win_idxs = _pick_lag_window(stim, trial_inds, n_lags)
     cube = stim[win_idxs]
     lag_indices = list(range(n_lags))
     print(f"    lag cube: trial {chosen_trial}, {n_lags} frames "
           f"({n_lags / 120 * 1000:.0f} ms at 120 Hz)")
     return cube.astype(np.float32), lag_indices
+
+
+def _stabilized_lag_cube_from_fixrsvp(sess, n_lags: int = 33):
+    """Reafferent-ablated ("stabilized") counterpart of the moving lag cube.
+
+    Re-renders the SAME window of RSVP frames with the retinal ROI held fixed at
+    the trial's medoid gaze (`build_stabilized_stim`'s manipulation, scoped to
+    the one panel trial): image flashes still update mid-window, but the gaze-
+    induced retinal motion is removed. The result is the temporal counterfactual
+    quantified as "extraretinal only (stabilized)" in panels C/D/E.
+
+    Returns a (n_lags, H, W) float32 cube ordered oldest → newest, matching
+    `_lag_cube_from_fixrsvp`.
+    """
+    from models.data.datasets import DictDataset
+    from DataYatesV1.exp.fix_rsvp import FixRsvpTrial
+    from DataYatesV1.utils.general import get_clock_functions
+    from _fig3_ablation_data import _medoid_bin, FIX_RADIUS
+
+    exp = sess.exp
+    dset = DictDataset.load(str(sess.sess_dir / "datasets" / "fixrsvp.dset"))
+    raw_stim = np.asarray(dset["stim"])
+    trial_inds = np.asarray(dset.covariates["trial_inds"]).ravel().astype(int)
+    t_bins = np.asarray(dset.covariates["t_bins"]).ravel()
+    roi_all = np.asarray(dset["roi"])
+    dpi_pix = np.asarray(dset.covariates["dpi_pix"])
+    dpi_valid = np.asarray(dset.covariates["dpi_valid"]).ravel() > 0
+    eyepos = np.asarray(dset["eyepos"])
+    fixation = np.hypot(eyepos[:, 0], eyepos[:, 1]) < FIX_RADIUS
+
+    chosen_trial, win_idxs = _pick_lag_window(raw_stim, trial_inds, n_lags)
+    m = trial_inds == chosen_trial
+    valid = m & fixation & dpi_valid
+    if valid.sum() == 0:
+        raise RuntimeError(
+            f"stabilized cube: no valid fixation frames in trial {chosen_trial}")
+    vidx = np.where(valid)[0]
+    med = vidx[_medoid_bin(dpi_pix[vidx])]
+
+    trial = FixRsvpTrial(exp["D"][chosen_trial], exp["S"])
+    ptb2ephys, _ = get_clock_functions(exp)
+    start_idx = np.where(trial.image_ids == 2)[0][0]
+    flip_times = ptb2ephys(trial.flip_times[start_idx:])
+    hist_idx = np.searchsorted(flip_times, t_bins[m], side="right") - 1 + start_idx
+    roi_const = np.repeat(roi_all[med][None], m.sum(), axis=0)
+    stab_trial = np.asarray(trial.get_rois(hist_idx, roi=roi_const))
+
+    pos = np.searchsorted(np.where(m)[0], win_idxs)
+    stab_cube = stab_trial[pos].astype(np.float32)
+    print(f"    stabilized lag cube: trial {chosen_trial}, ROI frozen at medoid "
+          f"gaze (flashes preserved, reafferent motion removed)")
+    return stab_cube
+
+
+def _align_cube_last_frame(cube, screen, roi):
+    """Replace `cube[-1]` (the most-recent frame = cube front face) with the
+    resized test-screen ROI patch so the cube's current frame is visually
+    identical to what's on the test screen. In place; returns `cube`."""
+    from PIL import Image as PILImage
+    r0, r1 = int(roi[0, 0]), int(roi[0, 1])
+    c0, c1 = int(roi[1, 0]), int(roi[1, 1])
+    r0, r1 = max(0, r0), min(screen.shape[0], r1)
+    c0, c1 = max(0, c0), min(screen.shape[1], c1)
+    roi_patch = screen[r0:r1, c0:c1]
+    th, tw = cube.shape[1], cube.shape[2]
+    if roi_patch.size > 0:
+        resized = np.asarray(PILImage.fromarray(roi_patch).resize(
+            (tw, th), PILImage.BILINEAR), dtype=cube.dtype)
+        cube[-1] = resized
+    return cube
 
 
 def _real_freeview_trace(session_dir, pix_per_deg, screen_shape, *,
@@ -912,6 +991,17 @@ def load_panel_a_assets(recompute: bool = False) -> PanelAAssets:
             print("  backfilling best-ccnorm PSTHs into cache...")
             assets.psth_neurons = _load_best_ccnorm_psths(n=3)
             dirty = True
+        if getattr(assets, "stab_lag_cube", None) is None:
+            print("  backfilling stabilized (reafferent-ablated) lag cube...")
+            from DataYatesV1.utils.io import get_session
+            subj, dt = assets.session.split("_")
+            _sess = get_session(subj, dt)
+            stab = _stabilized_lag_cube_from_fixrsvp(_sess)
+            if "fixrsvp" in assets.screens and "fixrsvp" in assets.rois:
+                stab = _align_cube_last_frame(
+                    stab, assets.screens["fixrsvp"], assets.rois["fixrsvp"])
+            assets.stab_lag_cube = stab
+            dirty = True
         if dirty:
             with open(PANEL_A_CACHE_PATH, "wb") as f:
                 dill.dump(assets, f)
@@ -977,24 +1067,18 @@ def load_panel_a_assets(recompute: bool = False) -> PanelAAssets:
     print("  loading lag-cube from fixrsvp.dset...")
     cube, lag_idx = _lag_cube_from_fixrsvp(sess_dir, n_lags=33)
 
-    # Align the cube's most-recent frame (last in the lag stack) with the
-    # actual test-screen ROI content. This makes the "current frame" of
-    # the lag cube visually identical to what's on the test screen.
+    print("  rendering stabilized (reafferent-ablated) lag cube...")
+    stab_cube = _stabilized_lag_cube_from_fixrsvp(sess)
+
+    # Align both cubes' most-recent frame (last in the lag stack) with the actual
+    # test-screen ROI content, so their shared "current frame" (the cube front
+    # face) is visually identical to what's on the test screen and to each other.
     if "fixrsvp" in screens and "fixrsvp" in rois:
-        from PIL import Image as PILImage
-        scr = screens["fixrsvp"]
-        roi = rois["fixrsvp"]
-        r0, r1 = int(roi[0, 0]), int(roi[0, 1])
-        c0, c1 = int(roi[1, 0]), int(roi[1, 1])
-        r0, r1 = max(0, r0), min(scr.shape[0], r1)
-        c0, c1 = max(0, c0), min(scr.shape[1], c1)
-        roi_patch = scr[r0:r1, c0:c1]
-        th, tw = cube.shape[1], cube.shape[2]
-        if roi_patch.size > 0:
-            resized = np.asarray(PILImage.fromarray(roi_patch).resize(
-                (tw, th), PILImage.BILINEAR), dtype=cube.dtype)
-            cube[-1] = resized
-            print(f"    cube[-1] replaced with test-screen ROI ({th}×{tw})")
+        cube = _align_cube_last_frame(cube, screens["fixrsvp"], rois["fixrsvp"])
+        stab_cube = _align_cube_last_frame(stab_cube, screens["fixrsvp"],
+                                           rois["fixrsvp"])
+        print(f"    cube[-1] aligned to test-screen ROI ({cube.shape[1]}×"
+              f"{cube.shape[2]}) for moving + stabilized cubes")
 
     print("  extracting behavior segment...")
     beh_t, beh_eye, beh_speed, beh_roi_seq = _behavior_segment(sess_dir)
@@ -1028,6 +1112,7 @@ def load_panel_a_assets(recompute: bool = False) -> PanelAAssets:
         rois=rois,
         lag_cube=cube,
         lag_indices=lag_idx,
+        stab_lag_cube=stab_cube,
         arch=arch,
         frontend_weights=frontend_weights,
         readout_mean=rd_mean,

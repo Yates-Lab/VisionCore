@@ -346,6 +346,9 @@ CUBE_W = 1.55               # model-input cube — enlarged to read as a feature
 CUBE_H = 1.18
 CUBE_D = 1.62
 CUBE_GAP = 1.7
+MODEL_COL_LIFT = 0.62       # raise the panel-A model-input cube so the cube +
+                            # behavior echo column sits centred under the header
+                            # (fills the gap above, un-dangles the behavior below)
 
 TRAIN_SCALEBAR_DEG = 10.0
 TEST_SCALEBAR_DEG = 2.0
@@ -356,7 +359,7 @@ STIM_SUB_FS = 6.0           # match panel B stage sub-captions (ARCH_SUB_FS)
 
 def _draw_cube_block(ax, assets, front_center_2d, *, roi_quad_2d=None,
                      draw_header=True, draw_dims=True, draw_time=None,
-                     time_label=None):
+                     time_label=None, cube_override=None, outline=CYAN):
     """Draw the model-input lag cube with its front-face centre at
     `front_center_2d` (2D world coords).
 
@@ -364,18 +367,20 @@ def _draw_cube_block(ax, assets, front_center_2d, *, roi_quad_2d=None,
     face, the "Model input" header, the depth (time) arrow, and the spatial
     dimension labels. `draw_time` toggles the time arrow (defaults to
     `draw_dims`); `time_label` overrides its caption (defaults to the cube's
-    duration). The cube's 3D pose is fixed so it reads identically wherever it
-    is placed. Returns an anchor dict.
+    duration). `cube_override` supplies a (n_lags, H, W) volume in place of the
+    stored lag cube (e.g. a temporally frozen "stabilized" version), and
+    `outline` recolours the cube edges. The cube's 3D pose is fixed so it reads
+    identically wherever it is placed. Returns an anchor dict.
     """
     if draw_time is None:
         draw_time = draw_dims
     ppd = assets.pix_per_deg
     fcx, fcy = float(front_center_2d[0]), float(front_center_2d[1])
-    cube = assets.lag_cube[::-1]
+    cube = (assets.lag_cube if cube_override is None else cube_override)[::-1]
     cube_corners = box_corners_3d(
         (fcx, fcy, 0.0), (CUBE_W, CUBE_H, CUBE_D),
         yaw_deg=CUBE_YAW_DEG, pitch_deg=CUBE_PITCH_DEG, roll_deg=CUBE_ROLL_DEG)
-    cube_p2 = _draw_lag_cube(ax, cube, cube_corners, outline=CYAN,
+    cube_p2 = _draw_lag_cube(ax, cube, cube_corners, outline=outline,
                              edge_width=1.2, zorder=5)
     back_corners_2d = cube_p2[4:]
 
@@ -529,7 +534,7 @@ def _draw_top_row(ax, assets, row_cy):
     back_off_2d = _back_face_center_offset_2d(
         CUBE_D, CUBE_YAW_DEG, CUBE_PITCH_DEG, CUBE_ROLL_DEG)
     cube_front_cx = test_right_x + CUBE_GAP - back_off_2d[0]
-    cube_front_cy = roi_center_2d[1] - back_off_2d[1]
+    cube_front_cy = roi_center_2d[1] - back_off_2d[1] + MODEL_COL_LIFT
     cube_block = _draw_cube_block(
         ax, assets, (cube_front_cx, cube_front_cy),
         roi_quad_2d=test_roi_quad, draw_header=False, draw_dims=True)
@@ -561,7 +566,7 @@ def _draw_top_row(ax, assets, row_cy):
     _stim_header(train_cx_proj, "Training stimuli",
                  "gratings · gabors · natural images")
     _stim_header(test_cx_proj, "Test stimulus", "fixated flashed images")
-    _stim_header(cube_cx_proj, "Model input", "space × space × time")
+    _stim_header(cube_cx_proj, "Visual input", "space × space × time")
 
     # ── Scale bars ──────────────────────────────────────────────────────────
     train_front_quad = train_dst_quads[-1]
@@ -587,15 +592,34 @@ def _draw_top_row(ax, assets, row_cy):
             f"{TEST_SCALEBAR_DEG:g}°", ha="center", va="top",
             fontsize=SCALEBAR_FONTSIZE, color="#222")
 
+    # ── Behavioral input beneath the visual-input cube ──────────────────────
+    # Panel A is where the two model inputs are named and labelled: the visual
+    # cube above and the extraretinal behavior signals here (eye position x/y +
+    # eye velocity). Panel B shows the same signals bare, flowing into the model.
+    beh_x0 = cube_block["x_left"]
+    beh_w = cube_block["x_right"] - cube_block["x_left"]
+    beh_cx = 0.5 * (cube_block["x_left"] + cube_block["x_right"])
+    beh_title_y = cube_block["bottom_y"] - 0.30
+    ax.text(beh_cx, beh_title_y, "Behavioral input", ha="center", va="top",
+            fontsize=STIM_HEADER_FS, color=TEXT_COLOR, fontweight="bold")
+    ax.text(beh_cx, beh_title_y - 0.22, "signals × time", ha="center", va="top",
+            fontsize=STIM_SUB_FS, color="#555", style="italic")
+    beh_top = beh_title_y - 0.52
+    beh_row = _draw_behavior_traces(ax, assets, beh_x0, beh_top, beh_w,
+                                    labeled=True, scale_bar=True, box=False,
+                                    trace_h=0.95)
+
     # ── Collect bbox ────────────────────────────────────────────────────────
     xs, ys = [], []
     for q in train_dst_quads + [test_dst, cube_block["cube_p2"]]:
         xs.extend([q[:, 0].min(), q[:, 0].max()])
         ys.extend([q[:, 1].min(), q[:, 1].max()])
+    xs.extend([beh_row["x_left"], beh_row["x_right"]])
     ys.append(title_y + 0.35)
     ys.append(cube_block["top_y"])
     ys.append(min(train_bar_y, test_bar_y) - 0.25)
     ys.append(cube_block["bottom_y"])
+    ys.append(beh_row["y_bottom"])
 
     return {
         "x_left": float(min(xs)),
@@ -985,7 +1009,13 @@ def _draw_architecture(ax, assets, *, x_start, gaps=None):
 BEH_TRACE_H = 1.55          # total height of the two stacked trace panels
 BEH_EYE_COLOR_X = "#1f6feb"
 BEH_EYE_COLOR_Y = "#d68900"
-BEH_SPEED_COLOR = "#7e3f8a"
+BEH_SPEED_COLOR = "#2a9d8f"  # teal — kept distinct from the stabilized purple
+                            # (STABILIZED_COLOR) so purple reads only as "stabilized"
+
+# Stabilized (reafferent-ablated) retinal input, colour-matched to figure3's
+# "Extraretinal only (stabilized)" condition so the schematic's second cube and
+# the panel C/D/E stabilized violins read as the same manipulation.
+STABILIZED_COLOR = "#9467bd"
 
 
 def _mini_trace(ax, t, y_arr, x, y, w, h, *, color, lw=0.9, y2=None,
@@ -1017,7 +1047,7 @@ def _mini_trace(ax, t, y_arr, x, y, w, h, *, color, lw=0.9, y2=None,
 
 
 def _draw_behavior_traces(ax, assets, x0, y_top, w, *, labeled=True,
-                          scale_bar=True, box=True):
+                          scale_bar=True, box=True, trace_h=BEH_TRACE_H):
     """Draw the eye-position + velocity covariate panels in the rect whose top
     edge is `y_top`, left edge `x0`, width `w`.
 
@@ -1025,14 +1055,16 @@ def _draw_behavior_traces(ax, assets, x0, y_top, w, *, labeled=True,
     colour key; `scale_bar` adds a 100 ms bar; `box` wraps the traces (and their
     labels) in an unfilled rounded rectangle so the extraretinal covariate reads
     as a discrete model input — like the retinal-input cube — and returns the
-    box's right-edge output anchor. Returns a bbox + optional output anchor.
+    box's right-edge output anchor. `trace_h` sets the stacked panels' total
+    height (a smaller value gives the bare panel-A provenance echo). Returns a
+    bbox + optional output anchor.
     """
     t = np.asarray(assets.behavior_t, float)
     eye = np.asarray(assets.behavior_eyepos, float)
     speed = np.asarray(assets.behavior_speed, float)
 
-    panel_h = 0.5 * (BEH_TRACE_H - 0.06)
-    y_speed = y_top - BEH_TRACE_H
+    panel_h = 0.5 * (trace_h - 0.06)
+    y_speed = y_top - trace_h
     y_eye = y_speed + panel_h + 0.06
 
     # Eye position (x & y, shared scale) on top; velocity below.
@@ -1224,7 +1256,14 @@ BOT_CUBE_CX = 1.35          # bottom-row input-cube front-centre x
 BOT_BEH_GAP = 0.95          # gap: bottom-row cube bottom → behavior traces
                             # (lowers the route so it clears the prism bottoms)
 ROW_GAP = 0.55              # vertical gap: bottom-row top → top-row lowest ink
-TOP_ROW_BELOW = 1.95        # how far the top row extends below its centre line
+TOP_ROW_BELOW = 2.75        # how far the top row extends below its centre line
+                            # (now includes the bare behavior echo under the cube)
+
+# Panel-B retinal-input stack: the moving cube sits at ARCH_CENTER_Y; the
+# stabilized (reafferent-ablated) cube is dropped below it, and the behavior
+# box is pushed beneath the stabilized cube.
+STAB_CUBE_DY = 2.15         # vertical drop: moving-cube centre → stabilized-cube centre
+STAB_BEH_GAP = 1.15         # gap: stabilized-cube bottom (incl. label) → behavior box top
 
 
 def _draw_all(ax, assets):
@@ -1238,29 +1277,70 @@ def _draw_all(ax, assets):
     ax.axis("off")
 
     # ── Bottom row: model input (cube + behavior) → architecture → PSTHs ────
-    cube_in = _draw_cube_block(ax, assets, (BOT_CUBE_CX, ARCH_CENTER_Y),
+    # The moving (reafferent) cube and the stabilized cube form one vertical
+    # group centred on the frontend: the moving cube sits half a step above
+    # ARCH_CENTER_Y, the stabilized cube half a step below.
+    moving_cy = ARCH_CENTER_Y + STAB_CUBE_DY / 2.0
+    stab_cy = ARCH_CENTER_Y - STAB_CUBE_DY / 2.0
+
+    cube_in = _draw_cube_block(ax, assets, (BOT_CUBE_CX, moving_cy),
                                draw_header=False, draw_dims=False,
                                draw_time=True, time_label="time")
-    # Title the retinal pathway (mirrors the "Extraretinal behavior" label).
-    ax.text(0.5 * (cube_in["x_left"] + cube_in["x_right"]),
-            cube_in["top_y"] + 0.10, "Retinal input", ha="center", va="bottom",
-            fontsize=STIM_HEADER_FS, color=TEXT_COLOR, fontweight="bold")
-    arch = _draw_architecture(ax, assets, x_start=cube_in["x_right"] + BRIDGE_GAP)
+    # Title the retinal pathway (mirrors the "Extraretinal behavior" label). The
+    # italic sub-line names the reafferent motion the stabilized cube removes.
+    cube_cx = 0.5 * (cube_in["x_left"] + cube_in["x_right"])
+    ax.text(cube_cx, cube_in["top_y"] + 0.30, "Retinal input", ha="center",
+            va="bottom", fontsize=STIM_HEADER_FS, color=TEXT_COLOR,
+            fontweight="bold")
+    ax.text(cube_cx, cube_in["top_y"] + 0.10, "moves with eye (reafference)",
+            ha="center", va="bottom", fontsize=STIM_SUB_FS, color="#555",
+            style="italic")
 
-    # Visual path: model-input cube → frontend.
+    # Reafferent ablation: the "stabilized" copy of the cube beneath the moving
+    # one — the same RSVP frames with the retinal ROI frozen at the trial medoid
+    # gaze, so image flashes still update mid-window but the gaze-induced motion
+    # is gone (its top/side faces read as frozen bands stepping at each flash,
+    # versus the moving cube's continuous drift). Colour-matched to the panel
+    # C/D/E "stabilized" condition.
+    stab_cube = getattr(assets, "stab_lag_cube", None)
+    if stab_cube is None:   # cache predates the field; frozen-frame fallback
+        stab_cube = np.repeat(assets.lag_cube[-1][None],
+                              assets.lag_cube.shape[0], axis=0)
+    stab_block = _draw_cube_block(
+        ax, assets, (BOT_CUBE_CX, stab_cy), draw_header=False, draw_dims=False,
+        draw_time=False, cube_override=stab_cube, outline=STABILIZED_COLOR)
+    stab_cx = 0.5 * (stab_block["x_left"] + stab_block["x_right"])
+    ax.text(stab_cx, stab_block["bottom_y"] - 0.04, "Stabilized",
+            ha="center", va="top", fontsize=STIM_HEADER_FS - 0.5,
+            color=STABILIZED_COLOR, fontweight="bold")
+    ax.text(stab_cx, stab_block["bottom_y"] - 0.26, "reafference removed",
+            ha="center", va="top", fontsize=STIM_SUB_FS,
+            color=STABILIZED_COLOR, style="italic")
+
+    arch = _draw_architecture(ax, assets, x_start=cube_in["x_right"] + BRIDGE_GAP)
     fe_xy = arch["frontend_left_xy"]
+
+    # Both cubes feed the frontend, converging on its input: the moving cube via
+    # a solid arrow, the stabilized cube via a dashed purple swap-in arrow
+    # (mirrors the behavior box's Full/Ablated grammar — either can drive the
+    # retinal pathway).
     ax.annotate("", xy=(fe_xy[0] - 0.06, fe_xy[1]),
                 xytext=(cube_in["x_right"] + 0.1, cube_in["mid_y"]),
                 arrowprops=dict(arrowstyle="->", lw=1.0, color="#333"),
                 zorder=4.8)
+    ax.annotate("", xy=(fe_xy[0] - 0.10, fe_xy[1] - 0.05),
+                xytext=(stab_block["x_right"] + 0.06, stab_block["mid_y"]),
+                arrowprops=dict(arrowstyle="->", lw=1.0, color=STABILIZED_COLOR,
+                                linestyle=(0, (4, 3))),
+                zorder=4.75)
 
-    # Behavioral path: labelled covariates beneath the input cube, boxed as a
-    # discrete model input and routed across to the concat marker.
+    # Behavioral path: labelled covariates beneath the stabilized cube, boxed as
+    # a discrete model input and routed across to the concat marker.
     beh_x0 = cube_in["x_left"]
     beh_w = arch["frontend_right_x"] - beh_x0
-    beh_top = cube_in["bottom_y"] - BOT_BEH_GAP
+    beh_top = stab_block["bottom_y"] - STAB_BEH_GAP
     beh = _draw_behavior_traces(ax, assets, beh_x0, beh_top, beh_w,
-                                labeled=True, scale_bar=True, box=True)
+                                labeled=False, scale_bar=True, box=True)
     # Bold title above the box (mirrors the "Retinal input" title over the cube).
     ax.text(beh_x0 + beh_w / 2, beh["y_top"] + 0.10, "Behavioral input",
             ha="center", va="bottom", fontsize=STIM_HEADER_FS, color=TEXT_COLOR,
@@ -1272,9 +1352,11 @@ def _draw_all(ax, assets):
 
     bot_xs = [cube_in["x_left"], cube_in["x_right"], arch["x_left"],
               arch["x_right"], beh["x_left"], beh["x_right"],
-              psth["x_left"], psth["x_right"]]
+              psth["x_left"], psth["x_right"],
+              stab_block["x_left"], stab_block["x_right"]]
     bot_ys = [cube_in["top_y"], arch["y_bottom"], arch["y_top"],
-              beh["y_bottom"], psth["y_bottom"], psth["y_top"]]
+              beh["y_bottom"], psth["y_bottom"], psth["y_top"],
+              stab_block["bottom_y"] - 0.45]
     bot_y_top = max(bot_ys)
 
     # ── Top row: stimulus provenance, placed above the model row ────────────
