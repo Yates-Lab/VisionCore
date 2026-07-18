@@ -32,6 +32,13 @@ PREFERRED_FIXRSVP_IMAGE_IDS = [21, 12, 7, 18, 3, 9, 14, 25, 5, 16]
 # the trace's gaze samples are pinned.
 PINNED_FREEVIEW = (327, 91923)
 
+# Current/predicted frame for panel A's natural-image model input, as a local
+# index into the pinned free-viewing window. Hand-picked so a high-contrast
+# saccade sits early in the displayed window (its post-saccadic transient then
+# spans the prediction-target raster). Advancing it moves the model input
+# forward in time (saccade lands earlier); ~6 bins ≈ 50 ms at 120 Hz.
+TRAIN_CUR_FRAME_LOCAL = 312
+
 
 @dataclass
 class PanelAAssets:
@@ -60,6 +67,19 @@ class PanelAAssets:
                                         # ("stabilized") copy of lag_cube: same RSVP
                                         # frames, retinal ROI frozen at the trial
                                         # medoid gaze (flashes kept, motion removed)
+    # ── Natural-image (training) model input + prediction target ────────────
+    # Panel A's top row shows the training objective: a natural-image model
+    # input (space×space×time crop + behavior) and the observed spike-count
+    # raster it is trained to predict. All sourced from the pinned backimage
+    # free-viewing window (PINNED_FREEVIEW), so they match the gaze trace drawn
+    # on the natural-image training screen.
+    train_lag_cube: Optional[np.ndarray] = None      # (n_lags, h, w) oldest→newest
+    train_cur_roi_px: Optional[np.ndarray] = None    # (2,2) backimage-screen ROI at
+                                                     # the cube's current (newest) frame
+    train_behavior_t: Optional[np.ndarray] = None    # (T,) seconds
+    train_behavior_eyepos: Optional[np.ndarray] = None  # (T, 2) deg
+    train_behavior_speed: Optional[np.ndarray] = None   # (T,) deg/s
+    train_raster: Optional[np.ndarray] = None        # (n_units, T) observed spikes/bin
 
 
 # ----------------------------------------------------------------------------
@@ -767,6 +787,80 @@ def _stabilized_lag_cube_from_fixrsvp(sess, n_lags: int = 33):
     return stab_cube
 
 
+def _train_model_input_and_raster(session_dir: Path, *, n_lags: int = 33,
+                                  n_future: int = 12, fs: float = 120.0):
+    """Build panel A's natural-image training objective from the pinned
+    backimage free-viewing window.
+
+    Returns the model input the twin actually consumes at one inference time
+    (a space × space × time crop of the gaze-contingent stimulus history plus
+    the eye-position/velocity covariates) together with the observed
+    spike-count raster (units × time) it is trained to predict. The highlighted
+    raster column is the cube's current (newest) frame — the single timepoint
+    the shown input window predicts.
+
+    The window is centred on the largest saccade in the pinned segment (placed
+    at the middle of the lag cube) so the post-saccadic response transient it
+    drives is visible in the prediction-target raster. Everything is sourced
+    from the same `PINNED_FREEVIEW` window drawn on the natural-image training
+    screen, so the gaze trace, the magnified ROI crop, and the predicted spikes
+    all describe one moment in one free-viewing trial.
+    """
+    from models.data.datasets import DictDataset
+    dset = DictDataset.load(str(session_dir / "datasets" / "backimage.dset"))
+    stim = np.asarray(dset["stim"])                      # (N, H, W)
+    robs = np.asarray(dset["robs"])                      # (N, n_units)
+    eyepos = np.asarray(dset["eyepos"])                  # (N, 2) deg
+    roi_all = np.asarray(dset["roi"])                    # (N, 2, 2)
+    trial_inds = np.asarray(dset.covariates["trial_inds"]).ravel().astype(int)
+
+    if PINNED_FREEVIEW is None:
+        raise RuntimeError("train model input needs PINNED_FREEVIEW set")
+    pin_trial, pin_start = PINNED_FREEVIEW
+    win_n = int(5.0 * fs)                                # match the displayed 5 s trace
+    if pin_start + win_n > len(eyepos):
+        raise RuntimeError(
+            f"PINNED_FREEVIEW window {pin_start}:{pin_start + win_n} exceeds "
+            f"backimage.dset (len={len(eyepos)})")
+    seg_trials = np.unique(trial_inds[pin_start:pin_start + win_n])
+    if not (len(seg_trials) == 1 and seg_trials[0] == pin_trial):
+        raise RuntimeError(
+            f"pinned window spans trials {seg_trials}; expected only {pin_trial}")
+
+    # Hard-coded current/predicted frame (local index within the pinned window),
+    # chosen so a high-contrast saccade sits early in the displayed window and
+    # its post-saccadic transient is visible across the raster. The lag cube is
+    # the 33-frame history ending here; the raster spans the same history plus a
+    # few future bins.
+    t = TRAIN_CUR_FRAME_LOCAL
+
+    g0 = pin_start + t - n_lags + 1                      # global start of cube
+    cube = stim[g0:g0 + n_lags].astype(np.float32)       # (n_lags, H, W) oldest→newest
+    cur_roi = roi_all[pin_start + t].astype(int)         # (2, 2)
+
+    r0 = g0                                              # raster window start (global)
+    r1 = pin_start + t + n_future + 1                    # exclusive
+    raster = np.asarray(robs[r0:r1], dtype=np.float32).T  # (n_units, n_bins), natural order
+
+    # Behavior covariates over the raster window (eye position x/y + speed).
+    ep_win = eyepos[r0:r1].astype(np.float32)
+    dxy2 = np.diff(ep_win, axis=0, prepend=ep_win[:1])
+    speed_win = (np.linalg.norm(dxy2, axis=1) * fs).astype(np.float32)
+    t_axis = (np.arange(r1 - r0) / fs).astype(np.float32)
+
+    print(f"    train model input: pinned trial {pin_trial}, current frame "
+          f"t={t} ({n_lags} lags + {n_future} future bins, raster "
+          f"{raster.shape[0]}×{raster.shape[1]})")
+    return {
+        "train_lag_cube": cube,
+        "train_cur_roi_px": cur_roi,
+        "train_behavior_t": t_axis,
+        "train_behavior_eyepos": ep_win,
+        "train_behavior_speed": speed_win,
+        "train_raster": raster,
+    }
+
+
 def _align_cube_last_frame(cube, screen, roi):
     """Replace `cube[-1]` (the most-recent frame = cube front face) with the
     resized test-screen ROI patch so the cube's current frame is visually
@@ -1002,6 +1096,15 @@ def load_panel_a_assets(recompute: bool = False) -> PanelAAssets:
                     stab, assets.screens["fixrsvp"], assets.rois["fixrsvp"])
             assets.stab_lag_cube = stab
             dirty = True
+        if getattr(assets, "train_raster", None) is None:
+            print("  backfilling natural-image model input + prediction-target "
+                  "raster...")
+            from DataYatesV1.utils.io import get_session
+            subj, dt = assets.session.split("_")
+            _sess = get_session(subj, dt)
+            for k, v in _train_model_input_and_raster(_sess.sess_dir).items():
+                setattr(assets, k, v)
+            dirty = True
         if dirty:
             with open(PANEL_A_CACHE_PATH, "wb") as f:
                 dill.dump(assets, f)
@@ -1083,6 +1186,9 @@ def load_panel_a_assets(recompute: bool = False) -> PanelAAssets:
     print("  extracting behavior segment...")
     beh_t, beh_eye, beh_speed, beh_roi_seq = _behavior_segment(sess_dir)
 
+    print("  building natural-image model input + prediction-target raster...")
+    train_objective = _train_model_input_and_raster(sess_dir)
+
     print("  extracting free-viewing eye trace...")
     freeview_result = _real_freeview_trace(sess_dir, pix_per_deg, screen_shape)
     if freeview_result is None:
@@ -1126,6 +1232,7 @@ def load_panel_a_assets(recompute: bool = False) -> PanelAAssets:
         freeview_roi_seq_px=freeview_roi_seq,
         example_neurons=example_neurons,
         psth_neurons=psth_neurons,
+        **train_objective,
     )
 
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
