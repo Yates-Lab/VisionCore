@@ -477,7 +477,8 @@ PRED_TEST_GAP = 2.2          # gap: prediction raster right → held-out test sc
 PLUS_GAP = 0.27             # vertical gap around the ⊕ between visual + behavioral
                             # (trimmed with cube_front_cy so the ⊕/behavior hold
                             # while the Visual group drops toward the ⊕)
-RASTER_W = 1.62             # prediction-raster world width
+RASTER_W = 2.30             # prediction-raster world width (widened to host the
+                            # extended future-time window: 33 lags + 30 future bins)
 RASTER_H_FRAC = 0.90        # raster height as a fraction of the model-input slice
 
 

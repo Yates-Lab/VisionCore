@@ -788,7 +788,7 @@ def _stabilized_lag_cube_from_fixrsvp(sess, n_lags: int = 33):
 
 
 def _train_model_input_and_raster(session_dir: Path, *, n_lags: int = 33,
-                                  n_future: int = 12, fs: float = 120.0):
+                                  n_future: int = 30, fs: float = 120.0):
     """Build panel A's natural-image training objective from the pinned
     backimage free-viewing window.
 

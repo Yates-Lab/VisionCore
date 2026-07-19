@@ -25,6 +25,7 @@ import json
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from matplotlib.cbook import boxplot_stats
 from matplotlib.gridspec import GridSpec
 import numpy as np
 from scipy.stats import spearmanr, wilcoxon
@@ -84,7 +85,7 @@ def _standard_panel_heading(ax, letter: str, title: str):
 
 
 # ---------------------------------------------------------------------------
-# Shared violin / significance helpers
+# Shared box-and-whisker / significance helpers
 # ---------------------------------------------------------------------------
 def _stars(p):
     if not np.isfinite(p):
@@ -108,29 +109,37 @@ def _fmt_p(p):
     return f"p = {p:.3g}"
 
 
-def _violin_box(ax, groups, positions, colors, *, width=0.72, box_width=0.16):
-    """Grey violin bodies (fig2's neutral grammar) with a per-condition cross
-    overlay: a vertical stroke spanning the IQR (25-75) and a horizontal median
-    tick, coloured by condition. Robust median/IQR analog of fig2's
-    marker+errorbar violin grammar. Returns the violin parts."""
-    parts = ax.violinplot(groups, positions=positions, widths=width,
-                          showextrema=False, showmedians=False)
-    for body in parts["bodies"]:
-        body.set_facecolor("0.82")
-        body.set_edgecolor("none")
-        body.set_alpha(0.9)
-        body.set_zorder(1)
-    for grp, pos, color in zip(groups, positions, colors):
-        arr = np.asarray(grp, dtype=float)
-        arr = arr[np.isfinite(arr)]
-        q1, med, q3 = np.percentile(arr, [25, 50, 75])
-        # Vertical stroke = interquartile range (25-75).
-        ax.plot([pos, pos], [q1, q3], color=color, lw=1.4,
-                solid_capstyle="round", zorder=3)
-        # Horizontal stroke = median.
-        ax.plot([pos - box_width, pos + box_width], [med, med], color=color,
-                lw=2.0, solid_capstyle="round", zorder=4)
-    return parts
+def _lighten(color, frac=0.5):
+    """Light tint of `color`: mix `frac` of the colour with (1-frac) white, so the
+    box interiors read as a faint condition wash rather than a saturated fill."""
+    import matplotlib.colors as mcolors
+    c = np.asarray(mcolors.to_rgb(color))
+    return tuple(1.0 - (1.0 - c) * frac)
+
+
+def _box_whisker(ax, groups, positions, colors, *, width=0.55):
+    """Box-and-whisker per condition: a faint condition-tinted box (25-75 IQR)
+    with a uniform black outline (edge, whiskers, caps) and black median line,
+    whiskers at the 2.5th and 97.5th percentiles (interpretable fixed quantiles
+    for this large-N summary, rather than Tukey 1.5*IQR). Fliers hidden. The fill
+    tint signifies the condition. Returns the boxplot dict."""
+    groups = [np.asarray(g, dtype=float) for g in groups]
+    groups = [g[np.isfinite(g)] for g in groups]
+    bp = ax.boxplot(groups, positions=positions, widths=width,
+                    patch_artist=True, showfliers=False, whis=(2.5, 97.5),
+                    medianprops=dict(lw=2.0, solid_capstyle="round"),
+                    boxprops=dict(lw=1.1), whiskerprops=dict(lw=1.0),
+                    capprops=dict(lw=1.0), zorder=3)
+    for box, color in zip(bp["boxes"], colors):
+        box.set_facecolor(_lighten(color))
+        box.set_edgecolor("black")
+        box.set_zorder(3)
+    for med in bp["medians"]:
+        med.set_color("black")
+        med.set_zorder(4)
+    for part in bp["whiskers"] + bp["caps"]:
+        part.set_color("black")
+    return bp
 
 
 def _sig_bracket(ax, x1, x2, y, p, *, h, gap, color="k", fontsize=7.5,
@@ -172,8 +181,8 @@ def _plot_ccnorm_violins(ax, abl):
     m = good & _finite_mask(intact, ablated, stab)
     gi, ga, gs = intact[m], ablated[m], stab[m]
 
-    _violin_box(ax, [gi, ga, gs], [0, 1, 2],
-                [INTACT_COLOR, ABLATED_COLOR, STABILIZED_COLOR])
+    _box_whisker(ax, [gi, ga, gs], [0, 1, 2],
+                 [INTACT_COLOR, ABLATED_COLOR, STABILIZED_COLOR])
 
     intact_med = float(np.median(gi))
     p_z = wilcoxon(gi, ga).pvalue
@@ -186,9 +195,9 @@ def _plot_ccnorm_violins(ax, abl):
     # two stacked significance connectors sit clear above the distributions.
     ax.set_ylim(0, 1.42)
     ax.set_yticks(np.arange(0, 1.001, 0.2))
-    _sig_bracket(ax, 0, 1, 1.02, p_z, h=0.014, gap=0.045,
+    _sig_bracket(ax, 0, 1, 1.02, p_z, h=0.014, gap=0.058,
                  delta=f"Δ={d_z:+.3f}\n({pct_z:.0f}% of total)")
-    _sig_bracket(ax, 0, 2, 1.24, p_s, h=0.014, gap=0.045,
+    _sig_bracket(ax, 0, 2, 1.24, p_s, h=0.014, gap=0.058,
                  delta=f"Δ={d_s:+.3f}\n({pct_s:.0f}% of total)")
 
     ax.set_xlim(-0.6, 2.6)
@@ -215,17 +224,23 @@ def _plot_singletrial_r2_violins(ax, abl):
     m = good & _finite_mask(psth, full, ablated, stab)
     gp, gf, ga, gs = psth[m], full[m], ablated[m], stab[m]
 
-    # PSTH is demoted from a violin to just its median reference line (kept as the
-    # "trial-average" baseline); the three model conditions are the violins.
-    _violin_box(ax, [gf, ga, gs], [0, 1, 2],
-                [INTACT_COLOR, ABLATED_COLOR, STABILIZED_COLOR])
+    # PSTH is demoted from a box to just its median reference line (kept as the
+    # "trial-average" baseline); the three model conditions are the boxes.
+    _box_whisker(ax, [gf, ga, gs], [0, 1, 2],
+                 [INTACT_COLOR, ABLATED_COLOR, STABILIZED_COLOR])
 
     psth_med = float(np.median(gp))
     conc = np.concatenate([gf, ga, gs])
     lo = float(min(np.nanpercentile(conc, 1), psth_med))
     hi = float(np.nanpercentile(conc, 99))
     rng = hi - lo
-    ax.set_ylim(min(0.0, lo), hi + 0.62 * rng)
+    # Bottom of the axis keys to the lowest whisker (2.5th percentile), which
+    # dips below 0 for the stabilized condition — so the box whiskers/caps are
+    # fully visible rather than clipped. Still include 0 (the reference line).
+    whis_lo = min(s["whislo"] for s in boxplot_stats([gf, ga, gs],
+                                                     whis=(2.5, 97.5)))
+    y_bottom = min(0.0, whis_lo - 0.04 * rng)
+    ax.set_ylim(y_bottom, hi + 0.62 * rng)
 
     # Baseline: the leave-one-out PSTH-ceiling median (kept as a reference line;
     # the per-condition PSTH contrasts are reported in the printout/text).
@@ -277,11 +292,14 @@ def _plot_singletrial_r2_violins(ax, abl):
 # ---------------------------------------------------------------------------
 def _plot_payoff_with_marginal(ax, ax_marg, abl):
     good = np.asarray(abl["good"], dtype=bool)
-    alpha = np.asarray(abl["alpha"], dtype=float)
+    # Unclipped 1-alpha + fig2's inclusion mask (0 <= 1-alpha <= 1), so the FEM
+    # axis matches the exact population fig2 reports (no clip pile-up at 0).
+    oma = np.asarray(abl["one_minus_alpha"], dtype=float)
+    include = np.asarray(abl["fem_include"], dtype=bool)
     ve_abl = np.asarray(abl["ve"]["zeroed"], dtype=float)
     ve_psth = np.asarray(abl["ve_psth"], dtype=float)
-    m = good & _finite_mask(alpha, ve_abl, ve_psth) & (ve_psth > 0)
-    x = 1.0 - alpha[m]
+    m = good & include & _finite_mask(oma, ve_abl, ve_psth) & (ve_psth > 0)
+    x = oma[m]
     y = ve_abl[m] / ve_psth[m]
 
     ymax = float(np.nanpercentile(y, 98))

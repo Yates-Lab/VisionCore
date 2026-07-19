@@ -50,6 +50,7 @@ from VisionCore.covariance import rate_variance_components
 from _fig3_data import (
     DT, VALID_TIME_BINS, MIN_FIX_DUR, MIN_TOTAL_SPIKES, CCMAX_THRESHOLD,
     SUBJECTS, CHECKPOINT_PATH,
+    COVDECOMP_CACHE_PATH, COVDECOMP_TARGET,
     subject_from_session, _load_fig2_alpha_by_session,
     _load_fig2_included_sessions,
 )
@@ -438,6 +439,41 @@ def aggregate(results):
     return agg
 
 
+def _raw_one_minus_alpha(results):
+    """Unclipped fig2 1-alpha, aligned to `aggregate`'s flattened cell order.
+
+    Reads the covariance-decomposition cache (first counting window,
+    target='full') and returns 1 - diag(Cpsth)/diag(Crate) WITHOUT clipping,
+    exactly as fig2's `derive.py` computes it (NaN where diag(Crate) <= 0). The
+    stored `alpha` in this cache is `_load_fig2_alpha_by_session`'s clipped
+    version, which folds every diag_psth/diag_rate > 1 cell onto 1-alpha=0 and
+    keeps it; fig2 instead *excludes* those cells (0 <= 1-alpha <= 1). Panel E
+    uses this unclipped value plus the `fem_include` mask so its 1-alpha axis
+    describes the exact population fig2 reports (no clip pile-up at 0).
+
+    Ordering matches `aggregate`: results-order x neuron_mask-order.
+    """
+    with open(COVDECOMP_CACHE_PATH, "rb") as f:
+        srs = dill.load(f)
+    raw = {}
+    for sr in srs:
+        if sr["subject"] not in SUBJECTS:
+            continue
+        block = sr["windows"][0]["targets"][COVDECOMP_TARGET]
+        diag_psth = np.diag(block["Cpsth"])
+        diag_rate = np.diag(block["Crate"])
+        with np.errstate(divide="ignore", invalid="ignore"):
+            oma = 1.0 - diag_psth / diag_rate
+        oma[~(diag_rate > 0)] = np.nan
+        for nid, v in zip(sr["neuron_mask"], oma):
+            raw[(sr["session"], int(nid))] = float(v)
+    out = []
+    for r in results:
+        for nid in r["neuron_mask"]:
+            out.append(raw.get((r["session"], int(nid)), np.nan))
+    return np.asarray(out, dtype=float)
+
+
 def select_ablation_example(results):
     """Return the example-neuron payload (pinned PANEL_B session) or None."""
     return next((r["example"] for r in results if r.get("example")), None)
@@ -473,9 +509,20 @@ def load_ablation_data(recompute=False):
     results = kept
 
     agg = aggregate(results)
+    # Unclipped fig2 1-alpha + fig2's inclusion mask (0 <= 1-alpha <= 1). The
+    # panel-E 1-alpha axis uses these instead of the clipped `agg["alpha"]`, so
+    # the FEM axis describes the exact population fig2 reports (no clip pile-up
+    # at 0). Aligned to the same flattened cell order as `agg`.
+    oma_raw = _raw_one_minus_alpha(results)
+    agg["one_minus_alpha"] = oma_raw
+    agg["fem_include"] = (
+        np.isfinite(oma_raw) & (oma_raw >= 0.0) & (oma_raw <= 1.0)
+    )
     n_good = int(agg["good"].sum())
+    n_excl = int((agg["good"] & ~agg["fem_include"]).sum())
     print(f"Ablation data: {len(results)} sessions, {len(agg['good'])} cells "
-          f"({n_good} good, ccmax > {CCMAX_THRESHOLD})")
+          f"({n_good} good, ccmax > {CCMAX_THRESHOLD}); "
+          f"FEM-axis excludes {n_excl} good cell(s) with 1-alpha out of [0,1]")
 
     _cached_data = {
         **agg,
