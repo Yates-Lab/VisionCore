@@ -66,6 +66,19 @@ def decompose_model_session(rhat, robs, eye, valid_mask, dfs,
     A_model = np.full(n_cells, np.nan)
     B_model = np.full(n_cells, np.nan)
     B_obs = np.full(n_cells, np.nan)
+    # Unclipped companions: 1 - diag(Cpsth)/diag(Crate) WITHOUT the [0,1] clip
+    # the pipeline applies (covariance.py). fig2 excludes out-of-[0,1] cells
+    # rather than clipping them onto the boundaries, so callers that mirror fig2
+    # (e.g. the twin-replication supplement) need the raw value + an exclusion.
+    B_model_uncl = np.full(n_cells, np.nan)
+    B_obs_uncl = np.full(n_cells, np.nan)
+
+    def _uncl(d):
+        # pipeline_one_minus_alpha returns per-cell diagonals; single-cell here.
+        crate = float(np.asarray(d["crate_diag"])[0])
+        if not (crate > 0):
+            return np.nan
+        return 1.0 - float(np.asarray(d["cpsth_diag"])[0]) / crate
 
     for ni in range(n_cells):
         valid_ni = valid_mask & (dfs[:, :, ni] != 0)
@@ -75,17 +88,22 @@ def decompose_model_session(rhat, robs, eye, valid_mask, dfs,
             min_trials_per_phase=min_trials_per_phase,
         )["one_minus_alpha"]
 
-        B_model[ni] = pipeline_one_minus_alpha(
+        mdl = pipeline_one_minus_alpha(
             rhat[:, :, ni:ni + 1], eye, valid=valid_ni, threshold=threshold,
             min_trials_per_phase=min_trials_per_phase,
-        )["one_minus_alpha"][0]
+        )
+        B_model[ni] = mdl["one_minus_alpha"][0]
+        B_model_uncl[ni] = _uncl(mdl)
 
-        B_obs[ni] = pipeline_one_minus_alpha(
+        obs = pipeline_one_minus_alpha(
             robs[:, :, ni:ni + 1], eye, valid=valid_ni, threshold=threshold,
             min_trials_per_phase=min_trials_per_phase,
-        )["one_minus_alpha"][0]
+        )
+        B_obs[ni] = obs["one_minus_alpha"][0]
+        B_obs_uncl[ni] = _uncl(obs)
 
-    return {"A_model": A_model, "B_model": B_model, "B_obs": B_obs}
+    return {"A_model": A_model, "B_model": B_model, "B_obs": B_obs,
+            "B_model_uncl": B_model_uncl, "B_obs_uncl": B_obs_uncl}
 
 
 def load_model_data(refresh=False):
