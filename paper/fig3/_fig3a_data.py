@@ -738,11 +738,15 @@ def _lag_cube_from_fixrsvp(session_dir: Path, n_lags: int = 33):
 def _stabilized_lag_cube_from_fixrsvp(sess, n_lags: int = 33):
     """Reafferent-ablated ("stabilized") counterpart of the moving lag cube.
 
-    Re-renders the SAME window of RSVP frames with the retinal ROI held fixed at
-    the trial's medoid gaze (`build_stabilized_stim`'s manipulation, scoped to
-    the one panel trial): image flashes still update mid-window, but the gaze-
-    induced retinal motion is removed. The result is the temporal counterfactual
-    quantified as "extraretinal only (stabilized)" in panels C/D/E.
+    Re-renders the SAME window of RSVP frames with the retinal ROI held fixed, so
+    image flashes still update mid-window but the gaze-induced retinal motion is
+    removed. This is a single-trial illustration of the "extraretinal only
+    (stabilized)" manipulation quantified in panels C/D/E; for legibility the ROI
+    is frozen at THIS example trial's own medoid gaze, which keeps the flashed
+    image centred in the crop. The quantified ablation instead freezes every trial
+    at the session-global centroid (`build_stabilized_stim`); anchoring the single
+    panel trial there would crop away from its own stimulus and read as mostly
+    blank, so the picture uses the trial-local medoid.
 
     Returns a (n_lags, H, W) float32 cube ordered oldest → newest, matching
     `_lag_cube_from_fixrsvp`.
@@ -750,7 +754,7 @@ def _stabilized_lag_cube_from_fixrsvp(sess, n_lags: int = 33):
     from models.data.datasets import DictDataset
     from DataYatesV1.exp.fix_rsvp import FixRsvpTrial
     from DataYatesV1.utils.general import get_clock_functions
-    from _fig3_ablation_data import _medoid_bin, FIX_RADIUS
+    from _fig3_ablation_data import FIX_RADIUS
 
     exp = sess.exp
     dset = DictDataset.load(str(sess.sess_dir / "datasets" / "fixrsvp.dset"))
@@ -769,8 +773,14 @@ def _stabilized_lag_cube_from_fixrsvp(sess, n_lags: int = 33):
     if valid.sum() == 0:
         raise RuntimeError(
             f"stabilized cube: no valid fixation frames in trial {chosen_trial}")
+
+    # Illustration ROI: the example trial's own medoid gaze (sample minimizing
+    # summed distance to the trial's other valid gazes), which keeps the flashed
+    # image centred in the frozen crop. Schematic-only; the quantified ablation
+    # (C/D/E) freezes at the session-global centroid instead.
     vidx = np.where(valid)[0]
-    med = vidx[_medoid_bin(dpi_pix[vidx])]
+    d = np.sqrt(((dpi_pix[vidx][:, None] - dpi_pix[vidx][None]) ** 2).sum(-1)).sum(1)
+    med = int(vidx[np.argmin(d)])
 
     trial = FixRsvpTrial(exp["D"][chosen_trial], exp["S"])
     ptb2ephys, _ = get_clock_functions(exp)
@@ -782,8 +792,8 @@ def _stabilized_lag_cube_from_fixrsvp(sess, n_lags: int = 33):
 
     pos = np.searchsorted(np.where(m)[0], win_idxs)
     stab_cube = stab_trial[pos].astype(np.float32)
-    print(f"    stabilized lag cube: trial {chosen_trial}, ROI frozen at medoid "
-          f"gaze (flashes preserved, reafferent motion removed)")
+    print(f"    stabilized lag cube: trial {chosen_trial}, ROI frozen at this "
+          f"trial's medoid gaze (flashes preserved, reafferent motion removed)")
     return stab_cube
 
 

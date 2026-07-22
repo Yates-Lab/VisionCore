@@ -16,8 +16,8 @@ reproduces fig2:
 
   - intact     : full retinal stimulus + full behavior input (the "full" twin).
   - zeroed     : behavior set to 0 (extraretinal route removed; "ablated").
-  - stabilized : retinal image frozen at the per-trial MEDOID gaze (reafferent
-                 route removed), behavior intact.
+  - stabilized : retinal image frozen at ONE session-global centroid gaze
+                 (reafferent route removed), behavior intact.
 
 The behavior-zeroing and pixel-exact stabilized-stim rendering are imported
 verbatim from ``_fig3_ablation_data`` so the conditions are defined identically
@@ -126,9 +126,9 @@ def run_inference(force=False):
 
         beh_mod = build_behavior_modifiers()
 
-        # Reafferent-ablation stim: retinal image frozen at the per-trial medoid
-        # gaze, rendered from raw data and decimated to the model frame. The
-        # alignment gate must pass (== 0) or the substitution is not frame-aligned.
+        # Reafferent-ablation stim: retinal image frozen at one session-global
+        # centroid gaze, rendered from raw data and decimated to the model frame.
+        # The alignment gate must pass (== 0) or the substitution is not frame-aligned.
         samp = dataset_config.get('sampling', {})
         factor = (int(samp['source_rate']) // int(samp['target_rate'])) if samp else 1
         stab_stim_np, align_maxabs, n_tr_stab = build_stabilized_stim(

@@ -7,8 +7,8 @@ estimator on the same intersection population (see _supp_data.py):
 
   Full        (intact)     : full retinal stimulus + full behavior.
   Ablated     (zeroed)     : behavior set to 0 (extraretinal route removed).
-  Stabilized  (stabilized) : retinal image frozen at the per-trial medoid gaze
-                             (reafferent route removed), behavior intact.
+  Stabilized  (stabilized) : retinal image frozen at one session-global centroid
+                             gaze (reafferent route removed), behavior intact.
 
 Columns:
   1-alpha            : per-cell FEM modulation. Row 0 shows the neuron distribution;

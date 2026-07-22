@@ -5,8 +5,8 @@ and, at inference, remove one of the two FEM information routes:
 
   - intact     : full retinal stimulus + full behavior input (reference)
   - zeroed     : behavior set to 0 (extraretinal route removed; "retinal only")
-  - stabilized : retinal input frozen at the per-trial MEDOID gaze so the image
-                 no longer moves with the eye (reafferent route removed;
+  - stabilized : retinal input frozen at ONE session-global centroid gaze so the
+                 image no longer moves with the eye (reafferent route removed;
                  "extraretinal only"), behavior intact.
 
 The two ablations are symmetric counterfactuals. The fixRSVP stimulus is rendered
@@ -18,8 +18,9 @@ collapses under `stabilized`, the trial-to-trial variability the twin captures i
 carried by the moving retinal image, not by extraretinal modulation of V1.
 
 The stabilized retinal input is rendered pixel-exactly with DataYatesV1
-`FixRsvpTrial.get_rois` at a constant medoid ROI (validated against the native
-grid_sample renderer), in the raw 240 Hz frame, then decimated to the model's
+`FixRsvpTrial.get_rois` at a constant session-global centroid ROI (validated
+against the native grid_sample renderer), in the raw 240 Hz frame, then decimated
+to the model's
 120 Hz frame exactly as the training pipeline does (`downsample_stimulus` =
 decimation). A per-session alignment gate asserts decimate(raw stored stim) ==
 embedded `dset['stim']` bit-exactly, so the substitution is frame-aligned and the
@@ -69,6 +70,9 @@ COND_LABEL = {"intact": "intact", "zeroed": "zeroed", "stabilized": "stabilized"
 BEHAVIOR_CONDS = ["intact", "zeroed"]         # conditions that keep the stored stim
 STIM_CONDS = ["stabilized"]                   # conditions that replace the stim
 FIX_RADIUS = 1.0                              # deg; fixation = hypot(eyepos) < 1.0
+CENTROID_RADIUS = 0.5                          # deg; central window for the global
+                                              # stabilization centroid (independent
+                                              # of FIX_RADIUS; matches fig2's frame)
 
 CCNORM_N_SPLITS = 200
 MIN_TRIALS_PER_PHASE = 10
@@ -85,22 +89,24 @@ def build_behavior_modifiers():
     return {"intact": None, "zeroed": zeroed}
 
 
-def _medoid_bin(gaze_xy):
-    """Index (into the passed array) of the sample minimizing summed Euclidean
-    distance to all others. gaze_xy: (n, 2)."""
-    d = np.sqrt(((gaze_xy[:, None, :] - gaze_xy[None, :, :]) ** 2).sum(-1)).sum(1)
-    return int(np.argmin(d))
-
-
 def build_stabilized_stim(session_name, embedded_stim, factor):
     """Return (stab_stim, align_maxabs, n_trials_stab) for the reafferent ablation.
 
     stab_stim: float32 array shaped like `embedded_stim` (N_emb, 1, 51, 51),
     pixel-normalized ((raw-127)/255), a drop-in for dset['stim']; the retinal image
-    is frozen at each trial's medoid gaze while the RSVP images still flash.
+    is frozen at ONE common (session-global) gaze for every trial while the RSVP
+    images still flash.
+
+    A per-trial medoid would anchor each trial to a different frozen point, so the
+    frozen image would still vary trial-to-trial and leave a spurious across-trial
+    signal at matched eye positions (inflating the estimated FEM modulation). To get
+    a true extraretinal-only control we freeze every trial at a SINGLE gaze: the
+    centroid of `dpi_pix` over all valid samples inside the central CENTROID_RADIUS
+    deg (independent of FIX_RADIUS), realized as the ROI of the one session bin whose
+    `dpi_pix` is nearest that centroid. That ROI is reused for all trials.
 
     The stim is rendered pixel-exactly via DataYatesV1 `FixRsvpTrial.get_rois` with a
-    constant medoid ROI in the raw 240 Hz frame, then decimated to the model's
+    constant global ROI in the raw 240 Hz frame, then decimated to the model's
     120 Hz frame (the pipeline's `downsample_stimulus` is decimation). Because the
     other covariates are average-pooled at downsample time, the render must use the
     RAW covariates, not the embedded ones.
@@ -138,21 +144,32 @@ def build_stabilized_stim(session_name, embedded_stim, factor):
     n = min(len(dec), len(emb_px))
     align_maxabs = int(np.abs(dec[:n] - emb_px[:n]).max())
 
-    # per-trial medoid-stabilized render (raw frame)
+    # Session-global stabilization gaze: centroid of dpi_pix over all valid samples
+    # inside the central CENTROID_RADIUS deg, realized as the ROI of the single bin
+    # nearest that centroid. Reused for every trial so the frozen retinal image is
+    # identical across trials (true extraretinal-only control). Falls back to the
+    # fixation window only if no sample lands inside CENTROID_RADIUS.
+    central = np.hypot(eyepos[:, 0], eyepos[:, 1]) < CENTROID_RADIUS
+    global_valid = central & dpi_valid
+    if not np.any(global_valid):
+        global_valid = fixation & dpi_valid
+    gidx = np.where(global_valid)[0]
+    centroid = dpi_pix[gidx].mean(axis=0)
+    med_global = int(gidx[np.argmin(((dpi_pix[gidx] - centroid) ** 2).sum(1))])
+    roi_global = roi_all[med_global]
+
+    # Global-centroid-stabilized render (raw frame): freeze every trial at roi_global.
     stab_raw = raw_stim.copy()
     n_trials_stab = 0
     for iT in np.unique(trial_inds):
         m = trial_inds == iT
-        valid = m & fixation & dpi_valid
-        if valid.sum() == 0:
+        if not np.any(m & fixation & dpi_valid):
             continue
-        vidx = np.where(valid)[0]
-        med = vidx[_medoid_bin(dpi_pix[vidx])]
         trial = FixRsvpTrial(exp["D"][iT], exp["S"])
         start_idx = np.where(trial.image_ids == 2)[0][0]
         flip_times = ptb2ephys(trial.flip_times[start_idx:])
         hist_idx = np.searchsorted(flip_times, t_bins[m], side="right") - 1 + start_idx
-        roi_const = np.repeat(roi_all[med][None], m.sum(), axis=0)
+        roi_const = np.repeat(roi_global[None], m.sum(), axis=0)
         stab_raw[m] = trial.get_rois(hist_idx, roi=roi_const)
         n_trials_stab += 1
 
@@ -263,9 +280,9 @@ def _run_inference():
 
         beh_mod = build_behavior_modifiers()
 
-        # Reafferent-ablation stim: retinal image frozen at the per-trial medoid
-        # gaze, rendered from raw data and decimated to the model frame. The
-        # alignment gate must pass (== 0) or the substitution is not frame-aligned.
+        # Reafferent-ablation stim: retinal image frozen at one session-global
+        # centroid gaze, rendered from raw data and decimated to the model frame.
+        # The alignment gate must pass (== 0) or the substitution is not frame-aligned.
         samp = dataset_config.get('sampling', {})
         factor = (int(samp['source_rate']) // int(samp['target_rate'])) if samp else 1
         stab_stim_np, align_maxabs, n_tr_stab = build_stabilized_stim(
