@@ -473,7 +473,7 @@ def _draw_prediction_raster(ax, raster, x0, y0, w, h):
 # ── Top-row layout constants (natural-image training objective) ─────────────
 MODEL_GROUP_GAP = 1.5        # 2D gap: training stack right edge → model-input cube
 PRED_ARROW_GAP = 1.5         # gap: model-input group right → prediction raster left
-PRED_TEST_GAP = 2.2          # gap: prediction raster right → held-out test screen
+PRED_TEST_GAP = 1.3          # gap: prediction raster right → held-out test screen
 PLUS_GAP = 0.27             # vertical gap around the ⊕ between visual + behavioral
                             # (trimmed with cube_front_cy so the ⊕/behavior hold
                             # while the Visual group drops toward the ⊕)
@@ -1271,9 +1271,10 @@ def _route_behavior_to_concat(ax, out_x, out_mid_y, concat_xy):
     mid = out_mid_y
     elbow_x = cx
 
-    # Switch geometry: two contacts on the wire separated by a gap, centred at
-    # 55% along the horizontal run (before the elbow that turns up to concat).
-    gx = out_x + 0.55 * (elbow_x - out_x)
+    # Switch geometry: two contacts on the wire separated by a gap, centred along
+    # the horizontal run (before the elbow that turns up to concat). Sat well past
+    # the midpoint so the drooping "Ablated" label clears the behavior box.
+    gx = out_x + 0.66 * (elbow_x - out_x)
     half = 0.42
     xL, xR = gx - half, gx + half
 
@@ -1387,13 +1388,22 @@ TOP_ROW_BELOW = 2.75        # how far the top row extends below its centre line
                             # (now includes the bare behavior echo under the cube)
 
 # Panel-B retinal-input stack: the moving cube sits at ARCH_CENTER_Y; the
-# stabilized (reafferent-ablated) cube is dropped below it, and the behavior
-# box is pushed beneath the stabilized cube.
+# stabilized (reafferent-ablated) cube is dropped below it.
 STAB_CUBE_DY = 2.6          # vertical drop: moving-cube centre → stabilized-cube centre
-STAB_BEH_GAP = 1.15         # gap: stabilized-cube bottom (incl. label) → behavior box top
 CUBE_STACK_DROP = 0.7       # lower both cubes below the frontend line so the retinal
                             # title clears the panel-B letter (feed arrows angle up);
                             # reads as retinal = main path, stabilized = the option
+
+# Behavioral-input box: rather than a wide box hung below the stabilized cube
+# (which made panel B tall), it is shrunk and tucked into the empty band to the
+# RIGHT of the retinal/stabilized cubes, raised beside them beneath the early
+# architecture stages. This lifts panel B's bottom edge and frees figure height
+# for the bottom analysis row.
+BEH_BOX_X_GAP = 1.2         # gap: cubes' right edge → behavior box left
+BEH_BOX_W = 2.6             # behavior box width (narrower than the old full span)
+BEH_BOX_TRACE_H = 1.05      # stacked-trace height (shrunk from BEH_TRACE_H)
+BEH_BOX_TOP_DY = 0.15       # box top above the stabilized cube's bottom edge (sits
+                            # in the empty band below the early architecture stages)
 
 
 def _draw_all(ax, assets):
@@ -1464,14 +1474,15 @@ def _draw_all(ax, assets):
                                 linestyle=(0, (4, 3))),
                 zorder=4.75)
 
-    # Behavioral path: labelled covariates beneath the stabilized cube, boxed as
-    # a discrete model input and routed across to the concat marker.
-    beh_x0 = cube_in["x_left"]
-    beh_w = arch["frontend_right_x"] - beh_x0
-    beh_top = stab_block["bottom_y"] - STAB_BEH_GAP
+    # Behavioral path: compact covariate box tucked to the right of the cubes and
+    # raised beside them, boxed as a discrete model input and routed across to the
+    # concat marker.
+    beh_x0 = stab_block["x_right"] + BEH_BOX_X_GAP
+    beh_w = BEH_BOX_W
+    beh_top = stab_block["bottom_y"] + BEH_BOX_TOP_DY
     beh = _draw_behavior_traces(ax, assets, beh_x0, beh_top, beh_w,
                                 labeled=False, scale_bar=True, box=True,
-                                key_side="left")
+                                key_side="left", trace_h=BEH_BOX_TRACE_H)
     # Bold title above the box (mirrors the "Retinal input" title over the cube).
     ax.text(beh_x0 + beh_w / 2, beh["y_top"] + 0.10, "Behavioral input",
             ha="center", va="bottom", fontsize=STIM_HEADER_FS, color=TEXT_COLOR,

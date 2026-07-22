@@ -181,6 +181,13 @@ def _plot_ccnorm_violins(ax, abl):
     m = good & _finite_mask(intact, ablated, stab)
     gi, ga, gs = intact[m], ablated[m], stab[m]
 
+    # Horizontal dashed guide at each condition's median, spanning the panel so
+    # the three medians can be read off against one another at a glance.
+    for grp, color in zip((gi, ga, gs),
+                          (INTACT_COLOR, ABLATED_COLOR, STABILIZED_COLOR)):
+        ax.axhline(float(np.median(grp)), color=color, lw=0.9,
+                   ls=(0, (4, 3)), alpha=0.55, zorder=1)
+
     _box_whisker(ax, [gi, ga, gs], [0, 1, 2],
                  [INTACT_COLOR, ABLATED_COLOR, STABILIZED_COLOR])
 
@@ -200,10 +207,10 @@ def _plot_ccnorm_violins(ax, abl):
     _sig_bracket(ax, 0, 2, 1.24, p_s, h=0.014, gap=0.058,
                  delta=f"Δ={d_s:+.3f}\n({pct_s:.0f}% of total)")
 
-    ax.set_xlim(-0.6, 2.6)
+    ax.set_xlim(-0.6, 2.9)
     ax.set_xticks([0, 1, 2])
     ax.set_xticklabels(["Retinal +\nbehavioral\n(full)", "Retinal\nonly\n(ablated)",
-                        "Extraretinal\nonly\n(stabilized)"], fontsize=5.8)
+                        "Extraretinal\nonly\n(stabilized)"], fontsize=5.3)
     ax.set_ylabel("Held-out prediction\n(ccnorm)")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -245,8 +252,11 @@ def _plot_singletrial_r2_violins(ax, abl):
     # Baseline: the leave-one-out PSTH-ceiling median (kept as a reference line;
     # the per-condition PSTH contrasts are reported in the printout/text).
     ax.axhline(psth_med, color="0.55", lw=0.8, ls="--", alpha=0.8, zorder=0)
-    ax.text(2.58, psth_med, "Trial-avg.\nmedian\n(PSTH)", color="0.5", fontsize=5.6,
-            va="center", ha="left", clip_on=False)
+    # Label sits above the reference line, just right of the stabilized whiskers
+    # (kept inside the panel via the extended x-limit) so it no longer collides
+    # with panel E's y-axis label.
+    ax.text(2.28, psth_med + 0.006, "Trial avg.\nmedian", color="0.5",
+            fontsize=5.4, va="bottom", ha="left", clip_on=False)
 
     # Two ablation contrasts vs the full twin, staggered so the brackets never
     # overlap: the small extraretinal (zeroed) cost sits lower, the large
@@ -269,10 +279,10 @@ def _plot_singletrial_r2_violins(ax, abl):
                  delta=f"Δ={d_fs:+.3f}\n({pct_fs:.0f}% of total)")
 
     ax.axhline(0, color="0.7", lw=0.6, ls=":")
-    ax.set_xlim(-0.6, 2.6)
+    ax.set_xlim(-0.6, 2.9)
     ax.set_xticks([0, 1, 2])
     ax.set_xticklabels(["Retinal +\nbehavioral\n(full)", "Retinal\nonly\n(ablated)",
-                        "Extraretinal\nonly\n(stabilized)"], fontsize=5.8)
+                        "Extraretinal\nonly\n(stabilized)"], fontsize=5.3)
     ax.set_ylabel("Single-trial $r^2$")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -441,7 +451,7 @@ def compose(*, recompute: bool = False, out_dir=FIG_DIR, dpi: int = 300):
         right=0.985,
         bottom=0.052,
         top=0.955,
-        height_ratios=[3.0, 1.0],
+        height_ratios=[2.4, 1.0],
         hspace=0.11,
     )
 
