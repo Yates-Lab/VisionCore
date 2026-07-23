@@ -8,12 +8,15 @@ Renders the digital-twin mechanism figure:
      zeroed) vs extraretinal-only (retina stabilized)
   D  Single-trial r^2 (vs the PSTH-median reference line): full twin vs
      retinal-only vs extraretinal-only
-  E  Empirical FEM modulation (1-alpha) vs the ablated twin's single-trial
-     r^2 gain over the PSTH baseline, with a marginal gain distribution
+  E  FEM modulation fraction (1-alpha): the neuron distribution vs each
+     within-model twin condition, with a paired TOST equivalence test — Full
+     and Ablated reproduce the empirical FEM modulation, Stabilized does not.
 
-Panels C/D/E all draw on the single unified analysis-row cache
-(`fig3_bottomrow_ablation.pkl`), so they share sessions, neurons, and the
-`good` reliability mask.
+Panels C/D draw on the unified analysis-row cache
+(`fig3_bottomrow_ablation.pkl`) on the fig2 inclusion population (rate > 2 Hz &
+PSTH R^2 > 0.05). Panel E is computed by `_fig3_femfraction` on the same fig2
+frame + intersection population, so C/D/E describe (almost) the same cells fig2
+reports.
 
 Usage:
     uv run python paper/fig3/generate_figure3.py [--recompute]
@@ -28,13 +31,14 @@ import matplotlib.pyplot as plt
 from matplotlib.cbook import boxplot_stats
 from matplotlib.gridspec import GridSpec
 import numpy as np
-from scipy.stats import spearmanr, wilcoxon
+from scipy.stats import wilcoxon
 
 from VisionCore.paths import VISIONCORE_ROOT
 
 from _fig3_data import FIG_DIR, configure_matplotlib
 from _fig3_ablation_data import CACHE_PATH as ABLATION_CACHE_PATH
 from _fig3_ablation_data import load_ablation_data
+from _fig3_femfraction import compute_femfraction_data, CONDITIONS as FEM_CONDITIONS
 from _fig3a_data import load_panel_a_assets
 from generate_fig3a import plot_panel_a
 
@@ -174,11 +178,11 @@ def _finite_mask(*arrays):
 # Panel C — trial-averaged held-out prediction (intact vs ablated ccnorm)
 # ---------------------------------------------------------------------------
 def _plot_ccnorm_violins(ax, abl):
-    good = np.asarray(abl["good"], dtype=bool)
+    pop = np.asarray(abl["cd_population"], dtype=bool)
     intact = np.asarray(abl["ccnorm"]["intact"], dtype=float)
     ablated = np.asarray(abl["ccnorm"]["zeroed"], dtype=float)
     stab = np.asarray(abl["ccnorm"]["stabilized"], dtype=float)
-    m = good & _finite_mask(intact, ablated, stab)
+    m = pop & _finite_mask(intact, ablated, stab)
     gi, ga, gs = intact[m], ablated[m], stab[m]
 
     # Horizontal dashed guide at each condition's median, spanning the panel so
@@ -223,12 +227,12 @@ def _plot_ccnorm_violins(ax, abl):
 # Panel D — single-trial r^2 (PSTH baseline vs full vs ablated)
 # ---------------------------------------------------------------------------
 def _plot_singletrial_r2_violins(ax, abl):
-    good = np.asarray(abl["good"], dtype=bool)
+    pop = np.asarray(abl["cd_population"], dtype=bool)
     psth = np.asarray(abl["ve_psth"], dtype=float)
     full = np.asarray(abl["ve"]["intact"], dtype=float)
     ablated = np.asarray(abl["ve"]["zeroed"], dtype=float)
     stab = np.asarray(abl["ve"]["stabilized"], dtype=float)
-    m = good & _finite_mask(psth, full, ablated, stab)
+    m = pop & _finite_mask(psth, full, ablated, stab)
     gp, gf, ga, gs = psth[m], full[m], ablated[m], stab[m]
 
     # PSTH is demoted from a box to just its median reference line (kept as the
@@ -298,81 +302,145 @@ def _plot_singletrial_r2_violins(ax, abl):
 
 
 # ---------------------------------------------------------------------------
-# Panel E — FEM modulation vs ablated single-trial gain over PSTH
+# Panel E — FEM modulation fraction: neurons vs each within-model twin condition
 # ---------------------------------------------------------------------------
-def _plot_payoff_with_marginal(ax, ax_marg, abl):
-    good = np.asarray(abl["good"], dtype=bool)
-    # Unclipped 1-alpha + fig2's inclusion mask (0 <= 1-alpha <= 1), so the FEM
-    # axis matches the exact population fig2 reports (no clip pile-up at 0).
-    oma = np.asarray(abl["one_minus_alpha"], dtype=float)
-    include = np.asarray(abl["fem_include"], dtype=bool)
-    ve_abl = np.asarray(abl["ve"]["zeroed"], dtype=float)
-    ve_psth = np.asarray(abl["ve_psth"], dtype=float)
-    m = good & include & _finite_mask(oma, ve_abl, ve_psth) & (ve_psth > 0)
-    x = oma[m]
-    y = ve_abl[m] / ve_psth[m]
+TOST_MARGIN = 0.10   # equivalence margin on 1-alpha (robust for any Δ >= 0.05)
 
-    ymax = float(np.nanpercentile(y, 98))
-    ymax = max(2.0, ymax)
 
-    ax.scatter(x, y, s=6, alpha=0.5, color=SCATTER_COLOR, linewidths=0)
-    ax.axhline(1, color="k", ls="--", lw=0.5, alpha=0.5)
+def _in01(v):
+    """fig2's 1-alpha inclusion: finite and within [0, 1] (unclipped values)."""
+    v = np.asarray(v, float)
+    return np.isfinite(v) & (v >= 0.0) & (v <= 1.0)
 
-    b, a = np.polyfit(x, y, 1)
-    xs = np.linspace(0, 1, 50)
-    ax.plot(xs, b * xs + a, color=ACCENT, lw=1.6, zorder=5)
 
-    sr = spearmanr(x, y)
-    rho, pval = sr.correlation, sr.pvalue
-    # Stars sit above rho, but must stay below y=0.98: _clear_panel_heading()
-    # culls any transAxes text with y >= 0.98 near the left edge.
-    ax.text(0.045, 0.91, _stars(pval), transform=ax.transAxes,
-            ha="left", va="top", fontsize=10, color="0.12")
-    ax.text(0.04, 0.85, f"ρ = {rho:.2f}", transform=ax.transAxes,
-            ha="left", va="top", fontsize=9, color="0.12")
+def _paired_tost(emp, mod, margin=TOST_MARGIN):
+    """Paired two-one-sided-t equivalence test on the matched-cell differences
+    d = emp - mod (cells with both 1-alpha in [0, 1]). Equivalence to the neuron
+    distribution is established at level a when the returned p_tost < a.
+
+    Returns (p_tost, median_d, n)."""
+    from scipy.stats import t as tdist
+    both = _in01(emp) & _in01(mod)
+    d = np.asarray(emp, float)[both] - np.asarray(mod, float)[both]
+    n = int(d.size)
+    md = float(np.median(d)) if n else np.nan
+    if n < 3:
+        return np.nan, md, n
+    mean = float(d.mean())
+    se = float(d.std(ddof=1)) / np.sqrt(n)
+    df = n - 1
+    if se == 0:
+        return (0.0 if abs(mean) < margin else 1.0), md, n
+    p_lower = float(tdist.sf((mean + margin) / se, df))   # H1: mean > -margin
+    p_upper = float(tdist.cdf((mean - margin) / se, df))  # H1: mean < +margin
+    return max(p_lower, p_upper), md, n
+
+
+def _nice_step(x):
+    """A '1/2/2.5/5 x 10^k' step near x (for count-axis ticks)."""
+    if x <= 0:
+        return 1.0
+    mag = 10.0 ** np.floor(np.log10(x))
+    for m in (1, 2, 2.5, 5, 10):
+        if m * mag >= x:
+            return m * mag
+    return 10 * mag
+
+
+def _plot_femfraction(ax, femdata, *, margin=TOST_MARGIN):
+    """FEM modulation fraction (1 - alpha) in per-unit counts: the empirical
+    neuron distribution (grey) vs each within-model twin condition (step), on
+    the fig2 frame + intersection population (the same quantity fig2 panel C
+    reports). Median triangles mark each distribution. The histograms fill only
+    the lower ~60% of the axis; the headroom above holds the median markers,
+    legend, and equivalence annotation. A paired TOST (margin ±margin) tests
+    every condition's equivalence to the neurons: Full and Ablated reproduce the
+    empirical FEM modulation, Stabilized does not — so reafference carries the
+    fig2 effect."""
+    from matplotlib.lines import Line2D
+
+    bins = np.linspace(0, 1, 26)
+    emp = np.asarray(femdata["intact"]["B_obs_uncl"], dtype=float)
+    e = emp[_in01(emp)]
+    conds = [("intact", "Model (full)", INTACT_COLOR),
+             ("zeroed", "Model (ablated)", ABLATED_COLOR),
+             ("stabilized", "Model (stabilized)", STABILIZED_COLOR)]
+    model_v = {k: np.asarray(femdata[k]["B_model_uncl"], dtype=float)[
+        _in01(femdata[k]["B_model_uncl"])] for k, _, _ in conds}
+
+    # Count ceiling: the first round tick above the tallest bar of any series.
+    # The axis then extends to ceiling / 0.60 so the histograms fill ~60% of the
+    # vertical span and the top ~40% is free for markers/legend/stats.
+    counts = [np.histogram(e, bins=bins)[0].max()]
+    counts += [np.histogram(model_v[k], bins=bins)[0].max() for k, _, _ in conds]
+    maxcount = int(max(counts))
+    step = _nice_step(maxcount / 3.0)
+    ceiling = float(np.ceil(maxcount / step) * step)
+    if ceiling <= maxcount:
+        ceiling += step
+    ylim_top = ceiling / 0.60
+
+    # Histograms (per-unit counts). Empirical filled grey; models as step lines.
+    ax.hist(e, bins=bins, color="0.6", alpha=0.5, edgecolor="white",
+            linewidth=0.3, zorder=1)
+    for key, _label, color in conds:
+        ax.hist(model_v[key], bins=bins, histtype="step", color=color, lw=1.6,
+                zorder=3)
+
+    head = ylim_top - ceiling
+    y_tri = ceiling + 0.12 * head
+    med = {"emp": float(np.median(e))}
+    tost = {}
+    for key, _label, _color in conds:
+        med[key] = float(np.median(model_v[key]))
+        p_tost, md, n = _paired_tost(emp, femdata[key]["B_model_uncl"], margin)
+        tost[key] = (p_tost, np.isfinite(p_tost) and p_tost < 0.05)
+        print(f"Panel E — {_label}: model med={med[key]:.3f} (n={n}); "
+              f"median(neuron-model)={md:+.3f}; TOST(Δ={margin}) p={p_tost:.2e} -> "
+              f"{'EQUIVALENT' if tost[key][1] else 'not equivalent'} to neurons")
+
+    # Equivalence display: a TOST equivalence zone = empirical median ± margin,
+    # shaded in the headroom. A distribution whose median triangle lands inside
+    # the zone is statistically equivalent to the neurons (paired TOST, p<0.05);
+    # one outside is not. Full and Ablated fall inside, Stabilized far outside.
+    from matplotlib.patches import Rectangle
+    band_lo, band_hi = med["emp"] - margin, med["emp"] + margin
+    yb0, yb1 = ceiling + 0.02 * head, ceiling + 0.22 * head
+    ax.add_patch(Rectangle((band_lo, yb0), band_hi - band_lo, yb1 - yb0,
+                           facecolor="0.78", alpha=0.5, edgecolor="none", zorder=2))
+    for xb in (band_lo, band_hi):
+        ax.plot([xb, xb], [yb0, yb1], color="0.55", lw=0.8, zorder=3)
+    ax.text(band_hi + 0.015, 0.5 * (yb0 + yb1),
+            "TOST equiv.\n" rf"zone ($\pm${margin:g})",
+            ha="left", va="center", fontsize=4.8, color="0.4", linespacing=1.1)
+
+    # Median triangles (replacing the empirical dashed line): one per
+    # distribution, in a single headroom row inside/against the zone. Whether a
+    # triangle lands inside the shaded zone reads the equivalence verdict on its
+    # own, so no per-marker text is needed.
+    ax.plot(med["emp"], y_tri, marker="v", ms=9.5, color="0.3", mec="white",
+            mew=0.7, clip_on=False, zorder=6)
+    for key, _label, color in conds:
+        ax.plot(med[key], y_tri, marker="v", ms=9.0, color=color, mec="white",
+                mew=0.7, clip_on=False, zorder=6)
 
     ax.set_xlim(0, 1)
-    ax.set_ylim(0, ymax)
-    ax.set_xlabel("Fraction of rate modulation\ndue to FEM")
-    ax.set_ylabel("Single-trial $r^2$ gain\n(Ablated / trial avg.)")
+    ax.set_ylim(0, ylim_top)
+    ax.set_yticks(np.arange(0, ceiling + 0.5 * step, step))
+    ax.set_xlabel("Fraction of rate modulation\ndue to FEM (1-α)")
+    ax.set_ylabel("Units")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
 
-    # Right marginal: distribution of the r^2 gain, sharing the scatter's y.
-    med = float(np.median(y))
-    bins = np.linspace(0, ymax, 31)
-    counts, _, _ = ax_marg.hist(np.clip(y, 0, ymax), bins=bins,
-                                orientation="horizontal",
-                                color=SCATTER_COLOR, alpha=0.55, edgecolor="none")
-    cmax = float(counts.max())
-    ax_marg.axhline(1, color="k", ls="--", lw=0.5, alpha=0.5)
-    # Median: dark-grey dashed line ending exactly at a left-pointing triangle
-    # (so the line never pokes past the marker), with the value in black to the
-    # marker's right (the triangle is identified as the median in the caption).
-    tri_x = cmax * 1.18
-    ax_marg.plot([0, tri_x], [med, med], color="0.3", ls="--", lw=1.2, zorder=5)
-    ax_marg.plot(tri_x, med, marker="<", ms=6, color="0.3", mec="0.3",
-                 clip_on=False, zorder=6)
-    ax_marg.text(tri_x + cmax * 0.26, med, f"{med:.2f}", color="black",
-                 fontsize=6.5, va="center", ha="left", clip_on=False)
-    ax_marg.set_ylim(0, ymax)
-    ax_marg.set_xlim(0, cmax * 1.55)
-    # Count axis (shared y with the scatter, ticks kept but unlabelled to show
-    # the shared axis; x labelled 'Units', re-centred under the bars). Drop the
-    # 0 tick (it collides with the scatter's 1.0 x-label); keep a single rounded
-    # tick near the max count.
-    ax_marg.set_xticks([int(round(cmax / 10.0) * 10)])
-    ax_marg.set_xlabel("Units")
-    ax_marg.xaxis.set_label_coords(0.38, -0.16)
-    ax_marg.tick_params(axis="y", labelleft=False, left=True)
-    for side in ("top", "right"):
-        ax_marg.spines[side].set_visible(False)
-    ax_marg.spines["left"].set_visible(True)
-    ax_marg.spines["bottom"].set_visible(True)
-
-    print(f"Panel E — payoff (N={m.sum()}): Spearman ρ={rho:.3f} (p={pval:.2e}); "
-          f"gain median={med:.2f}, frac>1={np.mean(y > 1):.2f}, "
-          f"OLS slope={b:.2f}")
+    handles = [Line2D([0], [0], color="0.55", lw=5, alpha=0.5),
+               Line2D([0], [0], color=INTACT_COLOR, lw=1.6),
+               Line2D([0], [0], color=ABLATED_COLOR, lw=1.6),
+               Line2D([0], [0], color=STABILIZED_COLOR, lw=1.6)]
+    labels = ["Empirical", "Model (full)", "Model (ablated)", "Model (stabilized)"]
+    leg = ax.legend(handles, labels, frameon=False, fontsize=7.2, loc="upper left",
+                    handlelength=1.3, handletextpad=0.5, labelspacing=0.35,
+                    borderaxespad=0.2)
+    leg.set_zorder(7)
 
 
 def _plot_missing_cache(ax):
@@ -395,7 +463,7 @@ def _load_ablation_cache():
 def _write_sidecars(out_dir, manifest: dict):
     caption = """Figure 3. A retinal-input digital twin captures FEM-linked V1 response variability.
 
-(A) Training objective and held-out test. The twin is trained on gratings, gabors, and natural images to predict simultaneously recorded V1 spikes continuously: at each timepoint its input is a space × space × time crop of the gaze-contingent stimulus history (the natural-image "model input" cube) combined with the extraretinal behavior covariates, and its target is that timepoint's population spike counts (the units × time raster, with the single predicted bin highlighted). The fixated-flashed-image test stimulus (right) runs through the same pipeline but was held out during training. (B) Gaze-contingent digital twin architecture. The model receives the retinal stimulus history (a moving, reafferent space × space × time crop) and an optional extraretinal behavior input, then predicts simultaneously recorded V1 responses. The schematic depicts both within-model ablation routes quantified in C–E: the behavior input can be zeroed (the Full/Ablated switch), and the retinal input can be stabilized — frozen so it no longer moves with the eye (the second, temporally constant cube). (C, D) Two symmetric within-model ablations isolate the twin's two FEM information routes, pooled across reliable Allen and Logan cells (matching the fig. 2 session population, >=10 analyzed units/session): retinal-only zeroes the separate extraretinal behavior input, and extraretinal-only stabilizes the retinal input by freezing it at one common (session-global centroid) gaze so the image no longer moves with the eye (behavior intact). (C) Held-out, trial-averaged prediction (normalized correlation, ccnorm). Removing the extraretinal pathway lowers the trial-averaged prediction only slightly, whereas stabilizing the retinal input lowers it more, though much of the mean response survives. (D) Single-trial prediction (r^2) against the leave-one-out PSTH median (dashed reference line). The twin predicts single trials well above the PSTH ceiling with the extraretinal pathway zeroed, but stabilizing the retinal input collapses single-trial prediction to at or below the PSTH baseline — so the twin's trial-to-trial predictive power is carried by the moving retinal image (reafference), not by extraretinal modulation. (E) The retinal-only twin's single-trial r^2 gain over the PSTH baseline grows with a cell's empirical FEM modulation \\(1-\\alpha\\), the fraction of rate modulation due to FEM (OLS fit; Spearman rho with p-value inset; right marginal shows the per-unit gain distribution, with the left-pointing triangle marking the median). Retinal-input prediction alone tracks the empirically measured increase in apparent rate variance under fixational eye movements.
+(A) Training objective and held-out test. The twin is trained on gratings, gabors, and natural images to predict simultaneously recorded V1 spikes continuously: at each timepoint its input is a space × space × time crop of the gaze-contingent stimulus history (the natural-image "model input" cube) combined with the extraretinal behavior covariates, and its target is that timepoint's population spike counts (the units × time raster, with the single predicted bin highlighted). The fixated-flashed-image test stimulus (right) runs through the same pipeline but was held out during training. (B) Gaze-contingent digital twin architecture. The model receives the retinal stimulus history (a moving, reafferent space × space × time crop) and an optional extraretinal behavior input, then predicts simultaneously recorded V1 responses. The schematic depicts both within-model ablation routes quantified in C–E: the behavior input can be zeroed (the Full/Ablated switch), and the retinal input can be stabilized — frozen so it no longer moves with the eye (the second, temporally constant cube). (C, D) Two symmetric within-model ablations isolate the twin's two FEM information routes, pooled across reliable Allen and Logan cells (matching the fig. 2 session population, >=10 analyzed units/session): retinal-only zeroes the separate extraretinal behavior input, and extraretinal-only stabilizes the retinal input by freezing it at one common (session-global centroid) gaze so the image no longer moves with the eye (behavior intact). (C) Held-out, trial-averaged prediction (normalized correlation, ccnorm). Removing the extraretinal pathway lowers the trial-averaged prediction only slightly, whereas stabilizing the retinal input lowers it more, though much of the mean response survives. (D) Single-trial prediction (r^2) against the leave-one-out PSTH median (dashed reference line). The twin predicts single trials well above the PSTH ceiling with the extraretinal pathway zeroed, but stabilizing the retinal input collapses single-trial prediction to at or below the PSTH baseline — so the twin's trial-to-trial predictive power is carried by the moving retinal image (reafference), not by extraretinal modulation. (E) FEM modulation fraction (\\(1-\\alpha\\), the fraction of rate modulation due to FEM — the same quantity as fig. 2), in per-unit counts. The grey filled distribution is the neurons; each within-model twin condition overlays as a step histogram, all on the fig. 2 fixation frame and intersection population. Downward triangles mark each distribution's median. The shaded band is the empirical median \\(\\pm 0.1\\), a paired two-one-sided-t (TOST) equivalence zone (margin \\(\\Delta=0.1\\); the verdict is robust for any \\(\\Delta\\ge0.05\\)): a condition whose median falls inside is statistically equivalent to the neurons. The full twin and the behavior-ablated (retinal-only) twin are both equivalent to the empirical FEM modulation (\\(\\equiv\\) neurons; median offset ~0.03, TOST \\(p<10^{-20}\\)), whereas stabilizing the retinal input abolishes it (\\(\\neq\\) neurons; median 0.20 vs 0.67). Reafference alone reproduces the FEM-driven rate modulation that drives the fig. 2 population structure.
 """
     (out_dir / "figure3_caption.md").write_text(caption, encoding="utf-8")
 
@@ -404,10 +472,12 @@ def _write_sidecars(out_dir, manifest: dict):
 Generated by `paper/fig3/generate_figure3.py`.
 
 The digital-twin mechanism figure: a retinal-input twin whose single-trial
-prediction survives zeroing the extraretinal eye-state pathway, with the largest
-single-trial gains over a PSTH baseline for cells with stronger empirical FEM
-modulation. Analysis panels C/D/E share one cache
-(`fig3_bottomrow_ablation.pkl`).
+prediction survives zeroing the extraretinal eye-state pathway, and whose FEM
+modulation fraction (1-alpha) reproduces the empirical distribution under the
+full and behavior-ablated conditions but not when the retinal image is
+stabilized. Panels C/D use `fig3_bottomrow_ablation.pkl`; panel E uses the
+per-condition f_FEM caches (`fig3_femfraction_{condition}.pkl`), both on the
+fig2 inclusion population.
 
 ## Outputs
 - `figure3.png`
@@ -461,31 +531,30 @@ def compose(*, recompute: bool = False, out_dir=FIG_DIR, dpi: int = 300):
     ax_a = fig.add_subplot(gs[0, 0])
     plot_panel_a(ax=ax_a, assets=assets)
 
-    # Row 2. Three analysis panels. Panel E is wider to host its right marginal.
+    # Row 2. Three analysis panels: C/D box-and-whisker, E the FEM-fraction
+    # distribution overlay (no marginal axis).
     gs_mid = gs[1, 0].subgridspec(
         1, 5,
-        width_ratios=[0.12, 1.0, 1.15, 1.65, 0.12],
+        width_ratios=[0.12, 1.0, 1.0, 1.25, 0.12],
         wspace=0.5,
     )
 
     ax_c = fig.add_subplot(gs_mid[0, 1])
     ax_d = fig.add_subplot(gs_mid[0, 2])
-    gs_e = gs_mid[0, 3].subgridspec(1, 2, width_ratios=[1.0, 0.26], wspace=0.06)
-    ax_e = fig.add_subplot(gs_e[0, 0])
-    ax_e_marg = fig.add_subplot(gs_e[0, 1], sharey=ax_e)
+    ax_e = fig.add_subplot(gs_mid[0, 3])
 
     if abl is not None:
         _plot_ccnorm_violins(ax_c, abl)
         _plot_singletrial_r2_violins(ax_d, abl)
-        _plot_payoff_with_marginal(ax_e, ax_e_marg, abl)
+        femdata = {c: compute_femfraction_data(condition=c) for c in FEM_CONDITIONS}
+        _plot_femfraction(ax_e, femdata)
     else:
         for a in (ax_c, ax_d, ax_e):
             _plot_missing_cache(a)
-        ax_e_marg.set_axis_off()
 
     _standard_panel_heading(ax_c, "C", "Ablations modestly reduce\ntrial-averaged predictions")
     _standard_panel_heading(ax_d, "D", "Single-trial prediction needs\nthe moving retinal image")
-    _standard_panel_heading(ax_e, "E", "Reafference alone recovers\nFEM-linked variability")
+    _standard_panel_heading(ax_e, "E", "Reafference reproduces the\nempirical FEM modulation")
 
     # No bbox_inches="tight": keep the canvas at exactly the intended
     # page-width figsize (8.5 in) rather than cropping to the ink bounds.
@@ -504,8 +573,8 @@ def compose(*, recompute: bool = False, out_dir=FIG_DIR, dpi: int = 300):
                  "vs extraretinal-only (stabilized)",
             "D": "single-trial r2 vs PSTH-median line: full vs retinal-only "
                  "vs extraretinal-only (stabilized)",
-            "E": "empirical 1-alpha vs ablated single-trial r2 gain over PSTH, "
-                 "with marginal gain distribution",
+            "E": "FEM modulation fraction (1-alpha): neuron distribution vs each "
+                 "within-model twin condition, paired TOST equivalence test",
         },
     }
     _write_sidecars(out_dir, manifest)

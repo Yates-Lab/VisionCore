@@ -491,6 +491,39 @@ def _raw_one_minus_alpha(results):
     return np.asarray(out, dtype=float)
 
 
+def _fig2_cd_population(results):
+    """Per-cell bool (aligned to `aggregate`'s flattened cell order): the cell
+    passes fig2 inclusion (rate > 2 Hz & split-half PSTH R^2 > 0.05) in the
+    aligned covariance cache.
+
+    Panels C/D use this in place of the ccmax > 0.85 `good` mask so their
+    population matches fig2 (and the panel-E f_FEM population). Every `good` cell
+    is a strict subset of this set, so switching only *adds* (less reliable)
+    cells; it never drops a currently shown cell. Ordering mirrors
+    `_raw_one_minus_alpha`: results-order x neuron_mask-order.
+    """
+    covdecomp = str(VISIONCORE_ROOT / "paper" / "covariance_decomposition")
+    if covdecomp not in sys.path:
+        sys.path.insert(0, covdecomp)
+    import derive
+    from data_loading import load_cache as load_aligned_cache
+    aligned_by = {a["session"]: a for a in load_aligned_cache()}
+    incl = {}
+    for a in aligned_by.values():
+        nm = np.asarray(a["neuron_mask"])
+        rate = np.asarray(a["rate_hz"], float)
+        psth = np.asarray(a["psth_r2"], float)
+        keep = (np.isfinite(rate) & (rate > derive.MIN_RATE_HZ)
+                & np.isfinite(psth) & (psth > derive.MIN_PSTH_R2))
+        for o, k in zip(nm, keep):
+            incl[(a["session"], int(o))] = bool(k)
+    out = []
+    for r in results:
+        for nid in r["neuron_mask"]:
+            out.append(incl.get((r["session"], int(nid)), False))
+    return np.asarray(out, dtype=bool)
+
+
 def select_ablation_example(results):
     """Return the example-neuron payload (pinned PANEL_B session) or None."""
     return next((r["example"] for r in results if r.get("example")), None)
@@ -535,10 +568,16 @@ def load_ablation_data(recompute=False):
     agg["fem_include"] = (
         np.isfinite(oma_raw) & (oma_raw >= 0.0) & (oma_raw <= 1.0)
     )
+    # Panels C/D population: fig2 inclusion (rate > 2 Hz & PSTH R^2 > 0.05), so
+    # they describe the same cells fig2 (and panel E) report rather than the
+    # tighter ccmax > 0.85 `good` reliability set.
+    agg["cd_population"] = _fig2_cd_population(results)
     n_good = int(agg["good"].sum())
+    n_cd = int(agg["cd_population"].sum())
     n_excl = int((agg["good"] & ~agg["fem_include"]).sum())
     print(f"Ablation data: {len(results)} sessions, {len(agg['good'])} cells "
-          f"({n_good} good, ccmax > {CCMAX_THRESHOLD}); "
+          f"({n_good} good, ccmax > {CCMAX_THRESHOLD}; "
+          f"{n_cd} in fig2 C/D population); "
           f"FEM-axis excludes {n_excl} good cell(s) with 1-alpha out of [0,1]")
 
     _cached_data = {
