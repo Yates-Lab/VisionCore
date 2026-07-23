@@ -159,3 +159,49 @@ the same drift class as item 1, one level up.
 - **Regenerate mcfarland outputs per twin.** When adopting a new canonical twin,
   regenerate its mcfarland/CCNORM outputs (`mcfarland_sim.run_mcfarland_on_dataset`)
   against that twin + its config, rather than reusing an older artifact.
+
+---
+
+## 5. Standardize the twin's population to be a superset of the fig2 units
+
+### Motivation
+
+The fig3→fig2 replication supplement (`paper/supp_model_replication/`) has to
+compare the twin against fig2's covariance-decomposition population, and the two
+populations are defined by different inclusion rules that don't nest:
+
+- **fig2** (`covariance_decomposition`): rate > 2 Hz **and** split-half PSTH
+  R² > 0.05, then a ≥10-analyzed-unit session floor.
+- **twin** (`fig3/_fig3_data.py` inference): > 200 spikes on the fixrsvp
+  inference trials (`MIN_TOTAL_SPIKES`).
+
+### Extent of the mismatch (quantified 2026-07, current fig3 twin)
+
+Sessions align cleanly: all 23 fig2-reported sessions are covered by the twin's
+24 inference sessions (the one extra, `Logan_2019-12-26`, is a session fig2 drops
+at its floor). The mismatch is at the neuron level, within shared sessions:
+
+- **94.4%** of fig2's analyzed neurons (1279 / 1355) have a twin match.
+- **76 fig2 neurons (5.6%)** fall below the twin's 200-spike threshold — a
+  marginal, low-reliability tail (median rate 3.3 vs 18.7 Hz, PSTH R² 0.095 vs
+  0.203). Worst per-session loss is `Logan_2019-12-30` (12 / 24). Logan recovers
+  87.8% vs Allen's 96.2%.
+- **408 twin neurons (24.2% of the twin's 1687)** are NOT in fig2's analyzed set
+  — cells that clear 200 spikes but fail fig2's rate/PSTH-R² inclusion (i.e.
+  unreliable cells fig2 deliberately excludes).
+
+The supplement currently works around this by analyzing the **per-session
+intersection** (the 1279 both-included cells), so both axes describe the same
+population. This is fine but loses 5.6% of fig2's cells and requires an
+intersection step in every panel.
+
+### Train-time fix (next run)
+
+- **Train the twin on a population that is a superset of the fig2 analyzed
+  units.** Concretely, ensure the per-session readout `cids` include every unit
+  that passes fig2's inclusion (rate > 2 Hz & PSTH R² > 0.05), so the twin can
+  predict every fig2 cell. Then the replication supplement reduces to "apply
+  fig2 inclusion," with no cells lost and no intersection bookkeeping.
+- Keeping the twin's superset broader than fig2 (extra low-yield cells) is fine —
+  the supplement just re-applies fig2's inclusion on top. The invariant that
+  matters is **fig2_analyzed ⊆ twin_readout**, per session.
