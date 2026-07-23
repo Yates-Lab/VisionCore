@@ -20,6 +20,7 @@ import numpy as np
 from VisionCore.paths import VISIONCORE_ROOT
 
 sys.path.insert(0, str(VISIONCORE_ROOT / "paper" / "supp_twin_saccade_modulation"))
+sys.path.insert(0, str(VISIONCORE_ROOT / "paper" / "supp_twin_saccade_modulation" / "variance_hunt"))
 
 from _supp_saccade_augment import evaluate_augmentation, load_augment_context  # noqa: E402
 

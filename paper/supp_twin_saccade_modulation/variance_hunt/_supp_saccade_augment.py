@@ -54,6 +54,7 @@ import dill
 from VisionCore.paths import VISIONCORE_ROOT, CACHE_DIR
 
 sys.path.insert(0, str(VISIONCORE_ROOT / "paper" / "supp_twin_saccade_modulation"))
+sys.path.insert(0, str(VISIONCORE_ROOT / "paper" / "supp_twin_saccade_modulation" / "variance_hunt"))
 
 from _supp_saccade_data import (  # noqa: E402
     load_conditions_cache, build_saccade_alignment, DT, _eye_speed,
