@@ -1,6 +1,6 @@
 """Hunt H4: saccade amplitude/direction-scaled kernels.
 
-Standalone experiment script for the variance hunt (subagent #4).
+Standalone experiment script for the covariate hunt (subagent #4).
 
 Hypothesis: the baseline "both" design treats EVERY microsaccade identically
 (``Aadd`` = 0/1 onset lag indicators). Real microsaccades vary in amplitude and
@@ -41,7 +41,7 @@ import dill
 from VisionCore.paths import VISIONCORE_ROOT, CACHE_DIR
 
 sys.path.insert(0, str(VISIONCORE_ROOT / "paper" / "supp_twin_saccade_modulation"))
-sys.path.insert(0, str(VISIONCORE_ROOT / "paper" / "supp_twin_saccade_modulation" / "variance_hunt"))
+sys.path.insert(0, str(VISIONCORE_ROOT / "paper" / "supp_twin_saccade_modulation" / "covariate_hunt"))
 
 from _supp_saccade_data import (  # noqa: E402
     load_conditions_cache, build_saccade_alignment, _reconstruct_trial_order,

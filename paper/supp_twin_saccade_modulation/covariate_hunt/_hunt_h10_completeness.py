@@ -1,4 +1,4 @@
-"""Hunt H10 (FINAL): completeness + synthesis pass for the variance hunt.
+"""Hunt H10 (FINAL): completeness + synthesis pass for the covariate hunt.
 
 NOT a new marginal hypothesis. Four jobs:
  1. Reconfirm the #9 headline model (base 0.4028 -> aug 0.4201, +0.0108 paired,
@@ -25,7 +25,7 @@ import numpy as np
 from VisionCore.paths import VISIONCORE_ROOT
 
 sys.path.insert(0, str(VISIONCORE_ROOT / "paper" / "supp_twin_saccade_modulation"))
-sys.path.insert(0, str(VISIONCORE_ROOT / "paper" / "supp_twin_saccade_modulation" / "variance_hunt"))
+sys.path.insert(0, str(VISIONCORE_ROOT / "paper" / "supp_twin_saccade_modulation" / "covariate_hunt"))
 
 from _supp_saccade_augment import (  # noqa: E402
     evaluate_augmentation, load_augment_context, cols_time_in_trial,

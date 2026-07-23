@@ -1,6 +1,6 @@
 """Hunt H5: eye-velocity TEMPORAL FILTER (integrated velocity drive).
 
-Subagent #5 of the variance hunt. Tests whether a jointly-fit velocity-history
+Subagent #5 of the covariate hunt. Tests whether a jointly-fit velocity-history
 kernel (temporal integration of drift speed, as the ConvGRU core would do)
 recovers more of the extraretinal gap than #1's INSTANTANEOUS speed nonlinearity.
 
@@ -20,7 +20,7 @@ import numpy as np
 from VisionCore.paths import VISIONCORE_ROOT
 
 sys.path.insert(0, str(VISIONCORE_ROOT / "paper" / "supp_twin_saccade_modulation"))
-sys.path.insert(0, str(VISIONCORE_ROOT / "paper" / "supp_twin_saccade_modulation" / "variance_hunt"))
+sys.path.insert(0, str(VISIONCORE_ROOT / "paper" / "supp_twin_saccade_modulation" / "covariate_hunt"))
 
 from _supp_saccade_augment import evaluate_augmentation, load_augment_context  # noqa: E402
 from _supp_saccade_data import DT  # noqa: E402

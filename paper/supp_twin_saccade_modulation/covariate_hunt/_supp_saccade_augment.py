@@ -1,4 +1,4 @@
-"""Shared augmentation harness for the variance hunt.
+"""Shared augmentation harness for the covariate hunt.
 
 Goal: raise the fraction of the twin's extraretinal ablation gap
 ``y = full - ablated`` recovered on held-out whole trials, above the ~0.40
@@ -54,7 +54,7 @@ import dill
 from VisionCore.paths import VISIONCORE_ROOT, CACHE_DIR
 
 sys.path.insert(0, str(VISIONCORE_ROOT / "paper" / "supp_twin_saccade_modulation"))
-sys.path.insert(0, str(VISIONCORE_ROOT / "paper" / "supp_twin_saccade_modulation" / "variance_hunt"))
+sys.path.insert(0, str(VISIONCORE_ROOT / "paper" / "supp_twin_saccade_modulation" / "covariate_hunt"))
 
 from _supp_saccade_data import (  # noqa: E402
     load_conditions_cache, build_saccade_alignment, DT, _eye_speed,

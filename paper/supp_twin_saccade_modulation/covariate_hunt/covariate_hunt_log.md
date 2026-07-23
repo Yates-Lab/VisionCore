@@ -1,4 +1,4 @@
-# Variance hunt — log
+# Covariate hunt — log
 
 **Objective.** Raise the fraction of the twin's extraretinal ablation gap
 `y = full − ablated` recovered on held-out whole trials, above the ~0.40
