@@ -42,7 +42,7 @@ from model_decompose import decompose_model_session  # noqa: E402
 # Within-model conditions (fig3 naming); 'intact' == the full twin.
 CONDITIONS = ("intact", "zeroed", "stabilized")
 
-# fig2 inclusion (rate > 2 Hz & split-half PSTH R^2 > 0.05) and fig2 frame.
+# fig2 inclusion (rate > 2 Hz & split-half PSTH R^2 > 0.10) and fig2 frame.
 MIN_RATE_HZ = derive.MIN_RATE_HZ            # 2.0
 MIN_PSTH_R2 = derive.MIN_PSTH_R2            # 0.05
 FIG2_FIXATION_RADIUS = FIXATION_RADIUS      # 0.5 deg

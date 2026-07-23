@@ -27,7 +27,7 @@ embedded `dset['stim']` bit-exactly, so the substitution is frame-aligned and th
 intact re-render carries zero rendering artifact.
 
 This cache is the single source for all three analysis panels, so every panel
-draws on the same sessions, neurons, and `good` mask:
+draws on the same sessions, neurons, and `cd_population` mask (fig2 inclusion):
 
   - panel C : trial-averaged held-out prediction, `ccnorm[intact]` vs
               `ccnorm[zeroed]` (normalized correlation; ccmax is shared).
@@ -49,7 +49,7 @@ from VisionCore.paths import VISIONCORE_ROOT, CACHE_DIR
 from VisionCore.covariance import rate_variance_components
 
 from _fig3_data import (
-    DT, VALID_TIME_BINS, MIN_FIX_DUR, MIN_TOTAL_SPIKES, CCMAX_THRESHOLD,
+    DT, VALID_TIME_BINS, MIN_FIX_DUR, MIN_TOTAL_SPIKES,
     SUBJECTS, CHECKPOINT_PATH,
     COVDECOMP_CACHE_PATH, COVDECOMP_TARGET,
     subject_from_session, _load_fig2_alpha_by_session,
@@ -425,7 +425,12 @@ def _run_inference():
 
 
 def aggregate(results):
-    """Flatten per-cell arrays across sessions; `good` = ccmax > threshold."""
+    """Flatten per-cell arrays across sessions.
+
+    The population masks are built downstream in `load_ablation_data`:
+    `cd_population` (fig2 inclusion: rate > 2 Hz & split-half PSTH R^2) for
+    panels C/D and `fem_include` for panel E. `ccmax` (split-half reliability)
+    is carried per cell for reference but no longer gates any panel."""
     ve = {c: [] for c in CONDS}
     ccnorm = {c: [] for c in CONDS}
     model_one_minus_alpha = {c: [] for c in CONDS}
@@ -452,7 +457,6 @@ def aggregate(results):
     agg["ccmax"] = np.concatenate(ccmax)
     agg["alpha"] = np.concatenate(alpha)
     agg["subjects"] = np.array(subjects)
-    agg["good"] = agg["ccmax"] > CCMAX_THRESHOLD
     return agg
 
 
@@ -493,14 +497,12 @@ def _raw_one_minus_alpha(results):
 
 def _fig2_cd_population(results):
     """Per-cell bool (aligned to `aggregate`'s flattened cell order): the cell
-    passes fig2 inclusion (rate > 2 Hz & split-half PSTH R^2 > 0.05) in the
+    passes fig2 inclusion (rate > 2 Hz & split-half PSTH R^2 > 0.10) in the
     aligned covariance cache.
 
-    Panels C/D use this in place of the ccmax > 0.85 `good` mask so their
-    population matches fig2 (and the panel-E f_FEM population). Every `good` cell
-    is a strict subset of this set, so switching only *adds* (less reliable)
-    cells; it never drops a currently shown cell. Ordering mirrors
-    `_raw_one_minus_alpha`: results-order x neuron_mask-order.
+    Panels C/D use this so their population matches fig2 (and the panel-E f_FEM
+    population). Ordering mirrors `_raw_one_minus_alpha`: results-order x
+    neuron_mask-order.
     """
     covdecomp = str(VISIONCORE_ROOT / "paper" / "covariance_decomposition")
     if covdecomp not in sys.path:
@@ -533,8 +535,9 @@ _cached_data = None
 
 
 def load_ablation_data(recompute=False):
-    """Return a dict with flattened per-cell arrays, `good` mask, and the
-    example-neuron payload. Cached in-process after the first call."""
+    """Return a dict with flattened per-cell arrays, the `cd_population` /
+    `fem_include` masks, and the example-neuron payload. Cached in-process after
+    the first call."""
     global _cached_data
     if _cached_data is not None and not recompute:
         return _cached_data
@@ -568,17 +571,14 @@ def load_ablation_data(recompute=False):
     agg["fem_include"] = (
         np.isfinite(oma_raw) & (oma_raw >= 0.0) & (oma_raw <= 1.0)
     )
-    # Panels C/D population: fig2 inclusion (rate > 2 Hz & PSTH R^2 > 0.05), so
-    # they describe the same cells fig2 (and panel E) report rather than the
-    # tighter ccmax > 0.85 `good` reliability set.
+    # Panels C/D population: fig2 inclusion (rate > 2 Hz & PSTH R^2 > 0.10), so
+    # they describe the same cells fig2 (and panel E) report.
     agg["cd_population"] = _fig2_cd_population(results)
-    n_good = int(agg["good"].sum())
     n_cd = int(agg["cd_population"].sum())
-    n_excl = int((agg["good"] & ~agg["fem_include"]).sum())
-    print(f"Ablation data: {len(results)} sessions, {len(agg['good'])} cells "
-          f"({n_good} good, ccmax > {CCMAX_THRESHOLD}; "
-          f"{n_cd} in fig2 C/D population); "
-          f"FEM-axis excludes {n_excl} good cell(s) with 1-alpha out of [0,1]")
+    n_excl = int((agg["cd_population"] & ~agg["fem_include"]).sum())
+    print(f"Ablation data: {len(results)} sessions, {len(agg['cd_population'])} cells "
+          f"({n_cd} in fig2 C/D population); "
+          f"FEM-axis excludes {n_excl} C/D cell(s) with 1-alpha out of [0,1]")
 
     _cached_data = {
         **agg,
@@ -597,13 +597,13 @@ def print_ablation_stats(data=None):
     """
     if data is None:
         data = load_ablation_data()
-    good = data["good"]
-    print("\n=== Fig 3 bottom row — ablation cost (good cells, single-trial r^2) ===")
+    pop = data["cd_population"]
+    print("\n=== Fig 3 bottom row — ablation cost (fig2 C/D population, single-trial r^2) ===")
     print(f"{'cond':<10}{'subject':<8}{'N':<6}{'cost Δr²':<12}{'intact r²':<12}"
           f"{'cost/intact%':<14}{'cost/gainPSTH%':<15}")
     for cond in ABLATIONS:
         for subj in ["All"] + SUBJECTS:
-            m = good & np.isfinite(data["ve"]["intact"]) & np.isfinite(data["ve"][cond])
+            m = pop & np.isfinite(data["ve"]["intact"]) & np.isfinite(data["ve"][cond])
             if subj != "All":
                 m = m & (data["subjects"] == subj)
             cost = np.median(data["ve"]["intact"][m] - data["ve"][cond][m])

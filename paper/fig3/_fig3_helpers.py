@@ -144,13 +144,12 @@ def select_example_neuron(data,
     """Build the example-neuron payload used by panels B and C.
 
     If session/neuron_id are both set, the matching neuron is used; otherwise
-    the highest-ccnorm reliable neuron across all sessions is auto-picked.
+    the highest-ccnorm neuron across all sessions is auto-picked.
     Returns a dict with sorted rasters (rate), trial-averaged traces, the
     time axis, window mask, and shared color limits.
     """
     session_results = data["session_results"]
     ccnorm = data["ccnorm"]
-    good = data["good"]
     valid_indices = data["valid_indices"]
     all_trace_neuron_session = data["all_trace_neuron_session"]
     all_robs_mean = data["all_robs_mean"]
@@ -183,7 +182,7 @@ def select_example_neuron(data,
             )
         best_local = int(loc[0])
     else:
-        mask_all = good & np.isfinite(ccnorm)
+        mask_all = np.isfinite(ccnorm)
         candidates_all = np.where(mask_all)[0]
         best_local = candidates_all[np.nanargmax(ccnorm[candidates_all])]
         best_global = valid_indices[best_local]

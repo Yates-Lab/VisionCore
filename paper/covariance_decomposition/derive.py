@@ -34,7 +34,7 @@ from decompose import compute_decomposition, DT, WINDOW_BINS_DEFAULT, N_SHUFFLES
 
 # Inclusion / analysis constants (match production)
 MIN_RATE_HZ = 2.0
-MIN_PSTH_R2 = 0.05
+MIN_PSTH_R2 = 0.10
 MIN_VAR = 0
 # Session-level floor: drop sessions with too few analyzed units, since
 # population-dimensionality estimates (Fig. 2F/G) are noisy with few neurons.

@@ -14,9 +14,11 @@ Renders the digital-twin mechanism figure:
 
 Panels C/D draw on the unified analysis-row cache
 (`fig3_bottomrow_ablation.pkl`) on the fig2 inclusion population (rate > 2 Hz &
-PSTH R^2 > 0.05). Panel E is computed by `_fig3_femfraction` on the same fig2
-frame + intersection population, so C/D/E describe (almost) the same cells fig2
-reports.
+PSTH R^2 > 0.10). Panel E is computed by `_fig3_femfraction` on the same fig2
+frame + intersection population and is filtered to the same >=10-analyzed-unit
+session floor (via `_restrict_femdata_to_floor`), so C/D/E describe nearly the
+same cells fig2 reports (residual gap is only the twin's per-neuron spike/overlap
+requirements, not sessions).
 
 Usage:
     uv run python paper/fig3/generate_figure3.py [--recompute]
@@ -35,7 +37,7 @@ from scipy.stats import wilcoxon
 
 from VisionCore.paths import VISIONCORE_ROOT
 
-from _fig3_data import FIG_DIR, configure_matplotlib
+from _fig3_data import FIG_DIR, configure_matplotlib, _load_fig2_included_sessions
 from _fig3_ablation_data import CACHE_PATH as ABLATION_CACHE_PATH
 from _fig3_ablation_data import load_ablation_data
 from _fig3_femfraction import compute_femfraction_data, CONDITIONS as FEM_CONDITIONS
@@ -443,6 +445,19 @@ def _plot_femfraction(ax, femdata, *, margin=TOST_MARGIN):
     leg.set_zorder(7)
 
 
+def _restrict_femdata_to_floor(femdata, included):
+    """Mask a femfraction dict's per-cell arrays to cells from floored sessions
+    (fig2's >=10-analyzed-unit floor). Panel E's caches are computed over every
+    session with >=3 included cells, but panels C/D go through the floor via
+    `_load_fig2_included_sessions`; applying the same floor here (fresh, not
+    baked into the cache — symmetric with `load_ablation_data`) keeps C/D/E on
+    the same session population fig2 reports. All femdata entries are per-cell
+    arrays of equal length, so one mask filters them uniformly."""
+    sess = np.asarray(femdata["session"])
+    keep = np.isin(sess, list(included))
+    return {k: np.asarray(v)[keep] for k, v in femdata.items()}
+
+
 def _plot_missing_cache(ax):
     ax.set_axis_off()
     ax.text(0.5, 0.58, "ablation cache not found",
@@ -546,7 +561,11 @@ def compose(*, recompute: bool = False, out_dir=FIG_DIR, dpi: int = 300):
     if abl is not None:
         _plot_ccnorm_violins(ax_c, abl)
         _plot_singletrial_r2_violins(ax_d, abl)
-        femdata = {c: compute_femfraction_data(condition=c) for c in FEM_CONDITIONS}
+        # Panel E on the same fig2 session floor as C/D (>=10 analyzed units).
+        included = _load_fig2_included_sessions()
+        femdata = {c: _restrict_femdata_to_floor(
+                       compute_femfraction_data(condition=c), included)
+                   for c in FEM_CONDITIONS}
         _plot_femfraction(ax_e, femdata)
     else:
         for a in (ax_c, ax_d, ax_e):

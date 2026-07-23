@@ -21,7 +21,6 @@ VALID_TIME_BINS = 120        # max within-trial time bins
 MIN_FIX_DUR = 20             # minimum fixation duration (bins)
 MIN_TOTAL_SPIKES = 200       # neuron inclusion threshold
 CCNORM_N_SPLITS = 500        # split-half iterations for ccnorm
-CCMAX_THRESHOLD = 0.85       # reliability threshold for "good" neurons
 
 SUBJECTS = ["Allen", "Logan"]
 SUBJECT_COLORS = {"Allen": "tab:blue", "Logan": "tab:green"}
@@ -412,14 +411,11 @@ def load_fig3_data(recompute=False):
     print(f"\nTotal neurons: {len(rhos)} ({(subjects == 'Allen').sum()} Allen, "
           f"{(subjects == 'Logan').sum()} Logan)")
 
-    good = ccmax > CCMAX_THRESHOLD
-    print(f"Good neurons (ccmax > {CCMAX_THRESHOLD}): {good.sum()}")
-
     _cached_data = {
         "session_results": session_results,
         "rhos": rhos, "ccnorm": ccnorm, "ccmax": ccmax,
         "ve_model": ve_model, "ve_psth": ve_psth, "alpha": alpha,
-        "subjects": subjects, "good": good,
+        "subjects": subjects,
         "valid_indices": valid_indices,
         "all_rhat_mean": all_rhat_mean,
         "all_robs_mean": all_robs_mean,

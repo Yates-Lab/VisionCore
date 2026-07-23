@@ -409,19 +409,19 @@ def _load_best_ccnorm_psths(n=3, window_s=0.5):
     sigma_bins = None  # predictions shown unsmoothed (raw per-bin model output)
 
     cand = []
-    from _fig3_data import CCMAX_THRESHOLD
 
     for si, sr in enumerate(session_results):
         ccn = np.asarray(sr["ccnorm"])
         ccm = np.asarray(sr["ccmax"])
         nmask = np.asarray(sr["neuron_mask"])
         for ni in range(sr["n_neurons"]):
-            # Gate on the split-half reliability ceiling (ccmax) and drop
-            # ccnorm > 1 — those are normalization artifacts on low-reliability
-            # units, not genuinely best-fit cells. Rank the survivors by ccnorm.
+            # Drop ccnorm > 1 — those are normalization artifacts on
+            # low-reliability units, not genuinely best-fit cells. Rank the
+            # survivors by ccnorm. (The panel-B units are pinned via
+            # MANUAL_PSTH_UNITS below, so this pool only feeds the fallback.)
             if not (np.isfinite(ccn[ni]) and np.isfinite(ccm[ni])):
                 continue
-            if ccm[ni] < CCMAX_THRESHOLD or ccn[ni] > 1.0:
+            if ccn[ni] > 1.0:
                 continue
             cand.append({
                 "si": si, "ni": ni,
