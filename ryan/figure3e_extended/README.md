@@ -26,8 +26,22 @@ sweeping the **scope** over which the retinal input is stabilized:
 gated to be bit-exact against fig3's production code, so the fork is anchored to
 a known number.
 
-Both metrics are computed per neuron: single-trial `r^2` and single-trial
-**Poisson bits per spike** against each unit's own mean-rate null.
+Three quantities are computed per neuron:
+
+- **single-trial `r^2`** against the observed spike counts
+- **single-trial Poisson bits per spike** against each unit's own mean-rate null
+- **residual rate fraction**, `var(rate_full − rate_perturbed) / var(rate_full)`
+  — how much of the twin's *own* predicted rate modulation each perturbation
+  moves. This one is model-vs-model: the observed spikes play no part, so it
+  measures what the twin's rate depends on rather than how well it predicts.
+  It is computed on the **raw** model output, not the affine-rescaled rates,
+  because the rescaling is fit per condition against the observed counts and
+  would partly absorb the very change being measured. A pure DC shift between
+  conditions cancels inside a variance, so this reflects changed *modulation*,
+  not a changed mean rate. The rescaled variant is cached as
+  `resid_frac_rescaled` for comparison. The fraction can exceed 1: a perturbed
+  twin is not a shrunken full twin, so the difference can carry more variance
+  than the reference.
 
 ## Within-window stabilization
 
@@ -104,7 +118,11 @@ derived bundle, and reproduce it exactly (19 sessions, 11 Allen / 8 Logan,
 - `_ext_stim.py` — the canvas renderer, the three stabilization scopes, the gates
 - `_ext_data.py` — six-condition inference, `r^2` + bits/spike, owns
   `outputs/cache/fig3e_extended_ablation.pkl`
-- `generate_figure3e_extended.py` — the two-row figure
+- `generate_figure3e_extended.py` — the three-row figure
+
+Note the cache stores per-neuron summaries only, not the per-bin rate traces, so
+any new trace-derived quantity (like the residual row was) costs a full re-run of
+the sweep.
 
 ## Usage
 

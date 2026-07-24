@@ -34,7 +34,7 @@ from scipy.stats import wilcoxon
 from VisionCore.paths import FIGURES_DIR
 
 from _ext_data import (
-    BOX_ORDER, COND_LABEL, CACHE_PATH, load_extended_data,
+    BOX_ORDER, COND_LABEL, CACHE_PATH, RESID_CONDS, load_extended_data,
 )
 
 
@@ -192,6 +192,76 @@ def plot_metric(ax, data, metric, ylabel, *, show_xticklabels, label):
     return printout
 
 
+def plot_residual_fraction(ax, data, *, show_xticklabels, label):
+    """Third row: how much of the twin's own predicted rate modulation each
+    perturbation moves, as var(full - perturbed) / var(full) per unit.
+
+    Purely within-model -- the observed spikes play no part -- so it reads as
+    "what fraction of the twin's rate variance depends on this input". `full` is
+    the reference (identically 0) and the PSTH is not a model, so neither gets a
+    box; their slots are kept so the x-axis stays aligned with the rows above.
+
+    Note a residual fraction can exceed 1: the perturbed twin is not a shrunken
+    version of the full twin, so the difference can carry more variance than the
+    reference itself."""
+    pop = np.asarray(data["population"], dtype=bool)
+    vals = {c: np.asarray(data["resid_frac"][c], dtype=float) for c in RESID_CONDS}
+
+    m = pop.copy()
+    for c in RESID_CONDS:
+        m &= np.isfinite(vals[c])
+    groups = {c: vals[c][m] for c in RESID_CONDS}
+    n = int(m.sum())
+
+    positions = [BOX_ORDER.index(c) for c in RESID_CONDS]
+    _box_whisker(ax, [groups[c] for c in RESID_CONDS], positions,
+                 [COND_COLOR[c] for c in RESID_CONDS])
+
+    stats = boxplot_stats([groups[c] for c in RESID_CONDS], whis=(2.5, 97.5))
+    whis_hi = max(s["whishi"] for s in stats)
+    # Non-negative quantity: the axis is floored at 0 rather than keyed to the
+    # lowest whisker.
+    ax.set_ylim(0, whis_hi * 1.24)
+
+    # The two non-model slots, marked rather than left ambiguously blank.
+    ax.plot([BOX_ORDER.index("full")], [0], marker="_", ms=11, color=FULL_COLOR,
+            mew=2.0, zorder=4, clip_on=False)
+    ax.text(BOX_ORDER.index("full"), whis_hi * 0.045, "0 by\ndefinition",
+            ha="center", va="bottom", fontsize=4.9, color="0.45",
+            linespacing=1.15)
+    ax.text(BOX_ORDER.index("psth"), whis_hi * 0.045, "n/a\n(not a model)",
+            ha="center", va="bottom", fontsize=4.9, color="0.55",
+            linespacing=1.15)
+    ax.axhline(1.0, color="0.7", lw=0.6, ls=":", zorder=0)
+
+    # Median printed just above each box's own whisker rather than on one shared
+    # row: these conditions span 0.05 to ~1.0, so a common annotation height
+    # would strand the labels far from the small boxes.
+    printout = {}
+    for c, pos, s in zip(RESID_CONDS, positions, stats):
+        med = float(np.median(groups[c]))
+        printout[c] = {"median": med, "n": n}
+        ax.text(pos, s["whishi"] + 0.02 * whis_hi, f"{med:.2f}", ha="center",
+                va="bottom", fontsize=6.2, color="0.25", clip_on=False)
+
+    ax.set_xlim(-0.65, len(BOX_ORDER) - 0.35)
+    ax.set_xticks(np.arange(len(BOX_ORDER)))
+    if show_xticklabels:
+        ax.set_xticklabels([COND_LABEL[c] for c in BOX_ORDER], fontsize=5.4)
+    else:
+        ax.set_xticklabels([])
+    ax.set_ylabel("Fraction of twin's rate\nvariance in residual")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    print(f"\n=== {label} (N={n} cells, fig2 population) ===")
+    print(f"{'condition':<22}{'median':>10}{'IQR':>22}")
+    for c in RESID_CONDS:
+        q1, q3 = np.percentile(groups[c], [25, 75])
+        print(f"{c:<22}{printout[c]['median']:>10.3f}   [{q1:.3f}, {q3:.3f}]")
+    return printout
+
+
 def compose(*, recompute=False, out_dir=OUT_DIR, dpi=300, cache_path=CACHE_PATH):
     configure_matplotlib()
     import matplotlib as mpl
@@ -206,19 +276,25 @@ def compose(*, recompute=False, out_dir=OUT_DIR, dpi=300, cache_path=CACHE_PATH)
 
     data = load_extended_data(recompute=recompute, cache_path=cache_path)
 
-    fig = plt.figure(figsize=(7.2, 6.6), constrained_layout=False)
-    gs = GridSpec(2, 1, figure=fig, left=0.10, right=0.965, bottom=0.115,
-                  top=0.935, hspace=0.20)
+    fig = plt.figure(figsize=(7.2, 9.0), constrained_layout=False)
+    gs = GridSpec(3, 1, figure=fig, left=0.105, right=0.965, bottom=0.085,
+                  top=0.955, hspace=0.22)
     ax_a = fig.add_subplot(gs[0, 0])
     ax_b = fig.add_subplot(gs[1, 0])
+    ax_c = fig.add_subplot(gs[2, 0])
 
     stats_r2 = plot_metric(ax_a, data, "ve", "Single-trial $r^2$",
                            show_xticklabels=False, label="Single-trial r^2")
     stats_bps = plot_metric(ax_b, data, "bps", "Single-trial bits per spike",
-                            show_xticklabels=True, label="Single-trial bits/spike")
+                            show_xticklabels=False, label="Single-trial bits/spike")
+    stats_resid = plot_residual_fraction(
+        ax_c, data, show_xticklabels=True,
+        label="Residual rate variance (model vs model)")
 
     _panel_heading(ax_a, "A", "Single-trial variance explained")
     _panel_heading(ax_b, "B", "Single-trial information rate")
+    _panel_heading(ax_c, "C", "Fraction of the twin's rate modulation "
+                              "that each input carries")
 
     for ext in ("png", "pdf", "svg"):
         fig.savefig(out_dir / f"figure3e_extended.{ext}", dpi=dpi)
@@ -231,7 +307,8 @@ def compose(*, recompute=False, out_dir=OUT_DIR, dpi=300, cache_path=CACHE_PATH)
         "n_sessions": len(data["results"]),
         "n_cells_total": int(len(data["population"])),
         "n_cells_population": int(np.asarray(data["population"]).sum()),
-        "stats": {"single_trial_r2": stats_r2, "bits_per_spike": stats_bps},
+        "stats": {"single_trial_r2": stats_r2, "bits_per_spike": stats_bps,
+                  "residual_rate_fraction": stats_resid},
     }
     with open(out_dir / "figure3e_extended_manifest.json", "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, default=str)

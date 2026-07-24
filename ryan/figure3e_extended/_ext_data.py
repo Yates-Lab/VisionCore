@@ -87,6 +87,10 @@ BOX_ORDER = ["psth"] + CONDS
 STAB_CONDS = ["stab_window", "stab_trial", "stab_global", "stab_global_ablated"]
 ZERO_BEHAVIOR_CONDS = ["ablated", "stab_global_ablated"]
 
+# Conditions that have a residual against the full twin (`full` is the
+# reference, and the PSTH is not a model, so neither has one).
+RESID_CONDS = [c for c in CONDS if c != "full"]
+
 COND_LABEL = {
     "psth": "Trial\naverage\n(PSTH)",
     "full": "Retinal +\nbehavioral\n(full)",
@@ -234,7 +238,7 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH):
         fix_dur = np.full(NT, np.nan)
         rhat = {c: np.full((NT, T, NC), np.nan) for c in CONDS}
 
-        n_clamped_tot, disp_num, disp_den = 0, 0.0, 0
+        n_clamped_tot = 0
         for itrial in tqdm(range(NT), desc=f"  {session_name}"):
             ix = (trial_inds == trials[itrial]) & fixation
             if not np.any(ix):
@@ -256,9 +260,6 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH):
                             stim_indices, stim_lags, factor)
                         window_cube = torch.from_numpy(cube)
                         n_clamped_tot += n_cl
-                        disp_num += rend.window_displacement_px(
-                            stim_indices, stim_lags, factor) * len(stim_indices)
-                        disp_den += len(stim_indices)
                     stim = window_cube
                 elif c in stab_stim:
                     stim = stab_stim[c][stim_lag_indices]
@@ -342,9 +343,42 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH):
         bps["psth"], floored["psth"] = _bits_per_spike(rbar_rs_m, robs, dfs)
         bps_raw["psth"], floored["psth_unrescaled"] = _bits_per_spike(rbar, robs, dfs)
 
-        mean_disp = disp_num / disp_den if disp_den else np.nan
-        print(f"  window stabilization removed {mean_disp:.2f} px "
-              f"({mean_disp / 37.5:.3f} deg) mean in-window gaze displacement; "
+        # --- how much of the twin's rate modulation each perturbation moves ---
+        # Model vs model: the residual between the full twin's predicted rate and
+        # each perturbed twin's, as a fraction of the full twin's own rate
+        # variance. The observed spikes play no part.
+        #
+        # Computed on the RAW model output, not the affine-rescaled rates. The
+        # rescaling is fit per condition against the observed counts, so it would
+        # partly absorb the very change being measured; the raw output is what
+        # the twin actually predicts. Note a pure DC shift between conditions
+        # cancels inside a variance, so this measures changed *modulation*, not a
+        # changed mean rate. The rescaled version is stored alongside for
+        # comparison.
+        valid_bins = np.isfinite(dfs) & (dfs > 0)
+
+        def _bin_var(x):
+            return np.nanvar(np.where(valid_bins, x, np.nan), axis=(0, 1))
+
+        rate_var = {"raw": _bin_var(rhat["full"]), "rescaled": _bin_var(rhat_rs["full"])}
+        resid_frac, resid_frac_rs = {}, {}
+        with np.errstate(divide="ignore", invalid="ignore"):
+            for c in RESID_CONDS:
+                resid_frac[c] = _bin_var(rhat["full"] - rhat[c]) / rate_var["raw"]
+                resid_frac_rs[c] = (_bin_var(rhat_rs["full"] - rhat_rs[c])
+                                    / rate_var["rescaled"])
+        for c in RESID_CONDS:
+            resid_frac[c][~(rate_var["raw"] > 0)] = np.nan
+            resid_frac_rs[c][~(rate_var["rescaled"] > 0)] = np.nan
+        print("  residual/rate variance  " + "  ".join(
+            f"{c}: {np.nanmedian(resid_frac[c]):.3f}" for c in RESID_CONDS))
+
+        # One median over every prediction time in the session (eye-tracking
+        # validity masked inside `window_displacement_px`).
+        med_disp = rend.window_displacement_px(
+            np.where(fixation)[0], stim_lags, factor)
+        print(f"  window stabilization removed {med_disp:.2f} px "
+              f"({med_disp / 37.5:.3f} deg) median in-window gaze displacement; "
               f"{n_clamped_tot} lag(s) clamped at session start")
         print("  medians  " + "  ".join(
             f"{c}: r2={np.nanmedian(ve[c]):+.4f} bps={np.nanmedian(bps[c]):+.4f}"
@@ -369,11 +403,13 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH):
             "n_trials": n_trials,
             "ve": ve, "bps": bps, "bps_unrescaled": bps_raw,
             "ve_psth_unrescaled": ve_psth_unrescaled,
+            "resid_frac": resid_frac, "resid_frac_rescaled": resid_frac_rs,
+            "rate_var_full": rate_var["raw"],
             "diagnostics": {
                 "align_maxabs": align, "native_maxabs": native,
                 "n_trials_frozen_global": n_tr_glob,
                 "n_trials_frozen_trial": n_tr_trial,
-                "mean_window_disp_px": mean_disp,
+                "median_window_disp_px": med_disp,
                 "n_window_lags_clamped": n_clamped_tot,
                 "n_bps_floored": floored,
             },
@@ -431,6 +467,13 @@ def aggregate(results):
         "sessions": np.array(
             [r["session"] for r in results for _ in range(r["n_neurons"])]),
     }
+    if all("resid_frac" in r for r in results):
+        for key in ("resid_frac", "resid_frac_rescaled"):
+            agg[key] = {c: np.concatenate([r[key][c] for r in results])
+                        for c in RESID_CONDS}
+    else:
+        print("NOTE: cache predates the residual-variance row; rerun with "
+              "--recompute to populate it.")
     return agg
 
 
