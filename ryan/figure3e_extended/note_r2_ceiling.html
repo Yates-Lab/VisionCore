@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang xml:lang>
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <meta name="author" content="fem-v1-fovea methods note" />
+  <meta name="dcterms.date" content="2026-07-28" />
+  <title>Single-trial variance explained relative to explainable rate variance</title>
+  <style>
+    html {
+      line-height: 1.5;
+      font-family: Georgia, serif;
+      font-size: 20px;
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      word-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 1em;
+      }
+    }
+    @media print {
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    code {
+      font-family: Menlo, Monaco, 'Lucida Console', Consolas, monospace;
+      font-size: 85%;
+      margin: 0;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      padding: 0;
+      overflow: visible;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      background-color: #1a1a1a;
+      border: none;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    span.underline{text-decoration: underline;}
+    div.column{display: inline-block; vertical-align: top; width: 50%;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    ul.task-list{list-style: none;}
+  </style>
+  <!--[if lt IE 9]>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/html5shiv/3.7.3/html5shiv-printshiv.min.js"></script>
+  <![endif]-->
+  <style>
+  .numbered-equation { position: relative; }
+  .numbered-equation .eqno {
+    position: absolute; right: 0.5em; top: 50%;
+    transform: translateY(-50%);
+  }
+  table { border-collapse: collapse; margin: 1.2em 0; font-size: 0.88em; }
+  th, td { border-bottom: 1px solid #ddd; padding: 0.3em 0.7em; text-align: left; }
+  th { border-bottom: 2px solid #999; }
+  code { font-size: 0.88em; }
+  blockquote { border-left: 3px solid #ccc; padding-left: 1em; color: #444; }
+  </style>
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">Single-trial variance explained relative to explainable rate variance</h1>
+<p class="subtitle">Definition, derivation, relation to CCnorm, and interpretation for Figure 3</p>
+<p class="author">fem-v1-fovea methods note</p>
+<p class="date">2026-07-28</p>
+</header>
+<h1 id="summary">Summary</h1>
+<p>Single-trial spike counts contain two kinds of variation. The conditional firing rate changes with the stimulus and gaze, while spiking and other response fluctuations produce variation around that rate. A deterministic model can predict the first component but cannot predict the second from stimulus and gaze alone. Consequently, a low single-trial <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msup><mi>r</mi><mn>2</mn></msup><annotation encoding="application/x-tex">r^2</annotation></semantics></math> can reflect either an inaccurate model or a response dominated by unpredictable variation.</p>
+<p>The normalized score separates these possibilities:</p>
+<div class="numbered-equation">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>Q</mi><mspace width="0.278em"></mspace><mo>=</mo><mspace width="0.278em"></mspace><mfrac><msup><mi>r</mi><mn>2</mn></msup><msubsup><mi>R</mi><mo>max</mo><mn>2</mn></msubsup></mfrac><mo>,</mo><mspace width="2.0em"></mspace><msup><mi>r</mi><mn>2</mn></msup><mo>=</mo><mn>1</mn><mo>−</mo><mfrac><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>Y</mi><mo>−</mo><mover><mi>Y</mi><mo accent="true">̂</mo></mover><mo stretchy="true" form="postfix">)</mo></mrow></mrow><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>Y</mi><mo stretchy="true" form="postfix">)</mo></mrow></mrow></mfrac><mo>,</mo><mspace width="2.0em"></mspace><msubsup><mi>R</mi><mo>max</mo><mn>2</mn></msubsup><mo>=</mo><mfrac><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>λ</mi><mo stretchy="true" form="postfix">)</mo></mrow></mrow><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>Y</mi><mo stretchy="true" form="postfix">)</mo></mrow></mrow></mfrac><mo>,</mo></mrow><annotation encoding="application/x-tex">
+Q \;=\; \frac{r^2}{R^2_{\max}},
+\qquad
+r^2 = 1-\frac{\operatorname{Var}(Y-\hat Y)}{\operatorname{Var}(Y)},
+\qquad
+R^2_{\max}=\frac{\operatorname{Var}(\lambda)}{\operatorname{Var}(Y)},
+
+</annotation></semantics></math></p>
+<span class="eqno">(1)</span>
+</div>
+<p>where <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>Y</mi><annotation encoding="application/x-tex">Y</annotation></semantics></math> is the spike count in one 120 Hz bin, <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mover><mi>Y</mi><mo accent="true">̂</mo></mover><annotation encoding="application/x-tex">\hat Y</annotation></semantics></math> is the model prediction, and <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>λ</mi><mo>=</mo><mstyle mathvariant="double-struck"><mi>𝔼</mi></mstyle><mrow><mo stretchy="true" form="prefix">[</mo><mi>Y</mi><mo>∣</mo><mi>Z</mi><mo stretchy="true" form="postfix">]</mo></mrow></mrow><annotation encoding="application/x-tex">\lambda=\mathbb E[Y\mid Z]</annotation></semantics></math> is the conditional mean count given the variables <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>Z</mi><annotation encoding="application/x-tex">Z</annotation></semantics></math> available to the predictor. When all quantities refer to the same conditioning variables and sampling distribution,</p>
+<div class="numbered-equation">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>Q</mi><mo>=</mo><mn>1</mn><mo>−</mo><mfrac><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>λ</mi><mo>−</mo><mover><mi>Y</mi><mo accent="true">̂</mo></mover><mo stretchy="true" form="postfix">)</mo></mrow></mrow><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>λ</mi><mo stretchy="true" form="postfix">)</mo></mrow></mrow></mfrac><mi>.</mi></mrow><annotation encoding="application/x-tex">
+Q
+=1-\frac{\operatorname{Var}(\lambda-\hat Y)}
+         {\operatorname{Var}(\lambda)}.
+
+</annotation></semantics></math></p>
+<span class="eqno">(2)</span>
+</div>
+<p>Thus, <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>Q</mi><annotation encoding="application/x-tex">Q</annotation></semantics></math> is the fraction of conditional rate variance explained by the model, using the same variance-based definition as the implemented single-trial <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msup><mi>r</mi><mn>2</mn></msup><annotation encoding="application/x-tex">r^2</annotation></semantics></math>. It has a natural constant-rate reference of zero and an oracle reference of one. Negative values indicate that the model’s rate error varies more than the true conditional rate. Values above one can occur for the empirical score because the denominator is estimated with finite data and conditions on a shorter gaze history than the model.</p>
+<p>This metric complements <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mstyle mathvariant="normal"><mi>C</mi><mi>C</mi></mstyle><mstyle mathvariant="normal"><mi>n</mi><mi>o</mi><mi>r</mi><mi>m</mi></mstyle></msub><annotation encoding="application/x-tex">\mathrm{CC}_{\mathrm{norm}}</annotation></semantics></math>. The latter asks whether the model predicts the shape of the trial-averaged response across stimulus time after correcting for the reliability of the measured trial average. It discards trial-specific variation. The normalized single-trial <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msup><mi>r</mi><mn>2</mn></msup><annotation encoding="application/x-tex">r^2</annotation></semantics></math> asks how much stimulus- and gaze-dependent rate variation the model predicts on individual trials. Together, the two metrics distinguish accurate prediction of the average response from accurate prediction of the structured variation around that average.</p>
+<h1 id="statistical-target">1. Statistical target</h1>
+<p>Consider one neuron. Let <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>I</mi><annotation encoding="application/x-tex">I</annotation></semantics></math> index trials and <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>T</mi><annotation encoding="application/x-tex">T</annotation></semantics></math> index 8.33 ms time bins within the repeated fixated-flashed-image sequence. Sampling a valid pair <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="true" form="prefix">(</mo><mi>I</mi><mo>,</mo><mi>T</mi><mo stretchy="true" form="postfix">)</mo></mrow><annotation encoding="application/x-tex">(I,T)</annotation></semantics></math> defines a random spike count</p>
+<div class="numbered-equation">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>Y</mi><mo>=</mo><msub><mi>Y</mi><mrow><mi>I</mi><mo>,</mo><mi>T</mi></mrow></msub><mi>.</mi></mrow><annotation encoding="application/x-tex">
+Y=Y_{I,T}.
+
+</annotation></semantics></math></p>
+<span class="eqno">(3)</span>
+</div>
+<p>Let <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>Z</mi><annotation encoding="application/x-tex">Z</annotation></semantics></math> contain the information used to predict that count. For the conceptual derivation, <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>Z</mi><annotation encoding="application/x-tex">Z</annotation></semantics></math> includes stimulus time and the relevant gaze trajectory. In the experiment, stimulus time identifies the screen image because the same image sequence is repeated across trials. Gaze determines how that screen image moves across the retina. The digital twin predicts a mean count from a gaze-contingent retinal stimulus history and eye-position-derived behavioral covariates, so a fixed model produces</p>
+<div class="numbered-equation">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mover><mi>Y</mi><mo accent="true">̂</mo></mover><mo>=</mo><mi>g</mi><mrow><mo stretchy="true" form="prefix">(</mo><mi>Z</mi><mo stretchy="true" form="postfix">)</mo></mrow><mi>.</mi></mrow><annotation encoding="application/x-tex">
+\hat Y=g(Z).
+
+</annotation></semantics></math></p>
+<span class="eqno">(4)</span>
+</div>
+<p>The best possible squared-error prediction based on <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>Z</mi><annotation encoding="application/x-tex">Z</annotation></semantics></math> is the conditional mean</p>
+<div class="numbered-equation">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>λ</mi><mrow><mo stretchy="true" form="prefix">(</mo><mi>Z</mi><mo stretchy="true" form="postfix">)</mo></mrow><mo>=</mo><mstyle mathvariant="double-struck"><mi>𝔼</mi></mstyle><mrow><mo stretchy="true" form="prefix">[</mo><mi>Y</mi><mo>∣</mo><mi>Z</mi><mo stretchy="true" form="postfix">]</mo></mrow><mi>.</mi></mrow><annotation encoding="application/x-tex">
+\lambda(Z)=\mathbb E[Y\mid Z].
+
+</annotation></semantics></math></p>
+<span class="eqno">(5)</span>
+</div>
+<p>The conditional mean is a property of the neural response distribution rather than of the fitted twin. It represents the mean count that would be observed if the same stimulus and gaze state could be repeated many times. Write the observed count as</p>
+<div class="numbered-equation">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>Y</mi><mo>=</mo><mi>λ</mi><mrow><mo stretchy="true" form="prefix">(</mo><mi>Z</mi><mo stretchy="true" form="postfix">)</mo></mrow><mo>+</mo><mi>ε</mi><mo>,</mo><mspace width="2.0em"></mspace><mstyle mathvariant="double-struck"><mi>𝔼</mi></mstyle><mrow><mo stretchy="true" form="prefix">[</mo><mi>ε</mi><mo>∣</mo><mi>Z</mi><mo stretchy="true" form="postfix">]</mo></mrow><mo>=</mo><mn>0</mn><mi>.</mi></mrow><annotation encoding="application/x-tex">
+Y=\lambda(Z)+\varepsilon,
+\qquad
+\mathbb E[\varepsilon\mid Z]=0.
+
+</annotation></semantics></math></p>
+<span class="eqno">(6)</span>
+</div>
+<p>The residual <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>ε</mi><annotation encoding="application/x-tex">\varepsilon</annotation></semantics></math> includes stochastic spiking and any response variation not predictable from <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>Z</mi><annotation encoding="application/x-tex">Z</annotation></semantics></math>. Equation (6) does not assume a Poisson distribution. The conditional residual has mean zero by the definition of <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>λ</mi><annotation encoding="application/x-tex">\lambda</annotation></semantics></math>.</p>
+<p>All variances below are taken over the joint distribution of valid trials and time bins for one neuron. The numerator and denominator must use the same bin width and, for the exact interpretation, the same sampling distribution.</p>
+<h1 id="explainable-and-residual-variance">2. Explainable and residual variance</h1>
+<p>The law of total variance divides the observed count variance into rate variance and conditional residual variance:</p>
+<div class="numbered-equation">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>Y</mi><mo stretchy="true" form="postfix">)</mo></mrow><mo>=</mo><mo>Var</mo><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mstyle mathvariant="double-struck"><mi>𝔼</mi></mstyle><mrow><mo stretchy="true" form="prefix">[</mo><mi>Y</mi><mo>∣</mo><mi>Z</mi><mo stretchy="true" form="postfix">]</mo></mrow><mo stretchy="true" form="postfix">)</mo></mrow><mo>+</mo><mstyle mathvariant="double-struck"><mi>𝔼</mi></mstyle><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">[</mo><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>Y</mi><mo>∣</mo><mi>Z</mi><mo stretchy="true" form="postfix">)</mo></mrow><mo stretchy="true" form="postfix">]</mo></mrow><mi>.</mi></mrow><annotation encoding="application/x-tex">
+\operatorname{Var}(Y)
+=
+\operatorname{Var}\!\left(\mathbb E[Y\mid Z]\right)
++
+\mathbb E\!\left[\operatorname{Var}(Y\mid Z)\right].
+
+</annotation></semantics></math></p>
+<span class="eqno">(7)</span>
+</div>
+<p>Substituting <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>λ</mi><mo>=</mo><mstyle mathvariant="double-struck"><mi>𝔼</mi></mstyle><mrow><mo stretchy="true" form="prefix">[</mo><mi>Y</mi><mo>∣</mo><mi>Z</mi><mo stretchy="true" form="postfix">]</mo></mrow></mrow><annotation encoding="application/x-tex">\lambda=\mathbb E[Y\mid Z]</annotation></semantics></math> gives</p>
+<div class="numbered-equation">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>Y</mi><mo stretchy="true" form="postfix">)</mo></mrow><mo>=</mo><munder><munder><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>λ</mi><mo stretchy="true" form="postfix">)</mo></mrow></mrow><mo accent="true">⏟</mo></munder><mtext mathvariant="normal">rate variance</mtext></munder><mo>+</mo><munder><munder><mrow><mstyle mathvariant="double-struck"><mi>𝔼</mi></mstyle><mrow><mo stretchy="true" form="prefix">[</mo><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>Y</mi><mo>∣</mo><mi>Z</mi><mo stretchy="true" form="postfix">)</mo></mrow><mo stretchy="true" form="postfix">]</mo></mrow></mrow><mo accent="true">⏟</mo></munder><mtext mathvariant="normal">conditional residual variance</mtext></munder><mi>.</mi></mrow><annotation encoding="application/x-tex">
+\operatorname{Var}(Y)
+=
+\underbrace{\operatorname{Var}(\lambda)}_{\text{rate variance}}
++
+\underbrace{\mathbb E[\operatorname{Var}(Y\mid Z)]}_{\text{conditional residual variance}}.
+
+</annotation></semantics></math></p>
+<span class="eqno">(8)</span>
+</div>
+<p>This identity can also be obtained directly from (6). Because <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mstyle mathvariant="double-struck"><mi>𝔼</mi></mstyle><mrow><mo stretchy="true" form="prefix">[</mo><mi>ε</mi><mo>∣</mo><mi>Z</mi><mo stretchy="true" form="postfix">]</mo></mrow><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">\mathbb E[\varepsilon\mid Z]=0</annotation></semantics></math>, the residual is uncorrelated with every function of <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>Z</mi><annotation encoding="application/x-tex">Z</annotation></semantics></math>, including <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>λ</mi><annotation encoding="application/x-tex">\lambda</annotation></semantics></math>:</p>
+<div class="numbered-equation">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mtable><mtr><mtd columnalign="right"><mo>Cov</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>ε</mi><mo>,</mo><mi>λ</mi><mo stretchy="true" form="postfix">)</mo></mrow></mtd><mtd columnalign="left"><mo>=</mo><mstyle mathvariant="double-struck"><mi>𝔼</mi></mstyle><mrow><mo stretchy="true" form="prefix">[</mo><mi>ε</mi><mi>λ</mi><mo stretchy="true" form="postfix">]</mo></mrow><mo>−</mo><mstyle mathvariant="double-struck"><mi>𝔼</mi></mstyle><mrow><mo stretchy="true" form="prefix">[</mo><mi>ε</mi><mo stretchy="true" form="postfix">]</mo></mrow><mstyle mathvariant="double-struck"><mi>𝔼</mi></mstyle><mrow><mo stretchy="true" form="prefix">[</mo><mi>λ</mi><mo stretchy="true" form="postfix">]</mo></mrow></mtd></mtr><mtr><mtd columnalign="right"></mtd><mtd columnalign="left"><mo>=</mo><mstyle mathvariant="double-struck"><mi>𝔼</mi></mstyle><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">[</mo><mi>λ</mi><mspace width="0.167em"></mspace><mstyle mathvariant="double-struck"><mi>𝔼</mi></mstyle><mrow><mo stretchy="true" form="prefix">[</mo><mi>ε</mi><mo>∣</mo><mi>Z</mi><mo stretchy="true" form="postfix">]</mo></mrow><mo stretchy="true" form="postfix">]</mo></mrow></mtd></mtr><mtr><mtd columnalign="right"></mtd><mtd columnalign="left"><mo>=</mo><mn>0</mn><mi>.</mi></mtd></mtr></mtable><annotation encoding="application/x-tex">
+\begin{aligned}
+\operatorname{Cov}(\varepsilon,\lambda)
+&amp;=\mathbb E[\varepsilon\lambda]
+   -\mathbb E[\varepsilon]\mathbb E[\lambda] \\
+&amp;=\mathbb E\!\left[
+   \lambda\,\mathbb E[\varepsilon\mid Z]
+   \right] \\
+&amp;=0.
+\end{aligned}
+
+</annotation></semantics></math></p>
+<span class="eqno">(9)</span>
+</div>
+<p>Therefore <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>Y</mi><mo stretchy="true" form="postfix">)</mo></mrow><mo>=</mo><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>λ</mi><mo stretchy="true" form="postfix">)</mo></mrow><mo>+</mo><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>ε</mi><mo stretchy="true" form="postfix">)</mo></mrow></mrow><annotation encoding="application/x-tex">\operatorname{Var}(Y)=\operatorname{Var}(\lambda)+ \operatorname{Var}(\varepsilon)</annotation></semantics></math>. The residual variance equals the expected conditional variance because its conditional mean is zero:</p>
+<div class="numbered-equation">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>ε</mi><mo stretchy="true" form="postfix">)</mo></mrow><mo>=</mo><mstyle mathvariant="double-struck"><mi>𝔼</mi></mstyle><mrow><mo stretchy="true" form="prefix">[</mo><msup><mi>ε</mi><mn>2</mn></msup><mo stretchy="true" form="postfix">]</mo></mrow><mo>=</mo><mstyle mathvariant="double-struck"><mi>𝔼</mi></mstyle><mrow><mo stretchy="true" form="prefix">[</mo><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>Y</mi><mo>∣</mo><mi>Z</mi><mo stretchy="true" form="postfix">)</mo></mrow><mo stretchy="true" form="postfix">]</mo></mrow><mi>.</mi></mrow><annotation encoding="application/x-tex">
+\operatorname{Var}(\varepsilon)
+=\mathbb E[\varepsilon^2]
+=\mathbb E[\operatorname{Var}(Y\mid Z)].
+
+</annotation></semantics></math></p>
+<span class="eqno">(10)</span>
+</div>
+<p>Only <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>λ</mi><mo stretchy="true" form="postfix">)</mo></mrow></mrow><annotation encoding="application/x-tex">\operatorname{Var}(\lambda)</annotation></semantics></math> is predictable from <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>Z</mi><annotation encoding="application/x-tex">Z</annotation></semantics></math>. This motivates the single-trial variance ceiling</p>
+<div class="numbered-equation">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mi>R</mi><mo>max</mo><mn>2</mn></msubsup><mo>=</mo><mfrac><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>λ</mi><mo stretchy="true" form="postfix">)</mo></mrow></mrow><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>Y</mi><mo stretchy="true" form="postfix">)</mo></mrow></mrow></mfrac><mi>.</mi></mrow><annotation encoding="application/x-tex">
+R^2_{\max}
+=
+\frac{\operatorname{Var}(\lambda)}{\operatorname{Var}(Y)}.
+
+</annotation></semantics></math></p>
+<span class="eqno">(11)</span>
+</div>
+<p>For example, <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mi>R</mi><mo>max</mo><mn>2</mn></msubsup><mo>=</mo><mn>0.12</mn></mrow><annotation encoding="application/x-tex">R^2_{\max}=0.12</annotation></semantics></math> means that 12% of the variance in 8.33 ms spike counts reflects systematic rate modulation under the chosen conditioning variables. The remaining 88% is conditional residual variance at that temporal resolution. A perfect rate model can reach an observed-count <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msup><mi>r</mi><mn>2</mn></msup><annotation encoding="application/x-tex">r^2</annotation></semantics></math> of only 0.12, even though it predicts all rate modulation.</p>
+<h1 id="derivation-for-the-implemented-single-trial-r2">3. Derivation for the implemented single-trial <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msup><mi>r</mi><mn>2</mn></msup><annotation encoding="application/x-tex">r^2</annotation></semantics></math></h1>
+<p>The figure computes</p>
+<div class="numbered-equation">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>r</mi><mn>2</mn></msup><mo>=</mo><mn>1</mn><mo>−</mo><mfrac><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>Y</mi><mo>−</mo><mover><mi>Y</mi><mo accent="true">̂</mo></mover><mo stretchy="true" form="postfix">)</mo></mrow></mrow><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>Y</mi><mo stretchy="true" form="postfix">)</mo></mrow></mrow></mfrac><mi>.</mi></mrow><annotation encoding="application/x-tex">
+r^2
+=1-\frac{\operatorname{Var}(Y-\hat Y)}{\operatorname{Var}(Y)}.
+
+</annotation></semantics></math></p>
+<span class="eqno">(12)</span>
+</div>
+<p>This variance form differs slightly from the common sum-of-squared-errors form. It is the relevant definition because it is what <code>_var_explained</code> in <code>_ext_data.py</code> implements.</p>
+<p>Using <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>Y</mi><mo>=</mo><mi>λ</mi><mo>+</mo><mi>ε</mi></mrow><annotation encoding="application/x-tex">Y=\lambda+\varepsilon</annotation></semantics></math>, the prediction error is</p>
+<div class="numbered-equation">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>Y</mi><mo>−</mo><mover><mi>Y</mi><mo accent="true">̂</mo></mover><mo>=</mo><mi>ε</mi><mo>+</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>λ</mi><mo>−</mo><mover><mi>Y</mi><mo accent="true">̂</mo></mover><mo stretchy="true" form="postfix">)</mo></mrow><mi>.</mi></mrow><annotation encoding="application/x-tex">
+Y-\hat Y
+=\varepsilon+(\lambda-\hat Y).
+
+</annotation></semantics></math></p>
+<span class="eqno">(13)</span>
+</div>
+<p>Both <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>λ</mi><annotation encoding="application/x-tex">\lambda</annotation></semantics></math> and <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mover><mi>Y</mi><mo accent="true">̂</mo></mover><annotation encoding="application/x-tex">\hat Y</annotation></semantics></math> are functions of <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>Z</mi><annotation encoding="application/x-tex">Z</annotation></semantics></math>. The conditional residual is therefore uncorrelated with their difference:</p>
+<div class="numbered-equation">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mtable><mtr><mtd columnalign="right"><mo>Cov</mo><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mi>ε</mi><mo>,</mo><mi>λ</mi><mo>−</mo><mover><mi>Y</mi><mo accent="true">̂</mo></mover><mo stretchy="true" form="postfix">)</mo></mrow></mtd><mtd columnalign="left"><mo>=</mo><mstyle mathvariant="double-struck"><mi>𝔼</mi></mstyle><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">[</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>λ</mi><mo>−</mo><mover><mi>Y</mi><mo accent="true">̂</mo></mover><mo stretchy="true" form="postfix">)</mo></mrow><mspace width="0.167em"></mspace><mstyle mathvariant="double-struck"><mi>𝔼</mi></mstyle><mrow><mo stretchy="true" form="prefix">[</mo><mi>ε</mi><mo>∣</mo><mi>Z</mi><mo stretchy="true" form="postfix">]</mo></mrow><mo stretchy="true" form="postfix">]</mo></mrow></mtd></mtr><mtr><mtd columnalign="right"></mtd><mtd columnalign="left"><mo>=</mo><mn>0</mn><mi>.</mi></mtd></mtr></mtable><annotation encoding="application/x-tex">
+\begin{aligned}
+\operatorname{Cov}\!\left(\varepsilon,\lambda-\hat Y\right)
+&amp;=\mathbb E\!\left[
+(\lambda-\hat Y)\,\mathbb E[\varepsilon\mid Z]
+\right] \\
+&amp;=0.
+\end{aligned}
+
+</annotation></semantics></math></p>
+<span class="eqno">(14)</span>
+</div>
+<p>The variance of the prediction error consequently separates into two terms:</p>
+<div class="numbered-equation">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>Y</mi><mo>−</mo><mover><mi>Y</mi><mo accent="true">̂</mo></mover><mo stretchy="true" form="postfix">)</mo></mrow><mo>=</mo><mstyle mathvariant="double-struck"><mi>𝔼</mi></mstyle><mrow><mo stretchy="true" form="prefix">[</mo><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>Y</mi><mo>∣</mo><mi>Z</mi><mo stretchy="true" form="postfix">)</mo></mrow><mo stretchy="true" form="postfix">]</mo></mrow><mo>+</mo><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>λ</mi><mo>−</mo><mover><mi>Y</mi><mo accent="true">̂</mo></mover><mo stretchy="true" form="postfix">)</mo></mrow><mi>.</mi></mrow><annotation encoding="application/x-tex">
+\operatorname{Var}(Y-\hat Y)
+=
+\mathbb E[\operatorname{Var}(Y\mid Z)]
++
+\operatorname{Var}(\lambda-\hat Y).
+
+</annotation></semantics></math></p>
+<span class="eqno">(15)</span>
+</div>
+<p>The first term is irreducible for a predictor based on <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>Z</mi><annotation encoding="application/x-tex">Z</annotation></semantics></math>. The second is the model’s error in predicting the conditional rate. Substitution into (12), followed by use of (8), yields</p>
+<div class="numbered-equation">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mtable><mtr><mtd columnalign="right"><msup><mi>r</mi><mn>2</mn></msup></mtd><mtd columnalign="left"><mo>=</mo><mn>1</mn><mo>−</mo><mfrac><mrow><mstyle mathvariant="double-struck"><mi>𝔼</mi></mstyle><mrow><mo stretchy="true" form="prefix">[</mo><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>Y</mi><mo>∣</mo><mi>Z</mi><mo stretchy="true" form="postfix">)</mo></mrow><mo stretchy="true" form="postfix">]</mo></mrow><mo>+</mo><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>λ</mi><mo>−</mo><mover><mi>Y</mi><mo accent="true">̂</mo></mover><mo stretchy="true" form="postfix">)</mo></mrow></mrow><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>Y</mi><mo stretchy="true" form="postfix">)</mo></mrow></mrow></mfrac></mtd></mtr><mtr><mtd columnalign="right"></mtd><mtd columnalign="left"><mo>=</mo><mfrac><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>λ</mi><mo stretchy="true" form="postfix">)</mo></mrow><mo>−</mo><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>λ</mi><mo>−</mo><mover><mi>Y</mi><mo accent="true">̂</mo></mover><mo stretchy="true" form="postfix">)</mo></mrow></mrow><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>Y</mi><mo stretchy="true" form="postfix">)</mo></mrow></mrow></mfrac></mtd></mtr><mtr><mtd columnalign="right"></mtd><mtd columnalign="left"><mo>=</mo><msubsup><mi>R</mi><mo>max</mo><mn>2</mn></msubsup><mo>−</mo><mfrac><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>λ</mi><mo>−</mo><mover><mi>Y</mi><mo accent="true">̂</mo></mover><mo stretchy="true" form="postfix">)</mo></mrow></mrow><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>Y</mi><mo stretchy="true" form="postfix">)</mo></mrow></mrow></mfrac><mi>.</mi></mtd></mtr></mtable><annotation encoding="application/x-tex">
+\begin{aligned}
+r^2
+&amp;=1-
+\frac{
+\mathbb E[\operatorname{Var}(Y\mid Z)]
++\operatorname{Var}(\lambda-\hat Y)
+}{\operatorname{Var}(Y)} \\
+&amp;=\frac{
+\operatorname{Var}(\lambda)
+-\operatorname{Var}(\lambda-\hat Y)
+}{\operatorname{Var}(Y)} \\
+&amp;=R^2_{\max}
+-\frac{\operatorname{Var}(\lambda-\hat Y)}{\operatorname{Var}(Y)}.
+\end{aligned}
+
+</annotation></semantics></math></p>
+<span class="eqno">(16)</span>
+</div>
+<p>Dividing by (11) gives the normalized score:</p>
+<div class="numbered-equation">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><menclose notation="box"><mrow><mfrac><msup><mi>r</mi><mn>2</mn></msup><msubsup><mi>R</mi><mo>max</mo><mn>2</mn></msubsup></mfrac><mo>=</mo><mn>1</mn><mo>−</mo><mfrac><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>λ</mi><mo>−</mo><mover><mi>Y</mi><mo accent="true">̂</mo></mover><mo stretchy="true" form="postfix">)</mo></mrow></mrow><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>λ</mi><mo stretchy="true" form="postfix">)</mo></mrow></mrow></mfrac></mrow></menclose><mi>.</mi></mrow><annotation encoding="application/x-tex">
+\boxed{
+\frac{r^2}{R^2_{\max}}
+=1-
+\frac{\operatorname{Var}(\lambda-\hat Y)}
+     {\operatorname{Var}(\lambda)}
+}.
+
+</annotation></semantics></math></p>
+<span class="eqno">(17)</span>
+</div>
+<p>Equation (17) is an ordinary variance-explained coefficient with the latent conditional rate as its target. Normalization removes the conditional response noise from the scale without removing it from the data used to score the model.</p>
+<p>The population quantity has the following interpretation:</p>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>value</th>
+<th>interpretation</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mn>1</mn><annotation encoding="application/x-tex">1</annotation></semantics></math></td>
+<td>The prediction matches all variation in <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>λ</mi><annotation encoding="application/x-tex">\lambda</annotation></semantics></math>, up to a constant offset.</td>
+</tr>
+<tr class="even">
+<td>between <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mn>0</mn><annotation encoding="application/x-tex">0</annotation></semantics></math> and <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mn>1</mn><annotation encoding="application/x-tex">1</annotation></semantics></math></td>
+<td>The prediction reduces rate-error variance relative to a constant prediction.</td>
+</tr>
+<tr class="odd">
+<td><math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mn>0</mn><annotation encoding="application/x-tex">0</annotation></semantics></math></td>
+<td>The prediction explains no conditional rate variance. Any constant prediction has this value.</td>
+</tr>
+<tr class="even">
+<td>below <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mn>0</mn><annotation encoding="application/x-tex">0</annotation></semantics></math></td>
+<td>Rate-error variance exceeds <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>λ</mi><mo stretchy="true" form="postfix">)</mo></mrow></mrow><annotation encoding="application/x-tex">\operatorname{Var}(\lambda)</annotation></semantics></math>.</td>
+</tr>
+<tr class="odd">
+<td>above <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mn>1</mn><annotation encoding="application/x-tex">1</annotation></semantics></math></td>
+<td>Impossible for exact population quantities defined on the same <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>Z</mi><annotation encoding="application/x-tex">Z</annotation></semantics></math> and distribution; possible for the empirical ratio because its denominator is estimated.</td>
+</tr>
+</tbody>
+</table>
+<p>Because (12) uses residual variance, a constant error is not penalized. The maximum is attained whenever <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mover><mi>Y</mi><mo accent="true">̂</mo></mover><mo>=</mo><mi>λ</mi><mo>+</mo><mi>c</mi></mrow><annotation encoding="application/x-tex">\hat Y=\lambda+c</annotation></semantics></math>. An MSE-based coefficient would instead satisfy</p>
+<div class="numbered-equation">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mi>r</mi><mstyle mathvariant="normal"><mi>M</mi><mi>S</mi><mi>E</mi></mstyle><mn>2</mn></msubsup><mo>=</mo><msup><mi>r</mi><mn>2</mn></msup><mo>−</mo><mfrac><msup><mrow><mo stretchy="true" form="prefix">(</mo><mstyle mathvariant="double-struck"><mi>𝔼</mi></mstyle><mrow><mo stretchy="true" form="prefix">[</mo><mi>Y</mi><mo>−</mo><mover><mi>Y</mi><mo accent="true">̂</mo></mover><mo stretchy="true" form="postfix">]</mo></mrow><mo stretchy="true" form="postfix">)</mo></mrow><mn>2</mn></msup><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>Y</mi><mo stretchy="true" form="postfix">)</mo></mrow></mrow></mfrac><mo>,</mo></mrow><annotation encoding="application/x-tex">
+r^2_{\mathrm{MSE}}
+=r^2-
+\frac{\left(\mathbb E[Y-\hat Y]\right)^2}{\operatorname{Var}(Y)},
+
+</annotation></semantics></math></p>
+<span class="eqno">(18)</span>
+</div>
+<p>and would attain its maximum only at <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>c</mi><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">c=0</annotation></semantics></math>. Predictions in Figure 3 undergo a per-unit affine calibration before scoring, which makes mean errors small, but the plotted metric remains the variance-based quantity in (12).</p>
+<h1 id="estimating-r2_max-from-the-covariance-decomposition">4. Estimating <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msubsup><mi>R</mi><mo>max</mo><mn>2</mn></msubsup><annotation encoding="application/x-tex">R^2_{\max}</annotation></semantics></math> from the covariance decomposition</h1>
+<p>The conditional rate <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>λ</mi><annotation encoding="application/x-tex">\lambda</annotation></semantics></math> is not observed directly. Figure 2 estimates its variance from repeated presentations and matched gaze trajectories. For each unit, the diagonal entries of the covariance decomposition provide</p>
+<div class="numbered-equation">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>diag</mo><msub><mi>C</mi><mstyle mathvariant="normal"><mi>t</mi><mi>o</mi><mi>t</mi><mi>a</mi><mi>l</mi></mstyle></msub><mo>≈</mo><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>Y</mi><mo stretchy="true" form="postfix">)</mo></mrow><mo>,</mo><mspace width="2.0em"></mspace><mo>diag</mo><msub><mi>C</mi><mstyle mathvariant="normal"><mi>r</mi><mi>a</mi><mi>t</mi><mi>e</mi></mstyle></msub><mo>≈</mo><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>λ</mi><mo stretchy="true" form="postfix">)</mo></mrow><mi>.</mi></mrow><annotation encoding="application/x-tex">
+\operatorname{diag}C_{\mathrm{total}}
+\approx \operatorname{Var}(Y),
+\qquad
+\operatorname{diag}C_{\mathrm{rate}}
+\approx \operatorname{Var}(\lambda).
+
+</annotation></semantics></math></p>
+<span class="eqno">(19)</span>
+</div>
+<p>The empirical normalizer is therefore</p>
+<div class="numbered-equation">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mover><mi>R</mi><mo accent="true">̂</mo></mover><mo>max</mo><mn>2</mn></msubsup><mo>=</mo><mfrac><mrow><mo>diag</mo><msub><mi>C</mi><mstyle mathvariant="normal"><mi>r</mi><mi>a</mi><mi>t</mi><mi>e</mi></mstyle></msub></mrow><mrow><mo>diag</mo><msub><mi>C</mi><mstyle mathvariant="normal"><mi>t</mi><mi>o</mi><mi>t</mi><mi>a</mi><mi>l</mi></mstyle></msub></mrow></mfrac><mi>.</mi></mrow><annotation encoding="application/x-tex">
+\widehat R^2_{\max}
+=
+\frac{\operatorname{diag}C_{\mathrm{rate}}}
+     {\operatorname{diag}C_{\mathrm{total}}}.
+
+</annotation></semantics></math></p>
+<span class="eqno">(20)</span>
+</div>
+<h2 id="total-count-variance">4.1 Total count variance</h2>
+<p><math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>C</mi><mstyle mathvariant="normal"><mi>t</mi><mi>o</mi><mi>t</mi><mi>a</mi><mi>l</mi></mstyle></msub><annotation encoding="application/x-tex">C_{\mathrm{total}}</annotation></semantics></math> is the covariance of the observed spike counts pooled over valid trials and stimulus times. Its diagonal is the variance of each unit’s single-bin counts. It contains stimulus-locked rate modulation, gaze-dependent rate modulation, and conditional residual variance.</p>
+<h2 id="conditional-rate-variance-from-close-trial-pairs">4.2 Conditional rate variance from close trial pairs</h2>
+<p>Suppose two distinct trials <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>i</mi><mo>≠</mo><mi>j</mi></mrow><annotation encoding="application/x-tex">i\ne j</annotation></semantics></math> reach the same stimulus time with matching gaze trajectories. Their counts can be written</p>
+<div class="numbered-equation">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>Y</mi><mi>i</mi></msub><mo>=</mo><msub><mi>λ</mi><mi>i</mi></msub><mo>+</mo><msub><mi>ε</mi><mi>i</mi></msub><mo>,</mo><mspace width="2.0em"></mspace><msub><mi>Y</mi><mi>j</mi></msub><mo>=</mo><msub><mi>λ</mi><mi>j</mi></msub><mo>+</mo><msub><mi>ε</mi><mi>j</mi></msub><mi>.</mi></mrow><annotation encoding="application/x-tex">
+Y_i=\lambda_i+\varepsilon_i,
+\qquad
+Y_j=\lambda_j+\varepsilon_j.
+
+</annotation></semantics></math></p>
+<span class="eqno">(21)</span>
+</div>
+<p>If their gaze-conditioned rates are equal and their conditional residuals are independent across trials, then</p>
+<div class="numbered-equation">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mstyle mathvariant="double-struck"><mi>𝔼</mi></mstyle><mrow><mo stretchy="true" form="prefix">[</mo><msub><mi>Y</mi><mi>i</mi></msub><msub><mi>Y</mi><mi>j</mi></msub><mo>∣</mo><msub><mi>Z</mi><mi>i</mi></msub><mo>≈</mo><msub><mi>Z</mi><mi>j</mi></msub><mo stretchy="true" form="postfix">]</mo></mrow><mo>≈</mo><msup><mi>λ</mi><mn>2</mn></msup><mi>.</mi></mrow><annotation encoding="application/x-tex">
+\mathbb E[Y_iY_j\mid Z_i\approx Z_j]
+\approx \lambda^2.
+
+</annotation></semantics></math></p>
+<span class="eqno">(22)</span>
+</div>
+<p>Cross-trial multiplication removes private response noise in expectation. After averaging these products and subtracting the squared mean rate, the close-pair estimator recovers <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>λ</mi><mo stretchy="true" form="postfix">)</mo></mrow></mrow><annotation encoding="application/x-tex">\operatorname{Var}(\lambda)</annotation></semantics></math>. Figure 2 uses gaze-trajectory pairs within <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msup><mn>0.05</mn><mo>∘</mo></msup><annotation encoding="application/x-tex">0.05^\circ</annotation></semantics></math> RMS distance.</p>
+<p>Close pairs occur most often near the center of the fixation distribution. Without correction, they sample approximately from the squared gaze density rather than from the distribution of positions actually viewed. The production estimator importance-weights close-pair midpoints back to the full viewing distribution before computing <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>C</mi><mstyle mathvariant="normal"><mi>r</mi><mi>a</mi><mi>t</mi><mi>e</mi></mstyle></msub><annotation encoding="application/x-tex">C_{\mathrm{rate}}</annotation></semantics></math>. This correction is needed so that the numerator and denominator of (20) refer to the same gaze distribution.</p>
+<h2 id="temporal-resolution">4.3 Temporal resolution</h2>
+<p><math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msubsup><mi>R</mi><mo>max</mo><mn>2</mn></msubsup><annotation encoding="application/x-tex">R^2_{\max}</annotation></semantics></math> depends on counting-window duration. Longer windows average conditional response noise and therefore have larger explainable fractions. The twin predicts one count at 120 Hz, so Figure 3 uses the one-bin estimate from Figure 2:</p>
+<div class="numbered-equation">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mtext mathvariant="normal">window</mtext><mo>=</mo><mn>1</mn><mi>/</mi><mn>120</mn><mspace width="0.222em"></mspace><mstyle mathvariant="normal"><mi>s</mi></mstyle><mo>=</mo><mn>8.33</mn><mspace width="0.222em"></mspace><mstyle mathvariant="normal"><mi>m</mi><mi>s</mi></mstyle><mi>.</mi></mrow><annotation encoding="application/x-tex">
+\text{window}=1/120\ \mathrm{s}=8.33\ \mathrm{ms}.
+
+</annotation></semantics></math></p>
+<span class="eqno">(23)</span>
+</div>
+<p>A ceiling estimated from the 25 ms window displayed in Figure 2 would not be a valid normalizer for the model’s 8.33 ms single-trial <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msup><mi>r</mi><mn>2</mn></msup><annotation encoding="application/x-tex">r^2</annotation></semantics></math>.</p>
+<p>Units with non-positive estimated rate variance have undefined <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msubsup><mover><mi>R</mi><mo accent="true">̂</mo></mover><mo>max</mo><mn>2</mn></msubsup><annotation encoding="application/x-tex">\widehat R^2_{\max}</annotation></semantics></math> and are excluded rather than clipped. Small positive estimates can produce unstable ratios, so population summaries should use medians and display the distribution rather than rely on its mean.</p>
+<h1 id="relationship-to-mathrmcc_mathrmnorm">5. Relationship to <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mstyle mathvariant="normal"><mi>C</mi><mi>C</mi></mstyle><mstyle mathvariant="normal"><mi>n</mi><mi>o</mi><mi>r</mi><mi>m</mi></mstyle></msub><annotation encoding="application/x-tex">\mathrm{CC}_{\mathrm{norm}}</annotation></semantics></math></h1>
+<p>Both metrics account for neural response variability, but they evaluate different targets.</p>
+<h2 id="what-mathrmcc_mathrmnorm-measures">5.1 What <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mstyle mathvariant="normal"><mi>C</mi><mi>C</mi></mstyle><mstyle mathvariant="normal"><mi>n</mi><mi>o</mi><mi>r</mi><mi>m</mi></mstyle></msub><annotation encoding="application/x-tex">\mathrm{CC}_{\mathrm{norm}}</annotation></semantics></math> measures</h2>
+<p>Let</p>
+<div class="numbered-equation">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>μ</mi><mrow><mo stretchy="true" form="prefix">(</mo><mi>t</mi><mo stretchy="true" form="postfix">)</mo></mrow><mo>=</mo><mstyle mathvariant="double-struck"><mi>𝔼</mi></mstyle><mrow><mo stretchy="true" form="prefix">[</mo><mi>Y</mi><mo>∣</mo><mi>T</mi><mo>=</mo><mi>t</mi><mo stretchy="true" form="postfix">]</mo></mrow></mrow><annotation encoding="application/x-tex">
+\mu(t)=\mathbb E[Y\mid T=t]
+
+</annotation></semantics></math></p>
+<span class="eqno">(24)</span>
+</div>
+<p>be the trial-averaged neural response, or ideal PSTH. For each eligible stimulus time, the implementation averages observed counts and model predictions over trials and computes</p>
+<div class="numbered-equation">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mstyle mathvariant="normal"><mi>C</mi><mi>C</mi></mstyle><mstyle mathvariant="normal"><mi>a</mi><mi>b</mi><mi>s</mi></mstyle></msub><mo>=</mo><msub><mo>Corr</mo><mi>t</mi></msub><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mover><mi>Y</mi><mo accent="true">‾</mo></mover><mrow><mo stretchy="true" form="prefix">(</mo><mi>t</mi><mo stretchy="true" form="postfix">)</mo></mrow><mo>,</mo><mover><mover><mi>Y</mi><mo accent="true">̂</mo></mover><mo accent="true">¯</mo></mover><mrow><mo stretchy="true" form="prefix">(</mo><mi>t</mi><mo stretchy="true" form="postfix">)</mo></mrow><mo stretchy="true" form="postfix">)</mo></mrow><mi>.</mi></mrow><annotation encoding="application/x-tex">
+\mathrm{CC}_{\mathrm{abs}}
+=\operatorname{Corr}_t\!\left(\bar Y(t),\overline{\hat Y}(t)\right).
+
+</annotation></semantics></math></p>
+<span class="eqno">(25)</span>
+</div>
+<p>The measured PSTH is noisy because it is estimated from finitely many trials. The implementation repeatedly splits trials in half, correlates the two half-PSTHs, and averages those correlations to obtain <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mstyle mathvariant="normal"><mi>C</mi><mi>C</mi></mstyle><mstyle mathvariant="normal"><mi>h</mi><mi>a</mi><mi>l</mi><mi>f</mi></mstyle></msub><annotation encoding="application/x-tex">\mathrm{CC}_{\mathrm{half}}</annotation></semantics></math>. The Spearman–Brown conversion estimates the reliability of the full PSTH:</p>
+<div class="numbered-equation">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mstyle mathvariant="normal"><mi>C</mi><mi>C</mi></mstyle><mo>max</mo></msub><mo>=</mo><msqrt><mfrac><mrow><mn>2</mn><mspace width="0.167em"></mspace><msub><mstyle mathvariant="normal"><mi>C</mi><mi>C</mi></mstyle><mstyle mathvariant="normal"><mi>h</mi><mi>a</mi><mi>l</mi><mi>f</mi></mstyle></msub></mrow><mrow><mn>1</mn><mo>+</mo><msub><mstyle mathvariant="normal"><mi>C</mi><mi>C</mi></mstyle><mstyle mathvariant="normal"><mi>h</mi><mi>a</mi><mi>l</mi><mi>f</mi></mstyle></msub></mrow></mfrac></msqrt><mi>.</mi></mrow><annotation encoding="application/x-tex">
+\mathrm{CC}_{\max}
+=
+\sqrt{\frac{2\,\mathrm{CC}_{\mathrm{half}}}
+           {1+\mathrm{CC}_{\mathrm{half}}}}.
+
+</annotation></semantics></math></p>
+<span class="eqno">(26)</span>
+</div>
+<p>The reported score is</p>
+<div class="numbered-equation">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mstyle mathvariant="normal"><mi>C</mi><mi>C</mi></mstyle><mstyle mathvariant="normal"><mi>n</mi><mi>o</mi><mi>r</mi><mi>m</mi></mstyle></msub><mo>=</mo><mfrac><msub><mstyle mathvariant="normal"><mi>C</mi><mi>C</mi></mstyle><mstyle mathvariant="normal"><mi>a</mi><mi>b</mi><mi>s</mi></mstyle></msub><msub><mstyle mathvariant="normal"><mi>C</mi><mi>C</mi></mstyle><mo>max</mo></msub></mfrac><mi>.</mi></mrow><annotation encoding="application/x-tex">
+\mathrm{CC}_{\mathrm{norm}}
+=
+\frac{\mathrm{CC}_{\mathrm{abs}}}{\mathrm{CC}_{\max}}.
+
+</annotation></semantics></math></p>
+<span class="eqno">(27)</span>
+</div>
+<p>This correction estimates how well the model’s average response follows the latent, noise-free PSTH. Pearson correlation measures temporal shape, not calibrated amplitude. It is unchanged by a positive affine transformation of the prediction. Averaging over trials also removes the trial-specific gaze variation that motivates the single-trial analysis.</p>
+<h2 id="the-psth-occupies-only-part-of-the-conditional-rate-variance">5.2 The PSTH occupies only part of the conditional rate variance</h2>
+<p>The conditional rate depends on stimulus time and gaze. Applying the law of total variance to <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>λ</mi><mrow><mo stretchy="true" form="prefix">(</mo><mi>T</mi><mo>,</mo><mi>E</mi><mo stretchy="true" form="postfix">)</mo></mrow></mrow><annotation encoding="application/x-tex">\lambda(T,E)</annotation></semantics></math> while conditioning on time gives</p>
+<div class="numbered-equation">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>λ</mi><mo stretchy="true" form="postfix">)</mo></mrow><mo>=</mo><munder><munder><mrow><msub><mo>Var</mo><mi>T</mi></msub><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mi>μ</mi><mrow><mo stretchy="true" form="prefix">(</mo><mi>T</mi><mo stretchy="true" form="postfix">)</mo></mrow><mo stretchy="true" form="postfix">)</mo></mrow></mrow><mo accent="true">⏟</mo></munder><mtext mathvariant="normal">stimulus-locked rate variance</mtext></munder><mo>+</mo><munder><munder><mrow><msub><mstyle mathvariant="double-struck"><mi>𝔼</mi></mstyle><mi>T</mi></msub><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">[</mo><msub><mo>Var</mo><mi>E</mi></msub><mrow><mo stretchy="true" form="prefix">(</mo><mi>λ</mi><mo>∣</mo><mi>T</mi><mo stretchy="true" form="postfix">)</mo></mrow><mo stretchy="true" form="postfix">]</mo></mrow></mrow><mo accent="true">⏟</mo></munder><mtext mathvariant="normal">FEM-dependent rate variance</mtext></munder><mi>.</mi></mrow><annotation encoding="application/x-tex">
+\operatorname{Var}(\lambda)
+=
+\underbrace{\operatorname{Var}_T\!\left(\mu(T)\right)}_{\text{stimulus-locked rate variance}}
++
+\underbrace{\mathbb E_T\!\left[
+\operatorname{Var}_E(\lambda\mid T)
+\right]}_{\text{FEM-dependent rate variance}}.
+
+</annotation></semantics></math></p>
+<span class="eqno">(28)</span>
+</div>
+<p>These are the diagonal terms called <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>C</mi><mstyle mathvariant="normal"><mi>P</mi><mi>S</mi><mi>T</mi><mi>H</mi></mstyle></msub><annotation encoding="application/x-tex">C_{\mathrm{PSTH}}</annotation></semantics></math> and <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>C</mi><mstyle mathvariant="normal"><mi>F</mi><mi>E</mi><mi>M</mi></mstyle></msub><annotation encoding="application/x-tex">C_{\mathrm{FEM}}</annotation></semantics></math> in Figure 2, with <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>C</mi><mstyle mathvariant="normal"><mi>r</mi><mi>a</mi><mi>t</mi><mi>e</mi></mstyle></msub><mo>=</mo><msub><mi>C</mi><mstyle mathvariant="normal"><mi>P</mi><mi>S</mi><mi>T</mi><mi>H</mi></mstyle></msub><mo>+</mo><msub><mi>C</mi><mstyle mathvariant="normal"><mi>F</mi><mi>E</mi><mi>M</mi></mstyle></msub></mrow><annotation encoding="application/x-tex">C_{\mathrm{rate}}=C_{\mathrm{PSTH}}+C_{\mathrm{FEM}}</annotation></semantics></math>. Define the stimulus-locked share of rate variance as</p>
+<div class="numbered-equation">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>α</mi><mo>=</mo><mfrac><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>μ</mi><mo stretchy="true" form="postfix">)</mo></mrow></mrow><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>λ</mi><mo stretchy="true" form="postfix">)</mo></mrow></mrow></mfrac><mo>=</mo><mfrac><mrow><mo>diag</mo><msub><mi>C</mi><mstyle mathvariant="normal"><mi>P</mi><mi>S</mi><mi>T</mi><mi>H</mi></mstyle></msub></mrow><mrow><mo>diag</mo><msub><mi>C</mi><mstyle mathvariant="normal"><mi>r</mi><mi>a</mi><mi>t</mi><mi>e</mi></mstyle></msub></mrow></mfrac><mi>.</mi></mrow><annotation encoding="application/x-tex">
+\alpha
+=
+\frac{\operatorname{Var}(\mu)}{\operatorname{Var}(\lambda)}
+=
+\frac{\operatorname{diag}C_{\mathrm{PSTH}}}
+     {\operatorname{diag}C_{\mathrm{rate}}}.
+
+</annotation></semantics></math></p>
+<span class="eqno">(29)</span>
+</div>
+<p>An ideal PSTH predictor sets <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mover><mi>Y</mi><mo accent="true">̂</mo></mover><mo>=</mo><mi>μ</mi><mrow><mo stretchy="true" form="prefix">(</mo><mi>T</mi><mo stretchy="true" form="postfix">)</mo></mrow></mrow><annotation encoding="application/x-tex">\hat Y=\mu(T)</annotation></semantics></math>. Its rate-prediction error is <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>λ</mi><mo>−</mo><mi>μ</mi></mrow><annotation encoding="application/x-tex">\lambda-\mu</annotation></semantics></math>, whose variance is the FEM-dependent term in (28). Equation (17) then gives</p>
+<div class="numbered-equation">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mrow><mfrac><msup><mi>r</mi><mn>2</mn></msup><msubsup><mi>R</mi><mo>max</mo><mn>2</mn></msubsup></mfrac><mo stretchy="true" form="postfix">|</mo></mrow><mrow><mover><mi>Y</mi><mo accent="true">̂</mo></mover><mo>=</mo><mi>μ</mi></mrow></msub><mo>=</mo><mn>1</mn><mo>−</mo><mfrac><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>λ</mi><mo>−</mo><mi>μ</mi><mo stretchy="true" form="postfix">)</mo></mrow></mrow><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>λ</mi><mo stretchy="true" form="postfix">)</mo></mrow></mrow></mfrac><mo>=</mo><mi>α</mi><mi>.</mi></mrow><annotation encoding="application/x-tex">
+\left.\frac{r^2}{R^2_{\max}}\right|_{\hat Y=\mu}
+=
+1-
+\frac{\operatorname{Var}(\lambda-\mu)}
+     {\operatorname{Var}(\lambda)}
+=
+\alpha.
+
+</annotation></semantics></math></p>
+<span class="eqno">(30)</span>
+</div>
+<p>Thus, <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>α</mi><annotation encoding="application/x-tex">\alpha</annotation></semantics></math> is the maximum normalized single-trial score available to an ideal predictor restricted to stimulus time. A model can exceed this reference only by predicting rate modulation beyond the trial average. The measured leave-one-out PSTH generally scores below <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>α</mi><annotation encoding="application/x-tex">\alpha</annotation></semantics></math> because it estimates <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>μ</mi><mrow><mo stretchy="true" form="prefix">(</mo><mi>t</mi><mo stretchy="true" form="postfix">)</mo></mrow></mrow><annotation encoding="application/x-tex">\mu(t)</annotation></semantics></math> from a finite number of trials.</p>
+<h2 id="the-metrics-answer-complementary-questions">5.3 The metrics answer complementary questions</h2>
+<table>
+<colgroup>
+<col style="width: 20%" />
+<col style="width: 20%" />
+<col style="width: 20%" />
+<col style="width: 20%" />
+<col style="width: 20%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>metric</th>
+<th>target</th>
+<th>what is averaged away?</th>
+<th>normalization</th>
+<th>main interpretation</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mstyle mathvariant="normal"><mi>C</mi><mi>C</mi></mstyle><mstyle mathvariant="normal"><mi>n</mi><mi>o</mi><mi>r</mi><mi>m</mi></mstyle></msub><annotation encoding="application/x-tex">\mathrm{CC}_{\mathrm{norm}}</annotation></semantics></math></td>
+<td>Trial-averaged response <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>μ</mi><mrow><mo stretchy="true" form="prefix">(</mo><mi>t</mi><mo stretchy="true" form="postfix">)</mo></mrow></mrow><annotation encoding="application/x-tex">\mu(t)</annotation></semantics></math></td>
+<td>Trial-specific variation</td>
+<td>Reliability of the measured PSTH</td>
+<td>Accuracy of the average temporal response shape</td>
+</tr>
+<tr class="even">
+<td>Single-trial <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msup><mi>r</mi><mn>2</mn></msup><annotation encoding="application/x-tex">r^2</annotation></semantics></math></td>
+<td>Observed counts <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>Y</mi><mrow><mi>i</mi><mo>,</mo><mi>t</mi></mrow></msub><annotation encoding="application/x-tex">Y_{i,t}</annotation></semantics></math></td>
+<td>Nothing</td>
+<td>Total observed count variance</td>
+<td>Predictive variance on the raw count scale</td>
+</tr>
+<tr class="odd">
+<td><math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>r</mi><mn>2</mn></msup><mi>/</mi><msubsup><mi>R</mi><mo>max</mo><mn>2</mn></msubsup></mrow><annotation encoding="application/x-tex">r^2/R^2_{\max}</annotation></semantics></math></td>
+<td>Conditional rate <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>λ</mi><mrow><mo stretchy="true" form="prefix">(</mo><mi>t</mi><mo>,</mo><mi>e</mi><mo stretchy="true" form="postfix">)</mo></mrow></mrow><annotation encoding="application/x-tex">\lambda(t,e)</annotation></semantics></math></td>
+<td>Conditional residual noise is removed from the scale</td>
+<td>Estimated explainable rate fraction</td>
+<td>Fraction of stimulus- and gaze-dependent rate variance predicted</td>
+</tr>
+</tbody>
+</table>
+<p><math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mstyle mathvariant="normal"><mi>C</mi><mi>C</mi></mstyle><mstyle mathvariant="normal"><mi>n</mi><mi>o</mi><mi>r</mi><mi>m</mi></mstyle></msub><mo>=</mo><mn>0.7</mn></mrow><annotation encoding="application/x-tex">\mathrm{CC}_{\mathrm{norm}}=0.7</annotation></semantics></math> does not mean that 70% of explainable single-trial variance is captured. Correlation is insensitive to response scale, and it targets <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>μ</mi><mrow><mo stretchy="true" form="prefix">(</mo><mi>t</mi><mo stretchy="true" form="postfix">)</mo></mrow></mrow><annotation encoding="application/x-tex">\mu(t)</annotation></semantics></math> rather than <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>λ</mi><mrow><mo stretchy="true" form="prefix">(</mo><mi>t</mi><mo>,</mo><mi>e</mi><mo stretchy="true" form="postfix">)</mo></mrow></mrow><annotation encoding="application/x-tex">\lambda(t,e)</annotation></semantics></math>. Squaring <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mstyle mathvariant="normal"><mi>C</mi><mi>C</mi></mstyle><mstyle mathvariant="normal"><mi>n</mi><mi>o</mi><mi>r</mi><mi>m</mi></mstyle></msub><annotation encoding="application/x-tex">\mathrm{CC}_{\mathrm{norm}}</annotation></semantics></math> does not resolve these differences. A model can score well on <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mstyle mathvariant="normal"><mi>C</mi><mi>C</mi></mstyle><mstyle mathvariant="normal"><mi>n</mi><mi>o</mi><mi>r</mi><mi>m</mi></mstyle></msub><annotation encoding="application/x-tex">\mathrm{CC}_{\mathrm{norm}}</annotation></semantics></math> by predicting the average response while missing gaze-dependent trial variation. Conversely, a trial-specific model can improve normalized single-trial <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msup><mi>r</mi><mn>2</mn></msup><annotation encoding="application/x-tex">r^2</annotation></semantics></math> with little change in <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mstyle mathvariant="normal"><mi>C</mi><mi>C</mi></mstyle><mstyle mathvariant="normal"><mi>n</mi><mi>o</mi><mi>r</mi><mi>m</mi></mstyle></msub><annotation encoding="application/x-tex">\mathrm{CC}_{\mathrm{norm}}</annotation></semantics></math> if the added predictions average to zero across trials.</p>
+<h1 id="contribution-to-the-model-analysis">6. Contribution to the model analysis</h1>
+<p>Figure 2 establishes that much of the measurable rate variance in foveal V1 is associated with fixational eye movements. Figure 3 asks whether an image-computable model predicts that variation and which model input carries it.</p>
+<p>Raw single-trial <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msup><mi>r</mi><mn>2</mn></msup><annotation encoding="application/x-tex">r^2</annotation></semantics></math> establishes prediction against observed spikes, but its absolute magnitude depends strongly on each unit’s conditional residual noise. For the current extended-analysis population, the full twin has median raw <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>r</mi><mn>2</mn></msup><mo>=</mo><mn>0.0396</mn></mrow><annotation encoding="application/x-tex">r^2=0.0396</annotation></semantics></math>, while the median empirical ceiling is <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mover><mi>R</mi><mo accent="true">̂</mo></mover><mo>max</mo><mn>2</mn></msubsup><mo>=</mo><mn>0.1235</mn></mrow><annotation encoding="application/x-tex">\widehat R^2_{\max}=0.1235</annotation></semantics></math>. The normalized median is <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mn>0.350</mn><annotation encoding="application/x-tex">0.350</annotation></semantics></math>. The latter states that the full twin recovers roughly one third of the rate variance that Figure 2 identifies as measurable at the model’s temporal resolution. These numbers refer to the 972-unit Figure 2 inclusion population with a finite one-bin denominator; values in the main manuscript may differ when a different reliability population or PSTH treatment is used.</p>
+<p>The denominator is estimated from the neural data and is fixed across all model conditions for a given unit. It therefore cannot make a weakened model appear better by lowering its own reference. Within a unit, normalization is a positive rescaling and cannot reverse the ordering of the full, ablated, and stabilized predictions. Its contribution is to place neurons with different noise levels on a common rate-variance scale before population aggregation.</p>
+<p>The model perturbations then support three distinct conclusions:</p>
+<ol type="1">
+<li><strong>High <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mstyle mathvariant="normal"><mi>C</mi><mi>C</mi></mstyle><mstyle mathvariant="normal"><mi>n</mi><mi>o</mi><mi>r</mi><mi>m</mi></mstyle></msub><annotation encoding="application/x-tex">\mathrm{CC}_{\mathrm{norm}}</annotation></semantics></math></strong> shows that the twin predicts the held-out trial-averaged response.</li>
+<li><strong>Single-trial <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>r</mi><mn>2</mn></msup><mi>/</mi><msubsup><mi>R</mi><mo>max</mo><mn>2</mn></msubsup></mrow><annotation encoding="application/x-tex">r^2/R^2_{\max}</annotation></semantics></math> above the measured PSTH score</strong> shows that the twin predicts structured rate variation not available in a finite trial average.</li>
+<li><strong>Preservation under behavioral-input ablation and loss under retinal stabilization</strong> localizes that trial-specific prediction within the twin to the moving retinal image rather than to the separate extraretinal pathway.</li>
+</ol>
+<p>The third result is a within-model intervention. It shows which input route the fitted twin uses and connects its behavior to the empirical covariance decomposition. It does not by itself prove that the biological circuit lacks extraretinal modulation.</p>
+<h1 id="limits-of-the-empirical-interpretation">7. Limits of the empirical interpretation</h1>
+<p>Equation (17) is exact for fixed predictors and population quantities defined with the same <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>Z</mi><annotation encoding="application/x-tex">Z</annotation></semantics></math> and sampling distribution. The plotted ratio replaces <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msubsup><mi>R</mi><mo>max</mo><mn>2</mn></msubsup><annotation encoding="application/x-tex">R^2_{\max}</annotation></semantics></math> with an estimate from a separate analysis pipeline. Several limits follow.</p>
+<p><strong>Conditioning-history mismatch.</strong> The close-pair estimator matches a short gaze trajectory, whereas the twin receives a 33-frame retinal history and a broader eye-velocity embedding. Conditioning on more predictive information can only increase <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mstyle mathvariant="double-struck"><mi>𝔼</mi></mstyle><mrow><mo stretchy="true" form="prefix">[</mo><mi>Y</mi><mo>∣</mo><mi>Z</mi><mo stretchy="true" form="postfix">]</mo></mrow><mo stretchy="true" form="postfix">)</mo></mrow></mrow><annotation encoding="application/x-tex">\operatorname{Var}(\mathbb E[Y\mid Z])</annotation></semantics></math>. The Figure 2 estimate can therefore be lower than the ceiling appropriate to the model. Finite gaze matching tolerance has the same likely effect. These differences allow an empirical ratio above one without implying prediction beyond a true oracle.</p>
+<p><strong>Estimator uncertainty.</strong> <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>C</mi><mstyle mathvariant="normal"><mi>r</mi><mi>a</mi><mi>t</mi><mi>e</mi></mstyle></msub><annotation encoding="application/x-tex">C_{\mathrm{rate}}</annotation></semantics></math> is estimated from a limited number of close trial pairs. Sampling error can make its diagonal small or negative. Non-positive estimates are treated as undefined, while small positive values create a long right tail in the ratio. Medians and quantiles are more stable summaries than means.</p>
+<p><strong>Cross-trial dependence.</strong> The close-pair product removes conditional residual noise only when residuals are independent across the paired trials. Slow changes in excitability, adaptation, or recording stability can correlate residuals across trials and inflate the estimated rate variance. This would increase <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msubsup><mover><mi>R</mi><mo accent="true">̂</mo></mover><mo>max</mo><mn>2</mn></msubsup><annotation encoding="application/x-tex">\widehat R^2_{\max}</annotation></semantics></math> and reduce the normalized model score.</p>
+<p><strong>Sampling differences.</strong> The single-trial model analysis accepts gaze within <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msup><mn>1.0</mn><mo>∘</mo></msup><annotation encoding="application/x-tex">1.0^\circ</annotation></semantics></math>, whereas the covariance decomposition uses a <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msup><mn>0.5</mn><mo>∘</mo></msup><annotation encoding="application/x-tex">0.5^\circ</annotation></semantics></math> radius and its own valid-window rules. Existing checks indicate that the resulting change in total count variance is small, but exact equality of the two sampling distributions is not guaranteed.</p>
+<p><strong>In-sample calibration.</strong> Each condition receives a per-unit affine rescaling fit by Poisson likelihood on the responses that are subsequently scored. This places model conditions on a comparable count scale but introduces slight in-sample optimism. Cross-fitting the calibration would remove that optimism.</p>
+<p><strong>Conditional rather than universal explainability.</strong> The denominator measures rate variance explained by the variables and trajectory resolution represented in Figure 2. Residual variance can include unmeasured neural state as well as stochastic spiking. The metric should therefore be described as single-trial <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msup><mi>r</mi><mn>2</mn></msup><annotation encoding="application/x-tex">r^2</annotation></semantics></math> relative to the empirically measured stimulus- and gaze-conditional rate variance, rather than as a universal fraction of all biologically predictable activity.</p>
+<h1 id="reporting-definition">8. Reporting definition</h1>
+<p>A concise methods definition is:</p>
+<blockquote>
+<p>Single-trial prediction was quantified as <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>r</mi><mn>2</mn></msup><mo>=</mo><mn>1</mn><mo>−</mo><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>Y</mi><mo>−</mo><mover><mi>Y</mi><mo accent="true">̂</mo></mover><mo stretchy="true" form="postfix">)</mo></mrow><mi>/</mi><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>Y</mi><mo stretchy="true" form="postfix">)</mo></mrow></mrow><annotation encoding="application/x-tex">r^2=1-\operatorname{Var}(Y-\hat Y)/\operatorname{Var}(Y)</annotation></semantics></math> over valid 120 Hz trial-by-time bins. For each unit, this value was normalized by <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mover><mi>R</mi><mo accent="true">̂</mo></mover><mo>max</mo><mn>2</mn></msubsup><mo>=</mo><mo>diag</mo><msub><mi>C</mi><mstyle mathvariant="normal"><mi>r</mi><mi>a</mi><mi>t</mi><mi>e</mi></mstyle></msub><mi>/</mi><mo>diag</mo><msub><mi>C</mi><mstyle mathvariant="normal"><mi>t</mi><mi>o</mi><mi>t</mi><mi>a</mi><mi>l</mi></mstyle></msub></mrow><annotation encoding="application/x-tex">\widehat R^2_{\max}=\operatorname{diag}C_{\mathrm{rate}}/ \operatorname{diag}C_{\mathrm{total}}</annotation></semantics></math>, estimated from the Figure 2 covariance decomposition at the same 8.33 ms counting window. Under matched conditioning and sampling, the ratio equals <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>1</mn><mo>−</mo><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>λ</mi><mo>−</mo><mover><mi>Y</mi><mo accent="true">̂</mo></mover><mo stretchy="true" form="postfix">)</mo></mrow><mi>/</mi><mo>Var</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>λ</mi><mo stretchy="true" form="postfix">)</mo></mrow></mrow><annotation encoding="application/x-tex">1-\operatorname{Var}(\lambda-\hat Y)/\operatorname{Var}(\lambda)</annotation></semantics></math>, where <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>λ</mi><mo>=</mo><mstyle mathvariant="double-struck"><mi>𝔼</mi></mstyle><mrow><mo stretchy="true" form="prefix">[</mo><mi>Y</mi><mo>∣</mo><mtext mathvariant="normal">stimulus</mtext><mo>,</mo><mtext mathvariant="normal">gaze</mtext><mo stretchy="true" form="postfix">]</mo></mrow></mrow><annotation encoding="application/x-tex">\lambda=\mathbb E[Y\mid\text{stimulus},\text{gaze}]</annotation></semantics></math>. It therefore reports variance explained in the conditional firing rate rather than in the noisy spike counts. Units with non-positive estimated rate variance were excluded rather than clipped.</p>
+</blockquote>
+<p>The corresponding figure label should retain the mathematical definition, such as “single-trial <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>r</mi><mn>2</mn></msup><mi>/</mi><msubsup><mi>R</mi><mo>max</mo><mn>2</mn></msubsup></mrow><annotation encoding="application/x-tex">r^2/R^2_{\max}</annotation></semantics></math>,” because finite-sample values may be negative or exceed one. A reference at one denotes the estimated oracle rate variance, not a hard bound on the plotted estimator.</p>
+</body>
+</html>
