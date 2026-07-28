@@ -437,15 +437,18 @@ def plot_unaccounted_variance_panel(ax, decomp=None, caption=True):
     ax.plot(x, U, color="k", lw=1.5, marker="o", ms=4,
             markeredgecolor="k", markeredgewidth=0.4, zorder=3)
 
-    # Total variability label (top-left, above its line).
-    ax.text(0.04, Ctotal + 0.015 * y_hi, "Total variability",
+    # Total variability label (top-left, above its line). The x axis runs
+    # 1 -> 0, so "left" on screen is the large-Δe end.
+    ax.text(0.99, Ctotal + 0.015 * y_hi, "Total variability",
             fontsize=7.5, ha="left", va="bottom")
     # Internal-noise floor label (just above its line at mid-x).
     ax.text(0.30, sigma_int + 0.012 * y_hi, "Internal variability",
-            color="0.35", fontsize=7.5, ha="left", va="bottom")
+            color="0.35", fontsize=7.5, ha="right", va="bottom")
 
-    # Right-side decomposition bar at x = xa: FEM (internal floor -> eye-blind
-    # level) in blue, stimulus/PSTH (eye-blind level -> total) in red.
+    # Decomposition bar at x = xa (the loose-threshold end, screen-left under
+    # the reversed axis): FEM (internal floor -> eye-blind level) in blue,
+    # stimulus/PSTH (eye-blind level -> total) in red. Its labels sit to the
+    # right of the bar on screen, i.e. at slightly smaller Δe.
     xa = 0.92
     ax.annotate("", xy=(xa, U_naive), xytext=(xa, sigma_int),
                 arrowprops=dict(arrowstyle="<->", color=MATCHED_COLOR, lw=2.0),
@@ -455,16 +458,17 @@ def plot_unaccounted_variance_panel(ax, decomp=None, caption=True):
                 zorder=4)
     ax.text(xa - 0.02, 0.5 * (sigma_int + U_naive),
             "FEM variability\n$(\\sigma^2_{\\mathrm{FEM}})$",
-            color="k", fontsize=7.5, ha="right", va="center")
+            color="k", fontsize=7.5, ha="left", va="center")
     ax.text(xa - 0.02, 0.5 * (U_naive + Ctotal),
             "Eye position ignored $(\\sigma^2_{\\mathrm{PSTH}})$",
-            color="k", fontsize=7.5, ha="right", va="center")
+            color="k", fontsize=7.5, ha="left", va="center")
 
-    # Matched end sits on the internal floor (eye position fully accounted for).
+    # Matched end sits on the internal floor (eye position fully accounted for);
+    # under the reversed axis that end is at screen-right.
     ax.annotate("Trajectories matched",
-                xy=(x[0], U[0]), xytext=(0.16, 0.30), textcoords=ax.transAxes,
+                xy=(x[0], U[0]), xytext=(0.84, 0.30), textcoords=ax.transAxes,
                 arrowprops=dict(arrowstyle="->", color="k", lw=0.9),
-                fontsize=7.5, ha="left", va="center")
+                fontsize=7.5, ha="right", va="center")
 
     if caption:
         # Take-home: descriptive phrase bottom-left, fraction equation
@@ -477,7 +481,8 @@ def plot_unaccounted_variance_panel(ax, decomp=None, caption=True):
                 r"{\sigma^2_{\mathrm{FEM}}+\sigma^2_{\mathrm{PSTH}}}$",
                 transform=ax.transAxes, fontsize=11.5, ha="right", va="bottom")
 
-    ax.set_xlim(-0.05, 1.03)
+    # Reversed: threshold gets stricter to the right (1 -> 0).
+    ax.set_xlim(1.03, -0.05)
     ax.set_ylim(0.0, y_hi)
     ax.set_xlabel("Eye-trajectory mismatch threshold, Δe < x (°)")
     ax.set_ylabel("Unaccounted-for variability (spk²)")
