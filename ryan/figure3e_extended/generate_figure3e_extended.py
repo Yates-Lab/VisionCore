@@ -1,9 +1,17 @@
 """Extended single-trial perturbation figure (fork of figure 3's panel D).
 
-Two rows, one shared set of seven conditions:
+Four rows, one shared set of seven conditions:
 
-  A  single-trial r^2      vs model perturbation
-  B  single-trial bits/spike vs model perturbation
+  A  single-trial r^2                   vs model perturbation
+  B  single-trial bits/spike            vs model perturbation
+  C  residual rate fraction             (model vs model; no spikes involved)
+  D  Poisson self-consistency fraction  observed likelihood gain over the gain
+                                        expected under each condition's own
+                                        predicted rates
+
+Rows A, B and D are predictive and share the same paired contrasts against the
+full twin; row C is within-model. A and B are referenced to the PSTH median, D
+to its own expected value of 1.
 
 Left to right: the leave-one-out PSTH (trial average), the full twin, the
 behavior-ablated twin, then the stabilization ladder from the narrowest scope to
@@ -116,10 +124,17 @@ def _panel_heading(ax, letter, title):
             clip_on=False)
 
 
-def plot_metric(ax, data, metric, ylabel, *, show_xticklabels, label):
-    """One row: seven condition boxes, PSTH median reference line, and each
+def plot_metric(ax, data, metric, ylabel, *, show_xticklabels, label,
+                ref_value=None, ref_label="trial avg.\nmedian",
+                ref_color=PSTH_COLOR, ref_label_dx=0.42):
+    """One row: seven condition boxes, a horizontal reference line, and each
     non-reference condition annotated with its paired contrast against the full
-    twin."""
+    twin.
+
+    `ref_value=None` draws the PSTH median -- the empirical benchmark for the
+    predictive rows. A metric with its own natural reference (the
+    self-consistency fraction, whose expectation is 1) passes that value
+    instead."""
     pop = np.asarray(data["population"], dtype=bool)
     vals = {c: np.asarray(data[metric][c], dtype=float) for c in BOX_ORDER}
 
@@ -138,13 +153,16 @@ def plot_metric(ax, data, metric, ylabel, *, show_xticklabels, label):
     whis_lo = min(s["whislo"] for s in stats)
     rng = whis_hi - whis_lo
 
-    # Headroom above the tallest whisker for the per-condition annotations.
-    y_bottom = min(0.0, whis_lo - 0.06 * rng)
-    y_top = whis_hi + 0.42 * rng
+    psth_med = float(np.median(groups["psth"]))
+    ref_y = psth_med if ref_value is None else float(ref_value)
+
+    # Headroom above the tallest whisker for the per-condition annotations, and
+    # enough room that the reference line is never pushed off the axis.
+    y_bottom = min(0.0, whis_lo - 0.06 * rng, ref_y - 0.06 * rng)
+    y_top = max(whis_hi + 0.42 * rng, ref_y + 0.06 * rng)
     ax.set_ylim(y_bottom, y_top)
 
-    psth_med = float(np.median(groups["psth"]))
-    ax.axhline(psth_med, color=PSTH_COLOR, lw=0.8, ls="--", alpha=0.85, zorder=0)
+    ax.axhline(ref_y, color=ref_color, lw=0.8, ls="--", alpha=0.85, zorder=0)
     ax.axhline(0, color="0.7", lw=0.6, ls=":", zorder=0)
 
     ref = groups[REFERENCE]
@@ -174,8 +192,9 @@ def plot_metric(ax, data, metric, ylabel, *, show_xticklabels, label):
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
 
-    # Reference-line label, parked right of the last box.
-    ax.text(len(BOX_ORDER) - 0.42, psth_med, "trial avg.\nmedian",
+    # Reference-line label, parked in the gutter right of the last box.
+    # `ref_label_dx` widens that gutter for labels too long for the figure margin.
+    ax.text(len(BOX_ORDER) - ref_label_dx, ref_y, ref_label,
             color="0.5", fontsize=5.2, va="center", ha="left", clip_on=False)
 
     print(f"\n=== {label} (N={n} cells, fig2 population) ===")
@@ -275,26 +294,60 @@ def compose(*, recompute=False, out_dir=OUT_DIR, dpi=300, cache_path=CACHE_PATH)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     data = load_extended_data(recompute=recompute, cache_path=cache_path)
+    if "selfcons" not in data:
+        raise RuntimeError(
+            f"{cache_path} predates the Poisson self-consistency row, and the "
+            "cache stores per-neuron summaries rather than the per-bin rate "
+            "traces the metric needs, so it cannot be backfilled. Re-run the "
+            "sweep:\n    uv run python "
+            "ryan/figure3e_extended/generate_figure3e_extended.py --recompute")
 
-    fig = plt.figure(figsize=(7.2, 9.0), constrained_layout=False)
-    gs = GridSpec(3, 1, figure=fig, left=0.105, right=0.965, bottom=0.085,
-                  top=0.955, hspace=0.22)
+    fig = plt.figure(figsize=(7.2, 14.4), constrained_layout=False)
+    gs = GridSpec(5, 1, figure=fig, left=0.105, right=0.965, bottom=0.055,
+                  top=0.972, hspace=0.22)
     ax_a = fig.add_subplot(gs[0, 0])
     ax_b = fig.add_subplot(gs[1, 0])
     ax_c = fig.add_subplot(gs[2, 0])
+    ax_d = fig.add_subplot(gs[3, 0])
+    ax_e = fig.add_subplot(gs[4, 0])
 
     stats_r2 = plot_metric(ax_a, data, "ve", "Single-trial $r^2$",
                            show_xticklabels=False, label="Single-trial r^2")
-    stats_bps = plot_metric(ax_b, data, "bps", "Single-trial bits per spike",
+    # Reference 1, not the PSTH median: the denominator is fig2's measured
+    # explainable variance, so 1 is where a model that had captured all of the
+    # stimulus- and gaze-conditional rate modulation would sit.
+    stats_norm = plot_metric(
+        ax_b, data, "r2_norm",
+        "Fraction of explainable\nvariance ($r^2 / R^2_{max}$)",
+        show_xticklabels=False, label="Normalized single-trial r^2",
+        ref_value=1.0, ref_label="ceiling", ref_color="0.35",
+        ref_label_dx=0.42)
+    stats_bps = plot_metric(ax_c, data, "bps", "Single-trial bits per spike",
                             show_xticklabels=False, label="Single-trial bits/spike")
     stats_resid = plot_residual_fraction(
-        ax_c, data, show_xticklabels=True,
+        ax_d, data, show_xticklabels=False,
         label="Residual rate variance (model vs model)")
+    # Reference 1, not the PSTH median: this row asks whether each condition
+    # realizes ITS OWN expected gain, so every box has a different denominator
+    # and the PSTH is just one more predictor rather than a benchmark.
+    stats_self = plot_metric(
+        ax_e, data, "selfcons", "Poisson self-consistency\nfraction",
+        show_xticklabels=True, label="Poisson self-consistency fraction",
+        ref_value=1.0, ref_label="expected\nvalue 1", ref_color="0.35",
+        ref_label_dx=0.60)
 
     _panel_heading(ax_a, "A", "Single-trial variance explained")
-    _panel_heading(ax_b, "B", "Single-trial information rate")
-    _panel_heading(ax_c, "C", "Fraction of the twin's rate modulation "
+    _panel_heading(ax_b, "B", "Single-trial $r^2$ as a fraction of the "
+                              "explainable rate variance measured in Fig. 2\n"
+                              "($R^2_{max}$ = rate variance / total variance, "
+                              "per unit, at the model's 120 Hz resolution)")
+    _panel_heading(ax_c, "C", "Single-trial information rate")
+    _panel_heading(ax_d, "D", "Fraction of the twin's rate modulation "
                               "that each input carries")
+    _panel_heading(ax_e, "E", "Observed likelihood gain relative to the gain "
+                              "expected if each condition's own\npredicted "
+                              "rates generated independent Poisson counts "
+                              "(expectation 1, not a bound)")
 
     for ext in ("png", "pdf", "svg"):
         fig.savefig(out_dir / f"figure3e_extended.{ext}", dpi=dpi)
@@ -307,8 +360,11 @@ def compose(*, recompute=False, out_dir=OUT_DIR, dpi=300, cache_path=CACHE_PATH)
         "n_sessions": len(data["results"]),
         "n_cells_total": int(len(data["population"])),
         "n_cells_population": int(np.asarray(data["population"]).sum()),
-        "stats": {"single_trial_r2": stats_r2, "bits_per_spike": stats_bps,
-                  "residual_rate_fraction": stats_resid},
+        "stats": {"single_trial_r2": stats_r2,
+                  "normalized_single_trial_r2": stats_norm,
+                  "bits_per_spike": stats_bps,
+                  "residual_rate_fraction": stats_resid,
+                  "poisson_self_consistency": stats_self},
     }
     with open(out_dir / "figure3e_extended_manifest.json", "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, default=str)

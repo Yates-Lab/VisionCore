@@ -1,0 +1,480 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{booktabs}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage[hidelinks]{hyperref}
+
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Var}{\operatorname{Var}}
+\newcommand{\Pois}{\operatorname{Poisson}}
+\newcommand{\KL}{D_{\mathrm{KL}}}
+\newcommand{\LL}{\mathcal{L}}
+
+\title{A Poisson Self-Consistency Reference for\\Single-Trial Neural Encoding Models}
+\author{Technical report for the Figure 3e extended analysis}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+The extended Figure 3e analysis compares single-trial spike-count predictions from an intact digital twin, several inference-time ablations, and a leave-one-out peri-stimulus time histogram (PSTH). Single-trial variance explained is easy to recognize but small because most count variance at 120~Hz reflects stochastic spiking. Poisson log-likelihood handles sparse counts appropriately, but bits per spike has no familiar absolute scale. This report develops a model-conditional Poisson reference proposed to place likelihood gain on a more interpretable scale. For each predictor, the reference is the likelihood gain expected if its predicted rates generated independent Poisson responses. The expectation has a closed form equal to a sum of Poisson Kullback--Leibler divergences from a fixed null model. Dividing observed likelihood gain by this expectation gives a Poisson self-consistency fraction with expected value one when the predictor is the true conditional Poisson mean. The fraction measures how much of a model's claimed predictive information appears in the data. Because each model defines its own denominator, it does not by itself rank models according to total predictive performance. It is best reported alongside held-out likelihood gain or the fraction of full-model information retained.
+\end{abstract}
+
+\section{Scientific setting}
+
+The extended Figure 3e analysis asks how inference-time perturbations change the digital twin's prediction of V1 responses during fixation. The conditions preserve or remove behavioral input and progressively stabilize retinal input over the model window, individual trials, or the full session. Each condition is evaluated against single-trial spike counts. A leave-one-out PSTH provides a repeated-trial predictor that does not use the target trial.
+
+The scientific claim has two parts. First, the intact model predicts single-trial responses better than the repeated-trial average. Second, retinal stabilization causes a larger loss than behavioral ablation, with broader stabilization producing progressively larger losses. The existing single-trial metrics support both statements, but neither gives an immediately satisfactory absolute scale.
+
+For observed counts $y_i$ and predicted counts $q_i$, the current variance-explained measure is
+\begin{equation}
+R^2_{\mathrm{trial}}
+=1-\frac{\Var_i(y_i-q_i)}{\Var_i(y_i)}.
+\end{equation}
+At the 120~Hz analysis resolution, most bins contain zero spikes and occasional bins contain one or more spikes. Even a predictor that knows the true conditional mean cannot predict the realized Poisson fluctuation. The attainable single-trial $R^2$ can therefore be only a few percent.
+
+Poisson likelihood treats this stochasticity as part of the observation model. Bits per spike reports the log-likelihood improvement over a mean-rate null,
+\begin{equation}
+\mathrm{BPS}(q;y)
+=
+\frac{\ell(q;y)-\ell(q_0;y)}{N_y\log 2},
+\qquad
+N_y=\sum_i y_i.
+\end{equation}
+This is a principled predictive score and is closely related to information-theoretic measures used for neural encoding models \cite{williamson2015,benjamin2018}. Its numerical scale is less familiar than variance explained, however, and a reader cannot infer from $0.1$ bits per spike how close a model lies to the score expected from a correct stochastic encoding model.
+
+These limitations motivate a reference that accounts for the firing rate, temporal modulation, valid-bin pattern, and bin width of each prediction. The proposed construction asks what likelihood gain the model should achieve against an independent Poisson response if its predicted rates were correct.
+
+\section{Why the PSTH is not a full-model noise ceiling}
+
+Repeated trials can estimate the response component locked to trial time or repeated stimulus identity. Let $r$ index trials and $t$ index time. A PSTH estimates
+\begin{equation}
+\E[Y_{rt}\mid t].
+\end{equation}
+The intact model conditions on additional variables, including the retinal trajectory and measured behavior,
+\begin{equation}
+\E[Y_{rt}\mid \text{stimulus},\text{retinal trajectory},\text{behavior}].
+\end{equation}
+Those variables differ among nominal repeats. Trial averaging removes their contribution from the PSTH even when they predict genuine single-trial rate variation. The leave-one-out PSTH is therefore an empirical benchmark for time-locked repeatability, not an upper bound for a model with trial-specific inputs.
+
+Repeated-trial signal-power methods remain useful when the estimand is the reproducible mean response \cite{sahani2003,hsu2004,schoppe2016,pospisil2021}. They do not provide an empirical ceiling conditional on a unique gaze and behavioral trajectory unless those covariates are themselves repeated. A model-based Poisson reference avoids that mismatch by conditioning on each model's trial-specific predicted rate. The cost is that the reference inherits the model and the assumed Poisson distribution.
+
+\section{Poisson likelihood and likelihood gain}
+
+Index all valid trial--time bins for one neuron by $i=1,\ldots,n$. Let $q_i>0$ denote a model's predicted mean spike count in bin $i$. Under the independent Poisson observation model,
+\begin{equation}
+Y_i\mid q_i\sim\Pois(q_i).
+\end{equation}
+The log likelihood is
+\begin{equation}
+\ell(q;y)
+=
+\sum_{i=1}^n
+\left[
+ y_i\log q_i-q_i-\log(y_i!)
+\right].
+\label{eq:poisson_ll}
+\end{equation}
+
+Absolute log likelihood has no useful zero and contains the observation-dependent term $-\log(y_i!)$. Model comparisons instead use a fixed reference prediction $q_{0i}>0$. Define the log-likelihood gain
+\begin{align}
+G(q;y)
+&=\ell(q;y)-\ell(q_0;y)\\
+&=\sum_{i=1}^n
+\left[
+ y_i\log\frac{q_i}{q_{0i}}-q_i+q_{0i}
+\right].
+\label{eq:gain}
+\end{align}
+The factorial terms cancel. A positive value favors $q$ over the null, zero indicates equal likelihood, and a negative value favors the null. Dividing $G$ by $N_y\log 2$ gives bits per observed spike.
+
+The null must remain fixed when comparing observed and simulated responses. A suitable implementation estimates each neuron's null rate from training data and then applies it unchanged to held-out real and simulated trials. Re-estimating the null from every simulated draw changes the estimand and removes the simple expectation derived below.
+
+\section{The model-conditional Poisson reference}
+
+\subsection{Definition}
+
+For a fitted prediction $q$, generate an independent response
+\begin{equation}
+Y_i^{\mathrm{rep}}\sim\Pois(q_i).
+\end{equation}
+The model-conditional Poisson reference is the expected likelihood gain against the same fixed null,
+\begin{equation}
+C(q;q_0)
+=
+\E_{Y^{\mathrm{rep}}\sim\Pois(q)}
+\left[G(q;Y^{\mathrm{rep}})\right].
+\label{eq:reference_definition}
+\end{equation}
+This quantity is the gain expected when the model's predicted means are correct and all remaining variation consists of independent Poisson draws.
+
+\subsection{Closed-form derivation}
+
+Substitute Equation~\ref{eq:gain} into Equation~\ref{eq:reference_definition}. Linearity of expectation and $\E[Y_i^{\mathrm{rep}}]=q_i$ give
+\begin{align}
+C(q;q_0)
+&=
+\sum_{i=1}^n
+\left[
+ \E[Y_i^{\mathrm{rep}}]\log\frac{q_i}{q_{0i}}
+ -q_i+q_{0i}
+\right]\\
+&=
+\boxed{
+\sum_{i=1}^n
+\left[
+ q_i\log\frac{q_i}{q_{0i}}-q_i+q_{0i}
+\right]
+}.
+\label{eq:closed_reference}
+\end{align}
+For Poisson distributions,
+\begin{equation}
+\KL\!\left[\Pois(a)\,\|\,\Pois(b)\right]
+=
+a\log\frac{a}{b}+b-a.
+\end{equation}
+The reference is therefore
+\begin{equation}
+\boxed{
+C(q;q_0)
+=
+\sum_{i=1}^n
+\KL\!\left[\Pois(q_i)\,\|\,\Pois(q_{0i})\right].
+}
+\label{eq:kl_reference}
+\end{equation}
+It is nonnegative and equals zero only when $q_i=q_{0i}$ in every valid bin.
+
+If the null is constant and equals the mean predicted count,
+\begin{equation}
+\bar q=\frac{1}{n}\sum_i q_i,
+\end{equation}
+then $\sum_i(-q_i+\bar q)=0$ and
+\begin{equation}
+C(q;\bar q)
+=
+\sum_i q_i\log\frac{q_i}{\bar q}.
+\label{eq:mean_null_reference}
+\end{equation}
+In bits per expected spike,
+\begin{equation}
+I_{\mathrm{self}}(q)
+=
+\frac{
+ \sum_i q_i\log_2(q_i/\bar q)
+}{
+ \sum_i q_i
+}.
+\label{eq:self_bits}
+\end{equation}
+This is the amount of modulation information that the model claims relative to its own mean rate. It is closely related to the single-spike information and likelihood-based information measures used for Poisson encoding models \cite{williamson2015}.
+
+\subsection{Absolute self-likelihood and Poisson entropy}
+
+The same expectation can be written for absolute log likelihood,
+\begin{equation}
+\E_{Y\sim\Pois(q)}[\ell(q;Y)]
+=
+-\sum_i H[\Pois(q_i)],
+\end{equation}
+where $H$ is Shannon entropy in nats. For one bin,
+\begin{equation}
+H[\Pois(q)]
+=
+q-q\log q
++e^{-q}\sum_{k=0}^{\infty}\frac{q^k}{k!}\log(k!).
+\end{equation}
+Poisson entropy has no elementary closed form, although convergent series, bounds, and asymptotic expansions are available \cite{knessl1998,adell2010}. The entropy term cancels from likelihood gain, which yields the simpler expression in Equation~\ref{eq:closed_reference}. This cancellation is one reason to normalize a likelihood difference rather than an absolute likelihood.
+
+\section{The Poisson self-consistency fraction}
+
+Define the observed fraction
+\begin{equation}
+\boxed{
+S(q;y,q_0)
+=
+\frac{G(q;y)}{C(q;q_0)}
+=
+\frac{
+\sum_i\left[
+ y_i\log(q_i/q_{0i})-q_i+q_{0i}
+\right]
+}{
+\sum_i\left[
+ q_i\log(q_i/q_{0i})-q_i+q_{0i}
+\right]
+}.
+}
+\label{eq:self_fraction}
+\end{equation}
+When $q$ is fixed independently of the evaluated response, $q_0$ is fixed, and $Y_i\sim\Pois(q_i)$,
+\begin{equation}
+\E[G(q;Y)]=C(q;q_0).
+\end{equation}
+Because the denominator is then deterministic,
+\begin{equation}
+\boxed{\E[S(q;Y,q_0)]=1.}
+\end{equation}
+The result does not require Monte Carlo simulation.
+
+The fraction has the following interpretation:
+\begin{itemize}
+    \item $S\approx1$ indicates that the observed likelihood gain agrees with the gain expected if the predicted rates were the true Poisson means.
+    \item $0<S<1$ indicates that the data support less predictive gain than the model claims under its own rate modulation.
+    \item $S=0$ indicates no observed improvement over the null.
+    \item $S<0$ indicates that the null predicts the observed counts better.
+    \item $S>1$ can occur in finite data. The reference is an expectation rather than a pointwise upper bound.
+\end{itemize}
+
+The name ``Poisson noise bound'' captures the motivation but can imply a hard maximum. ``Model-conditional Poisson reference'' describes the construction more precisely. ``Poisson self-consistency fraction'' describes Equation~\ref{eq:self_fraction}: the score measures whether a model realizes the predictive information implied by its own rates.
+
+\subsection{Sampling variability under the Poisson reference}
+
+The gain can be written as a weighted sum of counts plus a constant. Let
+\begin{equation}
+a_i=\log(q_i/q_{0i}).
+\end{equation}
+Under independent Poisson draws from $q$,
+\begin{align}
+\Var[G(q;Y)]
+&=\Var\left[\sum_i a_iY_i\right]\\
+&=\sum_i q_i a_i^2\\
+&=\boxed{\sum_i q_i\left[\log(q_i/q_{0i})\right]^2}.
+\label{eq:gain_variance}
+\end{align}
+Consequently,
+\begin{equation}
+\Var[S]
+=
+\frac{
+ \sum_i q_i[\log(q_i/q_{0i})]^2
+}{C(q;q_0)^2}
+\end{equation}
+under the reference assumptions. This expression shows why the fraction becomes unstable when $C(q;q_0)$ is small. Simulation remains useful for quantiles because the weighted sum need not be Gaussian for sparse counts. The analytic expectation and variance can be used to verify the simulation.
+
+\section{Why simulated scores should be averaged before responses}
+
+Suppose $B$ replicated responses are drawn from the prediction,
+\begin{equation}
+Y_i^{(b)}\sim\Pois(q_i),
+\qquad
+\bar Y_i=\frac{1}{B}\sum_{b=1}^B Y_i^{(b)}.
+\end{equation}
+The average satisfies
+\begin{equation}
+\E[\bar Y_i]=q_i,
+\qquad
+\Var(\bar Y_i)=\frac{q_i}{B}.
+\end{equation}
+As $B\rightarrow\infty$, $\bar Y_i\rightarrow q_i$. The average is generally noninteger and does not follow a Poisson distribution. Treating it as a single Poisson count therefore does not represent the single-trial prediction problem.
+
+The recommended Monte Carlo procedure is
+\begin{equation}
+\widehat C_B
+=
+\frac{1}{B}\sum_{b=1}^B G(q;Y^{(b)}),
+\end{equation}
+which converges to Equation~\ref{eq:closed_reference}. For the reduced likelihood gain in Equation~\ref{eq:gain}, $G$ is linear in the response. It follows that
+\begin{equation}
+G(q;\bar Y)
+=
+\frac{1}{B}\sum_bG(q;Y^{(b)})
+\end{equation}
+when $q_0$ remains fixed. This identity explains why averaging draws may appear to work in code that omits the factorial term. The equivalence fails if each draw receives a re-estimated null, if each score is divided by its random spike count, if ratios are averaged, or if the full Poisson likelihood is evaluated at the noninteger average. Calculating Equation~\ref{eq:closed_reference} directly avoids these ambiguities.
+
+\section{What the fraction measures}
+
+The raw likelihood gain and self-consistency fraction answer different questions. The raw gain asks how much predictive evidence a model provides above a common null. The fraction asks how much of that model's own expected evidence appears in the observed response.
+
+Consider two predictors. A richly modulated predictor may have an expected gain of $0.20$ bits per spike and an observed gain of $0.16$, giving $S=0.80$. A weakly modulated predictor may expect and achieve $0.05$ bits per spike, giving $S=1.00$. The second predictor is more self-consistent, but the first predicts substantially more information about the data. Ranking the models only by $S$ would reverse the ranking by predictive gain.
+
+This behavior follows from the model-specific denominator. Each condition defines a different hypothetical data-generating process. An ablated prediction that approaches the null also has
+\begin{equation}
+C(q_{\mathrm{ablated}};q_0)\rightarrow0.
+\end{equation}
+Its fraction becomes unstable and is undefined when the ablated prediction equals the null. A weak model can therefore score near one by claiming little and delivering little.
+
+The self-consistency fraction is not a proper scoring rule for comparing candidate predictions. Raw held-out log likelihood is proper: its expectation under a true distribution is maximized by predicting that distribution \cite{gneiting2007}. Dividing by a quantity that depends on the candidate prediction removes that property. The fraction should be treated as a calibration or model-checking statistic rather than the sole performance measure.
+
+\section{Benefits and limitations}
+
+\begin{table}[ht]
+\centering
+\small
+\begin{tabular}{p{0.44\textwidth}p{0.44\textwidth}}
+\toprule
+Benefits & Limitations \\
+\midrule
+Accounts for each neuron's firing rate, predicted modulation, valid bins, and temporal resolution. & Each candidate defines its own reference, so fractions do not rank total predictive information. \\
+\addlinespace
+Accommodates trial-specific gaze and behavioral predictions that a PSTH ceiling averages away. & A nearly null prediction has a nearly zero denominator and an unstable fraction. \\
+\addlinespace
+Gives an expected value of one when the fitted rate is the true conditional Poisson mean. & One is an expected reference, not a hard upper bound; finite samples can exceed it. \\
+\addlinespace
+Has a closed-form expectation and variance, so Monte Carlo is optional. & The result is conditional on the fitted prediction and ignores uncertainty in model fitting. \\
+\addlinespace
+Separates a loss of predicted modulation from failure of the remaining modulation to match spikes. & Independent Poisson variability may omit refractoriness, gain fluctuations, overdispersion, and temporal dependence. \\
+\addlinespace
+Requires no repeats with identical gaze and behavioral trajectories. & Data-dependent calibration or null estimation biases the expected-one interpretation. \\
+\bottomrule
+\end{tabular}
+\caption{Interpretive advantages and limitations of the Poisson self-consistency fraction.}
+\label{tab:pros_cons}
+\end{table}
+
+\section{Relation to established metrics}
+
+\subsection{Bits per spike}
+
+The observed numerator is the same likelihood gain used by bits per spike. The self-reference can also be expressed in bits per expected spike. If both use a common spike-count normalization, their ratio gives Equation~\ref{eq:self_fraction}. If the observed score is divided by $N_y$ while the reference is divided by $\sum_iq_i$, the ratio contains an additional random factor. It will approach the self-consistency fraction when total predicted and observed counts agree, but its expectation is not exactly one in finite samples.
+
+\subsection{Poisson deviance explained}
+
+Poisson deviance is
+\begin{equation}
+D(y,q)
+=2\sum_i
+\left[
+ y_i\log\frac{y_i}{q_i}-(y_i-q_i)
+\right].
+\end{equation}
+Ordinary deviance explained compares a candidate with a saturated model that predicts each realized count. It therefore retains an unattainable single-trial reference. A model-conditional expected deviance can be computed under $Y\sim\Pois(q)$, but its exact sparse-count expectation involves an infinite sum. Likelihood gain against a fixed null avoids the saturated model and gives the KL expression in Equation~\ref{eq:kl_reference}.
+
+\subsection{Repeated-trial explainable variance}
+
+Noise-corrected variance and correlation estimators use repeats to estimate a latent stimulus-locked mean response \cite{schoppe2016,pospisil2021}. They provide a data-derived correction when repeated conditions share one expected response. The Poisson self-reference instead uses the fitted model as the conditional mean for each trial. It can represent trial-varying predictions but is correspondingly more assumption-dependent.
+
+\subsection{Parametric model checking}
+
+Simulating replicated responses from a fitted distribution and comparing their statistics with the observed statistic is a standard parametric-bootstrap or posterior-predictive strategy. The proposed reference follows this logic with likelihood gain as the statistic. Expected log score, predictive entropy, and KL divergence are also standard. The exact candidate-specific ratio in Equation~\ref{eq:self_fraction} does not appear to be a canonical neural encoding metric. It should be introduced with its definition and interpreted as a model-conditional diagnostic rather than cited under an established metric name.
+
+\section{Recommended use for Figure 3e extended}
+
+The figure should retain a common held-out likelihood comparison as its primary ablation result. One suitable scale is the fraction of full-model likelihood gain retained,
+\begin{equation}
+R_m^{\mathrm{full}}
+=
+\frac{G(q_m;y)}{G(q_{\mathrm{full}};y)}.
+\label{eq:retained}
+\end{equation}
+The full model is $100\%$, the common null is $0\%$, and each ablation reports how much predictive information remains. This quantity directly addresses the ordering of the ablations.
+
+The Poisson self-reference can add a second decomposition. For every condition, report
+\begin{enumerate}
+    \item observed held-out gain, $G(q_m;y)$;
+    \item expected gain if the condition were the true Poisson mean, $C(q_m;q_0)$;
+    \item their ratio, $S_m$.
+\end{enumerate}
+A condition can then lose performance for two distinguishable reasons. Its predicted rate may become less informative, which lowers $C(q_m;q_0)$. The remaining modulation may also disagree with the recorded spikes, which lowers $S_m$. Displaying observed and expected gain together preserves both effects. A plot of $S_m$ alone would discard the first.
+
+Likelihood terms should be summed within a session before forming ratios. Neuron-wise fractions with small denominators will otherwise produce unstable distributions. Session- or animal-level resampling can provide uncertainty intervals. The analysis should report the distribution of $C(q_m;q_0)$ and specify any minimum denominator used for descriptive neuron-level plots.
+
+\section{Implementation requirements for the current analysis}
+
+The expected-one result requires predictions and calibration parameters that are independent of the evaluated response. The current Figure 3e extended code fits a separate affine rescaling for every condition against the same response bins later used for scoring. It also constructs the mean-rate null from the evaluated observations. Those choices are understandable for comparing modulation shape, but they invalidate a strict held-out interpretation of Equation~\ref{eq:self_fraction}.
+
+A predictive implementation should use trial- or block-level cross-fitting:
+\begin{enumerate}
+    \item Split observations into training and evaluation folds without random-bin leakage.
+    \item Fit the affine calibration for each condition on the training fold.
+    \item Estimate one common null rate per neuron on the training fold.
+    \item Apply the calibrated prediction and fixed null to the evaluation fold.
+    \item Accumulate $G(q_m;y)$ and $C(q_m;q_0)$ over evaluation folds.
+    \item Sum terms within sessions before calculating $S_m$ and $R_m^{\mathrm{full}}$.
+\end{enumerate}
+The leave-one-out PSTH should continue to exclude the target trial. Its smoothing or positive-rate regularization must also be fit without the target response. A Gamma--Poisson estimator or cross-fitted smoother would avoid structural zeros without using evaluation counts to set an additive floor.
+
+The Poisson assumption should be checked at the analysis resolution. Useful diagnostics include observed versus predicted count variance, zero and multi-spike frequencies, Fano factors over several windows, and residual temporal dependence. If conditional overdispersion remains, a negative-binomial or Poisson-lognormal self-reference may be more appropriate. If refractoriness dominates, a history-dependent point-process reference would better represent the attainable score \cite{brown2002,taouali2016}.
+
+\section{Recommended terminology and reporting statement}
+
+A concise methods description could read:
+
+\begin{quote}
+For each condition, we calculated held-out Poisson log-likelihood gain relative to a training-estimated mean-rate null. We normalized this gain by the gain expected if the condition's predicted rates generated independent Poisson responses. The expected gain has the closed form $\sum_i D_{\mathrm{KL}}[\Pois(q_i)\|\Pois(q_{0i})]$. The resulting Poisson self-consistency fraction has expected value one when the predicted rates equal the true conditional Poisson means. Because each condition defines its own reference, we used this fraction as a model-checking statistic and used unnormalized held-out likelihood gain to compare conditions.
+\end{quote}
+
+The term ``Poisson self-consistency fraction'' makes the model dependence explicit. ``Model-conditional Poisson-normalized likelihood'' is a more formal alternative. If ``Poisson noise bound'' is retained for communication, the text should state that it is an expected reference rather than a strict upper bound.
+
+\section{Conclusions}
+
+The proposed calculation supplies useful context for single-trial likelihood. It asks how much likelihood gain a fitted rate should achieve after irreducible Poisson sampling and provides an analytic answer. The expected gain is a KL divergence from the null, and the observed-to-expected ratio equals one on average when the prediction is the true conditional Poisson mean.
+
+The denominator changes across conditions because every prediction defines its own hypothetical response distribution. The fraction therefore measures self-consistency rather than total predictive performance. An ablated model can achieve a fraction near one while predicting little information, and predictions close to the null yield unstable ratios. For Figure 3e extended, the most informative presentation combines the self-consistency fraction with held-out likelihood gain. Their combination separates the amount of modulation each condition predicts from the degree to which the recorded spikes support that modulation.
+
+\begin{thebibliography}{99}
+
+\bibitem{adell2010}
+J.~A. Adell, A. Lekuona, and Y. Yu.
+Sharp bounds on the entropy of the Poisson law and related quantities.
+\emph{IEEE Transactions on Information Theory}, 56:2299--2306, 2010.
+\href{https://doi.org/10.1109/TIT.2010.2044057}{doi:10.1109/TIT.2010.2044057}.
+
+\bibitem{benjamin2018}
+A.~S. Benjamin, H.~L. Fernandes, T. Tomlinson, P. Ramkumar, C. VerSteeg, R.~E. Chowdhury, L.~E. Miller, and K.~P. Kording.
+Modern machine learning as a benchmark for fitting neural responses.
+\emph{Frontiers in Computational Neuroscience}, 12:56, 2018.
+\href{https://doi.org/10.3389/fncom.2018.00056}{doi:10.3389/fncom.2018.00056}.
+
+\bibitem{brown2002}
+E.~N. Brown, R. Barbieri, V. Ventura, R.~E. Kass, and L.~M. Frank.
+The time-rescaling theorem and its application to neural spike train data analysis.
+\emph{Neural Computation}, 14:325--346, 2002.
+\href{https://doi.org/10.1162/08997660252741149}{doi:10.1162/08997660252741149}.
+
+\bibitem{gneiting2007}
+T. Gneiting and A.~E. Raftery.
+Strictly proper scoring rules, prediction, and estimation.
+\emph{Journal of the American Statistical Association}, 102:359--378, 2007.
+\href{https://doi.org/10.1198/016214506000001437}{doi:10.1198/016214506000001437}.
+
+\bibitem{hsu2004}
+A. Hsu, A. Borst, and F.~E. Theunissen.
+Quantifying variability in neural responses and its application for the validation of model predictions.
+\emph{Network: Computation in Neural Systems}, 15:91--109, 2004.
+\href{https://doi.org/10.1088/0954-898X/15/2/002}{doi:10.1088/0954-898X/15/2/002}.
+
+\bibitem{knessl1998}
+C. Knessl.
+Integral representations and asymptotic expansions for Shannon and R\'enyi entropies.
+\emph{Applied Mathematics Letters}, 11:69--74, 1998.
+\href{https://doi.org/10.1016/S0893-9659(98)00013-5}{doi:10.1016/S0893-9659(98)00013-5}.
+
+\bibitem{pospisil2021}
+D.~A. Pospisil and W. Bair.
+The unbiased estimation of the fraction of variance explained by a model.
+\emph{PLOS Computational Biology}, 17:e1009212, 2021.
+\href{https://doi.org/10.1371/journal.pcbi.1009212}{doi:10.1371/journal.pcbi.1009212}.
+
+\bibitem{sahani2003}
+M. Sahani and J.~F. Linden.
+How linear are auditory cortical responses?
+In \emph{Advances in Neural Information Processing Systems 15}, pages 125--132, 2003.
+\href{https://proceedings.neurips.cc/paper/2002/hash/229754d7799160502a143a72f6789927-Abstract.html}{Proceedings link}.
+
+\bibitem{schoppe2016}
+O. Schoppe, N.~S. Harper, B.~D.~B. Willmore, A.~J. King, and J.~W.~H. Schnupp.
+Measuring the performance of neural models.
+\emph{Frontiers in Computational Neuroscience}, 10:10, 2016.
+\href{https://doi.org/10.3389/fncom.2016.00010}{doi:10.3389/fncom.2016.00010}.
+
+\bibitem{taouali2016}
+W. Taouali, T. Benvenuti, T. Wallisch, H. Chavane, T. Perrinet, and B. Cessac.
+Testing the odds of inherent versus observed overdispersion in neural spike counts.
+\emph{Journal of Neurophysiology}, 115:434--444, 2016.
+\href{https://doi.org/10.1152/jn.00194.2015}{doi:10.1152/jn.00194.2015}.
+
+\bibitem{williamson2015}
+R.~C. Williamson, M. Sahani, and J.~W. Pillow.
+The equivalence of information-theoretic and likelihood-based methods for neural dimensionality reduction.
+\emph{PLOS Computational Biology}, 11:e1004141, 2015.
+\href{https://doi.org/10.1371/journal.pcbi.1004141}{doi:10.1371/journal.pcbi.1004141}.
+
+\end{thebibliography}
+
+\end{document}

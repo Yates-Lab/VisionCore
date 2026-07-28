@@ -23,14 +23,17 @@ weights never change):
   stab_global_ablated  session-global freeze AND behavior zeroed: both FEM
                        routes removed at once
 
-Metrics, per neuron:
-  ve   single-trial r^2 against the observed spike counts
-  bps  single-trial Poisson bits per spike against each unit's own mean-rate
-       null (`models.losses.calc_poisson_bits_per_spike`)
+Metrics, per neuron (all in `_ext_metrics.py`):
+  ve        single-trial r^2 against the observed spike counts
+  bps       single-trial Poisson bits per spike against each unit's own
+            mean-rate null (`models.losses.calc_poisson_bits_per_spike`)
+  selfcons  Poisson self-consistency fraction: the same likelihood gain divided
+            by the gain expected if the condition's own predicted rates
+            generated independent Poisson counts
 
 plus a `psth` baseline (the leave-one-out PSTH used as the predictor) scored on
-both metrics, so the trial-average reference appears as a real box on both rows
-rather than only as a line.
+every metric, so the trial-average reference appears as a real box on each
+predictive row rather than only as a line.
 
 Self-contained: owns `outputs/cache/fig3e_extended_ablation.pkl` and imports
 nothing from `paper/fig3`. The population masks are rebuilt here from the shared
@@ -51,6 +54,7 @@ if str(VISIONCORE_ROOT) not in sys.path:
     sys.path.insert(0, str(VISIONCORE_ROOT))
 
 from _ext_stim import FixRsvpRenderer
+from _ext_metrics import bits_per_spike, poisson_self_consistency
 
 
 CACHE_PATH = CACHE_DIR / "fig3e_extended_ablation.pkl"
@@ -67,10 +71,6 @@ CHECKPOINT_SUBDIR = "2026-03-31_11-33-32_learned_resnet_concat_convgru_gaussian"
 EXPERIMENT_SUBDIR = "learned_resnet_concat_convgru_gaussian_lr1e-3_wd1e-5_cls1.0_bs256_ga4"
 BEST_CKPT = "epoch=374-val_bps_overall=0.6395.ckpt"
 CHECKPOINT_PATH = f"{CHECKPOINT_DIR}/{CHECKPOINT_SUBDIR}/{EXPERIMENT_SUBDIR}/{BEST_CKPT}"
-
-# Poisson BPS needs a strictly positive rate; the affine rescaling that makes the
-# r^2 axis comparable across conditions can push a few bins non-positive.
-BPS_FLOOR = 1e-6
 
 # Forward passes are chunked over the trial's prediction times. Batch elements
 # are independent (the recurrence runs over the lag axis inside each sample's
@@ -111,31 +111,6 @@ def subject_from_session(session_name):
 # ---------------------------------------------------------------------------
 def _var_explained(pred, true, axis=None):
     return 1 - np.nanvar(pred - true, axis=axis) / np.nanvar(true, axis=axis)
-
-
-def _bits_per_spike(rhat, robs, dfs):
-    """Per-neuron Poisson bits/spike. Arrays are (n_trials, n_time, n_neurons);
-    bins that are NaN in either array, or masked by `dfs`, are excluded.
-
-    Returns (bps, n_floored): `n_floored` counts bins whose predicted rate had to
-    be raised to BPS_FLOOR for the log (only reachable through the affine
-    rescaling, which is not sign-constrained)."""
-    import torch
-    from models.losses import calc_poisson_bits_per_spike
-
-    n_neurons = robs.shape[-1]
-    valid = np.isfinite(robs) & np.isfinite(rhat) & np.isfinite(dfs) & (dfs > 0)
-    r = np.where(valid, rhat, 1.0)
-    n_floored = int(((r < BPS_FLOOR) & valid).sum())
-    r = np.maximum(r, BPS_FLOOR)
-    y = np.where(valid, robs, 0.0)
-
-    bps = calc_poisson_bits_per_spike(
-        torch.from_numpy(r.reshape(-1, n_neurons).astype(np.float64)),
-        torch.from_numpy(y.reshape(-1, n_neurons).astype(np.float64)),
-        torch.from_numpy(valid.reshape(-1, n_neurons).astype(np.float64)),
-    ).numpy()
-    return bps, n_floored
 
 
 # ---------------------------------------------------------------------------
@@ -338,10 +313,23 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH):
 
         bps, bps_raw, floored = {}, {}, {}
         for c in CONDS:
-            bps[c], floored[c] = _bits_per_spike(rhat_rs[c], robs, dfs)
-            bps_raw[c], _ = _bits_per_spike(rhat[c], robs, dfs)
-        bps["psth"], floored["psth"] = _bits_per_spike(rbar_rs_m, robs, dfs)
-        bps_raw["psth"], floored["psth_unrescaled"] = _bits_per_spike(rbar, robs, dfs)
+            bps[c], floored[c] = bits_per_spike(rhat_rs[c], robs, dfs)
+            bps_raw[c], _ = bits_per_spike(rhat[c], robs, dfs)
+        bps["psth"], floored["psth"] = bits_per_spike(rbar_rs_m, robs, dfs)
+        bps_raw["psth"], floored["psth_unrescaled"] = bits_per_spike(rbar, robs, dfs)
+
+        # --- Poisson self-consistency: observed gain / its own Poisson reference ---
+        # Same rescaled predictions, same valid-bin mask, same positive floor and
+        # same mean-rate null as the bits/spike row above, so `gain_obs` is that
+        # row's likelihood gain before the per-spike normalization and the ratio
+        # only swaps the denominator. `G_self` is the gain expected if each
+        # condition's own predicted rates generated independent Poisson counts.
+        selfcons, gain_obs, gain_self = {}, {}, {}
+        for c in CONDS:
+            selfcons[c], gain_obs[c], gain_self[c], _ = poisson_self_consistency(
+                rhat_rs[c], robs, dfs)
+        (selfcons["psth"], gain_obs["psth"], gain_self["psth"],
+         _) = poisson_self_consistency(rbar_rs_m, robs, dfs)
 
         # --- how much of the twin's rate modulation each perturbation moves ---
         # Model vs model: the residual between the full twin's predicted rate and
@@ -381,7 +369,8 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH):
               f"({med_disp / 37.5:.3f} deg) median in-window gaze displacement; "
               f"{n_clamped_tot} lag(s) clamped at session start")
         print("  medians  " + "  ".join(
-            f"{c}: r2={np.nanmedian(ve[c]):+.4f} bps={np.nanmedian(bps[c]):+.4f}"
+            f"{c}: r2={np.nanmedian(ve[c]):+.4f} bps={np.nanmedian(bps[c]):+.4f} "
+            f"S={np.nanmedian(selfcons[c]):+.3f}"
             for c in BOX_ORDER))
         print(f"  PSTH rescaling: r2 {np.nanmedian(ve_psth_unrescaled):+.4f} -> "
               f"{np.nanmedian(ve['psth']):+.4f}, bps "
@@ -402,6 +391,7 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH):
             "neuron_mask": neuron_mask, "n_neurons": n_neurons,
             "n_trials": n_trials,
             "ve": ve, "bps": bps, "bps_unrescaled": bps_raw,
+            "selfcons": selfcons, "gain_obs": gain_obs, "gain_self": gain_self,
             "ve_psth_unrescaled": ve_psth_unrescaled,
             "resid_frac": resid_frac, "resid_frac_rescaled": resid_frac_rs,
             "rate_var_full": rate_var["raw"],
@@ -452,6 +442,60 @@ def _fig2_inclusion():
     return per_cell, floored
 
 
+# The eye-shuffle null is NOT a zero-rate-variance null. `_run_corrected_shuffles`
+# permutes the trajectories but leaves `T_idx` alone, and close pairs are still
+# enumerated within a time-in-trial group, so a shuffled `Crate` still carries
+# the PSTH variance -- which is why fig2 uses this null for `1 - alpha`. So
+# `p_rate` tests whether a unit has resolvable *FEM* modulation, not whether it
+# has usable rate variance. This row is a fraction of the *total* explainable
+# variance, so it must not be gated on that: the only exclusion is a denominator
+# that is not a usable variance (handled in `ceiling.py`). `p_rate` is carried
+# through for anyone who wants the FEM-resolvable subset.
+P_RATE_MAX = 0.05
+
+
+def _attach_ceiling(agg, keys):
+    """Join fig2's per-unit single-trial ceiling and normalize each r^2 by it.
+
+    `R2_max = Var(lambda)/Var(y) = diag(Crate)/diag(Ctotal)` bounds the r^2 of
+    any predictor that is a function of stimulus and gaze, so `ve / R2_max` is
+    the fraction of the explainable variance a condition actually captured.
+    Taken at `PRODUCTION_WINDOW_BINS` (one 120 Hz bin), which is both the twin's
+    resolution and the bin the `ve` row is computed on -- the ceiling is
+    strongly window-dependent, so the two must match.
+    """
+    covdecomp = str(VISIONCORE_ROOT / "paper" / "covariance_decomposition")
+    if covdecomp not in sys.path:
+        sys.path.insert(0, covdecomp)
+    from ceiling import load_ceiling, PRODUCTION_WINDOW_BINS
+
+    table = load_ceiling()
+    w = PRODUCTION_WINDOW_BINS
+
+    def field(key, name):
+        return table.get(key, {}).get(w, {}).get(name, np.nan)
+
+    r2_max = np.array([field(k, "r2_max") for k in keys], dtype=float)
+    p_rate = np.array([field(k, "p_rate") for k in keys], dtype=float)
+
+    pop = np.asarray(agg["population"], dtype=bool)
+    missing = int((pop & ~np.isfinite(r2_max)).sum())
+    unresolved = int((pop & np.isfinite(r2_max) & (p_rate > P_RATE_MAX)).sum())
+
+    agg["r2_max"] = r2_max
+    agg["p_rate"] = p_rate
+    with np.errstate(divide="ignore", invalid="ignore"):
+        agg["r2_norm"] = {c: np.asarray(agg["ve"][c], dtype=float) / r2_max
+                          for c in BOX_ORDER}
+
+    n_used = int((pop & np.isfinite(r2_max)).sum())
+    print(f"Ceiling (window_bins={w}): {n_used}/{int(pop.sum())} population "
+          f"cells normalized; dropped {missing} without a usable rate variance. "
+          f"({unresolved} of the retained cells have no FEM modulation "
+          f"resolvable against the eye-shuffle null, p > {P_RATE_MAX}; they are "
+          f"kept -- this row is a fraction of total explainable variance.)")
+
+
 def aggregate(results):
     """Flatten per-cell arrays across sessions, in results-order x
     neuron_mask-order."""
@@ -474,6 +518,15 @@ def aggregate(results):
     else:
         print("NOTE: cache predates the residual-variance row; rerun with "
               "--recompute to populate it.")
+    # The cache holds per-neuron summaries, not the per-bin rate traces, so a
+    # metric added after a sweep cannot be reconstructed from it.
+    if all("selfcons" in r for r in results):
+        for key in ("selfcons", "gain_obs", "gain_self"):
+            agg[key] = {c: np.concatenate([r[key][c] for r in results])
+                        for c in BOX_ORDER}
+    else:
+        print("NOTE: cache predates the Poisson self-consistency row; rerun "
+              "with --recompute to populate it.")
     return agg
 
 
@@ -502,9 +555,13 @@ def load_extended_data(recompute=False, cache_path=CACHE_PATH):
     results = kept
 
     agg = aggregate(results)
+    # One key list drives both the population mask and the ceiling join, so the
+    # two cannot drift out of alignment with the flattened per-cell arrays.
+    keys = [(r["session"], int(nid))
+            for r in results for nid in r["neuron_mask"]]
     agg["population"] = np.asarray(
-        [per_cell.get((r["session"], int(nid)), False)
-         for r in results for nid in r["neuron_mask"]], dtype=bool)
+        [per_cell.get(k, False) for k in keys], dtype=bool)
+    _attach_ceiling(agg, keys)
     print(f"Extended ablation: {len(results)} sessions, "
           f"{len(agg['population'])} cells "
           f"({int(agg['population'].sum())} in the fig2 population)")
