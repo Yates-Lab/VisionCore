@@ -763,8 +763,13 @@ def _plot_subspace_schematic(fig, subplot_spec):
               "Fraction of FEM variance in the PSTH subspace",
               transform=ax.transAxes, fontsize=8.5, color="0.20",
               ha="center", va="center")
+    # Directional subscript: this is FEM variance measured *in* the PSTH
+    # subspace, the opposite direction from the other bar in panel I -- and it
+    # also keeps the symbol distinct from panel B/C's f_FEM, a different
+    # quantity (the FEM share of single-neuron rate variance).
     ax.text2D(0.5, 0.045,
-              r"$f \;=\; \frac{\mathrm{projected\ variance}}"
+              r"$f_{\mathrm{FEM}\to\mathrm{PSTH}} \;=\; "
+              r"\frac{\mathrm{projected\ variance}}"
               r"{\mathrm{total\ variance}} \;=\; "
               r"\frac{\mathrm{tr}\!\left(U^{\top}\Sigma_{\mathrm{FEM}}\,U\right)}"
               r"{\mathrm{tr}\!\left(\Sigma_{\mathrm{FEM}}\right)}$",
@@ -916,7 +921,8 @@ def compose(refresh=False, split_subjects=False, *,
         _, c_primary = plot_fem_fraction(ax=c_ax, data=data)
         _normalize_axis_text(c_primary)
         _label(c_primary, "C")
-        c_primary.set_xlabel("Fraction of rate modulation\ndue to FEM")
+        c_primary.set_xlabel("Fraction of rate modulation\n"
+                             r"due to FEM ($f_{\mathrm{FEM}}$)")
 
         # --- Row 1: D covariance decomposition (~55% width), with the two
         # decomposition results side by side to its right: E Fano, F noise corr.

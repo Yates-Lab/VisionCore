@@ -4,7 +4,7 @@ Figure 2 example panels — the lead-in for the covariance decomposition.
 Provides (used by generate_figure2.py):
     plot_eye_rate_example(ax_eye, ax_spk)
         Two-trial eye-position traces + offset spike-rate step traces for the
-        example unit (Allen_2022-03-04, trials 49/68, unit 151), with matched
+        example unit (Allen_2022-04-08, trials 35/41, unit 134), with matched
         (blue) and divergent (red) Δe arrows. Rendered as Panel A.
     _load_unit_payload / _compute_uniform_bins
         Per-bin rate-covariance helpers behind the covariance-mismatch curve
@@ -31,16 +31,20 @@ from VisionCore.covariance import (
 )
 from _panel_common import standalone_save
 
-SESSION = "Allen_2022-03-04"
-EXAMPLE_UNIT = 110           # Figure-2 panel A/B example cell
-TRIAL_A = 41                 # "Trial 1" (solid black)
-TRIAL_B = 55                 # "Trial 2" (solid black)
-EYE_AXIS = 1                 # 0 = horizontal, 1 = vertical
+# Lead-in example, chosen by pick_lead_example.py over all 19 fig2 sessions:
+# the trajectories run ~0.5 deg apart, a saccade at ~283 ms brings them into
+# alignment, and this unit's 25 ms binned rates go from r = -0.74 before that
+# saccade to r = +0.78 after it -- the panel-A claim, made visible.
+SESSION = "Allen_2022-04-08"
+EXAMPLE_UNIT = 134           # Figure-2 panel A/B example cell
+TRIAL_A = 35                 # "Trial 1" (solid black)
+TRIAL_B = 41                 # "Trial 2" (solid black)
+EYE_AXIS = 0                 # 0 = horizontal, 1 = vertical
 WINDOW_BINS = 72             # 600 ms @ 120 Hz
 DT = 1.0 / 120.0
 
 W1 = (21, 27)                # divergent window, centered at 200 ms (bin 24)
-W2 = (51, 57)                # matched window, centered at 450 ms (bin 54)
+W2 = (48, 54)                # matched window, centered at 425 ms (bin 51)
 
 # Panel A/B styling: matched arrow = blue, divergent = crimson (mirrors panel B).
 MATCHED_COLOR = "tab:blue"
@@ -69,8 +73,9 @@ DECOMP_SEG_MIN = 36
 RATE_BIN_FACTOR = DECOMP_WINDOW_BINS
 
 UNIT_EXPLORE_CACHE = CACHE_DIR / "fig2_unit_explore.pkl"
-PAIR_SCAN_CACHE = CACHE_DIR / f"fig2_lead_pair_scan_{SESSION}.pkl"
 UNIFORM_CACHE = CACHE_DIR / f"fig2a_uniform_bins_{SESSION}.pkl"
+# Per-session cache paths live in _pair_scan_path / _allunits_cache_path so the
+# candidate pickers can range over sessions other than the committed one.
 
 
 def make_axes(fig, subplot_spec=None):
@@ -118,8 +123,14 @@ def _load_unit_payload():
     return p
 
 
-def _load_trial_pair():
-    with open(PAIR_SCAN_CACHE, "rb") as f:
+def _pair_scan_path(session=SESSION):
+    return CACHE_DIR / f"fig2_lead_pair_scan_{session}.pkl"
+
+
+def _load_trial_pair(session=SESSION):
+    """Trial-aligned fixRSVP arrays for ``session``. Defaults to the committed
+    lead-in session; other sessions need a cache from build_lead_scan_caches."""
+    with open(_pair_scan_path(session), "rb") as f:
         return pickle.load(f)
 
 
@@ -167,11 +178,14 @@ def _compute_uniform_bins():
 
 # Production analysis radius (mirror covariance_decomposition.data_loading.FIXATION_RADIUS).
 PANEL_FIXATION_RADIUS = 0.5
-ALLUNITS_CACHE = CACHE_DIR / f"fig2b_unaccounted_allunits_{SESSION}.pkl"
+
+
+def _allunits_cache_path(session=SESSION):
+    return CACHE_DIR / f"fig2b_unaccounted_allunits_{session}.pkl"
 
 
 def _decompose_all_units(radius=PANEL_FIXATION_RADIUS, d_max=1.0, n_bins=20,
-                         refresh=False):
+                         refresh=False, session=SESSION):
     """0.5°-radius 'unaccounted-for variability' decomposition for *every* unit
     in the lead example session, computed in one pass from the lead-pair-scan
     cache.
@@ -191,11 +205,12 @@ def _decompose_all_units(radius=PANEL_FIXATION_RADIUS, d_max=1.0, n_bins=20,
     Panel B plots U(Δe) = Ctotal - cum_crate, rising from the internal floor
     sigma_int (perfect matching) to the eye-blind asymptote Ctotal - Cpsth.
     """
-    if ALLUNITS_CACHE.exists() and not refresh:
-        with open(ALLUNITS_CACHE, "rb") as f:
+    cache_path = _allunits_cache_path(session)
+    if cache_path.exists() and not refresh:
+        with open(cache_path, "rb") as f:
             return pickle.load(f)
 
-    pair = _load_trial_pair()
+    pair = _load_trial_pair(session)
     eyepos_raw = np.asarray(pair["eyepos"], float)
     robs = np.nan_to_num(pair["robs"], nan=0.0)
     eyepos = np.nan_to_num(eyepos_raw, nan=0.0)
@@ -248,16 +263,17 @@ def _decompose_all_units(radius=PANEL_FIXATION_RADIUS, d_max=1.0, n_bins=20,
         "rate_hz": rate_hz,
         "neuron_mask": neuron_mask,
         "radius": radius,
+        "session": session,
     }
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    with open(ALLUNITS_CACHE, "wb") as f:
+    with open(cache_path, "wb") as f:
         pickle.dump(out, f)
     return out
 
 
 def _compute_unaccounted_curve(unit_orig=EXAMPLE_UNIT, **kw):
     """Per-unit slice of :func:`_decompose_all_units` for one unit (default: the
-    example unit). ``kw`` (radius/d_max/n_bins/refresh) are forwarded."""
+    example unit). ``kw`` (radius/d_max/n_bins/refresh/session) are forwarded."""
     allu = _decompose_all_units(**kw)
     j = int(np.where(np.asarray(allu["neuron_mask"]) == unit_orig)[0][0])
     return {
@@ -289,25 +305,36 @@ def _window_delta(e_a, e_b, win):
     return float(np.nanmean(np.abs(e_a[win[0]:win[1]] - e_b[win[0]:win[1]])))
 
 
-def plot_eye_rate_example(ax_eye, ax_spk, unit_orig=EXAMPLE_UNIT):
+def plot_eye_rate_example(ax_eye, ax_spk, unit_orig=EXAMPLE_UNIT,
+                          trial_a=None, trial_b=None, eye_axis=None,
+                          w1=None, w2=None, session=SESSION):
     """Panel A: two-trial eye-position traces above per-bin spike rates for the
     example unit. Both trials solid black with "Trial 1"/"Trial 2" text labels;
     gray matched/divergent windows shaded, each marked with a Δe callout arrow
     (matched = blue, divergent = crimson) mirroring panel B. The eye
     traces/windows are unit-independent; only the spike-rate traces depend on
-    ``unit_orig``. Returns the matched/divergent Δe values."""
-    pair = _load_trial_pair()
+    ``unit_orig``. ``trial_a``/``trial_b``/``eye_axis``/``w1``/``w2``/``session`` override
+    the committed example (used by the candidate pickers to preview alternatives
+    through the real renderer); each defaults to its module constant. Returns
+    the matched/divergent Δe values."""
+    trial_a = TRIAL_A if trial_a is None else trial_a
+    trial_b = TRIAL_B if trial_b is None else trial_b
+    eye_axis = EYE_AXIS if eye_axis is None else eye_axis
+    W1_ = W1 if w1 is None else tuple(w1)
+    W2_ = W2 if w2 is None else tuple(w2)
+
+    pair = _load_trial_pair(session)
     robs = pair["robs"]
     eyepos = pair["eyepos"]
     j = int(np.where(np.asarray(pair["neuron_mask"]) == unit_orig)[0][0])
 
     W = WINDOW_BINS
     t_ms = np.arange(W) * DT * 1000.0
-    e_a = eyepos[TRIAL_A, :W, EYE_AXIS]
-    e_b = eyepos[TRIAL_B, :W, EYE_AXIS]
+    e_a = eyepos[trial_a, :W, eye_axis]
+    e_b = eyepos[trial_b, :W, eye_axis]
     # Spike rates in 25 ms bins (matches the Panel B counting window).
-    t_spk, r_a = _binned_rate(robs[TRIAL_A, :W, j])
-    _, r_b = _binned_rate(robs[TRIAL_B, :W, j])
+    t_spk, r_a = _binned_rate(robs[trial_a, :W, j])
+    _, r_b = _binned_rate(robs[trial_b, :W, j])
     trace_lw = 1.8
 
     # ---------- window shading (drawn first, behind everything) ----------
@@ -316,8 +343,8 @@ def plot_eye_rate_example(ax_eye, ax_spk, unit_orig=EXAMPLE_UNIT):
                    color=WIN_SHADE, zorder=-1)
 
     for ax in (ax_eye, ax_spk):
-        _shade(ax, W1)
-        _shade(ax, W2)
+        _shade(ax, W1_)
+        _shade(ax, W2_)
 
     # ---------- eye traces (both solid black) ----------
     ax_eye.plot(t_ms, e_a, color="k", lw=trace_lw)
@@ -330,15 +357,16 @@ def plot_eye_rate_example(ax_eye, ax_spk, unit_orig=EXAMPLE_UNIT):
     ymin, ymax = ax_eye.get_ylim()
     ax_eye.set_ylim(min(ymin, -0.55), ymax)
     # Trial labels just inside the left edge (x in axes fraction so they clear
-    # the y-axis title, y in data so they sit next to each trace).
+    # the y-axis title), sitting just above where each trace starts. Anchoring
+    # to the trace's own starting value keeps each label attached to its trace;
+    # overlapping the trace further right is acceptable.
     _lbl_bbox = dict(fc="white", ec="none", pad=0.4)
     eye_trans = ax_eye.get_yaxis_transform()
-    t_div = (W1[0] + W1[1]) // 2
-    ax_eye.text(0.015, float(e_a[t_div]), "Trial 1", transform=eye_trans,
-                ha="left", va="center", fontsize=8, color="k",
+    ax_eye.text(0.015, float(e_a[0]), "Trial 1", transform=eye_trans,
+                ha="left", va="bottom", fontsize=8, color="k",
                 bbox=_lbl_bbox, zorder=7)
-    ax_eye.text(0.015, float(e_b[t_div]), "Trial 2", transform=eye_trans,
-                ha="left", va="center", fontsize=8, color="k",
+    ax_eye.text(0.015, float(e_b[0]), "Trial 2", transform=eye_trans,
+                ha="left", va="bottom", fontsize=8, color="k",
                 bbox=_lbl_bbox, zorder=7)
     # vertical scale bar
     sb_x_eye = t_ms[-1] + 12
@@ -352,8 +380,8 @@ def plot_eye_rate_example(ax_eye, ax_spk, unit_orig=EXAMPLE_UNIT):
     # Matched window: the traces coincide, so a thick dot + a "Δe = X" callout.
     # Both windows carry a Δe label so the two read consistently.
     d_vals = {}
-    for win, key, color in ((W2, "matched", MATCHED_COLOR),
-                            (W1, "divergent", DIVERGENT_COLOR)):
+    for win, key, color in ((W2_, "matched", MATCHED_COLOR),
+                            (W1_, "divergent", DIVERGENT_COLOR)):
         d_vals[key] = _window_delta(e_a, e_b, win)
         t_mid = (win[0] + win[1]) // 2
         t_mid_ms = t_mid * DT * 1000.0
@@ -398,11 +426,14 @@ def plot_eye_rate_example(ax_eye, ax_spk, unit_orig=EXAMPLE_UNIT):
     ax_spk.set_yticks([])
     for s in ("top", "right", "left"):
         ax_spk.spines[s].set_visible(False)
+    # Same rule as the eye panel: each label sits just above the start of its
+    # own step trace, not on the (often lower) baseline.
     spk_trans = ax_spk.get_yaxis_transform()
-    ax_spk.text(0.015, 0.0, "Trial 1", transform=spk_trans, ha="left",
+    ax_spk.text(0.015, float(r_a[0]), "Trial 1", transform=spk_trans, ha="left",
                 va="bottom", fontsize=8, color="k", bbox=_lbl_bbox, zorder=7)
-    ax_spk.text(0.015, offset, "Trial 2", transform=spk_trans, ha="left",
-                va="bottom", fontsize=8, color="k", bbox=_lbl_bbox, zorder=7)
+    ax_spk.text(0.015, offset + float(r_b[0]), "Trial 2", transform=spk_trans,
+                ha="left", va="bottom", fontsize=8, color="k", bbox=_lbl_bbox,
+                zorder=7)
     sb_len = max(10.0, round(rmax / 2 / 10) * 10)
     sb_x = t_ms[-1] + 12
     ax_spk.plot([sb_x, sb_x], [0, sb_len], color="k", lw=2, clip_on=False)
@@ -464,11 +495,18 @@ def plot_unaccounted_variance_panel(ax, decomp=None, caption=True):
             color="k", fontsize=7.5, ha="left", va="center")
 
     # Matched end sits on the internal floor (eye position fully accounted for);
-    # under the reversed axis that end is at screen-right.
-    ax.annotate("Trajectories matched",
-                xy=(x[0], U[0]), xytext=(0.84, 0.30), textcoords=ax.transAxes,
-                arrowprops=dict(arrowstyle="->", color="k", lw=0.9),
-                fontsize=7.5, ha="right", va="center")
+    # under the reversed axis that end is at screen-right. Set two lines above
+    # the internal-variability line at the right of the panel, pointing straight
+    # down at the Δe -> 0 point, which keeps it out of both that line's label
+    # (which ends near mid-panel) and the f_FEM equation along the bottom.
+    ax.annotate("Trajectories\nmatched",
+                xy=(x[0], U[0]),
+                xytext=(0.925, sigma_int + 0.14 * y_hi),
+                textcoords=ax.get_yaxis_transform(),
+                arrowprops=dict(arrowstyle="->", color="k", lw=0.9,
+                                shrinkA=3, shrinkB=2),
+                fontsize=7.5, ha="center", va="bottom",
+                linespacing=1.15)
 
     if caption:
         # Take-home: descriptive phrase bottom-left, fraction equation

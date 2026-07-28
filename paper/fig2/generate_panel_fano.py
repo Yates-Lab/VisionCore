@@ -111,7 +111,7 @@ def plot_fano_population(ax=None, refresh=False, data=None, window_ms=25.0):
 
     ax.set_xticks(x)
     ax.set_xticklabels(["uncorrected", "FEM-\ncorrected"])
-    ax.set_ylabel("Variability (Fano factor)")
+    ax.set_ylabel("Variability (Pop. Fano factor)")
     ax.set_xlim(-0.5, 1.62)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -182,7 +182,7 @@ def plot_panel_e(ax=None, refresh=False, data=None):
 
     ax.set_ylim(bottom=overall_bot - 0.04 * span)
     ax.set_xlabel("Counting window (ms)")
-    ax.set_ylabel("Variability (Fano factor)")
+    ax.set_ylabel("Variability (Pop. Fano factor)")
     ax.set_xticks(WINDOWS_MS)
     ax.set_xticklabels([f"{w:.0f}" for w in WINDOWS_MS])
     ax.spines["top"].set_visible(False)
