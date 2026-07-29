@@ -56,7 +56,9 @@ $r^2$. It has a natural constant-rate reference of zero and an oracle reference
 of one. Negative values indicate that the model's rate error varies more than
 the true conditional rate. Values above one can occur for the empirical score
 because the denominator is estimated with finite data and conditions on a
-shorter gaze history than the model.
+shorter gaze history than the model. Section 4 gives the estimator the figure
+computes, which divides the captured count variance by the rate variance Figure
+2 measures.
 
 This metric complements $\mathrm{CC}_{\mathrm{norm}}$. The latter asks whether
 the model predicts the shape of the trial-averaged response across stimulus
@@ -200,8 +202,10 @@ r^2
 $$
 
 This variance form differs slightly from the common sum-of-squared-errors form.
-It is the relevant definition because it is what `_var_explained` in
-`_ext_data.py` implements.
+It is the relevant definition because the plotted numerator is the difference
+between the two variances it contains, taken over one common set of bins per
+unit by `compute_matched_captured_variance` in
+`paper/fig3/_fig3_explainable_variance.py`.
 
 Using $Y=\lambda+\varepsilon$, the prediction error is
 
@@ -299,7 +303,7 @@ and would attain its maximum only at $c=0$. Predictions in Figure 3 undergo a
 per-unit affine calibration before scoring, which makes mean errors small, but
 the plotted metric remains the variance-based quantity in (12).
 
-# 4. Estimating $R^2_{\max}$ from the covariance decomposition
+# 4. Estimating the denominator from the covariance decomposition
 
 The conditional rate $\lambda$ is not observed directly. Figure 2 estimates its
 variance from repeated presentations and matched gaze trajectories. For each
@@ -314,15 +318,26 @@ $$
 \tag{19}
 $$
 
-The empirical normalizer is therefore
+Figure 3 uses the second of these directly. For each unit it divides the
+captured count variance by Figure 2's rate variance,
 
 $$
-\widehat R^2_{\max}
+\widehat Q
 =
-\frac{\operatorname{diag}C_{\mathrm{rate}}}
-     {\operatorname{diag}C_{\mathrm{total}}}.
+\frac{\operatorname{Var}(Y)-\operatorname{Var}(Y-\hat Y)}
+     {\operatorname{diag}C_{\mathrm{rate}}}.
 \tag{20}
 $$
+
+By (16) the numerator estimates $\operatorname{Var}(\lambda)-
+\operatorname{Var}(\lambda-\hat Y)$, so (20) targets the same population
+quantity as (17). Dividing the measured $r^2$ by the empirical normalizer
+$\widehat R^2_{\max}=\operatorname{diag}C_{\mathrm{rate}}/
+\operatorname{diag}C_{\mathrm{total}}$ returns the same value whenever the
+numerator's $\operatorname{Var}(Y)$ equals $\operatorname{diag}
+C_{\mathrm{total}}$. The two forms differ by the ratio of those totals, which
+Section 7 quantifies. Equation (20) takes one quantity from Figure 2 and leaves
+the rest of the calculation on the sample the model was scored on.
 
 ## 4.1 Total count variance
 
@@ -379,10 +394,37 @@ $$
 A ceiling estimated from the 25 ms window displayed in Figure 2 would not be a
 valid normalizer for the model's 8.33 ms single-trial $r^2$.
 
-Units with non-positive estimated rate variance have undefined
-$\widehat R^2_{\max}$ and are excluded rather than clipped. Small positive
-estimates can produce unstable ratios, so population summaries should use
-medians and display the distribution rather than rely on its mean.
+Units with non-positive estimated rate variance have an undefined denominator
+and are excluded rather than clipped. Small positive estimates can produce
+unstable ratios, so population summaries should use medians and display the
+distribution rather than rely on its mean.
+
+## 4.4 Which sample the denominator is estimated on
+
+Figure 3 scores only the bins at which the twin produces a prediction. A
+33-frame retinal history and the per-unit data filters remove the beginning of
+every trial and scattered later bins, so the scored sample is a subset of the
+one Figure 2 decomposes. Estimating $\operatorname{diag}C_{\mathrm{rate}}$ on
+that subset would place the numerator and the denominator on a single sampling
+distribution, which is the condition under which (17) holds exactly.
+
+That estimate is not usable in practice. The close-pair estimator needs pairs of
+distinct trials that reach the same stimulus time with matching gaze, and the
+history mask removes most of them. Across the 994-unit Figure 2 inclusion
+population it returns a positive rate variance for 509 units, against 972 for
+the estimate Figure 2 reports. Where both exist they disagree by a factor
+ranging from 0.10 to 5.19 between the 5th and 95th percentiles, with a median
+of 1.11: the subset estimate is not biased in a consistent direction, it is
+imprecise. In five of the nineteen sessions it returns nothing at all. Those
+five are not sessions the twin predicts poorly; they are sessions where the
+estimator's requirement of ten trials per time bin fails once the sample is
+reduced.
+
+The denominator is therefore Figure 2's own estimate, computed over every valid
+bin of its $0.5^\circ$ fixation frame. Each unit keeps one denominator across
+all model conditions, and that denominator is the same number figure 2 and the
+FEM-modulation panel report. The cost is that the numerator and the denominator
+no longer describe the same sample, which Section 7 quantifies.
 
 # 5. Relationship to $\mathrm{CC}_{\mathrm{norm}}$
 
@@ -515,14 +557,15 @@ it.
 
 Raw single-trial $r^2$ establishes prediction against observed spikes, but its
 absolute magnitude depends strongly on each unit's conditional residual noise.
-For the current extended-analysis population, the full twin has median raw
-$r^2=0.0396$, while the median empirical ceiling is
-$\widehat R^2_{\max}=0.1235$. The normalized median is $0.350$. The latter
-states that the full twin recovers roughly one third of the rate variance that
-Figure 2 identifies as measurable at the model's temporal resolution. These
-numbers refer to the 972-unit Figure 2 inclusion population with a finite
-one-bin denominator; values in the main manuscript may differ when a different
-reliability population or PSTH treatment is used.
+On the scored bins the full twin has a median raw $r^2$ of $0.034$, against a
+median $\widehat R^2_{\max}$ of $0.124$. The median of (20) is $0.269$: the full
+twin recovers a little over a quarter of the rate variance Figure 2 identifies
+as measurable at the model's temporal resolution. The leave-one-out PSTH reaches
+$0.157$ on the same units, and freezing the retinal image drops the twin to
+$0.042$. These numbers refer to the 972 units of the Figure 2 inclusion
+population that have a positive one-bin rate variance, in nineteen sessions;
+values elsewhere in the manuscript may differ when a different reliability
+population or PSTH treatment is used.
 
 The denominator is estimated from the neural data and is fixed across all model
 conditions for a given unit. It therefore cannot make a weakened model appear
@@ -551,8 +594,8 @@ extraretinal modulation.
 
 Equation (17) is exact for fixed predictors and population quantities defined
 with the same $Z$ and sampling distribution. The plotted ratio replaces
-$R^2_{\max}$ with an estimate from a separate analysis pipeline. Several limits
-follow.
+$\operatorname{Var}(\lambda)$ with an estimate from a separate analysis
+pipeline. Several limits follow.
 
 **Conditioning-history mismatch.** The close-pair estimator matches a short
 gaze trajectory, whereas the twin receives a 33-frame retinal history and a
@@ -566,7 +609,9 @@ empirical ratio above one without implying prediction beyond a true oracle.
 number of close trial pairs. Sampling error can make its diagonal small or
 negative. Non-positive estimates are treated as undefined, while small positive
 values create a long right tail in the ratio. Medians and quantiles are more
-stable summaries than means.
+stable summaries than means. Using every bin Figure 2 accepts, rather than the
+scored subset, is what keeps this term tolerable; Section 4.4 gives the size of
+the difference.
 
 **Cross-trial dependence.** The close-pair product removes conditional residual
 noise only when residuals are independent across the paired trials. Slow changes
@@ -574,11 +619,16 @@ in excitability, adaptation, or recording stability can correlate residuals
 across trials and inflate the estimated rate variance. This would increase
 $\widehat R^2_{\max}$ and reduce the normalized model score.
 
-**Sampling differences.** The single-trial model analysis accepts gaze within
-$1.0^\circ$, whereas the covariance decomposition uses a $0.5^\circ$ radius and
-its own valid-window rules. Existing checks indicate that the resulting change
-in total count variance is small, but exact equality of the two sampling
-distributions is not guaranteed.
+**Sampling differences.** The numerator is measured on the counting windows of
+Figure 2's $0.5^\circ$ fixation frame, restricted to the bins the twin can
+predict; the denominator uses every bin that frame accepts. The scored sample
+therefore carries less count variance than Figure 2 records: the ratio of the
+two totals has a median of $0.899$ and an interquartile range of $0.776$ to
+$0.992$. Equation (20) understates the captured fraction to that extent, and
+normalizing by $\widehat R^2_{\max}$ instead would raise each unit's score by
+the reciprocal of its own ratio. The figure reports the median ratio alongside
+the panel rather than correcting for it, because the correction is itself a
+per-unit estimate.
 
 **In-sample calibration.** Each condition receives a per-unit affine rescaling
 fit by Poisson likelihood on the responses that are subsequently scored. This
@@ -597,20 +647,25 @@ activity.
 
 A concise methods definition is:
 
-> Single-trial prediction was quantified as
-> $r^2=1-\operatorname{Var}(Y-\hat Y)/\operatorname{Var}(Y)$ over valid 120 Hz
-> trial-by-time bins. For each unit, this value was normalized by
-> $\widehat R^2_{\max}=\operatorname{diag}C_{\mathrm{rate}}/
-> \operatorname{diag}C_{\mathrm{total}}$, estimated from the Figure 2
-> covariance decomposition at the same 8.33 ms counting window. Under matched
-> conditioning and sampling, the ratio equals
+> Single-trial prediction was quantified per unit as the captured count
+> variance, $\operatorname{Var}(Y)-\operatorname{Var}(Y-\hat Y)$, over the
+> 8.33 ms counting windows of the Figure 2 fixation frame at which the model
+> produced a valid prediction, divided by that unit's
+> $\operatorname{diag}C_{\mathrm{rate}}$ from the Figure 2 covariance
+> decomposition at the same counting window. Both variances were taken over one
+> common set of bins per unit, shared by every scored condition. Under matched
+> conditioning and sampling the ratio equals
 > $1-\operatorname{Var}(\lambda-\hat Y)/\operatorname{Var}(\lambda)$, where
 > $\lambda=\mathbb E[Y\mid\text{stimulus},\text{gaze}]$. It therefore reports
 > variance explained in the conditional firing rate rather than in the noisy
-> spike counts. Units with non-positive estimated rate variance were excluded
-> rather than clipped.
+> spike counts. The denominator was taken from the Figure 2 estimate over all
+> valid bins rather than re-estimated on the scored subset, where the close-pair
+> estimator is unusable. Units with a non-positive Figure 2 rate variance were
+> excluded rather than clipped.
 
 The corresponding figure label should retain the mathematical definition, such
 as “single-trial $r^2/R^2_{\max}$,” because finite-sample values may be negative
-or exceed one. A reference at one denotes the estimated oracle rate variance,
-not a hard bound on the plotted estimator.
+or exceed one. That label names the population quantity in (17); the plotted
+estimator is (20), and the two coincide up to the sampling ratio in Section 7. A
+reference at one denotes the estimated oracle rate variance, not a hard bound on
+the plotted estimator.
