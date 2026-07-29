@@ -66,10 +66,11 @@ def subject_from_session(session_name):
 
 
 def _load_fig2_alpha_by_session():
-    """Load empirical α-per-session lookup (only needed during inference).
+    """Load Figure 2 per-unit rate-variance quantities for inference.
 
-    Reads the shared covariance-decomposition cache (target='full') and the
-    first counting window, mirroring the empirical 1-α the fig2 panels report.
+    Reads the shared covariance-decomposition cache (target='full') at the
+    one-bin counting window. The returned Ctotal and Crate diagonals let Figure
+    3 verify and normalize its matched single-trial variance calculation.
     """
     if not COVDECOMP_CACHE_PATH.exists():
         raise FileNotFoundError(
@@ -86,16 +87,26 @@ def _load_fig2_alpha_by_session():
         subject = sr["subject"]
         if subject not in SUBJECTS:
             continue
-        block = sr["windows"][0]["targets"][COVDECOMP_TARGET]  # first counting window
+        window = sr["windows"][0]
+        if int(window["window_bins"]) != 1:
+            raise ValueError(
+                f"Expected the first Figure 2 window to contain one bin; "
+                f"{sess_name} has {window['window_bins']}"
+            )
+        block = window["targets"][COVDECOMP_TARGET]
         diag_psth = np.diag(block["Cpsth"])
         diag_rate = np.diag(block["Crate"])
-        alpha = np.clip(diag_psth / diag_rate, 0, 1)
+        diag_total = np.diag(window["Ctotal"])
+        with np.errstate(divide="ignore", invalid="ignore"):
+            alpha = np.clip(diag_psth / diag_rate, 0, 1)
         out[sess_name] = {
             "alpha": alpha,
+            "c_rate": diag_rate,
+            "c_total": diag_total,
             "neuron_mask": sr["neuron_mask"],
             "subject": subject,
         }
-    print(f"  Loaded 1-α for {len(out)} sessions")
+    print(f"  Loaded one-bin Figure 2 variances for {len(out)} sessions")
     return out
 
 

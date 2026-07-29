@@ -1341,6 +1341,16 @@ def _draw_readout_psths(ax, assets, arch):
             color=TEXT_COLOR, fontweight="bold")
 
     n = min(len(rows), len(psths))
+
+    # One short arrow per row, readout → prediction: each readout head is fit
+    # for a single unit and generates that unit's predicted rate.
+    x_arrow0 = arch["readout_x_right"] + 0.10
+    x_arrow1 = x0 - 0.08
+    for k in range(n):
+        ax.annotate("", xy=(x_arrow1, rows[k]), xytext=(x_arrow0, rows[k]),
+                    arrowprops=dict(arrowstyle="->", lw=0.9, color="#333"),
+                    zorder=4.8)
+
     for k in range(n):
         cy = rows[k]
         p = psths[k]

@@ -31,7 +31,9 @@ draws on the same sessions, neurons, and `cd_population` mask (fig2 inclusion):
 
   - panel C : trial-averaged held-out prediction, `ccnorm[intact]` vs
               `ccnorm[zeroed]` (normalized correlation; ccmax is shared).
-  - panel D : single-trial r^2, `ve_psth` vs `ve[intact]` vs `ve[zeroed]`.
+  - panel D : captured count variance on Figure 2-matched, model-valid windows
+              divided by Figure 2's own diag(Crate) at the one-bin window, for
+              the leave-one-out PSTH and all three twin conditions.
   - panel E : empirical FEM modulation (1 - `alpha`) vs single-trial r^2 gain
               over the PSTH baseline (`ve[zeroed]` / `ve_psth`).
 
@@ -59,6 +61,12 @@ from _fig3_helpers import (
     order_single_neuron_by_seriation,
     PANEL_B_SESSION, PANEL_B_NEURON_ID, PANEL_B_MIN_BINS, N_BINS_B,
     PANEL_B_WINDOW_S,
+)
+from _fig3_explainable_variance import (
+    compute_matched_captured_variance,
+    estimate_matched_rate_variance,
+    explainable_fraction,
+    total_variance_ratio,
 )
 
 
@@ -224,9 +232,12 @@ def _compute_model_one_minus_alpha_by_condition(rhat_rs, dfs):
     return out
 
 
-def _run_inference():
-    """Run the concat model on every Allen/Logan fixRSVP session under all three
-    behavior conditions. Returns per-session result dicts and writes CACHE_PATH."""
+def _run_inference(session_filter=None, cache_path=CACHE_PATH):
+    """Run the twin under all three conditions and write a summary cache.
+
+    ``session_filter`` and ``cache_path`` support an off-cache alignment smoke
+    test before a full production sweep.
+    """
     import torch
     from tqdm import tqdm
     from DataYatesV1 import get_free_device
@@ -238,7 +249,7 @@ def _run_inference():
     if str(VISIONCORE_ROOT) not in sys.path:
         sys.path.insert(0, str(VISIONCORE_ROOT))
 
-    fig2_alpha_by_session = _load_fig2_alpha_by_session()
+    fig2_info_by_session = _load_fig2_alpha_by_session()
 
     device = get_free_device()
     print(f"Loading model from: {CHECKPOINT_PATH}")
@@ -251,6 +262,11 @@ def _run_inference():
     for dataset_idx, session_name in enumerate(model.names):
         subject = subject_from_session(session_name)
         if subject not in SUBJECTS:
+            continue
+        if session_filter is not None and session_name not in session_filter:
+            continue
+        if session_name not in fig2_info_by_session:
+            print(f"Skipping {session_name}: absent from the Figure 2 decomposition")
             continue
         print(f"\n--- {session_name} ({subject}) ---")
 
@@ -297,6 +313,7 @@ def _run_inference():
 
         robs = np.full((NT, T, NC), np.nan)
         dfs = np.full((NT, T, NC), np.nan)
+        eyepos = np.full((NT, T, 2), np.nan)
         fix_dur = np.full(NT, np.nan)
         rhat = {c: np.full((NT, T, NC), np.nan) for c in CONDS}
 
@@ -313,6 +330,7 @@ def _run_inference():
             fix_dur[itrial] = len(t_inds)
             robs[itrial, t_inds] = robs_flat[ix]
             dfs[itrial, t_inds] = np.asarray(dset['dfs'][ix])
+            eyepos[itrial, t_inds] = eyepos_flat[ix]
             for c in CONDS:
                 if c in STIM_CONDS:            # replace stim, keep behavior intact
                     batch = {'stim': stim_stab, 'behavior': behavior0}
@@ -330,6 +348,7 @@ def _run_inference():
         iix = np.arange(min(VALID_TIME_BINS, T))
         robs = robs[good_trials][:, iix]
         dfs = dfs[good_trials][:, iix]
+        eyepos = eyepos[good_trials][:, iix]
         rhat = {c: r[good_trials][:, iix] for c, r in rhat.items()}
 
         neuron_mask = np.where(np.nansum(robs, axis=(0, 1)) > MIN_TOTAL_SPIKES)[0]
@@ -370,14 +389,53 @@ def _run_inference():
         ccnorm, ccmax = _compute_ccnorm_by_condition(robs, rhat_rs, dfs)
 
         alpha = np.full(n_neurons, np.nan)
-        if session_name in fig2_alpha_by_session:
-            f2 = fig2_alpha_by_session[session_name]
-            for i, nidx in enumerate(neuron_mask):
-                loc = np.where(f2["neuron_mask"] == nidx)[0]
-                if len(loc) == 1:
-                    alpha[i] = f2["alpha"][loc[0]]
-        else:
-            print(f"  Warning: {session_name} not in fig2 cache (no alpha)")
+        fig2_c_rate = np.full(n_neurons, np.nan)
+        fig2_c_total = np.full(n_neurons, np.nan)
+        if session_name not in fig2_info_by_session:
+            raise KeyError(f"{session_name} is missing from the Figure 2 cache")
+        f2 = fig2_info_by_session[session_name]
+        for i, nidx in enumerate(neuron_mask):
+            loc = np.where(f2["neuron_mask"] == nidx)[0]
+            if len(loc) == 1:
+                j = int(loc[0])
+                alpha[i] = f2["alpha"][j]
+                fig2_c_rate[i] = f2["c_rate"][j]
+                fig2_c_total[i] = f2["c_total"][j]
+
+        # Captured count variance on Figure 2's one-bin windows intersected with
+        # the twin's valid support, over Figure 2's own diag(Crate). The
+        # denominator is read from the decomposition cache, never re-estimated
+        # on this subset: the history mask removes the close pairs the estimator
+        # needs (see `_fig3_explainable_variance`).
+        scored = compute_matched_captured_variance(
+            robs, {"psth": rbar, **rhat_m}, eyepos, dfs
+        )
+        fraction = explainable_fraction(scored["captured_variance"], fig2_c_rate)
+        var_ratio = total_variance_ratio(scored["var_y"], fig2_c_total)
+        n_scored = int(np.isfinite(scored["var_y"]).sum())
+        print(
+            f"  explainable variance: {n_scored}/{n_neurons} units scored on "
+            f"{scored['n_base_windows']} Figure 2 windows (median "
+            f"{int(np.median(scored['n_windows']))} model-valid/unit); "
+            f"Var(y)/Ctotal_fig2 median={np.nanmedian(var_ratio):.3f}; "
+            + ", ".join(
+                f"{c}={np.nanmedian(fraction[c]):+.3f}" for c in ("psth", *CONDS)
+            )
+        )
+
+        # Diagnostic only: the abandoned matched denominator, recorded so the
+        # figure can report how far it drifts from Figure 2's estimate.
+        matched = estimate_matched_rate_variance(robs, eyepos, dfs)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            drift = matched["c_rate"] / fig2_c_rate
+        print(
+            f"  [diagnostic] matched Crate: "
+            f"{int(np.sum(matched['c_rate'] > 0))}/{n_neurons} units positive, "
+            f"{matched['n_validity_groups']} validity groups "
+            f"({matched['n_validity_groups_excluded']} unusable), median "
+            f"{int(np.median(matched['n_close_pairs']))} close pairs, "
+            f"matched/Figure 2 median={np.nanmedian(drift):.3f}"
+        )
 
         example = None
         if session_name == PANEL_B_SESSION:
@@ -413,14 +471,29 @@ def _run_inference():
             "neuron_mask": neuron_mask, "n_neurons": n_neurons,
             "ve": ve, "ve_psth": ve_psth, "ccnorm": ccnorm, "ccmax": ccmax,
             "alpha": alpha,
+            "explainable_fraction": fraction,
+            "captured_variance": scored["captured_variance"],
+            "var_residual": scored["var_residual"],
+            "matched_var_y": scored["var_y"],
+            "matched_n_windows": scored["n_windows"],
+            "n_base_windows": scored["n_base_windows"],
+            "fig2_c_rate": fig2_c_rate,
+            "fig2_c_total": fig2_c_total,
+            "matched_c_rate": matched["c_rate"],
+            "matched_c_total": matched["c_total"],
+            "matched_n_close_pairs": matched["n_close_pairs"],
+            "matched_n_validity_groups": matched["n_validity_groups"],
+            "matched_n_validity_groups_excluded": matched[
+                "n_validity_groups_excluded"
+            ],
             "model_one_minus_alpha": model_one_minus_alpha,
             "example": example,
         })
 
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    with open(CACHE_PATH, "wb") as f:
+    with open(cache_path, "wb") as f:
         dill.dump(results, f)
-    print(f"\nCached {len(results)} sessions to {CACHE_PATH}")
+    print(f"\nCached {len(results)} sessions to {cache_path}")
     return results
 
 
@@ -431,10 +504,27 @@ def aggregate(results):
     `cd_population` (fig2 inclusion: rate > 2 Hz & split-half PSTH R^2) for
     panels C/D and `fem_include` for panel E. `ccmax` (split-half reliability)
     is carried per cell for reference but no longer gates any panel."""
+    score_conditions = ["psth", *CONDS]
+    required = (
+        "explainable_fraction", "captured_variance", "matched_var_y",
+        "matched_n_windows", "fig2_c_rate", "fig2_c_total", "matched_c_rate",
+    )
+    if any(any(key not in r for key in required) for r in results):
+        raise RuntimeError(
+            "The Figure 3 ablation cache predates the Figure 2-denominator "
+            "explainable-variance score. Rebuild it with `--recompute`."
+        )
+
     ve = {c: [] for c in CONDS}
     ccnorm = {c: [] for c in CONDS}
     model_one_minus_alpha = {c: [] for c in CONDS}
-    ve_psth, ccmax, alpha, subjects = [], [], [], []
+    fraction = {c: [] for c in score_conditions}
+    captured_variance = {c: [] for c in score_conditions}
+    ve_psth, ccmax, alpha = [], [], []
+    matched_var_y, matched_n_windows = [], []
+    fig2_c_rate, fig2_c_total = [], []
+    matched_c_rate, matched_c_total, matched_n_close_pairs = [], [], []
+    subjects, sessions = [], []
     for r in results:
         for c in CONDS:
             ve[c].append(r["ve"][c])
@@ -442,11 +532,30 @@ def aggregate(results):
                 ccnorm[c].append(r["ccnorm"][c])
             if "model_one_minus_alpha" in r:
                 model_one_minus_alpha[c].append(r["model_one_minus_alpha"][c])
+        for c in score_conditions:
+            fraction[c].append(r["explainable_fraction"][c])
+            captured_variance[c].append(r["captured_variance"][c])
         ve_psth.append(r["ve_psth"])
         ccmax.append(r["ccmax"])
         alpha.append(r["alpha"])
+        matched_var_y.append(r["matched_var_y"])
+        matched_n_windows.append(r["matched_n_windows"])
+        fig2_c_rate.append(r["fig2_c_rate"])
+        fig2_c_total.append(r["fig2_c_total"])
+        matched_c_rate.append(r["matched_c_rate"])
+        matched_c_total.append(r["matched_c_total"])
+        matched_n_close_pairs.append(r["matched_n_close_pairs"])
         subjects.extend([r["subject"]] * r["n_neurons"])
-    agg = {"ve": {c: np.concatenate(ve[c]) for c in CONDS}}
+        sessions.extend([r["session"]] * r["n_neurons"])
+    agg = {
+        "ve": {c: np.concatenate(ve[c]) for c in CONDS},
+        "explainable_fraction": {
+            c: np.concatenate(fraction[c]) for c in score_conditions
+        },
+        "captured_variance": {
+            c: np.concatenate(captured_variance[c]) for c in score_conditions
+        },
+    }
     if all(ccnorm[c] for c in CONDS):
         agg["ccnorm"] = {c: np.concatenate(ccnorm[c]) for c in CONDS}
     if all(model_one_minus_alpha[c] for c in CONDS):
@@ -456,7 +565,23 @@ def aggregate(results):
     agg["ve_psth"] = np.concatenate(ve_psth)
     agg["ccmax"] = np.concatenate(ccmax)
     agg["alpha"] = np.concatenate(alpha)
+    agg["matched_var_y"] = np.concatenate(matched_var_y)
+    agg["matched_n_windows"] = np.concatenate(matched_n_windows)
+    agg["fig2_c_rate"] = np.concatenate(fig2_c_rate)
+    agg["fig2_c_total"] = np.concatenate(fig2_c_total)
+    agg["matched_c_rate"] = np.concatenate(matched_c_rate)
+    agg["matched_c_total"] = np.concatenate(matched_c_total)
+    agg["matched_n_close_pairs"] = np.concatenate(matched_n_close_pairs)
+    # Sensitivity view: the same numerators over the abandoned matched
+    # denominator. Reported beside the panel, never plotted.
+    agg["explainable_fraction_matched"] = explainable_fraction(
+        agg["captured_variance"], agg["matched_c_rate"]
+    )
+    agg["total_variance_ratio"] = total_variance_ratio(
+        agg["matched_var_y"], agg["fig2_c_total"]
+    )
     agg["subjects"] = np.array(subjects)
+    agg["sessions"] = np.array(sessions)
     return agg
 
 

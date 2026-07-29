@@ -6,8 +6,8 @@ Renders the digital-twin mechanism figure:
   B  Digital twin schematic (architecture render)
   C  Held-out (trial-averaged) ccnorm: full twin vs retinal-only (behavior
      zeroed) vs extraretinal-only (retina stabilized)
-  D  Single-trial r^2 (vs the PSTH-median reference line): full twin vs
-     retinal-only vs extraretinal-only
+  D  Captured count variance over fig. 2's explainable rate variance:
+     leave-one-out PSTH vs full twin vs retinal-only vs extraretinal-only
   E  FEM modulation fraction (1-alpha): the neuron distribution vs each
      within-model twin condition, with a paired TOST equivalence test — Full
      and Ablated reproduce the empirical FEM modulation, Stabilized does not.
@@ -30,7 +30,6 @@ import json
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-from matplotlib.cbook import boxplot_stats
 from matplotlib.gridspec import GridSpec
 import numpy as np
 from scipy.stats import wilcoxon
@@ -55,6 +54,13 @@ SCATTER_COLOR = "0.35"
 ACCENT = "#c0392b"
 PANEL_LETTER_SIZE = 10   # match fig2's panel-letter size
 PANEL_TITLE_SIZE = 8.0
+
+# Whisker quantiles shared by the panel C and D box summaries. Panel D's score
+# is a ratio with a heavy right tail (a few units carry a small positive rate
+# variance in the denominator), so 2.5/97.5 whiskers reached twice the fig. 2
+# reference and set the axis scale for a few percent of the units. The 10th to
+# 90th percentiles keep the boxes legible; the tail is reported in the manifest.
+WHISKER_PERCENTILES = (10, 90)
 
 
 def _clear_panel_heading(ax):
@@ -126,13 +132,13 @@ def _lighten(color, frac=0.5):
 def _box_whisker(ax, groups, positions, colors, *, width=0.55):
     """Box-and-whisker per condition: a faint condition-tinted box (25-75 IQR)
     with a uniform black outline (edge, whiskers, caps) and black median line,
-    whiskers at the 2.5th and 97.5th percentiles (interpretable fixed quantiles
-    for this large-N summary, rather than Tukey 1.5*IQR). Fliers hidden. The fill
-    tint signifies the condition. Returns the boxplot dict."""
+    whiskers at `WHISKER_PERCENTILES` (interpretable fixed quantiles for this
+    large-N summary, rather than Tukey 1.5*IQR). Fliers hidden. The fill tint
+    signifies the condition. Returns the boxplot dict."""
     groups = [np.asarray(g, dtype=float) for g in groups]
     groups = [g[np.isfinite(g)] for g in groups]
     bp = ax.boxplot(groups, positions=positions, widths=width,
-                    patch_artist=True, showfliers=False, whis=(2.5, 97.5),
+                    patch_artist=True, showfliers=False, whis=WHISKER_PERCENTILES,
                     medianprops=dict(lw=2.0, solid_capstyle="round"),
                     boxprops=dict(lw=1.1), whiskerprops=dict(lw=1.0),
                     capprops=dict(lw=1.0), zorder=3)
@@ -226,81 +232,186 @@ def _plot_ccnorm_violins(ax, abl):
 
 
 # ---------------------------------------------------------------------------
-# Panel D — single-trial r^2 (PSTH baseline vs full vs ablated)
+# Panel D — explainable rate variance over fig. 2's diag(Crate)
 # ---------------------------------------------------------------------------
-def _plot_singletrial_r2_violins(ax, abl):
+def _session_paired_test(first, second, sessions, mask):
+    """Wilcoxon test across per-session median paired differences (second-first)."""
+    session_differences = []
+    for session in np.unique(sessions[mask]):
+        sm = mask & (sessions == session)
+        session_differences.append(float(np.median(second[sm] - first[sm])))
+    session_differences = np.asarray(session_differences)
+    if session_differences.size < 2:
+        p = np.nan
+    elif np.allclose(session_differences, 0):
+        p = 1.0
+    else:
+        p = float(wilcoxon(session_differences).pvalue)
+    return p, session_differences
+
+
+def _plot_explainable_variance_boxes(ax, abl):
     pop = np.asarray(abl["cd_population"], dtype=bool)
-    psth = np.asarray(abl["ve_psth"], dtype=float)
-    full = np.asarray(abl["ve"]["intact"], dtype=float)
-    ablated = np.asarray(abl["ve"]["zeroed"], dtype=float)
-    stab = np.asarray(abl["ve"]["stabilized"], dtype=float)
-    m = pop & _finite_mask(psth, full, ablated, stab)
-    gp, gf, ga, gs = psth[m], full[m], ablated[m], stab[m]
+    sessions = np.asarray(abl["sessions"])
+    score = abl["explainable_fraction"]
+    keys = ["psth", "intact", "zeroed", "stabilized"]
+    vals = {key: np.asarray(score[key], dtype=float) for key in keys}
+    m = pop & _finite_mask(*(vals[key] for key in keys))
+    groups = [vals[key][m] for key in keys]
+    colors = [PSTH_COLOR, INTACT_COLOR, ABLATED_COLOR, STABILIZED_COLOR]
+    positions = np.arange(4)
 
-    # PSTH is demoted from a box to just its median reference line (kept as the
-    # "trial-average" baseline); the three model conditions are the boxes.
-    _box_whisker(ax, [gf, ga, gs], [0, 1, 2],
-                 [INTACT_COLOR, ABLATED_COLOR, STABILIZED_COLOR])
+    _box_whisker(ax, groups, positions, colors)
 
-    psth_med = float(np.median(gp))
-    conc = np.concatenate([gf, ga, gs])
-    lo = float(min(np.nanpercentile(conc, 1), psth_med))
-    hi = float(np.nanpercentile(conc, 99))
-    rng = hi - lo
-    # Bottom of the axis keys to the lowest whisker (2.5th percentile), which
-    # dips below 0 for the stabilized condition — so the box whiskers/caps are
-    # fully visible rather than clipped. Still include 0 (the reference line).
-    whis_lo = min(s["whislo"] for s in boxplot_stats([gf, ga, gs],
-                                                     whis=(2.5, 97.5)))
-    y_bottom = min(0.0, whis_lo - 0.04 * rng)
-    ax.set_ylim(y_bottom, hi + 0.62 * rng)
+    # Panel C's frame and tick spacing, extended downward so the PSTH and
+    # stabilized whisker feet stay inside the axes.
+    ax.set_ylim(-0.3, 1.42)
+    ax.set_yticks(np.arange(-0.2, 1.001, 0.2))
+    # Zero is the constant-prediction reference: no captured rate variance.
+    # Solid, so it reads as the panel's zero-variance-explained baseline (the
+    # dashed grey line above it is the trial-average median).
+    ax.axhline(0, color="0.35", lw=1.0, zorder=0)
 
-    # Baseline: the leave-one-out PSTH-ceiling median (kept as a reference line;
-    # the per-condition PSTH contrasts are reported in the printout/text).
-    ax.axhline(psth_med, color="0.55", lw=0.8, ls="--", alpha=0.8, zorder=0)
-    # Label sits above the reference line, just right of the stabilized whiskers
-    # (kept inside the panel via the extended x-limit) so it no longer collides
-    # with panel E's y-axis label.
-    ax.text(2.28, psth_med + 0.006, "Trial avg.\nmedian", color="0.5",
-            fontsize=5.4, va="bottom", ha="left", clip_on=False)
+    # The trial-average reference: every twin condition except the stabilized
+    # one sits above it.
+    psth_median = float(np.median(vals["psth"][m]))
+    ax.axhline(psth_median, color="0.55", lw=0.8, ls="--", alpha=0.8, zorder=0)
+    ax.text(3.72, psth_median + 0.02, "trial-average\nmedian", color="0.5",
+            fontsize=4.9, va="bottom", ha="right", clip_on=False)
 
-    # Two ablation contrasts vs the full twin, staggered so the brackets never
-    # overlap: the small extraretinal (zeroed) cost sits lower, the large
-    # reafferent (stabilized) cost above it. Each carries stars + its median Δ,
-    # contextualised as a fraction of the full twin's single-trial r^2 lost.
-    p_fz = wilcoxon(gf, ga).pvalue
-    p_fs = wilcoxon(gf, gs).pvalue
-    full_med = float(np.median(gf))
-    d_fz = float(np.median(ga - gf))   # zeroed - full: extraretinal ablation cost
-    d_fs = float(np.median(gs - gf))   # stabilized - full: reafferent ablation cost
-    pct_fz = 100.0 * abs(d_fz) / full_med if full_med != 0 else np.nan
-    pct_fs = 100.0 * abs(d_fs) / full_med if full_med != 0 else np.nan
-    y0 = hi + 0.06 * rng
-    step = 0.24 * rng
-    h = 0.016 * rng
-    gap = 0.072 * rng
-    _sig_bracket(ax, 0, 1, y0, p_fz, h=h, gap=gap,
-                 delta=f"Δ={d_fz:+.3f}\n({pct_fz:.0f}% of total)")
-    _sig_bracket(ax, 0, 2, y0 + step, p_fs, h=h, gap=gap,
-                 delta=f"Δ={d_fs:+.3f}\n({pct_fs:.0f}% of total)")
+    # Nothing is clipped or folded onto one. The above-reference tail is left off
+    # the panel to keep it readable and is disclosed in the caption, the manifest,
+    # and the console diagnostics instead.
+    above_one = {key: int(np.sum(group > 1)) for key, group in zip(keys, groups)}
 
-    ax.axhline(0, color="0.7", lw=0.6, ls=":")
-    ax.set_xlim(-0.6, 2.9)
-    ax.set_xticks([0, 1, 2])
-    ax.set_xticklabels(["Retinal +\nbehavioral\n(full)", "Retinal\nonly\n(ablated)",
-                        "Extraretinal\nonly\n(stabilized)"], fontsize=5.3)
-    ax.set_ylabel("Single-trial $r^2$")
+    # Stacked just above the whisker tops (~0.75), lowest first. The n.s.
+    # full-vs-ablated bracket carries stars only, so it needs one line of room;
+    # the two significant brackets carry panel C's two-line Δ / % annotation.
+    # Percentages follow panel C's convention: |Δ| as a fraction of the full
+    # twin's median score.
+    intact_median = float(np.median(vals["intact"][m]))
+    contrasts = [
+        ("ablated_vs_full", 1, 2, "intact", "zeroed", 0.85, False),
+        ("full_vs_psth", 0, 1, "psth", "intact", 0.98, True),
+        ("stabilized_vs_full", 1, 3, "intact", "stabilized", 1.19, True),
+    ]
+    contrast_stats = {}
+    for name, x1, x2, first_key, second_key, y_bracket, show_delta in contrasts:
+        p, session_differences = _session_paired_test(
+            vals[first_key], vals[second_key], sessions, m
+        )
+        delta = float(np.median(vals[second_key][m] - vals[first_key][m]))
+        pct = (100.0 * abs(delta) / intact_median
+               if intact_median != 0 else np.nan)
+        _sig_bracket(
+            ax, x1, x2, y_bracket, p,
+            h=0.014, gap=0.058,
+            delta=(f"Δ={delta:+.3f}\n({pct:.0f}% of total)"
+                   if show_delta else None),
+        )
+        contrast_stats[name] = {
+            "median_unit_difference": delta,
+            "percent_of_full_twin_median": float(pct),
+            "session_median_differences": session_differences.tolist(),
+            "session_wilcoxon_p": p,
+        }
+
+    ax.set_xlim(-0.6, 3.75)
+    ax.set_xticks(positions)
+    ax.set_xticklabels([
+        "Trial average\n(LOO PSTH)",
+        "Retinal +\nbehavioral\n(full)",
+        "Retinal\nonly\n(ablated)",
+        "Extraretinal\nonly\n(stabilized)",
+    ], fontsize=4.9)
+    ax.set_ylabel("Fraction of consistent variance\nexplained ($r^2/R^2_{max}$)")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
-    # PSTH contrasts (line, not violins) reported here for the text.
-    p_pf = wilcoxon(gf, gp).pvalue
-    p_ps = wilcoxon(gs, gp).pvalue
-    print(f"Panel D — single-trial r² (N={m.sum()}): PSTH med={psth_med:.4f}, "
-          f"full med={full_med:.4f}, zeroed med={np.median(ga):.4f}, "
-          f"stabilized med={np.median(gs):.4f}; "
-          f"full-vs-zeroed Δ={d_fz:+.4f} p={p_fz:.2e}, "
-          f"full-vs-stabilized Δ={d_fs:+.4f} p={p_fs:.2e}; "
-          f"full-vs-PSTH p={p_pf:.2e}, stabilized-vs-PSTH p={p_ps:.2e}")
+
+    condition_stats = {}
+    print(f"Panel D — explainable rate variance over fig. 2 diag(Crate) "
+          f"(N={int(m.sum())} units, {len(np.unique(sessions[m]))} sessions):")
+    # Sensitivity: the same numerators over the abandoned matched denominator.
+    matched_score = abl["explainable_fraction_matched"]
+    for key, group in zip(keys, groups):
+        matched = np.asarray(matched_score[key], dtype=float)
+        matched_group = matched[m & np.isfinite(matched)]
+        condition_stats[key] = {
+            "n": int(group.size),
+            "median": float(np.median(group)),
+            "q025": float(np.percentile(group, 2.5)),
+            "q975": float(np.percentile(group, 97.5)),
+            "n_above_one": above_one[key],
+            "minimum": float(np.min(group)),
+            "maximum": float(np.max(group)),
+            "matched_denominator_sensitivity": {
+                "n": int(matched_group.size),
+                "median": float(np.median(matched_group))
+                if matched_group.size else float("nan"),
+                "n_above_one": int(np.sum(matched_group > 1)),
+            },
+        }
+        s = condition_stats[key]
+        print(f"  {key:<10} median={s['median']:+.4f}, "
+              f"2.5-97.5%=[{s['q025']:+.4f}, {s['q975']:+.4f}], "
+              f">1={s['n_above_one']}, range=[{s['minimum']:+.3f}, "
+              f"{s['maximum']:+.3f}], matched-denominator "
+              f"median={s['matched_denominator_sensitivity']['median']:+.4f} "
+              f"(n={s['matched_denominator_sensitivity']['n']})")
+    for name, stats in contrast_stats.items():
+        print(f"  {name}: Δ={stats['median_unit_difference']:+.4f}, "
+              f"session-level p={stats['session_wilcoxon_p']:.3g}")
+    with np.errstate(divide="ignore", invalid="ignore"):
+        fig2_r2max = np.asarray(abl["fig2_c_rate"], float) / np.asarray(
+            abl["fig2_c_total"], float
+        )
+        matched_r2max = np.asarray(abl["matched_c_rate"], float) / np.asarray(
+            abl["matched_c_total"], float
+        )
+
+    def summary(values, *, positive_only=True):
+        keep = pop & np.isfinite(values)
+        if positive_only:
+            keep &= values > 0
+        if not np.any(keep):
+            return {"n": 0, "percentiles": {}}
+        q = np.percentile(values[keep], [0, 1, 2.5, 25, 50, 75, 97.5, 99, 100])
+        return {
+            "n": int(keep.sum()),
+            "percentiles": dict(zip(
+                ["0", "1", "2.5", "25", "50", "75", "97.5", "99", "100"],
+                q.tolist(),
+            )),
+        }
+
+    # The numerator drops every bin the twin cannot predict, so its Var(y) is
+    # not fig. 2's diag(Ctotal); the ratio is reported rather than asserted.
+    var_ratio = np.asarray(abl["total_variance_ratio"], float)
+    scored_windows = np.asarray(abl["matched_n_windows"], float)
+    print(f"  sampling: matched Var(y)/Ctotal_fig2 median="
+          f"{np.nanmedian(var_ratio[pop]):.3f}, median "
+          f"{int(np.nanmedian(scored_windows[pop]))} scored windows/unit; "
+          f"fig. 2 denominator positive for "
+          f"{int((pop & (np.asarray(abl['fig2_c_rate'], float) > 0)).sum())}"
+          f"/{int(pop.sum())} population units, matched denominator for "
+          f"{int((pop & (np.asarray(abl['matched_c_rate'], float) > 0)).sum())}")
+
+    all_sessions = set(np.unique(sessions[pop]))
+    scored_sessions = set(np.unique(sessions[m]))
+    return {
+        "n_units": int(m.sum()),
+        "n_units_fig2_population": int(pop.sum()),
+        "n_units_excluded": int(pop.sum() - m.sum()),
+        "n_sessions": int(len(scored_sessions)),
+        "n_sessions_fig2_population": int(len(all_sessions)),
+        "sessions_excluded": sorted(all_sessions - scored_sessions),
+        "fig2_denominator": summary(fig2_r2max),
+        "matched_denominator_sensitivity": summary(matched_r2max),
+        "total_variance_ratio": summary(var_ratio, positive_only=False),
+        "scored_windows_per_unit": summary(scored_windows, positive_only=False),
+        "conditions": condition_stats,
+        "contrasts": contrast_stats,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -426,6 +537,21 @@ def _plot_femfraction(ax, femdata, *, margin=TOST_MARGIN):
         ax.plot(med[key], y_tri, marker="v", ms=9.0, color=color, mec="white",
                 mew=0.7, clip_on=False, zorder=6)
 
+    # Difference test to complement the equivalence test: a paired Wilcoxon
+    # signed-rank on the same matched cells, bracketing the neurons against the
+    # stabilized twin — the one condition the TOST rejects. Drawn in the
+    # headroom above the triangle row, clear of the TOST band.
+    both = _in01(emp) & _in01(femdata["stabilized"]["B_model_uncl"])
+    d_stab = emp[both] - np.asarray(
+        femdata["stabilized"]["B_model_uncl"], float)[both]
+    p_stab = float(wilcoxon(d_stab).pvalue) if d_stab.size >= 3 else np.nan
+    y_sig = ceiling + 0.26 * head
+    _sig_bracket(ax, med["stabilized"], med["emp"], y_sig, p_stab,
+                 h=0.035 * head, gap=0.10 * head, fontsize=7.5)
+    print(f"Panel E — empirical vs Model (stabilized): paired Wilcoxon "
+          f"p={p_stab:.2e} (n={int(d_stab.size)}, "
+          f"median difference={float(np.median(d_stab)):+.3f})")
+
     ax.set_xlim(0, 1)
     ax.set_ylim(0, ylim_top)
     ax.set_yticks(np.arange(0, ceiling + 0.5 * step, step))
@@ -478,7 +604,7 @@ def _load_ablation_cache():
 def _write_sidecars(out_dir, manifest: dict):
     caption = """Figure 3. A retinal-input digital twin captures FEM-linked V1 response variability.
 
-(A) Training objective and held-out test. The twin is trained on gratings, gabors, and natural images to predict simultaneously recorded V1 spikes continuously: at each timepoint its input is a space × space × time crop of the gaze-contingent stimulus history (the natural-image "model input" cube) combined with the extraretinal behavior covariates, and its target is that timepoint's population spike counts (the units × time raster, with the single predicted bin highlighted). The fixated-flashed-image test stimulus (right) runs through the same pipeline but was held out during training. (B) Gaze-contingent digital twin architecture. The model receives the retinal stimulus history (a moving, reafferent space × space × time crop) and an optional extraretinal behavior input, then predicts simultaneously recorded V1 responses. The schematic depicts both within-model ablation routes quantified in C–E: the behavior input can be zeroed (the Full/Ablated switch), and the retinal input can be stabilized — frozen so it no longer moves with the eye (the second, temporally constant cube). (C, D) Two symmetric within-model ablations isolate the twin's two FEM information routes, pooled across reliable Allen and Logan cells (matching the fig. 2 session population, >=10 analyzed units/session): retinal-only zeroes the separate extraretinal behavior input, and extraretinal-only stabilizes the retinal input by freezing it at one common (session-global centroid) gaze so the image no longer moves with the eye (behavior intact). (C) Held-out, trial-averaged prediction (normalized correlation, ccnorm). Removing the extraretinal pathway lowers the trial-averaged prediction only slightly, whereas stabilizing the retinal input lowers it more, though much of the mean response survives. (D) Single-trial prediction (r^2) against the leave-one-out PSTH median (dashed reference line). The twin predicts single trials well above the PSTH ceiling with the extraretinal pathway zeroed, but stabilizing the retinal input collapses single-trial prediction to at or below the PSTH baseline — so the twin's trial-to-trial predictive power is carried by the moving retinal image (reafference), not by extraretinal modulation. (E) FEM modulation fraction (\\(1-\\alpha\\), the fraction of rate modulation due to FEM — the same quantity as fig. 2), in per-unit counts. The grey filled distribution is the neurons; each within-model twin condition overlays as a step histogram, all on the fig. 2 fixation frame and intersection population. Downward triangles mark each distribution's median. The shaded band is the empirical median \\(\\pm 0.1\\), a paired two-one-sided-t (TOST) equivalence zone (margin \\(\\Delta=0.1\\); the verdict is robust for any \\(\\Delta\\ge0.05\\)): a condition whose median falls inside is statistically equivalent to the neurons. The full twin and the behavior-ablated (retinal-only) twin are both equivalent to the empirical FEM modulation (\\(\\equiv\\) neurons; median offset ~0.03, TOST \\(p<10^{-20}\\)), whereas stabilizing the retinal input abolishes it (\\(\\neq\\) neurons; median 0.20 vs 0.67). Reafference alone reproduces the FEM-driven rate modulation that drives the fig. 2 population structure.
+(A) Training objective and held-out test. The twin is trained on gratings, gabors, and natural images to predict simultaneously recorded V1 spikes continuously: at each timepoint its input is a space × space × time crop of the gaze-contingent stimulus history (the natural-image "model input" cube) combined with the extraretinal behavior covariates, and its target is that timepoint's population spike counts (the units × time raster, with the single predicted bin highlighted). The fixated-flashed-image test stimulus (right) runs through the same pipeline but was held out during training. (B) Gaze-contingent digital twin architecture. The model receives the retinal stimulus history (a moving, reafferent space × space × time crop) and an optional extraretinal behavior input, then predicts simultaneously recorded V1 responses. The schematic depicts both within-model ablation routes quantified in C–E: the behavior input can be zeroed (the Full/Ablated switch), and the retinal input can be stabilized — frozen so it no longer moves with the eye (the second, temporally constant cube). (C, D) Two symmetric within-model ablations isolate the twin's two FEM information routes, pooled across reliable Allen and Logan cells (matching the fig. 2 session population, >=10 analyzed units/session): retinal-only zeroes the separate extraretinal behavior input, and extraretinal-only stabilizes the retinal input by freezing it at one common (session-global centroid) gaze so the image no longer moves with the eye (behavior intact). (C) Held-out, trial-averaged prediction (normalized correlation, ccnorm). Removing the extraretinal pathway lowers the trial-averaged prediction only slightly, whereas stabilizing the retinal input lowers it more, though much of the mean response survives. (D) Single-trial prediction as a fraction of the explainable rate variance measured in fig. 2. For each unit, captured count variance, \\(\\operatorname{Var}(Y)-\\operatorname{Var}(Y-\\hat Y)\\), was measured on fig. 2's 0.5-degree, one-bin counting windows restricted to bins the twin can predict, and divided by that unit's \\(\\operatorname{diag}C_{\\mathrm{rate}}\\) from the fig. 2 covariance decomposition at the same 8.33 ms window. The denominator is fig. 2's own close-pair estimate over all of its valid bins; re-estimating it on the model-valid subset alone was rejected because the twin's 33-frame history mask removes most close trial pairs, leaving the estimate undefined for half the population. The leave-one-out PSTH is shown as a predictor alongside the three twin conditions. Units with a non-positive fig. 2 rate-variance estimate were excluded. Because the numerator drops bins the twin cannot predict, its \\(\\operatorname{Var}(Y)\\) is a median 0.90 of fig. 2's \\(\\operatorname{diag}C_{\\mathrm{total}}\\), so the ratio is a slight underestimate. The dashed horizontal line marks the median of the leave-one-out PSTH: the full and behavior-ablated twins sit above that trial-average reference, the stabilized twin below it. The solid line at zero is the constant-prediction reference, at which a predictor captures no rate variance. Bracket percentages express the median difference as a fraction of the full twin's median score. In C and D, boxes span the interquartile range with the median marked and whiskers span the 10th to 90th percentiles, on a shared vertical scale and tick spacing, with D extended below zero to contain its lower whiskers. No value was clipped or folded onto one: one is the fig. 2 rate-variance estimate rather than a hard bound, and 6.0% of units exceed it for the full twin, 5.2% with behavior zeroed, 2.9% for the leave-one-out PSTH, and 1.6% with the retinal input stabilized, all lying beyond the plotted whiskers. Paired tests use session-median differences. (E) FEM modulation fraction (\\(1-\\alpha\\), the fraction of rate modulation due to FEM — the same quantity as fig. 2), in per-unit counts. The grey filled distribution is the neurons; each within-model twin condition overlays as a step histogram, all on the fig. 2 fixation frame and intersection population. Downward triangles mark each distribution's median. The shaded band is the empirical median \\(\\pm 0.1\\), a paired two-one-sided-t (TOST) equivalence zone (margin \\(\\Delta=0.1\\); the verdict is robust for any \\(\\Delta\\ge0.05\\)): a condition whose median falls inside is statistically equivalent to the neurons. The full twin and the behavior-ablated (retinal-only) twin are both equivalent to the empirical FEM modulation (\\(\\equiv\\) neurons; median offset ~0.03, TOST \\(p<10^{-20}\\)), whereas stabilizing the retinal input abolishes it (\\(\\neq\\) neurons; median 0.20 vs 0.67; bracket, paired Wilcoxon signed-rank on the same matched cells). Reafference alone reproduces the FEM-driven rate modulation that drives the fig. 2 population structure.
 """
     (out_dir / "figure3_caption.md").write_text(caption, encoding="utf-8")
 
@@ -487,10 +613,12 @@ def _write_sidecars(out_dir, manifest: dict):
 Generated by `paper/fig3/generate_figure3.py`.
 
 The digital-twin mechanism figure: a retinal-input twin whose single-trial
-prediction survives zeroing the extraretinal eye-state pathway, and whose FEM
-modulation fraction (1-alpha) reproduces the empirical distribution under the
-full and behavior-ablated conditions but not when the retinal image is
-stabilized. Panels C/D use `fig3_bottomrow_ablation.pkl`; panel E uses the
+prediction survives zeroing the extraretinal eye-state pathway. Panel D reports
+captured count variance on Figure 2-matched, model-valid windows relative to
+Figure 2's own diag(Crate) at the one-bin window, including the leave-one-out
+PSTH as a predictor. The FEM modulation fraction (1-alpha) reproduces the empirical
+distribution under the full and behavior-ablated conditions but not when the
+retinal image is stabilized. Panels C/D use `fig3_bottomrow_ablation.pkl`; panel E uses the
 per-condition f_FEM caches (`fig3_femfraction_{condition}.pkl`), both on the
 fig2 inclusion population.
 
@@ -550,7 +678,7 @@ def compose(*, recompute: bool = False, out_dir=FIG_DIR, dpi: int = 300):
     # distribution overlay (no marginal axis).
     gs_mid = gs[1, 0].subgridspec(
         1, 5,
-        width_ratios=[0.12, 1.0, 1.0, 1.25, 0.12],
+        width_ratios=[0.08, 1.0, 1.28, 1.25, 0.08],
         wspace=0.5,
     )
 
@@ -558,9 +686,10 @@ def compose(*, recompute: bool = False, out_dir=FIG_DIR, dpi: int = 300):
     ax_d = fig.add_subplot(gs_mid[0, 2])
     ax_e = fig.add_subplot(gs_mid[0, 3])
 
+    panel_d_stats = None
     if abl is not None:
         _plot_ccnorm_violins(ax_c, abl)
-        _plot_singletrial_r2_violins(ax_d, abl)
+        panel_d_stats = _plot_explainable_variance_boxes(ax_d, abl)
         # Panel E on the same fig2 session floor as C/D (>=10 analyzed units).
         included = _load_fig2_included_sessions()
         femdata = {c: _restrict_femdata_to_floor(
@@ -572,7 +701,7 @@ def compose(*, recompute: bool = False, out_dir=FIG_DIR, dpi: int = 300):
             _plot_missing_cache(a)
 
     _standard_panel_heading(ax_c, "C", "Ablations modestly reduce\ntrial-averaged predictions")
-    _standard_panel_heading(ax_d, "D", "Single-trial prediction needs\nthe moving retinal image")
+    _standard_panel_heading(ax_d, "D", "Explainable rate variance in\nsingle-trial predictions")
     _standard_panel_heading(ax_e, "E", "Reafference reproduces the\nempirical FEM modulation")
 
     # No bbox_inches="tight": keep the canvas at exactly the intended
@@ -590,11 +719,12 @@ def compose(*, recompute: bool = False, out_dir=FIG_DIR, dpi: int = 300):
             "B": "digital-twin architecture schematic",
             "C": "trial-averaged held-out ccnorm: full vs retinal-only (zeroed) "
                  "vs extraretinal-only (stabilized)",
-            "D": "single-trial r2 vs PSTH-median line: full vs retinal-only "
-                 "vs extraretinal-only (stabilized)",
+            "D": "captured variance over fig. 2 diag(Crate): leave-one-out "
+                 "PSTH vs full vs retinal-only vs extraretinal-only",
             "E": "FEM modulation fraction (1-alpha): neuron distribution vs each "
                  "within-model twin condition, paired TOST equivalence test",
         },
+        "panel_d_stats": panel_d_stats,
     }
     _write_sidecars(out_dir, manifest)
     return fig, manifest
