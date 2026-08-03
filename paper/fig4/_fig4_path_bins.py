@@ -1,10 +1,19 @@
 #!/usr/bin/env python3
-"""Panels B/C/E/F: trajectory-path bins from the SF0.5/coh0.20/match15 run.
+"""Shared machinery for the trajectory-path-bin panels (displayed B and D).
 
-This compact renderer reuses the precomputed output from
-``paper/fig4/_fig4_orientation_match_sf05.py``.
-That upstream wrapper configures the BackImage story-panel code to use
-low SF < 0.5, high SF >= 0.5, contour coherence >= 0.20, and a 15 degree
+Both panels plot SSI change against path length for a low-SF and a high-SF
+group on one shared axis; they differ only in which source groups they draw and
+where they sit on the page. Everything common lives here -- the values loader,
+the broken x-axis, the two-colour titles, the support notes -- and the two
+panel modules (`panel_b_path_bins.py`, `panel_d_path_bins.py`) supply the rest.
+
+The source letters B/C/E/F in `PANEL_SPECS` are the ones measured off the
+Illustrator reference: displayed panel B draws source pair (B, C), and
+displayed panel D draws source pair (E, F).
+
+Values come precomputed from ``paper/fig4/_fig4_orientation_match_sf05.py``,
+whose upstream wrapper configures the BackImage story-panel code to use low
+SF < 0.5, high SF >= 0.5, contour coherence >= 0.20, and a 15 degree
 unit-contour match threshold for the aligned panels.
 """
 
@@ -25,14 +34,7 @@ import pandas as pd
 from matplotlib import patches
 from matplotlib.offsetbox import AnnotationBbox, DrawingArea
 
-try:  # noqa: E402
-    import _fig4_panel_header
-except ModuleNotFoundError:  # pragma: no cover - package/direct-script import paths.
-    try:
-        import _fig4_panel_header
-    except ModuleNotFoundError:
-        import _fig4_panel_header
-
+import _fig4_panel_header
 
 from VisionCore.paths import VISIONCORE_ROOT as ROOT
 
@@ -529,12 +531,15 @@ def draw_pair_panel(
     return frames
 
 
-def build_panel(out_dir: Path = OUT_DIR) -> dict[str, Path]:
+def build_preview_grid(out_dir: Path = OUT_DIR) -> dict[str, Path]:
+    """A 2x2 grid of all four source panels, for quick side-by-side
+    iteration. Not part of the composed figure -- panels B and D are built
+    by their own modules."""
     configure_matplotlib()
     out_dir.mkdir(parents=True, exist_ok=True)
     values = load_panel_values()
-    values.to_csv(out_dir / "panel_bcef_path_bins_values.csv", index=False)
-    (out_dir / "panel_bcef_path_bins_provenance.json").write_text(
+    values.to_csv(out_dir / "path_bins_preview_values.csv", index=False)
+    (out_dir / "path_bins_preview_provenance.json").write_text(
         json.dumps(load_provenance(), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
@@ -547,9 +552,9 @@ def build_panel(out_dir: Path = OUT_DIR) -> dict[str, Path]:
         ylim = top_ylim if label in {"B", "C"} else bottom_ylim
         draw_panel(ax, label=label, values=values, ylim=ylim, **spec)
     paths = {
-        "png": out_dir / "panel_bd_path_bins.png",
-        "pdf": out_dir / "panel_bd_path_bins.pdf",
-        "svg": out_dir / "panel_bd_path_bins.svg",
+        "png": out_dir / "path_bins_preview.png",
+        "pdf": out_dir / "path_bins_preview.pdf",
+        "svg": out_dir / "path_bins_preview.svg",
     }
     fig.savefig(paths["png"], dpi=220)
     fig.savefig(paths["pdf"], dpi=300)
@@ -573,8 +578,17 @@ def build_pair_panel(
     ylim_pad_high: float = 0.14,
     tight_pad: float = 0.55,
     separate_header: bool = False,
+    show_microsaccade_legend: bool | None = None,
 ) -> Path:
-    """Render a B/C or E/F comparison as one shared plotting axis."""
+    """Render a source pair (B, C) or (E, F) as one shared plotting axis.
+
+    Callers are the two panel modules, which own the layout arguments. The
+    legend default reproduces the historical behaviour of keying off the source
+    letters; passing it explicitly is preferred, so that which panel carries the
+    legend is a stated choice rather than a consequence of a tuple comparison.
+    """
+    if show_microsaccade_legend is None:
+        show_microsaccade_legend = labels == ("B", "C")
     configure_matplotlib()
     out_dir.mkdir(parents=True, exist_ok=True)
     values = load_panel_values()
@@ -591,7 +605,7 @@ def build_pair_panel(
         labels=labels,
         values=values,
         ylim=ylim,
-        show_microsaccade_legend=(labels == ("B", "C")),
+        show_microsaccade_legend=show_microsaccade_legend,
         panel_label=panel_label,
         panel_title=panel_title,
         panel_subtitle=panel_subtitle,
@@ -662,7 +676,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out-dir", type=Path, default=OUT_DIR)
     args = parser.parse_args()
-    paths = build_panel(args.out_dir)
+    paths = build_preview_grid(args.out_dir)
     for key in ("png", "pdf", "svg"):
         print(paths[key])
 

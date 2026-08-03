@@ -40,7 +40,8 @@ import _fig4_paths as _paths
 import _fig4_layout as layout  # noqa: E402
 import panel_a_motion_schematic  # noqa: E402
 import panel_c_contour_relative_stimulus  # noqa: E402
-import panel_bd_path_bins  # noqa: E402
+import panel_b_path_bins  # noqa: E402
+import panel_d_path_bins  # noqa: E402
 import panel_e_rms_excursion  # noqa: E402
 import panel_f_unwrapped_edge_coherence  # noqa: E402
 import _fig4_panel_header  # noqa: E402
@@ -157,26 +158,19 @@ def build_all_panels(out_dir: Path = PANELS_OUT_DIR) -> dict[str, Path]:
         panel_label=DISPLAY_SPECS["D"]["label"],
         panel_title=DISPLAY_SPECS["D"]["title"],
     )
-    for pair_key, letters in BCEF_PAIR_LABELS.items():
+    # Panels B and D share their drawing code (_fig4_path_bins) but not their
+    # layout, so each owns its own module. This loop used to branch on
+    # `pair_key` six times to pick axes box, padding and header placement; those
+    # choices now live with the panel they describe.
+    for pair_key, panel_module in (("BC", panel_b_path_bins), ("EF", panel_d_path_bins)):
         display = DISPLAY_SPECS[pair_key]
-        paths[pair_key] = panel_bd_path_bins.build_pair_panel(
-            letters,
+        paths[pair_key] = panel_module.build_panel(
             figsize=placement_boxes[pair_key][2:4],
             out_dir=out_dir,
             panel_label=display["label"],
             panel_title=display["title"],
             panel_subtitle=display.get("subtitle"),
             xlabel=display.get("xlabel"),
-            ylabel_x=_fig4_panel_header.MIDDLE_ROW_YLABEL_X if pair_key == "EF" else None,
-            axes_box=(
-                panel_bd_path_bins.TOP_ROW_PAIR_AXES_BOX
-                if pair_key == "BC"
-                else _fig4_panel_header.MIDDLE_ROW_AXES_BOX
-            ),
-            ylim_pad_low=0.055 if pair_key == "EF" else 0.12,
-            ylim_pad_high=0.055 if pair_key == "EF" else 0.14,
-            tight_pad=0.35 if pair_key == "BC" else 0.55,
-            separate_header=(pair_key == "BC"),
         )
     display_g = DISPLAY_SPECS["G"]
     paths["G"] = panel_e_rms_excursion.build_panel(

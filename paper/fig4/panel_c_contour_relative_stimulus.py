@@ -7,7 +7,7 @@ composited onto the final page at a measured position (see
 compose_ssi_figure_v3.py). E/F used to live as insets inside D's own axes
 (there was unused space there); now that D is independently sized/placed,
 E and F become their own top-level panels too (see
-panels/panel_bd_path_bins.py's single-panel build), so this only draws
+_fig4_path_bins.py's single-panel build), so this only draws
 D itself -- draw_ef_insets=False. The drawing logic is otherwise unchanged
 and still lives in _fig4_ssi_common.draw_panel_a.
 

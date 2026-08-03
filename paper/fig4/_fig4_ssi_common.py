@@ -45,11 +45,11 @@ except Exception as exc:  # pragma: no cover - fallback path is visual, not unit
     SCHEMATIC_IMPORT_ERROR = exc
 
 try:  # noqa: E402
-    import panel_bd_path_bins
+    import _fig4_path_bins
 
     PANEL_BCEF_IMPORT_ERROR: Exception | None = None
 except Exception as exc:  # pragma: no cover - fallback path is visual, not unit-tested.
-    panel_bd_path_bins = None
+    _fig4_path_bins = None
     PANEL_BCEF_IMPORT_ERROR = exc
 
 try:  # noqa: E402
@@ -267,9 +267,9 @@ def collect_methods_provenance(out_dir: Path = OUT_DIR) -> dict:
             ),
         },
     }
-    if panel_bd_path_bins is not None:
+    if _fig4_path_bins is not None:
         try:
-            panels["B_C_E_F"] = panel_bd_path_bins.load_provenance()
+            panels["B_C_E_F"] = _fig4_path_bins.load_provenance()
         except Exception as exc:
             panels["B_C_E_F"] = {"status": "provenance load failed", "error": repr(exc)}
     else:
@@ -2583,9 +2583,9 @@ def draw_panel_bcef_or_placeholder(
     ylim: tuple[float, float],
     show_microsaccade_legend: bool = False,
 ) -> None:
-    if panel_bd_path_bins is not None and not panel_b.empty:
+    if _fig4_path_bins is not None and not panel_b.empty:
         try:
-            panel_bd_path_bins.draw_panel(
+            _fig4_path_bins.draw_panel(
                 ax,
                 values=panel_b,
                 label=label,
@@ -2809,9 +2809,9 @@ def build_figure(out_dir: Path) -> dict[str, Path]:
     panel_b_values, component_values = read_existing_story_values()
     schematic_payload = read_schematic_payload()
     has_existing_panels = not panel_b_values.empty and panel_e_rms_excursion is not None
-    if panel_bd_path_bins is not None and not panel_b_values.empty:
-        bc_ylim = panel_bd_path_bins.shared_ylim_for(panel_b_values, relations=("strong_contours_no_osi",))
-        ef_ylim = panel_bd_path_bins.shared_ylim_for(panel_b_values, relations=("contour_matched",))
+    if _fig4_path_bins is not None and not panel_b_values.empty:
+        bc_ylim = _fig4_path_bins.shared_ylim_for(panel_b_values, relations=("strong_contours_no_osi",))
+        ef_ylim = _fig4_path_bins.shared_ylim_for(panel_b_values, relations=("contour_matched",))
     else:
         bc_ylim = shared_story_ylim(panel_b_values, fallback=(-20, 48))
         ef_ylim = bc_ylim
