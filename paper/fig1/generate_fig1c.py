@@ -14,6 +14,7 @@ Usage:
 
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 from scipy.spatial import ConvexHull
@@ -215,6 +216,11 @@ def plot_panel_c(ax=None, refresh=None, roi_extent=None,
     cmaps = {"Allen": plt.cm.Blues, "Logan": plt.cm.Greens}
     legend_handles = []
     total = 0
+    # ~2000 alpha-blended hulls at ~32 points each would be ~68k stroked path
+    # segments in the vector output -- enough to choke a printer's RIP. Collect
+    # them into one rasterized LineCollection instead; everything else in the
+    # panel (axes, text, annotations) stays vector.
+    segments, seg_colors = [], []
     for subject in SUBJECTS:
         sessions = sorted(by_subject.get(subject, []))
         if not sessions:
@@ -223,12 +229,19 @@ def plot_panel_c(ax=None, refresh=None, roi_extent=None,
         for i, (name, hulls) in enumerate(sessions):
             color = cmap(0.4 + 0.5 * i / max(len(sessions) - 1, 1))
             for hull in hulls:
-                ax.plot(hull[:, 1], hull[:, 0], color=color, alpha=0.15, lw=0.6)
+                segments.append(np.column_stack([hull[:, 1], hull[:, 0]]))
+                seg_colors.append(color)
                 total += 1
         legend_handles.append(
             Line2D([0], [0], color=cmap(0.65), lw=2,
                    label=f"{subject} ({len(sessions)} sess)")
         )
+    if segments:
+        ax.add_collection(LineCollection(
+            segments, colors=seg_colors, linewidths=0.6, alpha=0.15,
+            capstyle="projecting", joinstyle="round",
+            rasterized=True, zorder=2,
+        ))
 
     circle = plt.Circle((0, 0), 1.0, color=anno_color, ls="--", lw=0.8,
                         fill=False, zorder=5)
