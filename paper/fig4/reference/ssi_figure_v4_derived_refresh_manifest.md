@@ -1,5 +1,12 @@
 # ssi_figure_v4 derived-refresh handoff manifest
 
+> **Historical.** This describes the original handoff bundle as it arrived, in its
+> `declan/...` layout. The code has since been restructured into
+> `paper/fig4/` (figure panels), `paper/fig4/refresh/` (cache-regenerating
+> analysis) and `outputs/cache/fig4_*` (cached inputs); see
+> `paper/fig4/figure4_README.md` and `_fig4_paths.REFRESH_SOURCES` for the
+> current mapping. Kept for provenance -- paths below are not current.
+
 Purpose: give a collaborator on upstream `main` enough files to regenerate
 `outputs/fig/ssi_figure_v2/ssi_figure_v4.pdf`, either from the saved solo-machine
 caches or by refreshing the derived analysis tables those figure panels read.

@@ -19,14 +19,22 @@ import pandas as pd
 from scipy import ndimage, stats
 from tqdm import tqdm
 
+from VisionCore.paths import VISIONCORE_ROOT as ROOT
 
+import _fig4_imports  # noqa: F401  (puts the fig4 directory on sys.path)
+
+
+# Anchored, not CWD-relative. These used to resolve against wherever the script
+# happened to be invoked from, so every input silently went missing unless it was
+# run from the repo root -- the same bug the sibling analysis modules already fixed.
 DEFAULT_ROOT = (
-    Path("outputs")
+    ROOT
+    / "outputs"
     / "fixation_statistics_by_stimulus_all_sessions_after_review"
     / "backimage_patch_radius_sensitivity_v1"
 )
 
-BASE_OUTPUT_ROOT = Path("outputs") / "fixation_statistics_by_stimulus_all_sessions_after_review"
+BASE_OUTPUT_ROOT = ROOT / "outputs" / "fixation_statistics_by_stimulus_all_sessions_after_review"
 
 SUMMARY_RADII = (
     ("r0p25", 0.25),
@@ -150,7 +158,10 @@ def _valid_alignment_cache(df: pd.DataFrame) -> bool:
 
 
 def _compute_alignment_sweep_windows() -> tuple[pd.DataFrame, pd.DataFrame]:
-    from .image_features import (
+    # Absolute, not relative: this module is run as a script, so it has no
+    # parent package and `from .image_features import ...` raised ImportError
+    # the moment this function was reached.
+    from fixation_stats.image_features import (
         _backimage_canvas,
         backimage_trial_geometry,
         gaze_deg_to_screen_px,

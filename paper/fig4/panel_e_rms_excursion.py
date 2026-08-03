@@ -48,6 +48,7 @@ import pandas as pd
 from VisionCore.paths import VISIONCORE_ROOT as ROOT
 
 import _fig4_paths as _paths
+from _fig4_style import INK, configure_matplotlib
 
 import _fig4_option_sheet as options
 import _fig4_panel_header
@@ -64,10 +65,6 @@ DEFAULT_PANEL_TITLE = "High-SF aligned units' information\ndepends on trajectory
 # The real ssi_figure_v2 gs[2, 0] cell (MAIN_GRID_KWARGS at FIGURE_SIZE_IN =
 # (8.5, 11.0)), not the earlier 2.45in x 2.35in standalone-preview approximation.
 FIGSIZE = (2.563, 2.432)
-
-
-def configure_matplotlib() -> None:
-    options.configure_matplotlib()
 
 
 def _relative(path: Path) -> str:
@@ -135,7 +132,7 @@ def draw_panel(
         panel_label,
         panel_title,
         title_linespacing=_fig4_panel_header.MIDDLE_ROW_TITLE_LINESPACING,
-        color=options.INK,
+        color=INK,
     )
     ax.set_ylabel("SSI change (%)", labelpad=2.0)
     _fig4_panel_header.align_middle_row_ylabel(ax)

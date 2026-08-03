@@ -20,9 +20,12 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+
 import numpy as np
 import pandas as pd
 
+import _fig4_imports  # noqa: F401  (puts the fig4 directory on sys.path)
+from _fig4_style import INK, configure_matplotlib
 from fixation_stats import plot_backimage_contour_motion_components as contour_motion
 import panel_f_unwrapped_edge_coherence as panel_h
 
@@ -79,7 +82,6 @@ COHERENCE_COLORS = ("#9aa5b1", "#6c8fb5", "#2c7fb8", "#0b4f83")
 PATH_BIN_EDGES_ARCMIN = (0.0, 45.0, 55.0, 62.0, 85.0, 113.0, 130.0, math.inf)
 PATH_BIN_LABELS = ("<45", "45-55", "55-62", "62-85", "85-113", "113-130", ">=130")
 GRID = "#d8dde3"
-INK = "#111111"
 
 
 def _json_ready(value: Any) -> Any:
@@ -100,23 +102,6 @@ def _json_ready(value: Any) -> Any:
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(_json_ready(payload), indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-
-def configure_matplotlib() -> None:
-    plt.rcParams.update(
-        {
-            "font.family": "DejaVu Sans",
-            "font.size": 8,
-            "axes.titlesize": 9,
-            "axes.labelsize": 8,
-            "xtick.labelsize": 7,
-            "ytick.labelsize": 7,
-            "axes.linewidth": 0.8,
-            "pdf.fonttype": 42,
-            "ps.fonttype": 42,
-            "svg.fonttype": "none",
-        }
-    )
 
 
 def _clean_axis(ax: plt.Axes) -> None:

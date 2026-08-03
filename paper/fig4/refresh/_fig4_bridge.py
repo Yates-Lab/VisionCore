@@ -15,17 +15,20 @@ os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib-cache")
 Path(os.environ["MPLCONFIGDIR"]).mkdir(parents=True, exist_ok=True)
 from VisionCore.paths import VISIONCORE_ROOT as ROOT
 
+import _fig4_imports  # noqa: F401  (puts the fig4 directory on sys.path)
 import _fig4_paths as _paths
 
 import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+
 import numpy as np
 import pandas as pd
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.patches import Patch
 
+from _fig4_style import COHERENCE_ORDER, GRAY, configure_matplotlib
 from fixation_stats import plot_backimage_contour_motion_components as contour_motion
 
 
@@ -43,13 +46,9 @@ BOOTSTRAP_SEED = 119
 EPS = 1e-12
 DISPLAY_BEHAVIOR_QUANTILE = 99.0
 
-COHERENCE_ORDER = ("0-0.2", "0.2-0.5", "0.5-0.8", "0.8-1")
 COHERENCE_COLORS = {"0-0.2": "#9aa5b1", "0.8-1": "#0b4f83"}
-ORANGE = "#D55E00"
 GREEN = "#1b7f5c"
 PURPLE = "#7a3b9a"
-GRAY = "#6B6F75"
-INK = "#111111"
 GRID = "#d8dde3"
 
 METRIC_FAMILIES = (
@@ -118,23 +117,6 @@ def _json_ready(value: Any) -> Any:
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(_json_ready(payload), indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-
-def configure_matplotlib() -> None:
-    plt.rcParams.update(
-        {
-            "font.family": "DejaVu Sans",
-            "font.size": 8,
-            "axes.titlesize": 9,
-            "axes.labelsize": 8,
-            "xtick.labelsize": 7,
-            "ytick.labelsize": 7,
-            "axes.linewidth": 0.8,
-            "pdf.fonttype": 42,
-            "ps.fonttype": 42,
-            "svg.fonttype": "none",
-        }
-    )
 
 
 def _clean_axis(ax: plt.Axes) -> None:

@@ -18,9 +18,12 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+
 import numpy as np
 import pandas as pd
 
+import _fig4_imports  # noqa: F401  (puts the fig4 directory on sys.path)
+from _fig4_style import ORANGE
 from _fig4_component_2d_surface import (
     MATRIX_DIR,
     OUT_DIR,
@@ -60,7 +63,6 @@ BOOTSTRAP_SEED = 47
 LOWER_MIN_POS = 45.0
 LOWER_MAX_POS = 180.0
 LOWER_TICKS = [0, 50, 65, 90, 120, 160]
-ORANGE = "#D55E00"
 EPS = 1e-12
 
 COMPONENT_STYLES = {

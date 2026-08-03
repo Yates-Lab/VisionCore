@@ -25,7 +25,10 @@ import pandas as pd
 
 from VisionCore.paths import VISIONCORE_ROOT as ROOT
 
+import _fig4_imports  # noqa: F401  (puts the fig4 directory on sys.path)
 import _fig4_paths as _paths
+from _fig4_brackets import add_vertical_bracket as _add_vertical_bracket
+from _fig4_style import GRAY, INK, ORANGE, configure_matplotlib
 
 import _fig4_cell_baseline_errorbars as panel_c  # noqa: E402
 
@@ -39,29 +42,9 @@ UPSTREAM_SCRIPT = (
     "upstream://make_backimage_panel_c_sf05_match15_matched_bins_bracket.py"
 )
 
-ORANGE = "#D55E00"
-INK = "#111111"
-GRAY = "#6B6F75"
 BROKEN_AXIS_BREAK_LEFT = 0.27
 BROKEN_AXIS_BREAK_RIGHT = 0.82
 BROKEN_AXIS_BREAK_CENTER = 0.545
-
-
-def configure_matplotlib() -> None:
-    plt.rcParams.update(
-        {
-            "font.family": "DejaVu Sans",
-            "font.size": 8,
-            "axes.titlesize": 9,
-            "axes.labelsize": 8,
-            "xtick.labelsize": 7,
-            "ytick.labelsize": 7,
-            "axes.linewidth": 0.8,
-            "pdf.fonttype": 42,
-            "ps.fonttype": 42,
-            "svg.fonttype": "none",
-        }
-    )
 
 
 def load_panel_values(
@@ -137,33 +120,6 @@ def _add_component_reference_bar(ax: plt.Axes, context: dict | None) -> None:
         max_pos=panel_c.LOWER_MAX_POS,
     )
     ax.axvspan(float(x_low), float(x_high), facecolor="#7c7c7c", edgecolor="none", alpha=0.12, zorder=0)
-
-
-def _add_vertical_bracket(
-    ax: plt.Axes,
-    *,
-    x: float,
-    y0: float,
-    y1: float,
-    label: str,
-    color: str = ORANGE,
-) -> None:
-    low, high = sorted([float(y0), float(y1)])
-    tick = 0.10
-    ax.plot([x, x], [low, high], color=color, lw=1.15, clip_on=False, zorder=7)
-    ax.plot([x - tick, x], [low, low], color=color, lw=1.15, clip_on=False, zorder=7)
-    ax.plot([x - tick, x], [high, high], color=color, lw=1.15, clip_on=False, zorder=7)
-    ax.text(
-        x + 0.045,
-        0.5 * (low + high),
-        label,
-        ha="left",
-        va="center",
-        fontsize=5.8,
-        color=color,
-        linespacing=0.95,
-        zorder=8,
-    )
 
 
 def _remove_upstream_break_label(ax: plt.Axes) -> None:

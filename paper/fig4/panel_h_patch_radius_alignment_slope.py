@@ -24,6 +24,7 @@ import _fig4_panel_header
 from VisionCore.paths import VISIONCORE_ROOT as ROOT
 
 import _fig4_paths as _paths
+from _fig4_style import GRAY, INK, configure_matplotlib
 
 FIG4_DIR = ROOT / "paper" / "fig4"
 OUT_DIR = _paths.PANELS_DIR
@@ -32,26 +33,7 @@ SOURCE_FIGURE = _paths.PATCH_RADIUS_ALIGNMENT_BY_COHERENCE_PDF
 SOURCE_SCRIPT = FIG4_DIR / "refresh" / "summarize_backimage_patch_radius_sensitivity.py"
 
 SLOPE_COHERENCE_MIN = 0.3
-GRAY = "#6B6F75"
-INK = "#111111"
 GRID = "#E3E3E3"
-
-
-def configure_matplotlib() -> None:
-    plt.rcParams.update(
-        {
-            "font.family": "DejaVu Sans",
-            "font.size": 8,
-            "axes.titlesize": 9,
-            "axes.labelsize": 8,
-            "xtick.labelsize": 7,
-            "ytick.labelsize": 7,
-            "axes.linewidth": 0.8,
-            "pdf.fonttype": 42,
-            "ps.fonttype": 42,
-            "svg.fonttype": "none",
-        }
-    )
 
 
 def _relative(path: Path) -> str:

@@ -6,41 +6,9 @@ from typing import Any
 import numpy as np
 from scipy import ndimage
 
-
-@lru_cache(maxsize=128)
-def _cached_session(session_name: str):
-    from DataYatesV1 import get_session
-
-    subject, date = session_name.split("_", 1)
-    return get_session(subject, date)
-
-
-@lru_cache(maxsize=64)
-def _backimage_canvas(session_name: str, trial_idx: int) -> tuple[np.ndarray, float, tuple[int, int]]:
-    from DataYatesV1.exp.backimage import BackImageTrial
-    from PIL import Image as PILImage
-
-    sess = _cached_session(session_name)
-    trial = BackImageTrial(sess.exp["D"][int(trial_idx)], sess.exp["S"])
-    image = trial.get_image()
-    if image.ndim == 3:
-        image = image.mean(axis=2)
-    image = image.astype(np.float32)
-    sr = sess.exp["S"]["screenRect"].astype(int)
-    height = int(sr[3] - sr[1])
-    width = int(sr[2] - sr[0])
-    canvas = np.full((height, width), float(trial.bkgnd), dtype=np.float32)
-    x0, y0, x1, y1 = [int(v) for v in trial.dest_rect]
-    h, w = y1 - y0, x1 - x0
-    if image.shape[:2] != (h, w):
-        image = np.asarray(PILImage.fromarray(image.astype(np.float32), mode="F").resize((w, h), resample=2), dtype=np.float32)
-    y0c, y1c = max(0, y0), min(height, y1)
-    x0c, x1c = max(0, x0), min(width, x1)
-    sy0, sy1 = y0c - y0, h - (y1 - y1c)
-    sx0, sx1 = x0c - x0, w - (x1 - x1c)
-    canvas[y0c:y1c, x0c:x1c] = image[sy0:sy1, sx0:sx1]
-    ppd = float(sess.exp["S"]["pixPerDeg"])
-    return canvas, ppd, (height, width)
+# Re-exported: these moved to backimage_canvas so figure-4's schematic can
+# import them without pulling in this module's feature-extraction half.
+from .backimage_canvas import _backimage_canvas, _cached_session
 
 
 @lru_cache(maxsize=8192)

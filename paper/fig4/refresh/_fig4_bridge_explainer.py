@@ -41,16 +41,22 @@ os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib-cache")
 Path(os.environ["MPLCONFIGDIR"]).mkdir(parents=True, exist_ok=True)
 from VisionCore.paths import VISIONCORE_ROOT as ROOT
 
+import _fig4_imports  # noqa: F401  (puts the fig4 directory on sys.path)
 import _fig4_paths as _paths
 
 import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+
 import numpy as np
 import pandas as pd
 from matplotlib.patches import FancyArrowPatch
 
+from _fig4_style import (
+    GRAY, INK, ORANGE, PALE_GRID, POPULATION_COLORS, POPULATION_MARKERS,
+    configure_matplotlib,
+)
 import _fig4_bridge as bridge
 import _fig4_bridge_by_coherence as coh_bridge
 import _fig4_contour_schematic as ssi_schematic
@@ -60,13 +66,6 @@ OUT_STEM = "behavior_model_bridge_explainer_figure"
 MATCH_NULL_SUMMARY_CSV = _paths.BRIDGE_MATCH_NULL_SUMMARY_CSV
 COHERENCE_SUMMARY_CSV = _paths.BRIDGE_PREDICTION_BY_COHERENCE_SUMMARY_CSV
 
-# Same palette as _fig4_ssi_common.py: BLUE = low-SF, ORANGE = high-SF.
-BLUE = "#0072B2"
-ORANGE = "#D55E00"
-MUTED_ORANGE = "#A9714B"
-GRAY = "#6B6F75"
-INK = "#111111"
-PALE_GRID = "#E7E7E7"
 
 HEADLINE_SUBSET_KEY = "coh_ge_0p2"
 HEADLINE_POPULATION_ORDER = (
@@ -76,24 +75,6 @@ HEADLINE_POPULATION_ORDER = (
     "high_sf_all",
     "low_sf_all",
 )
-# All high-SF populations are shades of ORANGE (full strength for the aligned
-# headline result, lighter/muted for looser or pooled high-SF groups);
-# low-SF stays BLUE. This is the same color-means-SF convention as B/C/E/F/G,
-# just applied to five populations instead of two.
-POPULATION_COLORS = {
-    "high_sf_aligned": ORANGE,
-    "high_sf_oblique": "#E8956B",
-    "high_sf_orthogonal": "#F2C6A0",
-    "high_sf_all": MUTED_ORANGE,
-    "low_sf_all": BLUE,
-}
-POPULATION_MARKERS = {
-    "high_sf_aligned": "o",
-    "high_sf_oblique": "s",
-    "high_sf_orthogonal": "^",
-    "high_sf_all": "D",
-    "low_sf_all": "v",
-}
 METRIC_MARKERS = {"component_rms": "o", "component_range": "s"}
 MECHANISM_METRIC = "component_rms"
 MECHANISM_POPULATIONS = ("high_sf_aligned", "low_sf_all")
@@ -482,10 +463,6 @@ LEFT_MARGIN = 0.145
 RIGHT_MARGIN = 0.975
 TOP_MARGIN = 0.905
 BOTTOM_MARGIN = 0.075
-
-
-def configure_matplotlib() -> None:
-    bridge.configure_matplotlib()
 
 
 def build(out_dir: Path = OUT_DIR) -> dict[str, Path]:

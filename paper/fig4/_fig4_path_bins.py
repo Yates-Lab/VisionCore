@@ -39,35 +39,54 @@ import _fig4_panel_header
 from VisionCore.paths import VISIONCORE_ROOT as ROOT
 
 import _fig4_paths as _paths
+from _fig4_broken_axis import (
+    B_MAX_POS,
+    B_MIN_POS,
+    B_TICKS,
+    format_broken_axis,
+    plot_b_series,
+    shared_ylim as _shared_ylim,
+    x_broken_log,
+    ylim_series,
+)
+from _fig4_style import BLUE, GRAY, INK, ORANGE, configure_matplotlib
 
 FIG4_DIR = ROOT / "paper" / "fig4"
 
-import _fig4_orientation_match_sf05 as panel_b_sf05  # noqa: E402
-
-
-panel_b = panel_b_sf05.panel_b
-panel_b._configure_story()
-story = panel_b.story
+# The selection this panel's cached CSVs were produced under. These used to be
+# read back off the upstream analysis modules at import: this module imported
+# `_fig4_orientation_match_sf05`, which mutates globals on
+# `_fig4_orientation_match`, which mutates globals on
+# `_fig4_geometry_story_cde8bins`, and the resolved values were then read back
+# out -- ~4,000 lines of trace-bank analysis imported to obtain nine numbers.
+# They are recorded here instead, and the scripts they came from are still
+# named in the provenance below.
+SELECTION = {
+    "sf_metric_col": "sf_split_metric",
+    "low_sf_max_cpd": 0.5,
+    "high_sf_min_cpd": 0.5,
+    "contour_coherence_min": 0.2,
+    "min_osi": 0.05,
+    "match_max_deg": 15.0,
+    "orthogonal_min_deg": 67.5,
+    "n_drift_bins": 8,
+    "n_microsaccade_bins": 5,
+}
 
 OUT_DIR = _paths.PANELS_DIR
-SOURCE_STEM = panel_b.OUT_STEM
 VALUES_CSV = _paths.STORY_PANEL_B_VALUES_CSV
 SELECTION_CSV = _paths.STORY_PANEL_B_SELECTION_SUMMARY_CSV
 SUMMARY_JSON = _paths.STORY_PANEL_B_SUMMARY_JSON
 UPSTREAM_WRAPPER = (
-    FIG4_DIR / "_fig4_orientation_match_sf05.py"
+    FIG4_DIR / "refresh" / "_fig4_orientation_match_sf05.py"
 )
 UPSTREAM_CORE = (
-    FIG4_DIR / "_fig4_orientation_match.py"
+    FIG4_DIR / "refresh" / "_fig4_orientation_match.py"
 )
 UPSTREAM_STORY = (
-    FIG4_DIR / "_fig4_geometry_story_cde8bins.py"
+    FIG4_DIR / "refresh" / "_fig4_geometry_story_cde8bins.py"
 )
 
-BLUE = "#0072B2"
-ORANGE = "#D55E00"
-GRAY = "#6B6F75"
-INK = "#111111"
 BROKEN_AXIS_BREAK_CENTER = 0.545
 BROKEN_AXIS_TICK_OFFSET = 0.048
 BROKEN_AXIS_TICK_HALF_WIDTH = 0.040
@@ -109,23 +128,6 @@ PANEL_SPECS = {
 }
 
 
-def configure_matplotlib() -> None:
-    plt.rcParams.update(
-        {
-            "font.family": "DejaVu Sans",
-            "font.size": 8,
-            "axes.titlesize": 9,
-            "axes.labelsize": 8,
-            "xtick.labelsize": 7,
-            "ytick.labelsize": 7,
-            "axes.linewidth": 0.8,
-            "pdf.fonttype": 42,
-            "ps.fonttype": 42,
-            "svg.fonttype": "none",
-        }
-    )
-
-
 def _relative(path: Path) -> str:
     try:
         return str(path.resolve().relative_to(ROOT))
@@ -161,7 +163,7 @@ def load_panel_values(values_csv: Path = VALUES_CSV) -> pd.DataFrame:
 def shared_ylim(values: pd.DataFrame, *, pad_low: float = 0.12, pad_high: float = 0.14) -> tuple[float, float]:
     if values.empty:
         return (-20.0, 48.0)
-    return story._shared_ylim(story._ylim_series(values), pad_low=pad_low, pad_high=pad_high)
+    return _shared_ylim(ylim_series(values), pad_low=pad_low, pad_high=pad_high)
 
 
 def shared_ylim_for(
@@ -176,7 +178,7 @@ def shared_ylim_for(
     frame = values[values["relation"].isin(relations)].copy()
     if frame.empty:
         return shared_ylim(values, pad_low=pad_low, pad_high=pad_high)
-    return story._shared_ylim(story._ylim_series(frame), pad_low=pad_low, pad_high=pad_high)
+    return _shared_ylim(ylim_series(frame), pad_low=pad_low, pad_high=pad_high)
 
 
 def path_xlimit_right(values: pd.DataFrame, *, pad: float = 0.22) -> float:
@@ -186,7 +188,7 @@ def path_xlimit_right(values: pd.DataFrame, *, pad: float = 0.22) -> float:
     raw = raw[np.isfinite(raw)]
     if raw.size == 0:
         return 5.55
-    mapped = story._x_broken_log(raw, min_pos=story.B_MIN_POS, max_pos=story.B_MAX_POS)
+    mapped = x_broken_log(raw, min_pos=B_MIN_POS, max_pos=B_MAX_POS)
     return float(np.nanmax(mapped) + pad)
 
 
@@ -261,11 +263,11 @@ def _add_split_sf_zero_anchor(ax: plt.Axes) -> None:
 
 
 def format_broken_path_axis(ax: plt.Axes, *, xlim_right: float | None = None) -> None:
-    story._format_broken_axis(
+    format_broken_axis(
         ax,
-        ticks=story.B_TICKS,
-        min_pos=story.B_MIN_POS,
-        max_pos=story.B_MAX_POS,
+        ticks=B_TICKS,
+        min_pos=B_MIN_POS,
+        max_pos=B_MAX_POS,
         xlabel="path length (arcmin)",
     )
     if xlim_right is not None:
@@ -293,15 +295,15 @@ def load_provenance(
         "selection": summary.get(
             "selection",
             {
-                "sf_metric_col": story.SF_METRIC_COL,
-                "low_sf": f"{story.SF_METRIC_COL} < {story.LOW_SF_MAX_CPD}",
-                "high_sf": f"{story.SF_METRIC_COL} >= {panel_b.HIGH_SF_MIN_CPD}",
-                "contour_coherence_min": story.CONTOUR_COHERENCE_MIN,
-                "min_osi": story.MIN_OSI,
-                "match_max_deg": panel_b.MATCH_MAX_DEG,
-                "orthogonal_min_deg": story.ORTHOGONAL_MIN_DEG,
-                "panel_b_drift_bins": story.N_DRIFT_BINS,
-                "panel_b_microsaccade_bins": story.N_MICROSACCADE_BINS,
+                "sf_metric_col": SELECTION["sf_metric_col"],
+                "low_sf": f"{SELECTION['sf_metric_col']} < {SELECTION['low_sf_max_cpd']}",
+                "high_sf": f"{SELECTION['sf_metric_col']} >= {SELECTION['high_sf_min_cpd']}",
+                "contour_coherence_min": SELECTION["contour_coherence_min"],
+                "min_osi": SELECTION["min_osi"],
+                "match_max_deg": SELECTION["match_max_deg"],
+                "orthogonal_min_deg": SELECTION["orthogonal_min_deg"],
+                "panel_b_drift_bins": SELECTION["n_drift_bins"],
+                "panel_b_microsaccade_bins": SELECTION["n_microsaccade_bins"],
             },
         ),
         "baseline": summary.get(
@@ -460,7 +462,7 @@ def draw_panel(
     if frame.empty:
         raise ValueError(f"No values for sf_group={sf_group!r}, relation={relation!r}")
 
-    story._plot_b_series(ax, frame, color=color)
+    plot_b_series(ax, frame, color=color)
     format_broken_path_axis(ax, xlim_right=path_xlimit_right(frame))
     ax.axhline(0.0, color="0.35", lw=0.85, ls=":")
     ax.set_ylim(*(shared_ylim(values) if ylim is None else ylim))
@@ -500,7 +502,7 @@ def draw_pair_panel(
             raise ValueError(
                 f"No values for sf_group={spec['sf_group']!r}, relation={spec['relation']!r}, label={label!r}"
             )
-        story._plot_b_series(ax, frame, color=spec["color"])
+        plot_b_series(ax, frame, color=spec["color"])
         frames.append((label, frame))
 
     combined = pd.concat([frame for _, frame in frames], ignore_index=True)

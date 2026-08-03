@@ -25,6 +25,7 @@ import pandas as pd
 
 from VisionCore.paths import VISIONCORE_ROOT as ROOT
 
+import _fig4_imports  # noqa: F401  (puts the fig4 directory on sys.path)
 from fixation_stats.image_features import _backimage_canvas, gaze_deg_to_screen_px  # noqa: E402
 from _fig4_contour_schematic import normalize_image  # noqa: E402
 

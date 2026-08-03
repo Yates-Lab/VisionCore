@@ -5,8 +5,7 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 from matplotlib.transforms import ScaledTranslation
 
-INK = "#111111"
-GRAY = "#6B6F75"
+from _fig4_style import GRAY, INK
 
 PANEL_LETTER_SIZE = 10.4
 PANEL_TITLE_SIZE = 8.2

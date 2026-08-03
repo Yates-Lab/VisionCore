@@ -20,7 +20,8 @@ docs/plans/
 ray_results/
 
 # Figure 4 regression baseline: Declan's original build, the reference the
-# pixel-diff test asserts against. The extension rules above are repo-wide, so
-# tracking it needs an explicit exception.
+# pixel-diff test asserts against, plus the Illustrator artwork the measured
+# layout boxes and the panel-A network icon come from. The extension rules above
+# are repo-wide, so tracking them needs an explicit exception. (A matching
+# `*.txt` exception went with the handoff-bundle filelists it existed for.)
 !paper/fig4/reference/*.pdf
-!paper/fig4/reference/*.txt

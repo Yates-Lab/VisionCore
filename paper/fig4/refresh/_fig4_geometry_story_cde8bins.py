@@ -23,6 +23,17 @@ import pandas as pd
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.lines import Line2D
 
+import _fig4_imports  # noqa: F401  (puts the fig4 directory on sys.path)
+from _fig4_broken_axis import (
+    B_MAX_POS,
+    B_MIN_POS,
+    B_TICKS,
+    format_broken_axis as _format_broken_axis,
+    plot_b_series as _plot_b_series,
+    shared_ylim as _shared_ylim,
+    x_broken_log as _x_broken_log,
+    ylim_series as _ylim_series,
+)
 from _fig4_component_2d_surface import (
     MATRIX_DIR,
     OUT_DIR,
@@ -67,9 +78,6 @@ EPS = 1e-12
 N_BOOTSTRAP = 10_000
 BOOTSTRAP_SEED = 47
 
-B_MIN_POS = 88.0
-B_MAX_POS = 180.0
-B_TICKS = (0.0, 90.0, 105.0, 120.0, 150.0, 175.0)
 LOWER_MIN_POS = 45.0
 LOWER_MAX_POS = 180.0
 LOWER_TICKS = (0.0, 50.0, 65.0, 90.0, 120.0, 160.0)
@@ -124,49 +132,6 @@ def _population_values(pop: dict[str, Any]) -> dict[str, float]:
         "information_bits_per_sample": _finite_ratio(float(pop["information_numerator_bits"]), n),
         "expected_spikes_per_sample": _finite_ratio(float(pop["expected_spikes"]), n),
     }
-
-
-def _x_broken_log(values: np.ndarray | pd.Series | list[float], *, min_pos: float, max_pos: float) -> np.ndarray:
-    x = np.asarray(values, dtype=float)
-    mapped = np.zeros_like(x, dtype=float)
-    positive = x > 0
-    span = 5.1
-    mapped[positive] = 1.0 + span * np.log(x[positive] / min_pos) / np.log(max_pos / min_pos)
-    return mapped
-
-
-def _format_broken_axis(
-    ax: plt.Axes,
-    *,
-    ticks: tuple[float, ...],
-    min_pos: float,
-    max_pos: float,
-    xlabel: str,
-    show_xlabel: bool = True,
-) -> None:
-    ax.set_xlim(-0.12, 5.35)
-    ax.set_xticks(_x_broken_log(list(ticks), min_pos=min_pos, max_pos=max_pos))
-    ax.set_xticklabels([str(int(tick)) for tick in ticks])
-    if show_xlabel:
-        ax.set_xlabel(xlabel)
-    else:
-        ax.tick_params(axis="x", labelbottom=False)
-    ax.text(
-        0.52,
-        -0.075,
-        "//",
-        transform=ax.get_xaxis_transform(),
-        ha="center",
-        va="center",
-        fontsize=15,
-        fontweight="bold",
-        rotation=-20,
-        clip_on=False,
-    )
-    ax.grid(True, color="0.90", linewidth=0.8)
-    ax.set_axisbelow(True)
-    ax.spines[["top", "right"]].set_visible(False)
-    ax.tick_params(labelsize=8.5)
 
 
 def _sf_mask(unit: pd.DataFrame, sf_group: str) -> np.ndarray:
@@ -429,53 +394,6 @@ def _compute_component_panel(data: dict[str, Any]) -> tuple[pd.DataFrame, pd.Dat
     return pd.DataFrame(rows), pd.DataFrame(selection_rows)
 
 
-def _plot_b_series(ax: plt.Axes, frame: pd.DataFrame, *, color: str) -> None:
-    ax.scatter(
-        [0.0],
-        [0.0],
-        marker="o",
-        s=28,
-        facecolors="white",
-        edgecolors=color,
-        linewidths=1.35,
-        zorder=5,
-    )
-    for context, filled in [("drift_only", False), ("microsaccade", True)]:
-        sub = frame[frame["context"].eq(context)].sort_values("path_bin_order")
-        if sub.empty:
-            continue
-        x = _x_broken_log(sub["path_median_arcmin"], min_pos=B_MIN_POS, max_pos=B_MAX_POS)
-        y = sub["ssi_percent_vs_cell_baseline"].to_numpy(dtype=float)
-        if "ssi_percent_ci95_low_image_boot" in sub.columns:
-            ci_low = pd.to_numeric(sub["ssi_percent_ci95_low_image_boot"], errors="coerce").to_numpy(dtype=float)
-            ci_high = pd.to_numeric(sub["ssi_percent_ci95_high_image_boot"], errors="coerce").to_numpy(dtype=float)
-            has_ci = np.isfinite(ci_low) & np.isfinite(ci_high) & np.isfinite(y)
-            if np.any(has_ci):
-                yerr_low = np.clip(y[has_ci] - ci_low[has_ci], 0.0, None)
-                yerr_high = np.clip(ci_high[has_ci] - y[has_ci], 0.0, None)
-                ax.errorbar(
-                    x[has_ci],
-                    y[has_ci],
-                    yerr=[yerr_low, yerr_high],
-                    color=color,
-                    linestyle="none",
-                    elinewidth=1.1,
-                    capsize=0,
-                    zorder=3,
-                )
-        ax.plot(x, y, color=color, linewidth=1.75, zorder=2)
-        ax.scatter(
-            x,
-            y,
-            marker="o",
-            s=24,
-            facecolors=color if filled else "white",
-            edgecolors=color,
-            linewidths=1.25,
-            zorder=4,
-        )
-
-
 def _plot_component_series(ax: plt.Axes, frame: pd.DataFrame, *, color: str) -> None:
     ax.scatter(
         [0.0],
@@ -517,27 +435,6 @@ def _panel_label(ax: plt.Axes, label: str) -> None:
         fontsize=16,
         fontweight="bold",
     )
-
-
-def _ylim_series(frame: pd.DataFrame, col: str = "ssi_percent_vs_cell_baseline") -> list[pd.Series]:
-    """Point estimate plus bootstrap CI bounds (if present), so shared y-limits
-    aren't clipping the error bars this function's callers go on to draw."""
-    series = [frame[col]]
-    for ci_col in ("ssi_percent_ci95_low_image_boot", "ssi_percent_ci95_high_image_boot"):
-        if ci_col in frame.columns:
-            series.append(frame[ci_col])
-    return series
-
-
-def _shared_ylim(values: list[pd.Series], *, pad_low: float = 0.12, pad_high: float = 0.14) -> tuple[float, float]:
-    arrs = [pd.to_numeric(series, errors="coerce").to_numpy(dtype=float) for series in values if not series.empty]
-    vals = [0.0]
-    for arr in arrs:
-        vals.extend(arr[np.isfinite(arr)].tolist())
-    lo = min(vals)
-    hi = max(vals)
-    span = max(hi - lo, 1.0)
-    return lo - pad_low * span, hi + pad_high * span
 
 
 def _plot_figure(panel_b: pd.DataFrame, component: pd.DataFrame) -> plt.Figure:

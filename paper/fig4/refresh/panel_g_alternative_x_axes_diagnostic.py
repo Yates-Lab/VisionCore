@@ -19,10 +19,13 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+
 import numpy as np
 import pandas as pd
 from matplotlib.backends.backend_pdf import PdfPages
 
+import _fig4_imports  # noqa: F401  (puts the fig4 directory on sys.path)
+from _fig4_style import GRAY, INK, ORANGE, configure_matplotlib
 import _fig4_cell_baseline_errorbars as panel_c
 from _fig4_component_2d_surface import _assign_bins
 from _fig4_component_path_baseline import (
@@ -51,9 +54,6 @@ BODY_QUANTILES = (0.0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875)
 TAIL_QUANTILE = 0.95
 N_BOOTSTRAP = 10_000
 BOOTSTRAP_SEED = 47
-ORANGE = "#D55E00"
-GRAY = "#6B6F75"
-INK = "#111111"
 EPS = 1e-12
 
 FAMILIES = (
@@ -162,23 +162,6 @@ def _json_ready(value: Any) -> Any:
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(_json_ready(payload), indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-
-def configure_matplotlib() -> None:
-    plt.rcParams.update(
-        {
-            "font.family": "DejaVu Sans",
-            "font.size": 8,
-            "axes.titlesize": 9,
-            "axes.labelsize": 8,
-            "xtick.labelsize": 7,
-            "ytick.labelsize": 7,
-            "axes.linewidth": 0.8,
-            "pdf.fonttype": 42,
-            "ps.fonttype": 42,
-            "svg.fonttype": "none",
-        }
-    )
 
 
 def _compute_extended_component_metrics(data: dict[str, Any]) -> pd.DataFrame:

@@ -4,9 +4,10 @@
 This is the single-panel distillation of the behavior-model bridge: for each
 population, how much more (or less) predicted SSI the real trace-contour
 matching gives you than a randomly rotated trajectory, as a function of local
-edge coherence. It reuses the same data, palette, and population styling as
-the standalone explainer figure's Panel C
-(behavior_model_bridge/_fig4_bridge_explainer.py), rendered at this
+edge coherence. It reuses the same data as the standalone explainer figure's
+Panel C (`_fig4_bridge_explainer.py`) and the same population palette, which
+now lives in `_fig4_style.py` rather than being reached through the explainer,
+rendered at this
 slot's real footprint (originally Panel I's; the whole figure's G/H/I shifted
 to H/I/J once a new panel G was inserted between F and the old G -- see
 _fig4_ssi_common.py's EF_INSET_* constants and draw_contour_components_panel).
@@ -42,9 +43,9 @@ from VisionCore.paths import VISIONCORE_ROOT as ROOT
 
 import _fig4_paths as _paths
 
-import _fig4_bridge_explainer as explainer
-import _fig4_bridge as bridge
 import _fig4_panel_header
+import _fig4_style as style
+from _fig4_style import configure_matplotlib
 
 OUT_DIR = _paths.PANELS_DIR
 COHERENCE_SUMMARY_CSV = _paths.BRIDGE_PREDICTION_BY_COHERENCE_SUMMARY_CSV
@@ -53,10 +54,6 @@ METRIC_FAMILY = "component_rms"
 # (8.5, 11.0)) -- panel I's actual footprint, not its ~2.35x2.25 standalone
 # preview approximation.
 FIGSIZE = (1.955, 2.432)
-
-
-def configure_matplotlib() -> None:
-    explainer.configure_matplotlib()
 
 
 def _relative(path: Path) -> str:
@@ -69,7 +66,7 @@ def _relative(path: Path) -> str:
 def load_values(csv_path: Path = COHERENCE_SUMMARY_CSV) -> pd.DataFrame:
     frame = pd.read_csv(csv_path)
     frame = frame[frame["score_type"].astype(str).eq("component_mean_marginal") & frame["metric_family"].astype(str).eq(METRIC_FAMILY)].copy()
-    frame["coherence_bin"] = pd.Categorical(frame["coherence_bin"], categories=bridge.COHERENCE_ORDER, ordered=True)
+    frame["coherence_bin"] = pd.Categorical(frame["coherence_bin"], categories=style.COHERENCE_ORDER, ordered=True)
     return frame
 
 
@@ -93,9 +90,9 @@ def draw_panel(
 ) -> pd.DataFrame:
     """Draw the coherence-resolved match-advantage panel on ``ax``."""
     values = load_values() if values is None else values.copy()
-    x = np.arange(len(bridge.COHERENCE_ORDER), dtype=float)
+    x = np.arange(len(style.COHERENCE_ORDER), dtype=float)
 
-    ax.axhline(0.0, color=explainer.INK, lw=0.9, ls=":", alpha=0.6)
+    ax.axhline(0.0, color=style.INK, lw=0.9, ls=":", alpha=0.6)
 
     # Significance is encoded on the marker itself -- filled when the 95% CI
     # excludes zero, open (white) when it doesn't -- rather than floating
@@ -108,8 +105,8 @@ def draw_panel(
         lo = sub["observed_minus_rotated_ci95_low"].to_numpy(dtype=float)
         hi = sub["observed_minus_rotated_ci95_high"].to_numpy(dtype=float)
         is_aligned = population_key == "high_sf_aligned"
-        color = explainer.POPULATION_COLORS[population_key]
-        marker = explainer.POPULATION_MARKERS[population_key]
+        color = style.POPULATION_COLORS[population_key]
+        marker = style.POPULATION_MARKERS[population_key]
         ax.errorbar(
             x,
             y,
@@ -133,9 +130,9 @@ def draw_panel(
             zorder=5 if is_aligned else 4,
         )
 
-    ax.set_xlim(-0.45, len(bridge.COHERENCE_ORDER) - 0.55)
+    ax.set_xlim(-0.45, len(style.COHERENCE_ORDER) - 0.55)
     ax.set_xticks(x)
-    ax.set_xticklabels(bridge.COHERENCE_ORDER, fontsize=5.6, rotation=0, ha="center")
+    ax.set_xticklabels(style.COHERENCE_ORDER, fontsize=5.6, rotation=0, ha="center")
     ax.set_xlabel("local edge coherence", labelpad=1.5)
     # Single line, not the original 2-line "observed - random rotated\n(pp
     # SSI, RMS excursion)": a rotated ylabel's line-stacking direction
@@ -145,14 +142,14 @@ def draw_panel(
     # this whole panel row is RMS-excursion-based, so neither needs repeating
     # here.
     ax.set_ylabel("SSI advantage (pp)", labelpad=2.0)
-    ax.grid(axis="y", color=explainer.PALE_GRID, lw=0.75)
+    ax.grid(axis="y", color=style.PALE_GRID, lw=0.75)
     ax.set_axisbelow(True)
     _fig4_panel_header.draw_bottom_row_header(
         ax,
         label,
         title,
         title_linespacing=_fig4_panel_header.PANEL_TITLE_LINESPACING,
-        color=explainer.INK,
+        color=style.INK,
     )
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -164,10 +161,10 @@ def draw_panel(
         Line2D(
             [0],
             [0],
-            color=explainer.POPULATION_COLORS[key],
-            marker=explainer.POPULATION_MARKERS[key],
+            color=style.POPULATION_COLORS[key],
+            marker=style.POPULATION_MARKERS[key],
             markersize=4.2,
-            markerfacecolor=explainer.POPULATION_COLORS[key],
+            markerfacecolor=style.POPULATION_COLORS[key],
             markeredgewidth=1.0,
             lw=2.0 if key == "high_sf_aligned" else 1.5,
             label=SHORT_POPULATION_LABELS[key],
@@ -177,7 +174,7 @@ def draw_panel(
     significance_handle = Line2D(
         [0],
         [0],
-        color=explainer.INK,
+        color=style.INK,
         marker="o",
         markersize=4.2,
         markerfacecolor="white",

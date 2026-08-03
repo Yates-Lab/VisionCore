@@ -23,6 +23,7 @@ from matplotlib import patches
 from VisionCore.paths import VISIONCORE_ROOT as ROOT
 
 import _fig4_paths as _paths
+from _fig4_style import GRAY
 
 import panel_f_unwrapped_edge_coherence as panel_h  # noqa: E402
 
@@ -30,8 +31,6 @@ CACHE_NPZ = _paths.COHERENCE_GALLERY_NPZ
 # Same low -> high green sequence as panel I's coherence-bin legend.
 BIN_COLORS = panel_h.COLORS
 CONTOUR_WINDOW = "#E6A700"
-GRAY = "#6B6F75"
-INK = "#111111"
 
 
 def load_gallery(cache_npz: Path = CACHE_NPZ) -> dict | None:

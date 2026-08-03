@@ -11,6 +11,18 @@ import numpy as np
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib-cache")
 Path(os.environ["MPLCONFIGDIR"]).mkdir(parents=True, exist_ok=True)
 
+# `jake` is a repo-root package rather than an installed one, so the root has to
+# be importable before it resolves (same approach as
+# plot_backimage_contour_motion_components). Without this, importing this module
+# on its own raised ModuleNotFoundError -- it only worked when something else had
+# already run the same sys.path insert.
+import sys
+
+from VisionCore.paths import VISIONCORE_ROOT
+
+if str(VISIONCORE_ROOT) not in sys.path:
+    sys.path.insert(0, str(VISIONCORE_ROOT))
+
 from jake.twininfo.eye_controls import detect_microsaccade_events, speed_threshold_mad
 
 from .features import event_feature_rows, fixation_window_features

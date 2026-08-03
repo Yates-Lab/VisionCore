@@ -32,6 +32,8 @@ from pathlib import Path
 
 import fitz  # PyMuPDF
 
+from VisionCore.paths import VISIONCORE_ROOT as ROOT
+
 import _fig4_paths as _paths
 
 REFERENCE_PDF = _paths.LAYOUT_REFERENCE_PDF
@@ -49,7 +51,6 @@ def extract_network_icon(
     out_pdf: Path = OUT_PDF,
 ) -> Path:
     src = fitz.open(str(pdf_path))
-    src_page = src[0]
     clip = fitz.Rect(*bbox_pt)
 
     out_dir = out_pdf.parent

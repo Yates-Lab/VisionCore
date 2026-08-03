@@ -20,6 +20,7 @@ os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib-cache")
 Path(os.environ["MPLCONFIGDIR"]).mkdir(parents=True, exist_ok=True)
 from VisionCore.paths import VISIONCORE_ROOT as ROOT
 
+import _fig4_imports  # noqa: F401  (puts the fig4 directory on sys.path)
 import _fig4_paths as _paths
 
 import matplotlib

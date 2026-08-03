@@ -33,12 +33,9 @@ import pandas as pd
 from VisionCore.paths import VISIONCORE_ROOT as ROOT
 
 import _fig4_paths as _paths
+from _fig4_style import GRAY, INK, ORANGE, configure_matplotlib
 
-from _fig4_geometry_story import (
-    _add_bracket,
-    _format_p_label,
-)
-from _fig4_matched_bins_bracket import _add_vertical_bracket
+from _fig4_brackets import add_bracket, add_vertical_bracket, format_p_label
 
 VALUES_CSV = _paths.PATH_BINS_VALUES_CSV
 LAST_BIN_CONTRASTS_CSV = _paths.PATH_BINS_LAST_BIN_CONTRASTS_CSV
@@ -52,10 +49,7 @@ OUT_STEM = "_fig4_option_sheet"
 POPULATION_KEY = "high_sf_aligned"
 BRIDGE_SUBSET_KEY = "coh_ge_0p2"
 
-ORANGE = "#D55E00"
 DIRECTION_COLOR = ORANGE
-INK = "#111111"
-GRAY = "#6B6F75"
 GRID = "#E7E7E7"
 
 METRIC_ORDER = ("component_path", "component_rms", "component_range", "path_per_range")
@@ -89,23 +83,6 @@ COMPONENT_STYLE = {
     "across": {"label": "across (contour-normal)", "linestyle": "-", "marker": "o"},
     "along": {"label": "along (contour-parallel)", "linestyle": (0, (4.2, 2.0)), "marker": "s"},
 }
-
-
-def configure_matplotlib() -> None:
-    plt.rcParams.update(
-        {
-            "font.family": "DejaVu Sans",
-            "font.size": 8,
-            "axes.titlesize": 9,
-            "axes.labelsize": 8,
-            "xtick.labelsize": 7,
-            "ytick.labelsize": 7,
-            "axes.linewidth": 0.8,
-            "pdf.fonttype": 42,
-            "ps.fonttype": 42,
-            "svg.fonttype": "none",
-        }
-    )
 
 
 def _clean_axis(ax: plt.Axes) -> None:
@@ -290,10 +267,10 @@ def _draw_dose_panel(
         y_span = max(y_hi - y_lo, 1.0)
         text = (
             "near 0\n"
-            f"across {_format_p_label(float(across_first['population_delta_p_image_bootstrap_sign']))}\n"
-            f"along {_format_p_label(float(along_first['population_delta_p_image_bootstrap_sign']))}"
+            f"across {format_p_label(float(across_first['population_delta_p_image_bootstrap_sign']))}\n"
+            f"along {format_p_label(float(along_first['population_delta_p_image_bootstrap_sign']))}"
         )
-        _add_bracket(
+        add_bracket(
             ax,
             x0=0.0,
             x1=x1,
@@ -324,12 +301,12 @@ def _draw_dose_panel(
                 [float(last_rows["across"]["plot_median"])], min_pos=min_pos, max_pos=max_pos, zero_gap=zero_gap, span=span
             )[0]
         )
-        _add_vertical_bracket(
+        add_vertical_bracket(
             ax,
             x=x_last + final_bracket_x_offset,
             y0=float(last_rows["across"]["ssi_percent_vs_cell_baseline"]),
             y1=float(last_rows["along"]["ssi_percent_vs_cell_baseline"]),
-            label=f"{pp:+.1f} pp\n{_format_p_label(p_val)}",
+            label=f"{pp:+.1f} pp\n{format_p_label(p_val)}",
             color=DIRECTION_COLOR,
         )
 
@@ -374,9 +351,9 @@ def _evidence_chip_text(metric_family: str, contrasts: pd.DataFrame, bridge: pd.
         bridge_row = bridge_rows.iloc[0]
         bridge_pp = float(bridge_row["observed_minus_rotated_session_mean"])
         bridge_p = float(bridge_row["p_rotation_two_sided"])
-        bridge_text = f"{bridge_pp:+.3f} pp vs. random rotation, {_format_p_label(bridge_p)}"
+        bridge_text = f"{bridge_pp:+.3f} pp vs. random rotation, {format_p_label(bridge_p)}"
 
-    return f"Model:  {model_pp:+.1f} pp, {_format_p_label(model_p)}\nBridge: {bridge_text}"
+    return f"Model:  {model_pp:+.1f} pp, {format_p_label(model_p)}\nBridge: {bridge_text}"
 
 
 def build(out_dir: Path = OUT_DIR) -> dict[str, Path]:

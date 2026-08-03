@@ -249,6 +249,20 @@ Module names carry the **displayed** letter; the internal layout keys retain the
 **source** letters measured off `reference/ssi_figure_v2_3.pdf`, and
 `DISPLAY_SPECS` in the entry point maps between them.
 
+## Directory layout
+
+- `*.py` here -- the figure itself: `panel_[a-h]_*.py` and the `_fig4_*` modules
+  they share (`_fig4_style`, `_fig4_brackets`, `_fig4_broken_axis`,
+  `_fig4_schematic_axes`, `_fig4_ssi_common`, `_fig4_contour_schematic`, ...).
+  Everything here is on the build's import path.
+- `refresh/` -- the analysis that regenerates the cached inputs. Nothing here is
+  imported by the build. These are run directly and import the shared modules
+  above via `refresh/_fig4_imports.py`, which puts this directory on `sys.path`.
+- `fixation_stats/` -- BackImage fixation/eye-movement feature extraction, used
+  by `refresh/`; the build touches only `fixation_stats.backimage_canvas`.
+- `reference/` -- the regression baseline and the Illustrator source artwork,
+  plus the original handoff documentation (marked historical).
+
 ## Inputs
 
 All cached inputs live flat under `outputs/cache/` as `fig4_*`.

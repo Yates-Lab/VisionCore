@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import _fig4_imports  # noqa: F401  (puts the fig4 directory on sys.path)
 import _fig4_paths as _paths
+from _fig4_brackets import add_bracket as _add_bracket, format_p_label as _format_p_label
 
 import math
 from pathlib import Path
@@ -392,41 +394,6 @@ def _plot_path_series(
             linewidths=1.35,
             zorder=5,
         )
-
-
-def _format_p_label(value: float) -> str:
-    if not math.isfinite(float(value)):
-        return "p=n/a"
-    if float(value) < 0.001:
-        return "p<0.001"
-    return f"p={float(value):.3f}"
-
-
-def _add_bracket(
-    ax: plt.Axes,
-    *,
-    x0: float,
-    x1: float,
-    y: float,
-    text: str,
-    color: str,
-    linestyle: str | tuple[int, tuple[float, ...]] = "-",
-    text_x: float | None = None,
-    text_ha: str = "center",
-) -> None:
-    tick = 0.7
-    ax.plot([x0, x0, x1, x1], [y - tick, y, y, y - tick], color=color, lw=1.0, ls=linestyle, zorder=6)
-    ax.text(
-        0.5 * (x0 + x1) if text_x is None else text_x,
-        y + 0.45,
-        text,
-        ha=text_ha,
-        va="bottom",
-        color=color,
-        fontsize=7.2,
-        bbox={"facecolor": "white", "edgecolor": "none", "alpha": 0.78, "pad": 0.6},
-        zorder=7,
-    )
 
 
 def _first_drift_row(rows: pd.DataFrame, x_col: str) -> pd.Series | None:

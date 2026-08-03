@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """Build a contour-relative SSI schematic with a fig3-style model-input cube."""
 
-from pathlib import Path
 import sys
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
-from matplotlib import patches, patheffects, transforms
+from matplotlib import patches, patheffects
 
 try:
     from scipy.ndimage import shift as ndi_shift
@@ -18,6 +17,7 @@ except Exception:
 from VisionCore.paths import VISIONCORE_ROOT as ROOT
 
 import _fig4_paths as _paths
+from _fig4_style import INK
 
 # Panel A's model-input cube is drawn by figure 3's panel-A builder, so this is
 # a hard cross-figure dependency, not an optional embellishment. It used to be
@@ -31,8 +31,7 @@ FIG3_DIR = ROOT / "paper" / "fig3"
 if str(FIG3_DIR) not in sys.path:
     sys.path.insert(0, str(FIG3_DIR))
 
-from fixation_stats.image_features import _backimage_canvas
-from fixation_stats.run_backimage_twin_drift_geometry import _clip_patch
+from fixation_stats.backimage_canvas import _backimage_canvas, _clip_patch
 
 from generate_fig3a import (  # noqa: E402
     CYAN as FIG3_CYAN,
@@ -64,7 +63,6 @@ SCHEMATIC_REAL_TRACE_CENTER40_CSV = _paths.SCHEMATIC_TRACE_CENTER40_CSV
 RED = "#c51f27"
 BLUE = "#1e4ed8"
 GRAY = "#5f6368"
-INK = "#111111"
 READOUT_GREEN = "#1f5e1f"
 READOUT_FILL = "#d9ecd9"
 CORE_FILL = "#d7d9d8"
@@ -589,26 +587,9 @@ def make_stimulus(seed=7, n=260):
     return img
 
 
-def add_panel_label(fig, text, x, y):
-    fig.text(x, y, text, fontsize=15, weight="bold", ha="left", va="center")
-
-
 def add_panel_header(fig, letter, title, x, y):
     fig.text(x, y, letter, fontsize=16, weight="bold", ha="left", va="center")
     fig.text(x + 0.022, y, title, fontsize=15, weight="bold", ha="left", va="center")
-
-
-def add_flow_arrow(fig, x0, x1, y):
-    arrow = patches.FancyArrowPatch(
-        (x0, y),
-        (x1, y),
-        transform=fig.transFigure,
-        arrowstyle="-|>",
-        mutation_scale=17,
-        linewidth=1.1,
-        color=GRAY,
-    )
-    fig.patches.append(arrow)
 
 
 def add_small_arrow(fig, x0, x1, y):
@@ -627,12 +608,6 @@ def add_small_arrow(fig, x0, x1, y):
 
 def square_height(fig, width):
     return width * fig.get_figwidth() / fig.get_figheight()
-
-
-def image_height_for_width(fig, width, image):
-    arr = np.asarray(image)
-    h, w = arr.shape[:2]
-    return float(width) * fig.get_figwidth() / fig.get_figheight() * float(h) / float(w)
 
 
 def add_axis_arrows(ax, xlabel=True, ylabel=True):
@@ -1173,38 +1148,6 @@ def add_source_overview(ax, canvas, crop_center_xy, crop_size_px, *, label=True,
         )
 
 
-def add_contour_eye(ax):
-    ax.set_axis_off()
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
-    ax.set_aspect("equal", adjustable="box")
-
-    ax.add_patch(patches.Circle((0.50, 0.50), 0.42, facecolor="#fbfbfb", edgecolor=INK, lw=1.2))
-    ax.add_patch(patches.Circle((0.34, 0.51), 0.18, facecolor="#e9eef4", edgecolor=INK, lw=0.9))
-    ax.add_patch(patches.Circle((0.28, 0.51), 0.075, facecolor=INK, edgecolor=INK, lw=0.7))
-    ax.add_patch(patches.Circle((0.43, 0.66), 0.055, facecolor="white", edgecolor="none", alpha=0.9))
-    ax.plot([0.83, 0.97], [0.55, 0.61], color=INK, lw=1.0)
-    ax.plot([0.83, 0.97], [0.45, 0.39], color=INK, lw=1.0)
-
-
-def connect_gaze_to_eye(fig, stim_ax, gaze_xy, eye_ax):
-    start = fig.transFigure.inverted().transform(stim_ax.transData.transform(gaze_xy))
-    eye_pos = eye_ax.get_position()
-    end = (eye_pos.x0 + 0.09 * eye_pos.width, eye_pos.y0 + 0.50 * eye_pos.height)
-    fig.patches.append(
-        patches.FancyArrowPatch(
-            start,
-            end,
-            transform=fig.transFigure,
-            arrowstyle="-",
-            linestyle=(0, (3, 3)),
-            linewidth=1.05,
-            color=INK,
-            alpha=0.85,
-        )
-    )
-
-
 def connect_crop_to_source_overview(fig, stim_ax, overview_ax, crop_center_xy, crop_size_px):
     cx, cy = crop_center_xy
     size = float(crop_size_px)
@@ -1442,55 +1385,6 @@ def temporal_integrate_trace(values, n_frames=PANEL_A_INTEGRATION_FRAMES):
     return np.convolve(padded, kernel, mode="valid")
 
 
-def gabor_kernel(size_px, contour_axis_image_deg, *, cycles, sigma_frac):
-    n = int(size_px)
-    yy, xx = np.mgrid[-1:1:complex(n), -1:1:complex(n)]
-    theta = np.deg2rad(float(contour_axis_image_deg) + 90.0)
-    normal_coord = xx * np.cos(theta) + yy * np.sin(theta)
-    envelope = np.exp(-(xx**2 + yy**2) / (2.0 * float(sigma_frac) ** 2))
-    kernel = np.cos(2.0 * np.pi * float(cycles) * normal_coord) * envelope
-    kernel -= float(np.mean(kernel))
-    denom = float(np.sqrt(np.sum(kernel**2))) or 1.0
-    return kernel / denom
-
-
-def center_patch(image, size_px):
-    image = np.asarray(image, dtype=np.float64)
-    h, w = image.shape[:2]
-    return _clip_patch(image, (0.5 * (w - 1), 0.5 * (h - 1)), int(size_px))
-
-
-def linear_gabor_trace(image, contour_axis_image_deg, across_px, *, cycles, sigma_frac):
-    image = normalize_image(image)
-    theta = np.deg2rad(float(contour_axis_image_deg))
-    normal = np.array([-np.sin(theta), np.cos(theta)], dtype=np.float64)
-    kernel = gabor_kernel(
-        SYNTHETIC_GABOR_SIZE_PX,
-        contour_axis_image_deg,
-        cycles=cycles,
-        sigma_frac=sigma_frac,
-    )
-    responses = []
-    for amp in np.asarray(across_px, dtype=np.float64):
-        offset = normal * float(amp)
-        shifted = shift_image_with_edge(image, offset[0], offset[1])
-        patch = center_patch(shifted, SYNTHETIC_GABOR_SIZE_PX)
-        patch = normalize_image(patch)
-        patch = patch - float(np.mean(patch))
-        responses.append(float(np.sum(patch * kernel)))
-    return np.asarray(responses, dtype=np.float64)
-
-
-def center_pixel_gabor_activation(across_px, *, wavelength_px, sigma_px, phase_rad=0.0):
-    """Linear response of a contour-aligned Gabor RF to across-contour displacement."""
-    across_px = np.asarray(across_px, dtype=np.float64)
-    carrier = np.cos(2.0 * np.pi * across_px / float(wavelength_px) + float(phase_rad))
-    envelope = np.exp(-0.5 * (across_px / float(sigma_px)) ** 2)
-    response = carrier * envelope
-    response -= float(np.mean(response))
-    return response
-
-
 def schematic_grating_patch(size_px, wavelength_px, *, angle_deg):
     yy, xx = np.mgrid[:size_px, :size_px].astype(np.float64)
     cx = cy = 0.5 * (int(size_px) - 1)
@@ -1711,168 +1605,6 @@ def add_synthetic_eye_trace_panel(ax, synthetic_eye):
         clip_on=False,
     )
     bottom_ax.text(0.50, -0.38, "frame", transform=bottom_ax.transAxes, ha="center", fontsize=7.8, clip_on=False)
-
-
-def eye_trace_component(payload, condition_id, component="across"):
-    cond_idx = condition_index(payload, condition_id)
-    trace = np.asarray(payload["condition_traces"][cond_idx], dtype=np.float64)
-    centered = trace - np.mean(trace, axis=0, keepdims=True)
-    theta = np.deg2rad(float(payload.get("contour_axis_deg", 0.0)))
-    along_u = np.asarray([np.cos(theta), np.sin(theta)], dtype=np.float64)
-    across_u = np.asarray([-np.sin(theta), np.cos(theta)], dtype=np.float64)
-    unit = across_u if component == "across" else along_u
-    return centered @ unit
-
-
-def add_eye_trace_panel(ax, payload=None):
-    bank_traces = None if payload is None else payload.get("component_sorted_eye_traces")
-    if bank_traces is not None:
-        low = bank_traces["low"]
-        high = bank_traces["high"]
-        red = np.asarray(low["across_trace_arcmin"], dtype=np.float64)
-        blue = np.asarray(high["across_trace_arcmin"], dtype=np.float64)
-        t = np.arange(len(red))
-        both = np.concatenate([red[np.isfinite(red)], blue[np.isfinite(blue)]])
-        ylim = float(np.nanpercentile(np.abs(both), 99.0)) * 1.35 if both.size else 1.0
-        if not np.isfinite(ylim) or ylim <= EPS:
-            ylim = 1.0
-
-        ax.axhline(0.0, color="#cdd1d6", lw=0.8, zorder=0)
-        ax.plot(t, red, color=RED, lw=1.75)
-        ax.plot(t, blue, color=BLUE, lw=1.75)
-        ax.text(
-            0.02,
-            1.08,
-            "real eye traces",
-            transform=ax.transAxes,
-            fontsize=8.2,
-            color=GRAY,
-            ha="left",
-            va="bottom",
-            clip_on=False,
-        )
-        ax.text(
-            0.60,
-            1.08,
-            f"small {low['across_path_arcmin']:.0f}'",
-            transform=ax.transAxes,
-            fontsize=7.2,
-            color=RED,
-            ha="right",
-            va="bottom",
-            clip_on=False,
-        )
-        ax.text(
-            0.98,
-            1.08,
-            f"large {high['across_path_arcmin']:.0f}'",
-            transform=ax.transAxes,
-            fontsize=7.2,
-            color=BLUE,
-            ha="right",
-            va="bottom",
-            clip_on=False,
-        )
-        ax.set_ylim(-ylim, ylim)
-        ax.set_xlim(float(np.nanmin(t)), float(np.nanmax(t)))
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.spines[["top", "right", "left"]].set_visible(False)
-        ax.spines["bottom"].set_linewidth(0.9)
-        ax.annotate(
-            "",
-            xy=(1.02, 0.0),
-            xytext=(0.0, 0.0),
-            xycoords=("axes fraction", "axes fraction"),
-            arrowprops=dict(arrowstyle="-|>", lw=0.9, color=INK),
-        )
-        ax.text(0.50, -0.25, "frame", transform=ax.transAxes, ha="center", fontsize=7.8)
-        return
-
-    if payload is None:
-        t = np.linspace(0, 1, 40)
-        red = 0.25 * np.sin(2 * np.pi * (1.2 * t + 0.1))
-        blue = 0.75 * np.sin(2 * np.pi * (1.2 * t + 0.1))
-    else:
-        red = eye_trace_component(payload, SMALL_CONDITION, component="across")
-        blue = eye_trace_component(payload, LARGE_CONDITION, component="across")
-        t = np.arange(len(red))
-
-    def lane(values, center):
-        values = np.asarray(values, dtype=np.float64)
-        values = values - np.nanmean(values)
-        denom = float(np.nanpercentile(np.abs(values), 98.0))
-        if not np.isfinite(denom) or denom <= EPS:
-            return np.full_like(values, center)
-        return center + 0.18 * np.clip(values / denom, -1.0, 1.0)
-
-    red_lane = lane(red, 0.67)
-    blue_lane = lane(blue, 0.30)
-    ax.axhline(0.67, color="#d6d8dc", lw=0.7, zorder=0)
-    ax.axhline(0.30, color="#d6d8dc", lw=0.7, zorder=0)
-    ax.plot(t, red_lane, color=RED, lw=1.8)
-    ax.plot(t, blue_lane, color=BLUE, lw=1.8)
-    ax.text(0.02, 0.95, "eye traces", transform=ax.transAxes, fontsize=8.2, color=GRAY, ha="left", va="top")
-    ax.text(0.98, 0.76, "0.125x", transform=ax.transAxes, fontsize=7.4, color=RED, ha="right", va="center")
-    ax.text(0.98, 0.39, "3x", transform=ax.transAxes, fontsize=7.4, color=BLUE, ha="right", va="center")
-    ax.set_ylim(0.03, 0.98)
-    ax.set_xlim(float(np.nanmin(t)), float(np.nanmax(t)))
-    ax.set_xticks([])
-    ax.set_yticks([])
-    ax.spines[["top", "right", "left"]].set_visible(False)
-    ax.spines["bottom"].set_linewidth(0.9)
-    ax.annotate(
-        "",
-        xy=(1.02, 0.0),
-        xytext=(0.0, 0.0),
-        xycoords=("axes fraction", "axes fraction"),
-        arrowprops=dict(arrowstyle="-|>", lw=0.9, color=INK),
-    )
-    ax.text(0.50, -0.25, "frame", transform=ax.transAxes, ha="center", fontsize=7.8)
-
-
-def add_trace_panel(ax, sf="high", red_trace=None, blue_trace=None):
-    signed_activation = False
-    if red_trace is None or blue_trace is None:
-        t = np.linspace(0, 1, 240)
-        if sf == "high":
-            red = 0.55 + 0.27 * np.sin(2 * np.pi * (2.2 * t + 0.05)) * np.exp(-0.8 * t)
-            blue = 0.48 + 0.13 * np.sin(2 * np.pi * (1.3 * t + 0.3)) + 0.05 * np.sin(2 * np.pi * 5.1 * t)
-        elif sf == "medium":
-            red = 0.48 + 0.17 * np.sin(2 * np.pi * (2.0 * t + 0.15)) * np.exp(-0.45 * t)
-            blue = 0.47 + 0.18 * np.sin(2 * np.pi * (2.6 * t - 0.04)) + 0.04 * np.sin(2 * np.pi * 5.0 * t)
-        else:
-            red = 0.44 + 0.10 * np.sin(2 * np.pi * (1.6 * t + 0.2)) * np.exp(-1.0 * t)
-            blue = 0.47 + 0.30 * np.sin(2 * np.pi * (2.1 * t - 0.05)) + 0.08 * np.sin(2 * np.pi * 5.2 * t)
-    else:
-        both = np.concatenate([
-            np.asarray(red_trace, dtype=np.float64).ravel(),
-            np.asarray(blue_trace, dtype=np.float64).ravel(),
-        ])
-        signed_activation = float(np.nanmin(both)) < 0.0 < float(np.nanmax(both))
-        red, blue = scale_trace_pair(red_trace, blue_trace)
-        t = np.linspace(0, 1, len(red))
-
-    if signed_activation:
-        ax.axhline(0.50, color="#d6d8dc", lw=0.75, zorder=0)
-    ax.plot(t, red, color=RED, lw=1.8, label="small motion")
-    ax.plot(t, blue, color=BLUE, lw=1.8, label="large motion")
-    ax.text(0.02, 0.93, "small", transform=ax.transAxes, color=RED, fontsize=7.8, ha="left", va="top")
-    ax.text(0.17, 0.93, "large", transform=ax.transAxes, color=BLUE, fontsize=7.8, ha="left", va="top")
-    ax.set_ylim(0.04, 0.96)
-    ax.set_xlim(0, 1)
-    ax.set_yticks([])
-    ax.set_xticks([])
-    ax.spines[["top", "right", "left"]].set_visible(False)
-    ax.spines["bottom"].set_linewidth(0.9)
-    ax.annotate(
-        "",
-        xy=(1.02, 0.0),
-        xytext=(0.0, 0.0),
-        xycoords=("axes fraction", "axes fraction"),
-        arrowprops=dict(arrowstyle="-|>", lw=0.9, color=INK),
-    )
-    ax.text(0.50, -0.24, "time", transform=ax.transAxes, ha="center", fontsize=8)
 
 
 def add_split_response_trace_axes(
@@ -2520,44 +2252,6 @@ def add_motion_sharpening_panel(
         )
 
 
-def add_frame_sequence(fig, left, bottom, kind="sharp", frame_w=0.026, gap=0.006):
-    frame_h = square_height(fig, frame_w)
-    seq_y = bottom + 0.060
-    total_w = 4 * frame_w + 3 * gap
-    center = left + total_w / 2
-    for i in range(4):
-        ax = fig.add_axes([left + i * (frame_w + gap), seq_y, frame_w, frame_h])
-        ax.imshow(
-            make_activation_map(kind, phase=i * 0.9),
-            cmap=ACTIVATION_CMAP,
-            vmin=0,
-            vmax=1,
-            interpolation=ACTIVATION_INTERPOLATION,
-        )
-        ax.set_aspect("equal", adjustable="box")
-        ax.set_xticks([])
-        ax.set_yticks([])
-        for spine in ax.spines.values():
-            spine.set_linewidth(0.8)
-            spine.set_edgecolor(INK)
-
-    fig.text(left + frame_w / 2, seq_y - 0.026, "frame 1", fontsize=7.2, ha="center")
-    fig.text(center, seq_y - 0.026, "...", fontsize=11, ha="center")
-    fig.text(left + 3 * (frame_w + gap) + frame_w / 2, seq_y - 0.026, "frame T", fontsize=7.2, ha="center")
-
-    fig.patches.append(
-        patches.FancyArrowPatch(
-            (left - 0.018, seq_y + frame_h / 2),
-            (left - 0.004, seq_y + frame_h / 2),
-            transform=fig.transFigure,
-            arrowstyle="-|>",
-            mutation_scale=12,
-            lw=1,
-            color=GRAY,
-        )
-    )
-
-
 def add_frame_grid(
     fig,
     left,
@@ -2622,81 +2316,6 @@ def add_frame_grid(
     fig.text(left + total_w / 2, bottom - 0.022, "...", fontsize=10.5, ha="center")
     fig.text(left + total_w - frame_w / 2, bottom - 0.022, "frame T", fontsize=7.0, ha="center")
     return total_h
-
-
-def add_ssi_plot(ax, kind="high", red_trace=None, blue_trace=None):
-    if red_trace is None or blue_trace is None:
-        x = np.linspace(0, 1, 160)
-        if kind == "high":
-            red = 0.34 + 0.30 * np.exp(-((x - 0.35) / 0.17) ** 2) + 0.08 * np.sin(2 * np.pi * 2.0 * x)
-            blue = 0.25 + 0.20 * np.exp(-((x - 0.58) / 0.23) ** 2) + 0.04 * np.sin(2 * np.pi * 1.5 * x + 0.4)
-        elif kind == "medium":
-            red = 0.28 + 0.18 * np.exp(-((x - 0.42) / 0.22) ** 2) + 0.06 * np.sin(2 * np.pi * 1.8 * x + 0.2)
-            blue = 0.25 + 0.24 * np.exp(-((x - 0.52) / 0.20) ** 2) + 0.05 * np.sin(2 * np.pi * 2.2 * x + 0.1)
-        else:
-            red = 0.19 + 0.10 * np.exp(-((x - 0.46) / 0.26) ** 2) + 0.03 * np.sin(2 * np.pi * 1.4 * x)
-            blue = 0.23 + 0.18 * np.exp(-((x - 0.57) / 0.21) ** 2) + 0.05 * np.sin(2 * np.pi * 1.8 * x + 0.5)
-        ylim = (0, 0.78)
-    else:
-        red = np.asarray(red_trace, dtype=np.float64)
-        blue = np.asarray(blue_trace, dtype=np.float64)
-        x = np.arange(len(red))
-        top = float(np.nanmax(np.concatenate([red[np.isfinite(red)], blue[np.isfinite(blue)]])))
-        ylim = (0, max(top * 1.15, 0.05))
-
-    ax.plot(x, red, color=RED, lw=2.0, label="small motion")
-    ax.plot(x, blue, color=BLUE, lw=2.0, label="large motion")
-    ax.set_xlim(float(np.nanmin(x)), float(np.nanmax(x)))
-    ax.set_ylim(*ylim)
-    ax.set_xticks([])
-    ax.set_yticks([])
-    ax.set_xlabel("frame", fontsize=8, labelpad=2)
-    ax.set_ylabel("SSI", fontsize=9)
-    ax.set_title("Framewise SSI", fontsize=10, pad=5)
-    ax.spines[["top", "right"]].set_visible(False)
-    ax.spines[["bottom", "left"]].set_linewidth(0.9)
-    ax.annotate("", xy=(1.03, 0), xytext=(0, 0), xycoords="axes fraction", arrowprops=dict(arrowstyle="-|>", lw=0.9, color=INK))
-    ax.annotate("", xy=(0, 1.03), xytext=(0, 0), xycoords="axes fraction", arrowprops=dict(arrowstyle="-|>", lw=0.9, color=INK))
-    ax.legend(
-        loc="upper right",
-        frameon=True,
-        facecolor="white",
-        edgecolor="none",
-        framealpha=0.74,
-        fontsize=7.4,
-        handlelength=1.3,
-    )
-
-
-def add_callouts(fig):
-    fig.text(0.536, 0.704, "color =\npredicted\nresponse", fontsize=8.0, va="center", ha="left")
-    fig.text(0.536, 0.618, "map\nsharpness\n-> SSI", fontsize=8.0, va="center", ha="left")
-    fig.patches.append(
-        patches.FancyArrowPatch(
-            (0.505, 0.681),
-            (0.532, 0.704),
-            transform=fig.transFigure,
-            arrowstyle="-",
-            linestyle=":",
-            lw=1.0,
-            color=INK,
-        )
-    )
-    fig.patches.append(
-        patches.FancyArrowPatch(
-            (0.505, 0.617),
-            (0.532, 0.628),
-            transform=fig.transFigure,
-            arrowstyle="-",
-            linestyle=":",
-            lw=1.0,
-            color=INK,
-        )
-    )
-
-
-def add_ssi_note(fig):
-    fig.text(0.962, 0.520, "SSI = map\nselectivity\nper frame", fontsize=9, ha="left", va="center", color=INK)
 
 
 def add_source_overview_if_available(fig, payload, *, stim_ax=None):

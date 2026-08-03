@@ -33,7 +33,8 @@ import pandas as pd
 from scipy.ndimage import shift as scipy_shift
 from tqdm import tqdm
 
-from .image_features import _backimage_canvas, gaze_deg_to_screen_px
+from .backimage_canvas import _backimage_canvas, _clip_patch
+from .image_features import gaze_deg_to_screen_px
 
 
 DEFAULT_INPUT = Path("outputs/fixation_statistics_by_stimulus_all_sessions_after_review/backimage_image_structure_reviewed_v2_screenfiltered/backimage_image_fem_windows.csv")
@@ -112,23 +113,6 @@ def _axis_delta_deg(a_deg: np.ndarray | float, b_deg: np.ndarray | float) -> np.
 
 def _cos2(a_deg: np.ndarray | float, b_deg: np.ndarray | float) -> np.ndarray:
     return np.cos(2.0 * np.radians(np.asarray(a_deg) - np.asarray(b_deg)))
-
-
-def _clip_patch(canvas: np.ndarray, center_xy_px: tuple[float, float], size_px: int) -> np.ndarray:
-    half = int(size_px) // 2
-    cx, cy = float(center_xy_px[0]), float(center_xy_px[1])
-    x0 = int(round(cx)) - half
-    y0 = int(round(cy)) - half
-    out = np.full((int(size_px), int(size_px)), float(np.nanmean(canvas)), dtype=np.float32)
-    src_x0 = max(0, x0)
-    src_y0 = max(0, y0)
-    src_x1 = min(canvas.shape[1], x0 + int(size_px))
-    src_y1 = min(canvas.shape[0], y0 + int(size_px))
-    dst_x0 = src_x0 - x0
-    dst_y0 = src_y0 - y0
-    if src_x1 > src_x0 and src_y1 > src_y0:
-        out[dst_y0 : dst_y0 + src_y1 - src_y0, dst_x0 : dst_x0 + src_x1 - src_x0] = canvas[src_y0:src_y1, src_x0:src_x1]
-    return out
 
 
 def _standardize_uint_like(image: np.ndarray) -> np.ndarray:

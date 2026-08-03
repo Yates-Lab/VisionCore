@@ -31,6 +31,7 @@ import _fig4_panel_header
 from VisionCore.paths import VISIONCORE_ROOT as ROOT
 
 import _fig4_paths as _paths
+from _fig4_style import INK, configure_matplotlib
 OUT_DIR = _paths.PANELS_DIR
 PROFILE_CSV = _paths.EDGE_COHERENCE_PROFILES_CSV
 BASELINE_CSV = _paths.EDGE_COHERENCE_RANDOM_BASELINE_CSV
@@ -43,24 +44,6 @@ WIDE_COHERENCE_BANDS = (
 )
 COLORS = ("#8DAF8C", "#5D966D", "#2D7C5C", "#0E4E3D")
 GRID = "#d8dde3"
-INK = "#111111"
-
-
-def configure_matplotlib() -> None:
-    plt.rcParams.update(
-        {
-            "font.family": "DejaVu Sans",
-            "font.size": 8,
-            "axes.titlesize": 9,
-            "axes.labelsize": 8,
-            "xtick.labelsize": 7,
-            "ytick.labelsize": 7,
-            "axes.linewidth": 0.8,
-            "pdf.fonttype": 42,
-            "ps.fonttype": 42,
-            "svg.fonttype": "none",
-        }
-    )
 
 
 def _clean_axis(ax: plt.Axes) -> None:
