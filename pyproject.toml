@@ -33,6 +33,8 @@ dependencies = [
     "dill",
     "cairosvg>=2.9.0",
     "svgutils>=0.3.4",
+    "pypdf>=6.14.2",
+    "pymupdf>=1.28.0",
 ]
 
 [project.optional-dependencies]

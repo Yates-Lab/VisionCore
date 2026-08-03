@@ -18,3 +18,9 @@ outputs/
 plans/
 docs/plans/
 ray_results/
+
+# Figure 4 regression baseline: Declan's original build, the reference the
+# pixel-diff test asserts against. The extension rules above are repo-wide, so
+# tracking it needs an explicit exception.
+!paper/fig4/reference/*.pdf
+!paper/fig4/reference/*.txt
