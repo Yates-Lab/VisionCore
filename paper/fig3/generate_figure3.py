@@ -8,8 +8,8 @@ Renders the digital-twin mechanism figure:
      zeroed) vs extraretinal-only (retina stabilized)
   D  Captured count variance over fig. 2's explainable rate variance:
      leave-one-out PSTH vs full twin vs retinal-only vs extraretinal-only
-  E  FEM modulation fraction (1-alpha): the neuron distribution vs each
-     within-model twin condition, with a paired TOST equivalence test — Full
+  E  FEM modulation fraction (f_FEM = 1-alpha): the neuron distribution vs
+     each within-model twin condition, with a paired TOST equivalence test — Full
      and Ablated reproduce the empirical FEM modulation, Stabilized does not.
 
 Panels C/D draw on the unified analysis-row cache
@@ -466,8 +466,8 @@ def _nice_step(x):
 
 
 def _plot_femfraction(ax, femdata, *, margin=TOST_MARGIN):
-    """FEM modulation fraction (1 - alpha) in per-unit counts: the empirical
-    neuron distribution (grey) vs each within-model twin condition (step), on
+    """FEM modulation fraction (f_FEM = 1 - alpha) in per-unit counts: the
+    empirical neuron distribution (grey) vs each within-model condition, on
     the fig2 frame + intersection population (the same quantity fig2 panel C
     reports). Median triangles mark each distribution. The histograms fill only
     the lower ~60% of the axis; the headroom above holds the median markers,
@@ -560,7 +560,7 @@ def _plot_femfraction(ax, femdata, *, margin=TOST_MARGIN):
     ax.set_xlim(0, 1)
     ax.set_ylim(0, ylim_top)
     ax.set_yticks(np.arange(0, ceiling + 0.5 * step, step))
-    ax.set_xlabel("Fraction of rate modulation\ndue to FEM (1-α)")
+    ax.set_xlabel("Fraction of rate modulation\ndue to FEM ($f_{\\mathrm{FEM}}$)")
     ax.set_ylabel("Units")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -609,7 +609,7 @@ def _load_ablation_cache():
 def _write_sidecars(out_dir, manifest: dict):
     caption = """Figure 3. A retinal-input digital twin captures FEM-linked V1 response variability.
 
-(A) Training objective and held-out test. The twin is trained on gratings, gabors, and natural images to predict simultaneously recorded V1 spikes continuously: at each timepoint its input is a space × space × time crop of the gaze-contingent stimulus history (the natural-image "model input" cube) combined with the extraretinal behavior covariates, and its target is that timepoint's population spike counts (the units × time raster, with the single predicted bin highlighted). The fixated-flashed-image test stimulus (right) runs through the same pipeline but was held out during training. (B) Gaze-contingent digital twin architecture. The model receives the retinal stimulus history (a moving, reafferent space × space × time crop) and an optional extraretinal behavior input, then predicts simultaneously recorded V1 responses. The schematic depicts both within-model ablation routes quantified in C–E: the behavior input can be zeroed (the Full/Ablated switch), and the retinal input can be stabilized — frozen so it no longer moves with the eye (the second, temporally constant cube). (C, D) Two symmetric within-model ablations isolate the twin's two FEM information routes, pooled across reliable Allen and Logan cells (matching the fig. 2 session population, >=10 analyzed units/session): retinal-only zeroes the separate extraretinal behavior input, and extraretinal-only stabilizes the retinal input by freezing it at one common (session-global centroid) gaze so the image no longer moves with the eye (behavior intact). (C) Held-out, trial-averaged prediction (normalized correlation, ccnorm). Removing the extraretinal pathway lowers the trial-averaged prediction only slightly, whereas stabilizing the retinal input lowers it more, though much of the mean response survives. (D) Single-trial prediction as a fraction of the explainable rate variance measured in fig. 2. For each unit, captured count variance, \\(\\operatorname{Var}(Y)-\\operatorname{Var}(Y-\\hat Y)\\), was measured on fig. 2's 0.5-degree, one-bin counting windows restricted to bins the twin can predict, and divided by that unit's \\(\\operatorname{diag}C_{\\mathrm{rate}}\\) from the fig. 2 covariance decomposition at the same 8.33 ms window. The denominator is fig. 2's own close-pair estimate over all of its valid bins; re-estimating it on the model-valid subset alone was rejected because the twin's 33-frame history mask removes most close trial pairs, leaving the estimate undefined for half the population. The leave-one-out PSTH is shown as a predictor alongside the three twin conditions. Units with a non-positive fig. 2 rate-variance estimate were excluded. Because the numerator drops bins the twin cannot predict, its \\(\\operatorname{Var}(Y)\\) is a median 0.90 of fig. 2's \\(\\operatorname{diag}C_{\\mathrm{total}}\\), so the ratio is a slight underestimate. The dashed horizontal line marks the median of the leave-one-out PSTH: the full and behavior-ablated twins sit above that trial-average reference, the stabilized twin below it. The solid line at zero is the constant-prediction reference, at which a predictor captures no rate variance. Bracket percentages express the median difference as a fraction of that contrast's reference median: the gain over the trial average relative to the leave-one-out PSTH, the stabilization cost relative to the full twin. In C and D, boxes span the interquartile range with the median marked and whiskers span the 10th to 90th percentiles, on a shared vertical scale and tick spacing, with D extended below zero to contain its lower whiskers. No value was clipped or folded onto one: one is the fig. 2 rate-variance estimate rather than a hard bound, and 6.0% of units exceed it for the full twin, 5.2% with behavior zeroed, 2.9% for the leave-one-out PSTH, and 1.6% with the retinal input stabilized, all lying beyond the plotted whiskers. Paired tests use session-median differences. (E) FEM modulation fraction (\\(1-\\alpha\\), the fraction of rate modulation due to FEM — the same quantity as fig. 2), in per-unit counts. The grey filled distribution is the neurons; each within-model twin condition overlays as a step histogram, all on the fig. 2 fixation frame and intersection population. Downward triangles mark each distribution's median. The shaded band is the empirical median \\(\\pm 0.1\\), a paired two-one-sided-t (TOST) equivalence zone (margin \\(\\Delta=0.1\\); the verdict is robust for any \\(\\Delta\\ge0.05\\)): a condition whose median falls inside is statistically equivalent to the neurons. The full twin and the behavior-ablated (retinal-only) twin are both equivalent to the empirical FEM modulation (\\(\\equiv\\) neurons; median offset ~0.03, TOST \\(p<10^{-20}\\)), whereas stabilizing the retinal input abolishes it (\\(\\neq\\) neurons; median 0.20 vs 0.67; bracket, paired Wilcoxon signed-rank on the same matched cells). Reafference alone reproduces the FEM-driven rate modulation that drives the fig. 2 population structure.
+(A) The twin was trained on gaze-contingent gratings, Gabors, and natural images and evaluated on the held-out fixated flashed-image dataset. (B) The convolutional-recurrent twin receives a moving retinal stimulus and separate eye-position and eye-velocity inputs. The retinal-only condition zeroes the behavioral inputs. The stabilized condition retains them but freezes the retinal input for every trial at one session-global gaze centroid. (C) Held-out trial-averaged prediction across 984 cells from 19 sessions. The full and retinal-only twins had median ccnorm values of 0.664 and 0.643 (paired delta -0.014, 2%; Wilcoxon p=1.6e-44). Stabilization reduced the median to 0.504 (delta -0.143, 21%; p=1.2e-136). (D) Single-trial prediction as a fraction of Figure 2's explainable rate variance. Captured count variance, Var(Y)-Var(Y-Yhat), was measured on Figure 2-matched, model-valid bins and divided by each cell's diag(Sigma_rate). Across 972 cells, the trial average, full, retinal-only, and stabilized medians were 0.157, 0.269, 0.246, and 0.042. The full twin exceeded the trial average (delta +0.106, +67% of the trial-average median; session-level Wilcoxon p=0.032); retinal-only prediction did not differ from full (delta -0.014, p=0.35); and stabilization reduced the full score by 72% (delta -0.193, p=3.8e-6). Values above one were retained because the denominator is an estimate rather than a hard bound. (E) FEM modulation fraction, f_FEM (=1-alpha), for the neurons and each twin condition. The empirical, full, retinal-only, and stabilized medians were 0.652, 0.618, 0.631, and 0.196. Paired TOST with a +/-0.1 margin supported equivalence for the full and retinal-only twins (p<1e-29) but not the stabilized twin. The empirical and stabilized estimates differed by a paired median of 0.402 (Wilcoxon p=3.8e-93). Boxes in C and D show the interquartile range with 10th-90th percentile whiskers; triangles in E mark medians.
 """
     (out_dir / "figure3_caption.md").write_text(caption, encoding="utf-8")
 
@@ -621,8 +621,8 @@ The digital-twin mechanism figure: a retinal-input twin whose single-trial
 prediction survives zeroing the extraretinal eye-state pathway. Panel D reports
 captured count variance on Figure 2-matched, model-valid windows relative to
 Figure 2's own diag(Crate) at the one-bin window, including the leave-one-out
-PSTH as a predictor. The FEM modulation fraction (1-alpha) reproduces the empirical
-distribution under the full and behavior-ablated conditions but not when the
+PSTH as a predictor. The FEM modulation fraction, f_FEM (= 1-alpha), reproduces
+the empirical distribution under the full and behavior-ablated conditions but not when the
 retinal image is stabilized. Panels C/D use `fig3_bottomrow_ablation.pkl`; panel E uses the
 per-condition f_FEM caches (`fig3_femfraction_{condition}.pkl`), both on the
 fig2 inclusion population.
@@ -706,7 +706,7 @@ def compose(*, recompute: bool = False, out_dir=FIG_DIR, dpi: int = 300):
             _plot_missing_cache(a)
 
     _standard_panel_heading(ax_c, "C", "Ablations modestly reduce\ntrial-averaged predictions")
-    _standard_panel_heading(ax_d, "D", "Explainable rate variance in\nsingle-trial predictions")
+    _standard_panel_heading(ax_d, "D", "Single-trial prediction depends\non retinal image motion")
     _standard_panel_heading(ax_e, "E", "Reafference reproduces the\nempirical FEM modulation")
 
     # No bbox_inches="tight": keep the canvas at exactly the intended
@@ -726,8 +726,8 @@ def compose(*, recompute: bool = False, out_dir=FIG_DIR, dpi: int = 300):
                  "vs extraretinal-only (stabilized)",
             "D": "captured variance over fig. 2 diag(Crate): leave-one-out "
                  "PSTH vs full vs retinal-only vs extraretinal-only",
-            "E": "FEM modulation fraction (1-alpha): neuron distribution vs each "
-                 "within-model twin condition, paired TOST equivalence test",
+            "E": "FEM modulation fraction (f_FEM = 1-alpha): neuron distribution "
+                 "vs each within-model twin condition, paired TOST equivalence test",
         },
         "panel_d_stats": panel_d_stats,
     }
