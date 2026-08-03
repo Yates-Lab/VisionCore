@@ -108,7 +108,7 @@ def build_stabilized_stim(session_name, embedded_stim, factor):
     A per-trial medoid would anchor each trial to a different frozen point, so the
     frozen image would still vary trial-to-trial and leave a spurious across-trial
     signal at matched eye positions (inflating the estimated FEM modulation). To get
-    a true extraretinal-only control we freeze every trial at a SINGLE gaze: the
+    a stabilized-retina control we freeze every trial at a SINGLE gaze: the
     centroid of `dpi_pix` over all valid samples inside the central CENTROID_RADIUS
     deg (independent of FIX_RADIUS), realized as the ROI of the one session bin whose
     `dpi_pix` is nearest that centroid. That ROI is reused for all trials.
@@ -155,7 +155,7 @@ def build_stabilized_stim(session_name, embedded_stim, factor):
     # Session-global stabilization gaze: centroid of dpi_pix over all valid samples
     # inside the central CENTROID_RADIUS deg, realized as the ROI of the single bin
     # nearest that centroid. Reused for every trial so the frozen retinal image is
-    # identical across trials (true extraretinal-only control). Falls back to the
+    # identical across trials (stabilized-retina control). Falls back to the
     # fixation window only if no sample lands inside CENTROID_RADIUS.
     central = np.hypot(eyepos[:, 0], eyepos[:, 1]) < CENTROID_RADIUS
     global_valid = central & dpi_valid

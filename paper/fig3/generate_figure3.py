@@ -4,10 +4,10 @@ Renders the digital-twin mechanism figure:
 
   A  Training and test stimuli (schematic provenance row)
   B  Digital twin schematic (architecture render)
-  C  Held-out (trial-averaged) ccnorm: full twin vs retinal-only (behavior
-     zeroed) vs extraretinal-only (retina stabilized)
+  C  Held-out (trial-averaged) ccnorm: full twin vs retinal-only (extraretinal
+     input zeroed) vs stabilized-retina (extraretinal input retained)
   D  Captured count variance over fig. 2's explainable rate variance:
-     leave-one-out PSTH vs full twin vs retinal-only vs extraretinal-only
+     leave-one-out PSTH vs full twin vs retinal-only vs stabilized-retina
   E  FEM modulation fraction (f_FEM = 1-alpha): the neuron distribution vs
      each within-model twin condition, with a paired TOST equivalence test — Full
      and Ablated reproduce the empirical FEM modulation, Stabilized does not.
@@ -44,8 +44,8 @@ from _fig3a_data import load_panel_a_assets
 from generate_fig3a import plot_panel_a
 
 
-# Condition colors: intact/full = blue, behavior-ablated (retinal only) = red,
-# stabilized (extraretinal only) = purple, PSTH = grey.
+# Condition colors: intact/full = blue, extraretinal-ablated (retinal only) = red,
+# stabilized-retina (extraretinal retained) = purple, PSTH = grey.
 INTACT_COLOR = "#1f77b4"
 ABLATED_COLOR = "#d62728"
 STABILIZED_COLOR = "#9467bd"
@@ -207,7 +207,7 @@ def _plot_ccnorm_violins(ax, abl):
     p_z = wilcoxon(gi, ga).pvalue
     p_s = wilcoxon(gi, gs).pvalue
     d_z = float(np.median(ga - gi))   # extraretinal ablation cost (retinal only)
-    d_s = float(np.median(gs - gi))   # reafferent ablation cost (extraretinal only)
+    d_s = float(np.median(gs - gi))   # reafferent ablation cost (stabilized retina)
     pct_z = 100.0 * abs(d_z) / intact_med if intact_med != 0 else np.nan
     pct_s = 100.0 * abs(d_s) / intact_med if intact_med != 0 else np.nan
     # ccnorm is bounded at 1: keep 1.0 as the top tick but extend the axis so the
@@ -221,8 +221,8 @@ def _plot_ccnorm_violins(ax, abl):
 
     ax.set_xlim(-0.6, 2.9)
     ax.set_xticks([0, 1, 2])
-    ax.set_xticklabels(["Retinal +\nbehavioral\n(full)", "Retinal\nonly\n(ablated)",
-                        "Extraretinal\nonly\n(stabilized)"], fontsize=5.3)
+    ax.set_xticklabels(["Full", "Retinal\nonly", "Stabilized\nretina"],
+                       fontsize=5.3)
     ax.set_ylabel("Held-out prediction\n(ccnorm)")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -325,9 +325,9 @@ def _plot_explainable_variance_boxes(ax, abl):
     ax.set_xticks(positions)
     ax.set_xticklabels([
         "Trial average\n(LOO PSTH)",
-        "Retinal +\nbehavioral\n(full)",
-        "Retinal\nonly\n(ablated)",
-        "Extraretinal\nonly\n(stabilized)",
+        "Full",
+        "Retinal\nonly",
+        "Stabilized\nretina",
     ], fontsize=4.9)
     ax.set_ylabel("Fraction of consistent variance\nexplained ($r^2/R^2_{max}$)")
     ax.spines["top"].set_visible(False)
@@ -609,7 +609,7 @@ def _load_ablation_cache():
 def _write_sidecars(out_dir, manifest: dict):
     caption = """Figure 3. A retinal-input digital twin captures FEM-linked V1 response variability.
 
-(A) The twin was trained on gaze-contingent gratings, Gabors, and natural images and evaluated on the held-out fixated flashed-image dataset. (B) The convolutional-recurrent twin receives a moving retinal stimulus and separate eye-position and eye-velocity inputs. The retinal-only condition zeroes the behavioral inputs. The stabilized condition retains them but freezes the retinal input for every trial at one session-global gaze centroid. (C) Held-out trial-averaged prediction across 984 cells from 19 sessions. The full and retinal-only twins had median ccnorm values of 0.664 and 0.643 (paired delta -0.014, 2%; Wilcoxon p=1.6e-44). Stabilization reduced the median to 0.504 (delta -0.143, 21%; p=1.2e-136). (D) Single-trial prediction as a fraction of Figure 2's explainable rate variance. Captured count variance, Var(Y)-Var(Y-Yhat), was measured on Figure 2-matched, model-valid bins and divided by each cell's diag(Sigma_rate). Across 972 cells, the trial average, full, retinal-only, and stabilized medians were 0.157, 0.269, 0.246, and 0.042. The full twin exceeded the trial average (delta +0.106, +67% of the trial-average median; session-level Wilcoxon p=0.032); retinal-only prediction did not differ from full (delta -0.014, p=0.35); and stabilization reduced the full score by 72% (delta -0.193, p=3.8e-6). Values above one were retained because the denominator is an estimate rather than a hard bound. (E) FEM modulation fraction, f_FEM (=1-alpha), for the neurons and each twin condition. The empirical, full, retinal-only, and stabilized medians were 0.652, 0.618, 0.631, and 0.196. Paired TOST with a +/-0.1 margin supported equivalence for the full and retinal-only twins (p<1e-29) but not the stabilized twin. The empirical and stabilized estimates differed by a paired median of 0.402 (Wilcoxon p=3.8e-93). Boxes in C and D show the interquartile range with 10th-90th percentile whiskers; triangles in E mark medians.
+(A) The twin was trained on gaze-contingent gratings, Gabors, and natural images and evaluated on the held-out fixated flashed-image dataset. (B) The convolutional-recurrent twin receives a moving retinal stimulus and separate extraretinal eye-position and eye-velocity inputs. The retinal-only condition zeroes the extraretinal inputs. The stabilized-retina condition retains them but freezes the retinal input for every trial at one session-global gaze centroid. (C) Held-out trial-averaged prediction across 984 cells from 19 sessions. The full and retinal-only twins had median ccnorm values of 0.664 and 0.643 (paired delta -0.014, 2%; Wilcoxon p=1.6e-44). Stabilization reduced the median to 0.504 (delta -0.143, 21%; p=1.2e-136). (D) Single-trial prediction as a fraction of Figure 2's explainable rate variance. Captured count variance, Var(Y)-Var(Y-Yhat), was measured on Figure 2-matched, model-valid bins and divided by each cell's diag(Sigma_rate). Across 972 cells, the trial average, full, retinal-only, and stabilized medians were 0.157, 0.269, 0.246, and 0.042. The full twin exceeded the trial average (delta +0.106, +67% of the trial-average median; session-level Wilcoxon p=0.032); retinal-only prediction did not differ from full (delta -0.014, p=0.35); and stabilization reduced the full score by 72% (delta -0.193, p=3.8e-6). Values above one were retained because the denominator is an estimate rather than a hard bound. (E) FEM modulation fraction, f_FEM (=1-alpha), for the neurons and each twin condition. The empirical, full, retinal-only, and stabilized medians were 0.652, 0.618, 0.631, and 0.196. Paired TOST with a +/-0.1 margin supported equivalence for the full and retinal-only twins (p<1e-29) but not the stabilized twin. The empirical and stabilized estimates differed by a paired median of 0.402 (Wilcoxon p=3.8e-93). Boxes in C and D show the interquartile range with 10th-90th percentile whiskers; triangles in E mark medians.
 """
     (out_dir / "figure3_caption.md").write_text(caption, encoding="utf-8")
 
@@ -622,7 +622,7 @@ prediction survives zeroing the extraretinal eye-state pathway. Panel D reports
 captured count variance on Figure 2-matched, model-valid windows relative to
 Figure 2's own diag(Crate) at the one-bin window, including the leave-one-out
 PSTH as a predictor. The FEM modulation fraction, f_FEM (= 1-alpha), reproduces
-the empirical distribution under the full and behavior-ablated conditions but not when the
+the empirical distribution under the full and extraretinal-ablated conditions but not when the
 retinal image is stabilized. Panels C/D use `fig3_bottomrow_ablation.pkl`; panel E uses the
 per-condition f_FEM caches (`fig3_femfraction_{condition}.pkl`), both on the
 fig2 inclusion population.
@@ -723,9 +723,9 @@ def compose(*, recompute: bool = False, out_dir=FIG_DIR, dpi: int = 300):
             "A": "training and test stimuli (schematic provenance row)",
             "B": "digital-twin architecture schematic",
             "C": "trial-averaged held-out ccnorm: full vs retinal-only (zeroed) "
-                 "vs extraretinal-only (stabilized)",
+                 "vs stabilized-retina (extraretinal retained)",
             "D": "captured variance over fig. 2 diag(Crate): leave-one-out "
-                 "PSTH vs full vs retinal-only vs extraretinal-only",
+                 "PSTH vs full vs retinal-only vs stabilized-retina",
             "E": "FEM modulation fraction (f_FEM = 1-alpha): neuron distribution "
                  "vs each within-model twin condition, paired TOST equivalence test",
         },

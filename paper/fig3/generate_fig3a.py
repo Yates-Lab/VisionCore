@@ -6,7 +6,7 @@ Two rows share one matplotlib axes and one world coordinate frame:
     training stimuli stack (gratings · gabors · natural image with a
     gaze-contingent free-viewing trace) ─▶ "Model input" (a natural-image
     space×space×time crop = Visual input, ⊕ the eye-position/velocity
-    Behavioral input) ─▶ a "trained to predict" arrow into the Prediction
+    Extraretinal input) ─▶ a "trained to predict" arrow into the Prediction
     target: the observed units×time spike raster the twin is trained to match,
     with the single predicted time bin highlighted ┊ the fixated-RSVP Test
     stimulus, demoted to a held-out marker (screen + ROI + eye trace only). The
@@ -15,7 +15,7 @@ Two rows share one matplotlib axes and one world coordinate frame:
   * Row B (`_draw_architecture` + bridge + PSTHs) — the model: the moving
     reafferent retinal cube (and its stabilized counterpart) at far left flow
     through Frontend → Stem → ResBlock 1 → ResBlock 2 → ConvGRU → Readouts as
-    cabinet-projected kernel prisms, with the extraretinal behavior traces
+    cabinet-projected kernel prisms, with the extraretinal eye-state traces
     routed via a Full/Ablated switch into the concat marker, and an
     observed-vs-predicted PSTH beside each readout.
 
@@ -564,16 +564,16 @@ def _draw_top_row(ax, assets, row_cy):
             ha="center", va="bottom", fontsize=STIM_SUB_FS, color="#777",
             style="italic")
 
-    # ⊕ marker between visual and behavioral inputs.
+    # ⊕ marker between visual and extraretinal inputs.
     plus_y = cube_block["bottom_y"] - PLUS_GAP
     draw_op_marker(ax, cube_cx, plus_y, color="#222", radius=OP_MARKER_RADIUS,
                    lw=1.0, zorder=12.5, symbol="+")
 
-    # Behavioral input beneath the ⊕. Its "Behavioral input" tag sits ABOVE the
-    # traces (mirroring the "Visual input" tag above the cube).
+    # Extraretinal input beneath the ⊕. Its "Extraretinal input" tag sits ABOVE
+    # the traces (mirroring the "Visual input" tag above the cube).
     beh_x0 = cube_block["x_left"]
     beh_title_y = plus_y - 0.34
-    ax.text(cube_cx, beh_title_y, "Behavioral", ha="center", va="top",
+    ax.text(cube_cx, beh_title_y, "Extraretinal", ha="center", va="top",
             fontsize=STIM_SUB_FS + 1.5, color=TEXT_COLOR)
     ax.text(cube_cx, beh_title_y - 0.26, "signals × time", ha="center",
             va="top", fontsize=STIM_SUB_FS, color="#777", style="italic")
@@ -1311,7 +1311,7 @@ def _route_behavior_to_concat(ax, out_x, out_mid_y, concat_xy):
             fontsize=8.5, color=COND_FULL_COLOR, fontweight="bold", zorder=7)
     ax.text(txt_r, txt_cy + 0.13, "Ablated", ha="right", va="center",
             fontsize=9.0, color=COND_ABLATED_COLOR, fontweight="bold", zorder=7)
-    ax.text(txt_r, txt_cy - 0.13, "behavioral input → 0", ha="right", va="center",
+    ax.text(txt_r, txt_cy - 0.13, "extraretinal input → 0", ha="right", va="center",
             fontsize=6.8, color=COND_ABLATED_COLOR, style="italic", zorder=7)
 
 
@@ -1436,7 +1436,7 @@ def _draw_all(ax, assets):
     cube_in = _draw_cube_block(ax, assets, (BOT_CUBE_CX, moving_cy),
                                draw_header=False, draw_dims=False,
                                draw_time=False)
-    # Title the retinal pathway (mirrors the "Extraretinal behavior" label). The
+    # Title the retinal pathway (mirrors the "Extraretinal input" label). The
     # italic sub-line names the reafferent motion the stabilized cube removes.
     cube_cx = 0.5 * (cube_in["x_left"] + cube_in["x_right"])
     ax.text(cube_cx, cube_in["top_y"] + 0.30, "Retinal input", ha="center",
@@ -1484,7 +1484,7 @@ def _draw_all(ax, assets):
                                 linestyle=(0, (4, 3))),
                 zorder=4.75)
 
-    # Behavioral path: compact covariate box tucked to the right of the cubes and
+    # Extraretinal path: compact covariate box tucked to the right of the cubes and
     # raised beside them, boxed as a discrete model input and routed across to the
     # concat marker.
     beh_x0 = stab_block["x_right"] + BEH_BOX_X_GAP
@@ -1494,7 +1494,7 @@ def _draw_all(ax, assets):
                                 labeled=False, scale_bar=True, box=True,
                                 key_side="left", trace_h=BEH_BOX_TRACE_H)
     # Bold title above the box (mirrors the "Retinal input" title over the cube).
-    ax.text(beh_x0 + beh_w / 2, beh["y_top"] + 0.10, "Behavioral input",
+    ax.text(beh_x0 + beh_w / 2, beh["y_top"] + 0.10, "Extraretinal input",
             ha="center", va="bottom", fontsize=STIM_HEADER_FS, color=TEXT_COLOR,
             fontweight="bold")
     _route_behavior_to_concat(ax, beh["out_x"], beh["out_mid_y"],
