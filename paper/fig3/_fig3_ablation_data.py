@@ -101,7 +101,10 @@ CACHE_PATH = CACHE_DIR / "fig3_ablation_inference.pkl"
 # fields are NOT part of this schema -- they are recomputed on every load by
 # `_attach_fig2_derived`, so a Figure 2 convention change does not invalidate
 # this cache and must not bump this number.
-INFERENCE_SCHEMA_VERSION = 1
+# v2: scored windows now carry Figure 2's fixed 3-bin matching history (was 1 bin
+# at W=1), and every window in `SCORED_COUNT_BINS` is stored under
+# `scored_by_window`. A v1 cache's numerator is not comparable to a v2 one.
+INFERENCE_SCHEMA_VERSION = 2
 
 # Counting window (in 120 Hz bins) that panel D's numerator is scored on, and
 # the denominator window `_attach_fig2_derived` reads to match it. Panel D uses
@@ -111,9 +114,10 @@ sys.path.insert(0, str(VISIONCORE_ROOT / "paper" / "covariance_decomposition"))
 from fig3_windows import FIG3_SINGLETRIAL_WINDOW_BINS  # noqa: E402
 
 PRODUCTION_COUNT_BINS = FIG3_SINGLETRIAL_WINDOW_BINS
-# Additional windows scored in the same inference pass so the counting-window
-# choice can be compared on identical predictions without re-running inference.
-SCREEN_COUNT_BINS = (1, 3)
+# Every window scored in the same inference pass, on identical predictions, so
+# the counting-window choice can be revisited without re-running inference.
+# PRODUCTION_COUNT_BINS must be one of these.
+SCORED_COUNT_BINS = (1, 3)
 
 CONDS = ["intact", "zeroed", "stabilized"]
 ABLATIONS = ["zeroed", "stabilized"]          # extraretinal-route first
@@ -449,10 +453,10 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH):
             cb: compute_matched_captured_variance(
                 robs, {"psth": rbar, **rhat_m}, eyepos, dfs, count_bins=cb
             )
-            for cb in SCREEN_COUNT_BINS
+            for cb in SCORED_COUNT_BINS
         }
         scored = scored_by_window[PRODUCTION_COUNT_BINS]
-        for cb in SCREEN_COUNT_BINS:
+        for cb in SCORED_COUNT_BINS:
             s = scored_by_window[cb]
             n_scored = int(np.isfinite(s["var_y"]).sum())
             tag = " (production)" if cb == PRODUCTION_COUNT_BINS else ""

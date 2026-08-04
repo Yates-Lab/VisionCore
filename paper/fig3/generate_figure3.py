@@ -234,6 +234,86 @@ def _plot_ccnorm_violins(ax, abl):
 # ---------------------------------------------------------------------------
 # Panel D — explainable rate variance over fig. 2's diag(Crate)
 # ---------------------------------------------------------------------------
+BOOTSTRAP_N = 10000
+BOOTSTRAP_SEED = 42
+
+
+def _session_cluster_bootstrap(first, second, sessions, mask,
+                               n_boot=BOOTSTRAP_N, seed=BOOTSTRAP_SEED):
+    """Session-clustered bootstrap of the median paired difference (second-first).
+
+    The session-median Wilcoxon collapses ~1000 units into 19 numbers and then
+    uses only their signs and ranks, which leaves it hinging on whichever session
+    happens to sit nearest zero: on this data one borderline session moves it
+    between p = 0.019 and p = 0.073. This resamples SESSIONS (the unit of
+    independence) with replacement, pools the drawn sessions' units, and
+    recomputes the population median difference, giving an effect size with a
+    confidence interval rather than a fragile dichotomous p.
+
+    Sessions are resampled rather than units because units within a session share
+    a stimulus sequence and an eye trace. Pooling weights a session by its unit
+    count; `session_equal_weight` repeats the estimate weighting sessions
+    equally, as a sensitivity check.
+
+    Returns a dict with the observed median, the percentile CI, a two-sided
+    bootstrap p, and the equal-weight companion.
+    """
+    d = np.asarray(second, float)[mask] - np.asarray(first, float)[mask]
+    sess = np.asarray(sessions)[mask]
+    uniq = np.unique(sess)
+    idx = [np.where(sess == s)[0] for s in uniq]
+    if len(uniq) < 2 or d.size == 0:
+        nan = float("nan")
+        return {"median": nan, "ci_low": nan, "ci_high": nan, "p_boot": nan,
+                "n_sessions": len(uniq), "n_units": int(d.size),
+                "session_equal_weight": {"median": nan, "ci_low": nan,
+                                         "ci_high": nan}}
+
+    rng = np.random.default_rng(seed)
+    session_medians = np.array([np.median(d[i]) for i in idx])
+    pooled = np.empty(n_boot)
+    equal = np.empty(n_boot)
+    for b in range(n_boot):
+        draw = rng.integers(0, len(uniq), len(uniq))
+        pooled[b] = np.median(d[np.concatenate([idx[j] for j in draw])])
+        equal[b] = np.median(session_medians[draw])
+
+    obs = float(np.median(d))
+    lo, hi = np.percentile(pooled, [2.5, 97.5])
+    tail = np.mean(pooled <= 0) if obs > 0 else np.mean(pooled >= 0)
+    elo, ehi = np.percentile(equal, [2.5, 97.5])
+    return {
+        "median": obs,
+        "ci_low": float(lo), "ci_high": float(hi),
+        "p_boot": float(min(1.0, 2 * max(tail, 1.0 / n_boot))),
+        "n_sessions": int(len(uniq)), "n_units": int(d.size),
+        "n_boot": int(n_boot),
+        "session_equal_weight": {
+            "median": float(np.median(session_medians)),
+            "ci_low": float(elo), "ci_high": float(ehi),
+        },
+    }
+
+
+def _session_sign_test(first, second, sessions, mask):
+    """Sign test on per-session median differences.
+
+    Reported alongside the bootstrap because it is invariant to the explainable
+    fraction's denominator: `diag(Crate)` is shared by both conditions within a
+    unit, so it cannot change the sign of any per-unit difference, only its
+    magnitude. A test that uses only signs therefore carries none of the
+    denominator's estimation noise.
+    """
+    from scipy.stats import binomtest
+    d = np.asarray(second, float)[mask] - np.asarray(first, float)[mask]
+    sess = np.asarray(sessions)[mask]
+    sm = np.array([np.median(d[sess == s]) for s in np.unique(sess)])
+    if sm.size < 2:
+        return float("nan"), 0, int(sm.size)
+    n_pos = int((sm > 0).sum())
+    return float(binomtest(n_pos, sm.size, 0.5).pvalue), n_pos, int(sm.size)
+
+
 def _session_paired_test(first, second, sessions, mask):
     """Wilcoxon test across per-session median paired differences (second-first)."""
     session_differences = []
@@ -301,9 +381,19 @@ def _plot_explainable_variance_boxes(ax, abl):
     contrast_stats = {}
     for (name, x1, x2, first_key, second_key, y_bracket,
          ref_key, ref_label, signed) in contrasts:
-        p, session_differences = _session_paired_test(
+        p_wilcoxon, session_differences = _session_paired_test(
             vals[first_key], vals[second_key], sessions, m
         )
+        boot = _session_cluster_bootstrap(
+            vals[first_key], vals[second_key], sessions, m
+        )
+        p_sign, n_pos, n_sess = _session_sign_test(
+            vals[first_key], vals[second_key], sessions, m
+        )
+        # The bracket reports the bootstrap: it is the primary test (see
+        # `_session_cluster_bootstrap`); Wilcoxon and the sign test are kept in
+        # the manifest so the reported claim can be checked against both.
+        p = boot["p_boot"]
         delta = float(np.median(vals[second_key][m] - vals[first_key][m]))
         pct = np.nan
         label = None
@@ -318,7 +408,10 @@ def _plot_explainable_variance_boxes(ax, abl):
             "percent_reference": ref_key,
             "percent_of_reference_median": float(pct),
             "session_median_differences": session_differences.tolist(),
-            "session_wilcoxon_p": p,
+            "bootstrap": boot,
+            "session_wilcoxon_p": p_wilcoxon,
+            "session_sign_test": {"p": p_sign, "n_positive": n_pos,
+                                  "n_sessions": n_sess},
         }
 
     ax.set_xlim(-0.6, 3.75)
@@ -364,8 +457,16 @@ def _plot_explainable_variance_boxes(ax, abl):
               f"median={s['matched_denominator_sensitivity']['median']:+.4f} "
               f"(n={s['matched_denominator_sensitivity']['n']})")
     for name, stats in contrast_stats.items():
-        print(f"  {name}: Δ={stats['median_unit_difference']:+.4f}, "
-              f"session-level p={stats['session_wilcoxon_p']:.3g}")
+        b = stats["bootstrap"]
+        st = stats["session_sign_test"]
+        print(f"  {name}: Δ={stats['median_unit_difference']:+.4f} "
+              f"95% CI [{b['ci_low']:+.4f}, {b['ci_high']:+.4f}] "
+              f"boot p={b['p_boot']:.3g}  |  equal-session Δ="
+              f"{b['session_equal_weight']['median']:+.4f} "
+              f"[{b['session_equal_weight']['ci_low']:+.4f}, "
+              f"{b['session_equal_weight']['ci_high']:+.4f}]  |  sign "
+              f"{st['n_positive']}/{st['n_sessions']} p={st['p']:.3g}  |  "
+              f"Wilcoxon p={stats['session_wilcoxon_p']:.3g}")
     with np.errstate(divide="ignore", invalid="ignore"):
         fig2_r2max = np.asarray(abl["fig2_c_rate"], float) / np.asarray(
             abl["fig2_c_total"], float
