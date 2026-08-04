@@ -12,6 +12,14 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 LAUNCHER = ROOT / "paper" / "fig4" / "upstream" / "run_real_trace_matrix.py"
 MERGER = ROOT / "paper" / "fig4" / "upstream" / "merge_backimage_real_trace_ssi_matrix_shards.py"
+MATRIX_RUNNER = ROOT / "paper" / "fig4" / "upstream" / "score_real_trace_matrix.py"
+BASELINE_RUNNER = ROOT / "paper" / "fig4" / "upstream" / "score_real_trace_stabilized_baseline.py"
+UPSTREAM_DIR = ROOT / "paper" / "fig4" / "upstream"
+if str(UPSTREAM_DIR) not in sys.path:
+    sys.path.insert(0, str(UPSTREAM_DIR))
+
+from real_trace_matrix.core import score_matrix
+
 RR100_VERSION = (
     "V1-RR_MS_min_complete0p65_split0p75_pair0p60_anyfail_finalsplit0p75_"
     "medoidPosthocminRepcomplete0p45_movieMedoid"
@@ -57,6 +65,7 @@ def test_production_plan_records_recovered_deep_matrix_contract(tmp_path):
     first = score_commands[0]["argv"]
     second = score_commands[1]["argv"]
 
+    assert first[3].endswith("paper/fig4/upstream/score_real_trace_matrix.py")
     assert _arg_after(first, "--n-images") == "100"
     assert _arg_after(first, "--n-traces") == "1000"
     assert _arg_after(first, "--seed") == "20260717"
@@ -80,6 +89,8 @@ def test_production_plan_records_recovered_deep_matrix_contract(tmp_path):
 
     serialized_commands = json.dumps([cmd["argv"] for cmd in manifest["commands"]])
     assert "/home/declan/VisionCore/" not in serialized_commands
+    assert manifest["implementation_boundary"]["scorer_runner_status"] == "in_visioncoremain"
+    assert manifest["implementation_boundary"]["stabilized_baseline_runner_status"] == "in_visioncoremain"
     merge = next(cmd for cmd in manifest["commands"] if cmd["stage"] == "merge_shards")
     assert merge["argv"][3].endswith("paper/fig4/upstream/merge_backimage_real_trace_ssi_matrix_shards.py")
 
@@ -93,6 +104,7 @@ def test_production_plan_records_recovered_deep_matrix_contract(tmp_path):
     assert checks["rr100_population_spec_json"]["expected_sha256"] == (
         "d599fb0718faa363520a91b8f0819edafbff74ec501899b590e4061fef557f08"
     )
+    assert checks["mcfarland_outputs"]["required_for"] == ["score_shard", "stabilized_baseline"]
 
 
 def test_smoke_plan_is_tiny_and_schema_compatible(tmp_path):
@@ -109,7 +121,7 @@ def test_smoke_plan_is_tiny_and_schema_compatible(tmp_path):
     assert _arg_after(argv, "--image-shard-stop") == "1"
 
 
-def test_run_all_refuses_without_explicit_scorer_runner(tmp_path):
+def test_run_all_refuses_without_required_source_assets(tmp_path):
     plan_json = tmp_path / "blocked.json"
     result = subprocess.run(
         [
@@ -127,9 +139,98 @@ def test_run_all_refuses_without_explicit_scorer_runner(tmp_path):
         text=True,
     )
     assert result.returncode == 2
-    assert "FIG4_REAL_TRACE_MATRIX_RUNNER" in result.stderr
-    assert "FIG4_STABILIZED_BASELINE_RUNNER" in result.stderr
+    assert "Missing required source/model asset" in result.stderr
+    assert "source CSV" in result.stderr
+    assert "RR100 population JSON" in result.stderr
+    assert "McFarland outputs" in result.stderr
     assert plan_json.exists()
+
+
+def test_scorer_entrypoints_have_lightweight_help():
+    for script in (MATRIX_RUNNER, BASELINE_RUNNER):
+        result = subprocess.run(
+            [sys.executable, str(script), "--help"],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "usage:" in result.stdout
+
+
+class _FakeScorer:
+    n_units = 3
+
+    def score_traces_for_patch(
+        self,
+        patch,
+        traces,
+        *,
+        trace_batch_size,
+        frame_batch_size,
+        n_timepoints,
+        bin_seconds,
+    ):
+        assert patch.shape == (4, 4)
+        assert trace_batch_size == 2
+        assert frame_batch_size == 5
+        assert n_timepoints == 4
+        assert bin_seconds == 0.25
+        base = np.arange(len(traces) * self.n_units, dtype=np.float32).reshape(len(traces), self.n_units)
+        return base, base + 100.0, base + 200.0, np.arange(len(traces), dtype=np.float32) + 10.0
+
+
+def test_score_matrix_writes_schema_with_fake_scorer(tmp_path):
+    image_rows = pd.DataFrame(
+        {
+            "image_index": [0, 1],
+            "source_row": [10, 11],
+            "session": ["Allen_2022-02-16", "Allen_2022-02-16"],
+            "trial_idx": [3, 4],
+            "image_patch_rms_contrast": [0.5, 0.8],
+        }
+    )
+    trace_items = [
+        {
+            "trace": np.zeros((4, 2), dtype=np.float32),
+            "source_row": 20,
+            "session": "Allen_2022-02-16",
+            "trial_idx": 7,
+            "rendered_path_length_arcmin": 1.0,
+        },
+        {
+            "trace": np.ones((4, 2), dtype=np.float32),
+            "source_row": 21,
+            "session": "Allen_2022-02-16",
+            "trial_idx": 8,
+            "rendered_path_length_arcmin": 2.0,
+        },
+    ]
+
+    def fake_patch_loader(row, *, canvas_cache, patch_size_px):
+        return np.full((4, 4), float(row["image_index"]), dtype=np.float32), {"patch_size_px": int(patch_size_px)}
+
+    timing = score_matrix(
+        scorer=_FakeScorer(),
+        image_rows=image_rows,
+        trace_items=trace_items,
+        frame_batch_size=5,
+        trace_batch_size=2,
+        n_timepoints=4,
+        bin_seconds=0.25,
+        patch_size_px=4,
+        write_outputs=True,
+        out_dir=tmp_path,
+        patch_loader=fake_patch_loader,
+    )
+
+    assert timing["n_movies"] == 4
+    assert np.load(tmp_path / "ssi_matrix.npy").shape == (4, 3)
+    assert np.load(tmp_path / "expected_spikes_matrix.npy").shape == (4, 3)
+    assert np.load(tmp_path / "population_ssi.npy").tolist() == [10.0, 11.0, 10.0, 11.0]
+    movies = pd.read_csv(tmp_path / "movie_feature_table.csv")
+    assert movies["movie_index"].tolist() == [0, 1, 2, 3]
+    assert movies["image_source_row"].tolist() == [10, 10, 11, 11]
 
 
 def _write_shard(path: Path, *, movie_indices: list[int], matrix_offset: float) -> None:

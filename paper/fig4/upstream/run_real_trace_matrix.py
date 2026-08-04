@@ -7,9 +7,11 @@ scored against a stabilized zero-motion baseline. This launcher is deliberately
 safe by default: without --run-* flags it only writes a run plan/provenance JSON
 and prints the commands that would be run.
 
-The scorer body itself is not imported here. Until that body is ported into this
-repo, pass --matrix-runner/--baseline-runner (or the matching environment
-variables) to launch an external recovered runner explicitly.
+The scorer body lives in this repo under upstream/real_trace_matrix. The
+launcher still preflights every direct input before it will execute: the raw
+BackImage window table, the McFarland readout artifact, the model checkpoint,
+the frozen dataset config, and the RR100 population spec are data/model assets,
+not git-tracked code.
 """
 
 from __future__ import annotations
@@ -68,12 +70,19 @@ DEFAULT_POPULATION_SPEC_DIR = (
     ROOT / "outputs/redundancy_resolved_v1_twin/step1_activation_fingerprints"
 )
 MERGE_RUNNER = UPSTREAM_DIR / "merge_backimage_real_trace_ssi_matrix_shards.py"
+DEFAULT_MATRIX_RUNNER = UPSTREAM_DIR / "score_real_trace_matrix.py"
+DEFAULT_BASELINE_RUNNER = UPSTREAM_DIR / "score_real_trace_stabilized_baseline.py"
+DEFAULT_MCFARLAND_OUTPUT_CANDIDATES = (
+    ROOT / "scripts/mcfarland_outputs_mono.pkl",
+    ROOT / "scripts/mcfarland_outputs.pkl",
+)
 
 MATRIX_RUNNER_ENV = "FIG4_REAL_TRACE_MATRIX_RUNNER"
 BASELINE_RUNNER_ENV = "FIG4_STABILIZED_BASELINE_RUNNER"
 CHECKPOINT_ENV = "FIG4_TWIN_CHECKPOINT"
 DATASET_CONFIGS_ENV = "FIG4_DATASET_CONFIGS"
 POPULATION_SPEC_ENV = "FIG4_RR100_POPULATION_SPEC_DIR"
+MCFARLAND_OUTPUTS_ENV = "FIG4_MCFARLAND_OUTPUTS"
 
 
 PROFILES: dict[str, dict[str, Any]] = {
@@ -162,8 +171,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--window-features-csv", type=Path, default=DEFAULT_WINDOW_FEATURES_CSV)
     parser.add_argument("--out-root", type=Path, default=None)
     parser.add_argument("--plan-json", type=Path, default=None)
-    parser.add_argument("--matrix-runner", type=Path, default=os.environ.get(MATRIX_RUNNER_ENV))
-    parser.add_argument("--baseline-runner", type=Path, default=os.environ.get(BASELINE_RUNNER_ENV))
+    parser.add_argument(
+        "--matrix-runner",
+        type=Path,
+        default=Path(os.environ.get(MATRIX_RUNNER_ENV, str(DEFAULT_MATRIX_RUNNER))),
+    )
+    parser.add_argument(
+        "--baseline-runner",
+        type=Path,
+        default=Path(os.environ.get(BASELINE_RUNNER_ENV, str(DEFAULT_BASELINE_RUNNER))),
+    )
     parser.add_argument(
         "--checkpoint-path",
         type=Path,
@@ -178,6 +195,11 @@ def parse_args() -> argparse.Namespace:
         "--population-spec-dir",
         type=Path,
         default=Path(os.environ.get(POPULATION_SPEC_ENV, str(DEFAULT_POPULATION_SPEC_DIR))),
+    )
+    parser.add_argument(
+        "--mcfarland-outputs",
+        type=Path,
+        default=Path(os.environ[MCFARLAND_OUTPUTS_ENV]) if MCFARLAND_OUTPUTS_ENV in os.environ else None,
     )
     parser.add_argument("--device", type=str, default=None, help="Override the profile's device.")
     parser.add_argument(
@@ -294,12 +316,59 @@ def shard_name(bounds: tuple[int, int]) -> str:
 
 
 def base_env(args: argparse.Namespace) -> dict[str, str]:
-    return {
+    env = {
         DATASET_CONFIGS_ENV: str(Path(args.dataset_configs)),
         POPULATION_SPEC_ENV: str(Path(args.population_spec_dir)),
         CHECKPOINT_ENV: str(Path(args.checkpoint_path)),
         "MPLBACKEND": "Agg",
     }
+    if args.mcfarland_outputs is not None:
+        env[MCFARLAND_OUTPUTS_ENV] = str(Path(args.mcfarland_outputs))
+    return env
+
+
+def population_spec_paths(args: argparse.Namespace) -> tuple[Path, Path]:
+    spec_dir = Path(args.population_spec_dir)
+    return (
+        spec_dir / f"population_spec_{RR100_VERSION}.json",
+        spec_dir / f"population_spec_{RR100_VERSION}.npz",
+    )
+
+
+def mcfarland_output_candidates(args: argparse.Namespace) -> tuple[Path, ...]:
+    if args.mcfarland_outputs is not None:
+        return (Path(args.mcfarland_outputs),)
+    return DEFAULT_MCFARLAND_OUTPUT_CANDIDATES
+
+
+def mcfarland_outputs_exist(args: argparse.Namespace) -> bool:
+    return any(path.exists() for path in mcfarland_output_candidates(args))
+
+
+def score_asset_blocker(args: argparse.Namespace, *, include_source_tables: bool) -> str | None:
+    spec_json, spec_npz = population_spec_paths(args)
+    missing: list[str] = []
+    if include_source_tables:
+        for label, path in (
+            ("source CSV", Path(args.source_csv)),
+            ("unit tuning CSV", Path(args.unit_tuning_csv)),
+        ):
+            if not path.exists():
+                missing.append(f"{label}: {path}")
+    for label, path in (
+        ("model checkpoint", Path(args.checkpoint_path)),
+        ("dataset config", Path(args.dataset_configs)),
+        ("RR100 population JSON", spec_json),
+        ("RR100 population NPZ", spec_npz),
+    ):
+        if not path.exists():
+            missing.append(f"{label}: {path}")
+    if not mcfarland_outputs_exist(args):
+        candidates = ", ".join(str(path) for path in mcfarland_output_candidates(args))
+        missing.append(f"McFarland outputs: {candidates}")
+    if not missing:
+        return None
+    return "Missing required source/model asset(s): " + "; ".join(missing)
 
 
 def matrix_command(
@@ -368,8 +437,17 @@ def matrix_command(
         producer_args.append("--force")
 
     display_argv = ["uv", "run", "python", runner_token, *producer_args]
-    ready = runner is not None and Path(runner).exists()
-    blocker = None if ready else f"Set --matrix-runner or {MATRIX_RUNNER_ENV} to the scorer script."
+    runner_ready = runner is not None and Path(runner).exists()
+    asset_blocker = score_asset_blocker(args, include_source_tables=True)
+    ready = runner_ready and asset_blocker is None
+    blocker = None
+    hard_blocker = None
+    if not runner_ready:
+        blocker = f"Missing matrix scorer script: {runner_token}"
+        hard_blocker = blocker
+    elif asset_blocker is not None:
+        blocker = asset_blocker
+        hard_blocker = asset_blocker
     return CommandPlan(
         stage="score_shard",
         label=shard_name(shard),
@@ -379,7 +457,7 @@ def matrix_command(
         cwd=ROOT,
         ready=ready,
         blocker=blocker,
-        hard_blocker=blocker,
+        hard_blocker=hard_blocker,
         expected_outputs=(
             shard_dir / "summary.json",
             shard_dir / "ssi_matrix.npy",
@@ -470,12 +548,16 @@ def baseline_command(
         producer_args.append("--force")
     display_argv = ["uv", "run", "python", runner_token, *producer_args]
     runner_missing = runner is None or not Path(runner).exists()
-    ready = not runner_missing and merged_dir.exists()
+    asset_blocker = score_asset_blocker(args, include_source_tables=False)
+    ready = not runner_missing and merged_dir.exists() and asset_blocker is None
     blocker = None
     hard_blocker = None
     if runner_missing:
-        blocker = f"Set --baseline-runner or {BASELINE_RUNNER_ENV} to the stabilized-baseline script."
+        blocker = f"Missing stabilized-baseline script: {runner_token}"
         hard_blocker = blocker
+    elif asset_blocker is not None:
+        blocker = asset_blocker
+        hard_blocker = asset_blocker
     elif not merged_dir.exists():
         blocker = f"Missing merged matrix dir: {merged_dir}"
     return CommandPlan(
@@ -500,8 +582,9 @@ def baseline_command(
 
 
 def input_checks(args: argparse.Namespace, *, hash_inputs: bool) -> list[dict[str, Any]]:
-    spec_json = Path(args.population_spec_dir) / f"population_spec_{RR100_VERSION}.json"
-    spec_npz = Path(args.population_spec_dir) / f"population_spec_{RR100_VERSION}.npz"
+    spec_json, spec_npz = population_spec_paths(args)
+    mcfarland_candidates = mcfarland_output_candidates(args)
+    mcfarland_present = [path for path in mcfarland_candidates if path.exists()]
     return [
         path_check(
             label="direct_matrix_source_csv",
@@ -531,6 +614,18 @@ def input_checks(args: argparse.Namespace, *, hash_inputs: bool) -> list[dict[st
             expected_sha256=MODEL_CHECKPOINT_SHA256,
             note="Recovered from production logs; the old summaries recorded only the RR100 version.",
         ),
+        {
+            "label": "mcfarland_outputs",
+            "path": str(mcfarland_present[0] if mcfarland_present else mcfarland_candidates[0]),
+            "candidate_paths": [str(path) for path in mcfarland_candidates],
+            "exists": bool(mcfarland_present),
+            "status": "present" if mcfarland_present else "missing",
+            "required_for": ["score_shard", "stabilized_baseline"],
+            "expected_sha256": None,
+            "observed_sha256": sha256_file(mcfarland_present[0]) if hash_inputs and mcfarland_present else None,
+            "size_bytes": mcfarland_present[0].stat().st_size if mcfarland_present and mcfarland_present[0].is_file() else None,
+            "note": "McFarland output metadata used to assemble the canonical spatial readout.",
+        },
         path_check(
             label="dataset_configs_main",
             path=Path(args.dataset_configs),
@@ -597,14 +692,14 @@ def build_manifest(
         "implementation_boundary": {
             "launcher_status": "in_visioncoremain",
             "merge_runner": str(MERGE_RUNNER),
-            "scorer_runner_status": (
-                "not yet ported into VisionCoreMain; pass --matrix-runner or "
-                f"{MATRIX_RUNNER_ENV} explicitly to use a recovered scorer"
-            ),
-            "stabilized_baseline_runner_status": (
-                "not yet ported into VisionCoreMain; pass --baseline-runner or "
-                f"{BASELINE_RUNNER_ENV} explicitly to use a recovered runner"
-            ),
+            "scorer_runner_status": "in_visioncoremain",
+            "matrix_runner": str(args.matrix_runner),
+            "stabilized_baseline_runner_status": "in_visioncoremain",
+            "baseline_runner": str(args.baseline_runner),
+            "external_runner_override_env": {
+                "matrix": MATRIX_RUNNER_ENV,
+                "baseline": BASELINE_RUNNER_ENV,
+            },
         },
         "inputs": input_checks(args, hash_inputs=bool(args.hash_inputs)),
         "commands": [command.manifest() for command in commands],

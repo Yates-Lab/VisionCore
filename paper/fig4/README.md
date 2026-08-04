@@ -96,9 +96,10 @@ stages collapse to these source boundaries:
 
 | Boundary | State |
 |---|---|
-| Real-trace SSI matrix scorer | The canonical launcher is now in repo (`upstream/run_real_trace_matrix.py`) and records the recovered 100 image x 1000 trace production profile, but the scorer body is still not ported from the recovered `declan` tree. |
+| Real-trace SSI matrix scorer | In repo (`upstream/score_real_trace_matrix.py`, with shared code in `upstream/real_trace_matrix/`). It records model/checkpoint/readout/RR100 provenance at runtime and keeps the recovered 100 image x 1000 trace production profile in the launcher. |
 | Real-trace SSI matrix merge | In repo (`upstream/merge_backimage_real_trace_ssi_matrix_shards.py`). It needs generated shard dirs `.../backimage_real_trace_ssi_matrix_large_contour_no_driftgate_ms200_n100x1000_v1/shards/images_000_050` and `images_050_100`. |
 | Upstream fixation-window data | `window_features.csv` is a true upstream input outside this compact Fig. 4 module (`sha256 e8e2fa28c39d4d0222502bbe73fc221210260212fbed25bdc6c2e6c6217f73ba`, 76,832 rows, 57 columns). |
+| McFarland readout artifact | The source scorer needs `scripts/mcfarland_outputs_mono.pkl` or `scripts/mcfarland_outputs.pkl` to rebuild the canonical 756-channel readout. Override with `FIG4_MCFARLAND_OUTPUTS` or `--mcfarland-outputs`. |
 | RR100/model assets | The recovered production checkpoint is `/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_120_long/checkpoints/learned_resnet_none_convgru_gaussian_ddp_bs128_ds30_lr1e-3_wd1e-4_corelrscale.5_warmup5/epoch=147-val_bps_overall=0.5702.ckpt` (`sha256 55d084aa0beb7d65614aecb9122edf7ad49c5799d370dbbd5dcf60b815c62de3`). The RR100 population spec hashes are recorded in the launcher. |
 | Other RR100 panel producers | `instantaneous_unit_maps`, `sf_group_ssi_modulation`, and `schematic_final_maps` still need lower output trees under `outputs/active_sensing_movie_information/` and `outputs/fixation_statistics_by_stimulus_all_sessions_after_review/`. |
 
@@ -132,15 +133,19 @@ Use the smoke profile for the same schemas at tiny scale:
 uv run python paper/fig4/upstream/run_real_trace_matrix.py --profile smoke
 ```
 
-Until the scorer body is ported into this repo, execution requires naming the
-recovered runner explicitly:
+Execution uses in-repo scorer scripts by default. `--run-all` still refuses on a
+clean checkout until the source inputs and model/readout/RR100 artifacts are
+present:
 
 ```bash
-FIG4_REAL_TRACE_MATRIX_RUNNER=/path/to/run_backimage_real_trace_ssi_matrix_pilot.py \
-FIG4_STABILIZED_BASELINE_RUNNER=/path/to/run_backimage_real_trace_stabilized_baseline.py \
+FIG4_MCFARLAND_OUTPUTS=/path/to/mcfarland_outputs_mono.pkl \
 FIG4_RR100_POPULATION_SPEC_DIR=/path/to/step1_activation_fingerprints \
 uv run python paper/fig4/upstream/run_real_trace_matrix.py --run-all --force
 ```
+
+The raw-data trace-bank step also requires the optional `DataYatesV1` data
+package/environment. The repo records that dependency in `pyproject.toml` under
+the `data` extra, but the large data files are intentionally not git-tracked.
 
 For a single production shard:
 
