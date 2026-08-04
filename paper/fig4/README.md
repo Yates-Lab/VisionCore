@@ -68,6 +68,25 @@ The full-tree stage is the reference path today: it supplies the CI-bearing
 path-bin cache and producer-schema edge-coherence files needed for an exact
 match to `reference/figure4_reference.pdf`.
 
+## Building a clean cache bundle
+
+Once `outputs/cache/` is staged, package the current flat caches into a portable
+bundle:
+
+```bash
+uv run python paper/fig4/build_cache_bundle.py
+```
+
+Verify the bundle without touching the live cache:
+
+```bash
+uv run python paper/fig4/verify_cache_bundle.py outputs/figures/fig4/handoff/fig4_cache_bundle_YYYYMMDD.tar.gz
+```
+
+The verifier unpacks into a scratch directory, points `VISIONCORE_CACHE_DIR` and
+`VISIONCORE_FIGURES_DIR` there, composes Fig. 4, and requires a zero pixel
+difference against `reference/figure4_reference.pdf`.
+
 ## What blocks full reproduction
 
 Four stages are `BLOCKED` in the preflight. All four block on data that exists

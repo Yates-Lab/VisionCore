@@ -481,6 +481,8 @@ Historical handoff bundles can be migrated into the flat cache namespace with
 `paper/fig4/stage_cache_overlay.py`. The compact cache tarball is partial; a
 full old output tree supplies the lower-root RR100, merged-bank, CI-bearing
 path-bin, producer-schema edge-coherence and schematic-stimulus artifacts.
+Portable cache bundles can be created and tested with
+`paper/fig4/build_cache_bundle.py` and `paper/fig4/verify_cache_bundle.py`.
 
 `--allow-missing` renders placeholder panels instead of failing, and stamps a
 red "DEGRADED RENDER - NOT PUBLISHABLE" banner across the page. It is for layout
