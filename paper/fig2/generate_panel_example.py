@@ -67,7 +67,7 @@ HIST_N_BINS = int(round(HIST_D_MAX / INTERCEPT_THRESHOLD))
 
 # Decomposition params (mirror visualize_units.py)
 DECOMP_WINDOW_BINS = 3       # 3 bins @ 120 Hz = 25 ms counting window (fig2 standard)
-DECOMP_T_HIST = 1            # t_hist = max(DECOMP_T_HIST, t_count); matches T_HIST_MS=10
+DECOMP_T_HIST = 3            # fixed matching history; matches T_HIST_MS_DEFAULT=25 ms
 DECOMP_SEG_MIN = 36
 # Spike-rate display bin = the counting window (25 ms), so Panel A matches Panel B.
 RATE_BIN_FACTOR = DECOMP_WINDOW_BINS
@@ -154,7 +154,7 @@ def _compute_uniform_bins():
     counts, traj, T_idx = extract_windows(
         robs_clean, eyepos_clean, segments,
         t_count=DECOMP_WINDOW_BINS,
-        t_hist=max(DECOMP_T_HIST, DECOMP_WINDOW_BINS),
+        t_hist=DECOMP_T_HIST,
     )
 
     bin_edges = np.linspace(0.0, HIST_D_MAX, HIST_N_BINS + 1)
@@ -226,7 +226,7 @@ def _decompose_all_units(radius=PANEL_FIXATION_RADIUS, d_max=1.0, n_bins=20,
     segments = extract_valid_segments(valid, min_len_bins=DECOMP_SEG_MIN)
     counts, traj, T = extract_windows(
         robs, eyepos, segments, t_count=DECOMP_WINDOW_BINS,
-        t_hist=max(DECOMP_T_HIST, DECOMP_WINDOW_BINS),
+        t_hist=DECOMP_T_HIST,
     )
     C = counts.shape[1]
     di = np.arange(C)

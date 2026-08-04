@@ -9,15 +9,23 @@ directly-estimated close-pair density, and the uncentred close-pair
 own KDE-reweighted eye-shuffle null.
 
 Windowing semantics match the legacy ``extract_windows``: count window of
-``t_count`` bins after a ``t_hist = max(t_hist_bins, t_count)`` history, stride
-``t_count``, ``T_idx`` = the count-window start bin. ``C_total`` is the legacy
-unweighted ``np.cov(counts, ddof=1)`` so the Fano numerator
-``C_noise = C_total - C_rate`` uses the same total.
+``t_count`` bins after a FIXED ``t_hist`` history (``T_HIST_MS_DEFAULT`` = 25 ms
+= 3 bins at 120 Hz) that does not depend on the counting window, stride
+``t_count``, ``T_idx`` = the count-window start bin. Close pairs are therefore
+matched over ``t_hist + t_count`` bins of trajectory at every counting window,
+so an across-window comparison varies only the counting window. ``C_total`` is the
+pair-count-weighted covariance returned by ``decompose_trajectory``, centred on
+the same weighted mean ``Erate`` as ``C_psth``/``C_rate`` and computed over the
+same retained time bins, so the law of total covariance holds term by term and
+the Fano numerator ``C_noise = C_total - C_rate`` is weighting-consistent.
+(Previously this was the unweighted ``np.cov(counts, ddof=1)``, which weighted
+each bin by its trial count ``n_t`` and used the unweighted sample mean.)
 
 Output schema (per session): session, subject, rate_hz, psth_r2, neuron_mask,
 qc, meta, windows[]. Each ``windows[w]`` carries window_bins/window_ms,
 n_samples, n_close_pairs, Ctotal, and ``targets[target] = {Crate, Cpsth, Erate,
-one_minus_alpha, Shuffled_Crates}``.
+one_minus_alpha, Shuffled_Crates, n_shuffles_requested/kept/dropped,
+pair_density_degenerate}``.
 """
 from __future__ import annotations
 
@@ -42,7 +50,7 @@ DT = 1 / 120
 WINDOW_BINS_DEFAULT = (1, 2, 3, 6)
 TARGETS_DEFAULT = ("full",)
 THRESHOLD_DEFAULT = 0.05
-T_HIST_MS_DEFAULT = 10.0
+T_HIST_MS_DEFAULT = 25.0       # fixed matching history; see decompose_session
 MIN_SEG_LEN_DEFAULT = 36
 MIN_TRIALS_PER_TIME_BIN_DEFAULT = 10
 N_BOOT_DEFAULT = 20            # only used if cpsth_method='split_half'
@@ -73,29 +81,58 @@ def _ctotal_unweighted(counts):
 # Uncentred close-pair Crate (legacy form) + eye-shuffle null
 # ---------------------------------------------------------------------------
 
+MIN_PAIR_DENSITY_POINTS = 3
+
+
+def _fit_pair_density(E):
+    """KDE on the close-pair midpoint set, or ``None`` if it is degenerate.
+
+    ``gaussian_kde`` needs a full-rank 2-D sample covariance, so at least three
+    midpoints spanning both dimensions. With exactly two close pairs the two
+    midpoints are always collinear, the covariance is rank 1, and the internal
+    Cholesky raises ``LinAlgError``. Rather than substitute a regularized
+    parametric density -- which would manufacture a plausible-looking number out
+    of a two-point fit -- report the failure and let the caller drop the draw.
+    """
+    if len(E) < MIN_PAIR_DENSITY_POINTS:
+        return None
+    try:
+        return _density_fn(E, "kde")
+    except np.linalg.LinAlgError:
+        return None
+
+
 def _uncentred_crate(counts, trajectories, T_idx, target, threshold,
                      Erate, time_bin_weighting, weight_clip,
                      phat=None, rho=None, reduction="geometric_median",
                      closepair_density="direct", phat_pair=None):
     """Close-pair Crate as ``MM - Erate (x) Erate`` with the single-point-
     reduction importance weights (matches the §4.5 cell-side reference and the
-    legacy uncentred estimator). Returns (Crate, n_pairs, phat, rho, phat_pair);
-    representative points ``rho``, the KDE ``phat`` and (for direct density) the
-    close-pair KDE ``phat_pair`` are computed on demand and returned for reuse.
+    legacy uncentred estimator). Returns (Crate, n_pairs, phat, rho, phat_pair,
+    pair_density_ok); representative points ``rho``, the KDE ``phat`` and (for
+    direct density) the close-pair KDE ``phat_pair`` are computed on demand and
+    returned for reuse. ``pair_density_ok`` is False when the close-pair midpoint
+    density this target needs could not be estimated, which makes the returned
+    Crate unusable -- see ``_fit_pair_density``.
     """
     n_cells = counts.shape[1]
     gi, gj, tpair, _mid = _rms_traj_close_pairs(trajectories, T_idx, threshold)
     n_pairs = len(gi)
     if n_pairs == 0:
-        return np.full((n_cells, n_cells), np.nan), 0, phat, rho, phat_pair
+        return np.full((n_cells, n_cells), np.nan), 0, phat, rho, phat_pair, False
 
     if rho is None:
         rho = (_geometric_median(trajectories) if reduction == "geometric_median"
                else trajectories.mean(axis=1))
     if phat is None:
         phat = _density_fn(rho, "kde")
-    if closepair_density == "direct" and phat_pair is None:
-        phat_pair = _density_fn(0.5 * (rho[gi] + rho[gj]), "kde")
+    # The close-pair midpoint density is consumed only by the target='full'
+    # importance weights below, so don't demand it (or drop draws over it)
+    # for the other targets.
+    pair_density_ok = True
+    if closepair_density == "direct" and target == "full" and phat_pair is None:
+        phat_pair = _fit_pair_density(0.5 * (rho[gi] + rho[gj]))
+        pair_density_ok = phat_pair is not None
 
     if target == "full":
         rho_mid = 0.5 * (rho[gi] + rho[gj])
@@ -128,7 +165,7 @@ def _uncentred_crate(counts, trajectories, T_idx, target, threshold,
     prod = (counts[gi].T * pw) @ counts[gj]
     MM = 0.5 * (prod + prod.T)
     Crate = MM - np.outer(Erate, Erate)
-    return Crate, n_pairs, phat, rho, phat_pair
+    return Crate, n_pairs, phat, rho, phat_pair, pair_density_ok
 
 
 def _run_corrected_shuffles(counts, trajectories, T_idx, threshold, n_shuffles,
@@ -139,20 +176,30 @@ def _run_corrected_shuffles(counts, trajectories, T_idx, threshold, n_shuffles,
     the representative-point set) is permutation-invariant and reused; ``rho`` is
     permuted; ``phat_pair`` is re-fit per shuffle (passed None). ``Erate`` is
     held at the real per-target value.
+
+    A shuffle whose surviving close-pair set is too small to support the midpoint
+    density is dropped rather than estimated some other way: its Crate would be a
+    second moment over one or two pairs, which is not a usable null draw under
+    any density. Returns ``(crates, n_dropped)``; the permutation is drawn before
+    the drop test, so dropping does not perturb the later shuffles.
     """
     rng = np.random.default_rng(seed)
     N = counts.shape[0]
     out = []
+    n_dropped = 0
     for _ in range(n_shuffles):
         perm = rng.permutation(N)
-        Crate_shuf, _n, _p, _r, _pp = _uncentred_crate(
+        Crate_shuf, _n, _p, _r, _pp, ok = _uncentred_crate(
             counts, trajectories[perm], T_idx, target, threshold,
             Erate=Erate, time_bin_weighting=time_bin_weighting,
             weight_clip=weight_clip, phat=phat, rho=rho[perm],
             closepair_density=closepair_density, phat_pair=None,
         )
+        if not ok:
+            n_dropped += 1
+            continue
         out.append(Crate_shuf)
-    return out
+    return out, n_dropped
 
 
 # ---------------------------------------------------------------------------
@@ -183,18 +230,29 @@ def decompose_session(aligned,
     segments = extract_valid_segments(valid_mask, min_len_bins=min_seg_len)
     if verbose:
         print(f"  [{aligned['session']}] {len(segments)} valid segments")
-    t_hist_bins = int(t_hist_ms / (dt * 1000))
+    # FIXED matching history, independent of the counting window. Previously
+    # `t_hist = max(t_hist_bins, t_count)`, which made the history scale with
+    # the counting window (L = 2W) and so confounded counting-window duration
+    # with matching-history duration in any across-window comparison.
+    t_hist_bins = int(round(t_hist_ms / (dt * 1000)))
 
     per_window = []
     for t_count in windows_bins:
-        t_hist = max(t_hist_bins, t_count)
+        t_hist = t_hist_bins
         counts, trajectories, T_idx = extract_windows(
             robs, eyepos, segments, t_count, t_hist
         )
         if counts is None or counts.shape[0] < 100:
             continue
 
-        Ctotal = _ctotal_unweighted(counts)
+        # Ctotal is taken from decompose_trajectory (below), which computes it
+        # under the SAME pair-count time-bin weighting and the SAME weighted
+        # mean Erate as Cpsth/Crate, over the same retained time bins. This is
+        # what makes the factorization exact term by term; the previous
+        # unweighted np.cov weighted each bin by its trial count n_t and was
+        # centred on the unweighted sample mean, so C_noise = C_total - C_rate
+        # mixed two weightings and two means.
+        Ctotal = None
         per_target = {}
         n_close_pairs = None
         phat = rho = phat_pair = None
@@ -207,14 +265,17 @@ def decompose_session(aligned,
                 min_trials_per_time_bin=min_trials_per_time_bin,
                 closepair_density=closepair_density,
             )
+            if Ctotal is None:
+                Ctotal = real["Ctotal"]
             # Override Crate with the uncentred close-pair form (legacy /
             # §4.5-reference consistent; see note_pipeline.md §7.2 item 6).
-            Crate, n_close, phat, rho, phat_pair = _uncentred_crate(
-                counts, trajectories, T_idx, tgt, threshold,
-                Erate=real["Erate"], time_bin_weighting=time_bin_weighting,
-                weight_clip=weight_clip, phat=phat, rho=rho,
-                closepair_density=closepair_density, phat_pair=phat_pair,
-            )
+            Crate, n_close, phat, rho, phat_pair, real_pair_density_ok = \
+                _uncentred_crate(
+                    counts, trajectories, T_idx, tgt, threshold,
+                    Erate=real["Erate"], time_bin_weighting=time_bin_weighting,
+                    weight_clip=weight_clip, phat=phat, rho=rho,
+                    closepair_density=closepair_density, phat_pair=phat_pair,
+                )
             if n_close_pairs is None:
                 n_close_pairs = n_close
 
@@ -223,9 +284,9 @@ def decompose_session(aligned,
             one_minus_alpha = 1.0 - alpha
             one_minus_alpha[~(np.diag(Crate) > 0)] = np.nan
 
-            shuffled_crates = []
+            shuffled_crates, n_shuffles_dropped = [], 0
             if n_shuffles > 0:
-                shuffled_crates = _run_corrected_shuffles(
+                shuffled_crates, n_shuffles_dropped = _run_corrected_shuffles(
                     counts, trajectories, T_idx, threshold, n_shuffles,
                     time_bin_weighting, seed=seed, Erate=real["Erate"],
                     target=tgt, phat=phat, rho=rho, weight_clip=weight_clip,
@@ -238,6 +299,14 @@ def decompose_session(aligned,
                 "Erate": real["Erate"],
                 "one_minus_alpha": one_minus_alpha,
                 "Shuffled_Crates": shuffled_crates,
+                # Null-draw bookkeeping: shuffles whose close-pair set could not
+                # support the midpoint density (see _fit_pair_density).
+                "n_shuffles_requested": int(n_shuffles),
+                "n_shuffles_kept": len(shuffled_crates),
+                "n_shuffles_dropped": int(n_shuffles_dropped),
+                # Never observed on real (unshuffled) data; recorded so it can
+                # not become silent if it ever does occur.
+                "pair_density_degenerate": bool(not real_pair_density_ok),
             }
 
         per_window.append({
