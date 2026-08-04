@@ -38,6 +38,7 @@ if _COVDECOMP not in sys.path:
 import derive  # noqa: E402
 from data_loading import load_cache as load_aligned_cache, FIXATION_RADIUS  # noqa: E402
 from model_decompose import decompose_model_session  # noqa: E402
+from fig3_windows import FIG2_REPORTED_WINDOW_BINS  # noqa: E402
 
 # Within-model conditions (fig3 naming); 'intact' == the full twin.
 CONDITIONS = ("intact", "zeroed", "stabilized")
@@ -57,8 +58,16 @@ _TWIN_FIG3_CACHE = CACHE_DIR / "fig3_digitaltwin.pkl"
 _LEGACY_CACHE = {c: CACHE_DIR / f"supp_panel_c_{c}.pkl" for c in CONDITIONS}
 
 
-def _cache_path(condition):
-    return CACHE_DIR / f"fig3_femfraction_{condition}.pkl"
+def _cache_path(condition, count_bins=None):
+    """Cache path, keyed by the counting window the f_FEM was estimated on.
+
+    The window is in the filename so the 25 ms rebuild cannot silently overwrite
+    the legacy instantaneous-estimator caches, and so a future window change
+    invalidates by name rather than by memory.
+    """
+    if count_bins is None:
+        count_bins = FIG2_REPORTED_WINDOW_BINS
+    return CACHE_DIR / f"fig3_femfraction_{condition}_w{count_bins}.pkl"
 
 
 def _fig2_included(aligned_rec):
@@ -106,24 +115,35 @@ def _select_rhat(sr, condition):
     return np.asarray(rhat)
 
 
-def compute_femfraction_data(condition="intact", refresh=False):
+def compute_femfraction_data(condition="intact", refresh=False, count_bins=None):
     """Per-cell 1-alpha (unclipped) for the neurons (B_obs) and the twin
     ``condition`` (B_model), matched per cell on the fig2-frame intersection.
 
+    ``count_bins`` is the Figure 2 counting window the estimate is built on;
+    it defaults to Figure 2's reported window so panel E's f_FEM is the same
+    quantity Figure 2 panel C reports. ``count_bins=0`` selects the legacy
+    instantaneous single-bin estimator.
+
     Returns {'B_obs_uncl', 'B_model_uncl', 'B_obs', 'B_model', 'subj',
-    'session'} as flat (n_cells,) arrays. Cached per condition.
+    'session', 'count_bins'} as flat (n_cells,) arrays. Cached per condition
+    and window.
     """
     if condition not in CONDITIONS:
         raise ValueError(f"condition must be one of {CONDITIONS}")
+    if count_bins is None:
+        count_bins = FIG2_REPORTED_WINDOW_BINS
 
-    cache = _cache_path(condition)
+    cache = _cache_path(condition, count_bins)
     if cache.exists() and not refresh:
         with open(cache, "rb") as f:
             return dill.load(f)
 
-    # One-time migration: the legacy supp cache is the identical computation.
+    # The legacy supp caches hold the INSTANTANEOUS single-bin estimator, which
+    # is not this computation at any counting window (it is biased low against
+    # Figure 2 by 0.071 at 25 ms). Migrate it only for the legacy window, never
+    # into a windowed cache.
     legacy = _LEGACY_CACHE[condition]
-    if legacy.exists() and not refresh:
+    if not count_bins and legacy.exists() and not refresh:
         print(f"[fig3.femfrac] migrating {legacy.name} -> {cache.name} (identical)")
         with open(legacy, "rb") as f:
             out = dill.load(f)
@@ -152,7 +172,8 @@ def compute_femfraction_data(condition="intact", refresh=False):
         r_eye = np.hypot(eyepos[..., 0], eyepos[..., 1])
         valid_mask = base_valid & np.isfinite(r_eye) & (r_eye < FIG2_FIXATION_RADIUS)
 
-        comp = decompose_model_session(rhat, robs, eyepos, valid_mask, dfs)
+        comp = decompose_model_session(rhat, robs, eyepos, valid_mask, dfs,
+                                       count_bins=count_bins)
         B_obs.extend(comp["B_obs"])
         B_model.extend(comp["B_model"])
         B_obs_uncl.extend(comp["B_obs_uncl"])
@@ -168,6 +189,7 @@ def compute_femfraction_data(condition="intact", refresh=False):
         "B_model_uncl": np.asarray(B_model_uncl, float),
         "subj": np.asarray(subj, dtype=object).astype(str),
         "session": np.asarray(sess_list, dtype=object).astype(str),
+        "count_bins": int(count_bins),
     }
     with open(cache, "wb") as f:
         dill.dump(out, f)

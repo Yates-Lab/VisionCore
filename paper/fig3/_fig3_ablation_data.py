@@ -37,10 +37,34 @@ draws on the same sessions, neurons, and `cd_population` mask (fig2 inclusion):
   - panel E : empirical FEM modulation (1 - `alpha`) vs single-trial r^2 gain
               over the PSTH baseline (`ve[zeroed]` / `ve_psth`).
 
-Self-contained: owns cache `outputs/cache/fig3_bottomrow_ablation.pkl` (no
-dependency on the behavior-vs-vision within-model cache or the fig3 top-row
-cache). 1-alpha is read from the covariance-decomposition cache via
-`_fig3_data._load_fig2_alpha_by_session`.
+Two stages, deliberately split so the expensive one is not held hostage by the
+cheap one:
+
+  1. INFERENCE (`_run_inference`, cache `outputs/cache/fig3_ablation_inference.pkl`)
+     Everything that needs the model or the raw dataset: `ve`, `ve_psth`,
+     `ccnorm`/`ccmax`, `captured_variance`, `matched_var_y`, the `matched_*`
+     rate-variance diagnostic, `model_one_minus_alpha`, and the example payload.
+     Tens of minutes on a GPU. Re-run only when the checkpoint, the conditions,
+     the rendering, or the scoring windows change -- bump
+     `INFERENCE_SCHEMA_VERSION` when the stored schema or its semantics change.
+
+  2. DERIVE (`_attach_fig2_derived` + `aggregate`, no cache)
+     Everything that is a function of the Figure 2 covariance decomposition:
+     `alpha`, `fig2_c_rate`, `fig2_c_total`, `explainable_fraction`, and (in
+     `aggregate`) `total_variance_ratio` and `explainable_fraction_matched`.
+     Recomputed on EVERY load from the current caches. A change to Figure 2's
+     estimator, weighting, or inclusion criteria therefore costs a
+     `generate_figure3.py` run, not an inference sweep, and cannot leave a stale
+     Figure 2 quantity frozen inside the inference cache.
+
+The one asymmetry worth knowing: the `matched_*` diagnostic needs `dfs`, so it
+lives in stage 1 even though it uses no model. Changing the covariance
+*estimator convention* does invalidate it. It feeds only the
+`matched_denominator_sensitivity` entry in the figure manifest, never a
+manuscript number and never the score.
+
+No dependency on the behavior-vs-vision within-model cache or the fig3 top-row
+cache.
 """
 import sys
 
@@ -70,7 +94,26 @@ from _fig3_explainable_variance import (
 )
 
 
-CACHE_PATH = CACHE_DIR / "fig3_bottomrow_ablation.pkl"
+CACHE_PATH = CACHE_DIR / "fig3_ablation_inference.pkl"
+
+# Bumped when the *inference* stage's output schema or semantics change (new
+# condition, different rendering, different scoring windows). Figure 2-derived
+# fields are NOT part of this schema -- they are recomputed on every load by
+# `_attach_fig2_derived`, so a Figure 2 convention change does not invalidate
+# this cache and must not bump this number.
+INFERENCE_SCHEMA_VERSION = 1
+
+# Counting window (in 120 Hz bins) that panel D's numerator is scored on, and
+# the denominator window `_attach_fig2_derived` reads to match it. Panel D uses
+# the twin's native resolution; see covariance_decomposition/fig3_windows.py for
+# why it differs from the window panel E and Figure 2 report.
+sys.path.insert(0, str(VISIONCORE_ROOT / "paper" / "covariance_decomposition"))
+from fig3_windows import FIG3_SINGLETRIAL_WINDOW_BINS  # noqa: E402
+
+PRODUCTION_COUNT_BINS = FIG3_SINGLETRIAL_WINDOW_BINS
+# Additional windows scored in the same inference pass so the counting-window
+# choice can be compared on identical predictions without re-running inference.
+SCREEN_COUNT_BINS = (1, 3)
 
 CONDS = ["intact", "zeroed", "stabilized"]
 ABLATIONS = ["zeroed", "stabilized"]          # extraretinal-route first
@@ -249,7 +292,16 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH):
     if str(VISIONCORE_ROOT) not in sys.path:
         sys.path.insert(0, str(VISIONCORE_ROOT))
 
-    fig2_info_by_session = _load_fig2_alpha_by_session()
+    # Which sessions the Figure 2 decomposition covers. Read from the aligned
+    # cache (72 MB, ~0.1 s) rather than the multi-GB stage-1 cache: the
+    # decomposition emits exactly one record per aligned session, so the names
+    # agree, and `_attach_fig2_derived` -- which raises on a session missing from
+    # Figure 2 -- stays the only place that opens the big cache.
+    covdecomp = str(VISIONCORE_ROOT / "paper" / "covariance_decomposition")
+    if covdecomp not in sys.path:
+        sys.path.insert(0, covdecomp)
+    from data_loading import load_cache as load_aligned_cache
+    fig2_sessions = {a["session"] for a in load_aligned_cache()}
 
     device = get_free_device()
     print(f"Loading model from: {CHECKPOINT_PATH}")
@@ -265,7 +317,7 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH):
             continue
         if session_filter is not None and session_name not in session_filter:
             continue
-        if session_name not in fig2_info_by_session:
+        if session_name not in fig2_sessions:
             print(f"Skipping {session_name}: absent from the Figure 2 decomposition")
             continue
         print(f"\n--- {session_name} ({subject}) ---")
@@ -388,53 +440,41 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH):
 
         ccnorm, ccmax = _compute_ccnorm_by_condition(robs, rhat_rs, dfs)
 
-        alpha = np.full(n_neurons, np.nan)
-        fig2_c_rate = np.full(n_neurons, np.nan)
-        fig2_c_total = np.full(n_neurons, np.nan)
-        if session_name not in fig2_info_by_session:
-            raise KeyError(f"{session_name} is missing from the Figure 2 cache")
-        f2 = fig2_info_by_session[session_name]
-        for i, nidx in enumerate(neuron_mask):
-            loc = np.where(f2["neuron_mask"] == nidx)[0]
-            if len(loc) == 1:
-                j = int(loc[0])
-                alpha[i] = f2["alpha"][j]
-                fig2_c_rate[i] = f2["c_rate"][j]
-                fig2_c_total[i] = f2["c_total"][j]
-
         # Captured count variance on Figure 2's one-bin windows intersected with
-        # the twin's valid support, over Figure 2's own diag(Crate). The
-        # denominator is read from the decomposition cache, never re-estimated
-        # on this subset: the history mask removes the close pairs the estimator
-        # needs (see `_fig3_explainable_variance`).
-        scored = compute_matched_captured_variance(
-            robs, {"psth": rbar, **rhat_m}, eyepos, dfs
-        )
-        fraction = explainable_fraction(scored["captured_variance"], fig2_c_rate)
-        var_ratio = total_variance_ratio(scored["var_y"], fig2_c_total)
-        n_scored = int(np.isfinite(scored["var_y"]).sum())
-        print(
-            f"  explainable variance: {n_scored}/{n_neurons} units scored on "
-            f"{scored['n_base_windows']} Figure 2 windows (median "
-            f"{int(np.median(scored['n_windows']))} model-valid/unit); "
-            f"Var(y)/Ctotal_fig2 median={np.nanmedian(var_ratio):.3f}; "
-            + ", ".join(
-                f"{c}={np.nanmedian(fraction[c]):+.3f}" for c in ("psth", *CONDS)
+        # the twin's valid support. Only the numerator is computed here; the
+        # Figure 2 denominators (diag(Crate), diag(Ctotal)) and everything
+        # derived from them are attached at load time by `_attach_fig2_derived`,
+        # so they track the current decomposition cache without re-inference.
+        scored_by_window = {
+            cb: compute_matched_captured_variance(
+                robs, {"psth": rbar, **rhat_m}, eyepos, dfs, count_bins=cb
             )
-        )
+            for cb in SCREEN_COUNT_BINS
+        }
+        scored = scored_by_window[PRODUCTION_COUNT_BINS]
+        for cb in SCREEN_COUNT_BINS:
+            s = scored_by_window[cb]
+            n_scored = int(np.isfinite(s["var_y"]).sum())
+            tag = " (production)" if cb == PRODUCTION_COUNT_BINS else ""
+            print(
+                f"  captured variance [W={cb}, {cb * 1000 / 120:.1f} ms]{tag}: "
+                f"{n_scored}/{n_neurons} units scored on "
+                f"{s['n_base_windows']} Figure 2 windows (median "
+                f"{int(np.median(s['n_windows']))} model-valid/unit, "
+                f"{s['n_units_below_floor']} below floor)"
+            )
 
         # Diagnostic only: the abandoned matched denominator, recorded so the
-        # figure can report how far it drifts from Figure 2's estimate.
+        # figure can report how far it drifts from Figure 2's estimate. This one
+        # needs `dfs`, so it stays inference-side; its drift-vs-Figure-2 ratio is
+        # reported by `_attach_fig2_derived` once the denominators are attached.
         matched = estimate_matched_rate_variance(robs, eyepos, dfs)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            drift = matched["c_rate"] / fig2_c_rate
         print(
             f"  [diagnostic] matched Crate: "
             f"{int(np.sum(matched['c_rate'] > 0))}/{n_neurons} units positive, "
             f"{matched['n_validity_groups']} validity groups "
             f"({matched['n_validity_groups_excluded']} unusable), median "
-            f"{int(np.median(matched['n_close_pairs']))} close pairs, "
-            f"matched/Figure 2 median={np.nanmedian(drift):.3f}"
+            f"{int(np.median(matched['n_close_pairs']))} close pairs"
         )
 
         example = None
@@ -470,15 +510,24 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH):
             "session": session_name, "subject": subject,
             "neuron_mask": neuron_mask, "n_neurons": n_neurons,
             "ve": ve, "ve_psth": ve_psth, "ccnorm": ccnorm, "ccmax": ccmax,
-            "alpha": alpha,
-            "explainable_fraction": fraction,
             "captured_variance": scored["captured_variance"],
             "var_residual": scored["var_residual"],
             "matched_var_y": scored["var_y"],
             "matched_n_windows": scored["n_windows"],
             "n_base_windows": scored["n_base_windows"],
-            "fig2_c_rate": fig2_c_rate,
-            "fig2_c_total": fig2_c_total,
+            # Same quantities at every screened counting window, computed on the
+            # SAME predictions, so the windows can be compared pairwise per unit.
+            "scored_by_window": {
+                cb: {
+                    "captured_variance": s["captured_variance"],
+                    "var_residual": s["var_residual"],
+                    "var_y": s["var_y"],
+                    "n_windows": s["n_windows"],
+                    "n_base_windows": s["n_base_windows"],
+                    "n_units_below_floor": s["n_units_below_floor"],
+                }
+                for cb, s in scored_by_window.items()
+            },
             "matched_c_rate": matched["c_rate"],
             "matched_c_total": matched["c_total"],
             "matched_n_close_pairs": matched["n_close_pairs"],
@@ -492,7 +541,14 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH):
 
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     with open(cache_path, "wb") as f:
-        dill.dump(results, f)
+        dill.dump(
+            {
+                "schema_version": INFERENCE_SCHEMA_VERSION,
+                "checkpoint_path": CHECKPOINT_PATH,
+                "results": results,
+            },
+            f,
+        )
     print(f"\nCached {len(results)} sessions to {cache_path}")
     return results
 
@@ -585,6 +641,69 @@ def aggregate(results):
     return agg
 
 
+def _attach_fig2_derived(results, window_bins=PRODUCTION_COUNT_BINS):
+    """Attach the Figure 2-derived per-session fields, recomputed from the
+    CURRENT decomposition cache.
+
+    ``window_bins`` selects the Figure 2 counting window supplying the
+    denominators. It must match the window the cached `captured_variance`
+    numerator was scored on, or the explainable fraction mixes two windows.
+
+    These fields are pure functions of the session name, `neuron_mask`, the
+    Figure 2 covariance cache, and the already-cached `captured_variance` --
+    no model and no dataset. Keeping them out of the inference cache is what
+    makes a Figure 2 convention change (estimator, weighting, inclusion) cost a
+    `generate_figure3.py` run instead of a full GPU inference sweep.
+
+    Mutates and returns ``results``. Ordering is untouched, so the flattened
+    cell order assumed by `aggregate` / `_raw_one_minus_alpha` still holds.
+    """
+    fig2_info_by_session = _load_fig2_alpha_by_session(window_bins=window_bins)
+    drifts = []
+    for r in results:
+        session_name = r["session"]
+        n_neurons = int(r["n_neurons"])
+        alpha = np.full(n_neurons, np.nan)
+        fig2_c_rate = np.full(n_neurons, np.nan)
+        fig2_c_total = np.full(n_neurons, np.nan)
+        if session_name not in fig2_info_by_session:
+            raise KeyError(f"{session_name} is missing from the Figure 2 cache")
+        f2 = fig2_info_by_session[session_name]
+        for i, nidx in enumerate(r["neuron_mask"]):
+            loc = np.where(f2["neuron_mask"] == nidx)[0]
+            if len(loc) == 1:
+                j = int(loc[0])
+                alpha[i] = f2["alpha"][j]
+                fig2_c_rate[i] = f2["c_rate"][j]
+                fig2_c_total[i] = f2["c_total"][j]
+        r["alpha"] = alpha
+        r["fig2_c_rate"] = fig2_c_rate
+        r["fig2_c_total"] = fig2_c_total
+        r["explainable_fraction"] = explainable_fraction(
+            r["captured_variance"], fig2_c_rate
+        )
+        with np.errstate(divide="ignore", invalid="ignore"):
+            drift = r["matched_c_rate"] / fig2_c_rate
+        if np.any(np.isfinite(drift)):
+            drifts.append(np.nanmedian(drift))
+
+    # Sanity figures only, over every cached session and unit -- i.e. BEFORE the
+    # fig2 session floor and the C/D population mask. They are deliberately not
+    # the reported values: `generate_figure3.py` prints the population-restricted
+    # Var(y)/Ctotal_fig2 that the manuscript quotes, and it will read lower.
+    ratio = total_variance_ratio(
+        np.concatenate([r["matched_var_y"] for r in results]),
+        np.concatenate([r["fig2_c_total"] for r in results]),
+    )
+    print(
+        f"Figure 2 derived fields attached for {len(results)} session(s) "
+        f"[all cached sessions, pre-floor]: Var(y)/Ctotal_fig2 "
+        f"median={np.nanmedian(ratio):.3f}; matched/Figure 2 Crate "
+        f"median={np.nanmedian(drifts):.3f}"
+    )
+    return results
+
+
 def _raw_one_minus_alpha(results):
     """Unclipped fig2 1-alpha, aligned to `aggregate`'s flattened cell order.
 
@@ -668,11 +787,33 @@ def load_ablation_data(recompute=False):
         return _cached_data
 
     if CACHE_PATH.exists() and not recompute:
-        print(f"Loading cached ablation results from {CACHE_PATH}")
+        print(f"Loading cached inference results from {CACHE_PATH}")
         with open(CACHE_PATH, "rb") as f:
-            results = dill.load(f)
+            payload = dill.load(f)
+        if isinstance(payload, dict) and "results" in payload:
+            results = payload["results"]
+            version = payload.get("schema_version")
+            if version != INFERENCE_SCHEMA_VERSION:
+                raise ValueError(
+                    f"{CACHE_PATH} has inference schema_version {version}, "
+                    f"expected {INFERENCE_SCHEMA_VERSION}. Re-run inference "
+                    f"(load_ablation_data(recompute=True))."
+                )
+            if payload.get("checkpoint_path") != CHECKPOINT_PATH:
+                raise ValueError(
+                    f"{CACHE_PATH} was produced from "
+                    f"{payload.get('checkpoint_path')}, but CHECKPOINT_PATH is "
+                    f"{CHECKPOINT_PATH}. Re-run inference."
+                )
+        else:  # pre-split cache: a bare list, no provenance recorded
+            print("  (legacy cache format: no schema/checkpoint provenance)")
+            results = payload
     else:
         results = _run_inference()
+
+    # Figure 2-derived fields are recomputed from the current decomposition
+    # cache on every load, never read from the inference cache.
+    results = _attach_fig2_derived(results)
 
     # Restrict to fig2's floored population (>=10 analyzed units/session) so
     # panels C/D/E describe the exact same sessions/neurons fig2 reports. The

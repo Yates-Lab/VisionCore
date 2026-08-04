@@ -13,7 +13,7 @@ Renders the digital-twin mechanism figure:
      and Ablated reproduce the empirical FEM modulation, Stabilized does not.
 
 Panels C/D draw on the unified analysis-row cache
-(`fig3_bottomrow_ablation.pkl`) on the fig2 inclusion population (rate > 2 Hz &
+(`fig3_ablation_inference.pkl`) on the fig2 inclusion population (rate > 2 Hz &
 PSTH R^2 > 0.10). Panel E is computed by `_fig3_femfraction` on the same fig2
 frame + intersection population and is filtered to the same >=10-analyzed-unit
 session floor (via `_restrict_femdata_to_floor`), so C/D/E describe nearly the
@@ -582,11 +582,17 @@ def _restrict_femdata_to_floor(femdata, included):
     session with >=3 included cells, but panels C/D go through the floor via
     `_load_fig2_included_sessions`; applying the same floor here (fresh, not
     baked into the cache — symmetric with `load_ablation_data`) keeps C/D/E on
-    the same session population fig2 reports. All femdata entries are per-cell
-    arrays of equal length, so one mask filters them uniformly."""
+    the same session population fig2 reports. Per-cell entries are arrays of
+    equal length and are filtered by one mask; scalar provenance entries (e.g.
+    `count_bins`, the counting window the estimate was built on) are passed
+    through untouched."""
     sess = np.asarray(femdata["session"])
     keep = np.isin(sess, list(included))
-    return {k: np.asarray(v)[keep] for k, v in femdata.items()}
+    out = {}
+    for k, v in femdata.items():
+        a = np.asarray(v)
+        out[k] = a[keep] if a.shape[:1] == keep.shape else v
+    return out
 
 
 def _plot_missing_cache(ax):
@@ -623,7 +629,7 @@ captured count variance on Figure 2-matched, model-valid windows relative to
 Figure 2's own diag(Crate) at the one-bin window, including the leave-one-out
 PSTH as a predictor. The FEM modulation fraction, f_FEM (= 1-alpha), reproduces
 the empirical distribution under the full and extraretinal-ablated conditions but not when the
-retinal image is stabilized. Panels C/D use `fig3_bottomrow_ablation.pkl`; panel E uses the
+retinal image is stabilized. Panels C/D use `fig3_ablation_inference.pkl`; panel E uses the
 per-condition f_FEM caches (`fig3_femfraction_{condition}.pkl`), both on the
 fig2 inclusion population.
 

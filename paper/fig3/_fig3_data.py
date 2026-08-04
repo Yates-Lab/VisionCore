@@ -65,13 +65,20 @@ def subject_from_session(session_name):
     return session_name.split("_")[0]
 
 
-def _load_fig2_alpha_by_session():
+def _load_fig2_alpha_by_session(window_bins=None):
     """Load Figure 2 per-unit rate-variance quantities for inference.
 
     Reads the shared covariance-decomposition cache (target='full') at the
-    one-bin counting window. The returned Ctotal and Crate diagonals let Figure
-    3 verify and normalize its matched single-trial variance calculation.
+    ``window_bins``-bin counting window. The returned Ctotal and Crate diagonals
+    let Figure 3 verify and normalize its matched single-trial variance
+    calculation, so this window must be the one Figure 3 scores its numerator on.
     """
+    if window_bins is None:
+        covd = str(VISIONCORE_ROOT / "paper" / "covariance_decomposition")
+        if covd not in sys.path:
+            sys.path.insert(0, covd)
+        from fig3_windows import FIG3_SINGLETRIAL_WINDOW_BINS
+        window_bins = FIG3_SINGLETRIAL_WINDOW_BINS
     if not COVDECOMP_CACHE_PATH.exists():
         raise FileNotFoundError(
             f"Covariance-decomposition cache not found at {COVDECOMP_CACHE_PATH}. "
@@ -87,11 +94,12 @@ def _load_fig2_alpha_by_session():
         subject = sr["subject"]
         if subject not in SUBJECTS:
             continue
-        window = sr["windows"][0]
-        if int(window["window_bins"]) != 1:
+        window = next((w for w in sr["windows"]
+                       if int(w["window_bins"]) == int(window_bins)), None)
+        if window is None:
             raise ValueError(
-                f"Expected the first Figure 2 window to contain one bin; "
-                f"{sess_name} has {window['window_bins']}"
+                f"{sess_name} has no {window_bins}-bin Figure 2 counting window "
+                f"(available: {[int(w['window_bins']) for w in sr['windows']]})"
             )
         block = window["targets"][COVDECOMP_TARGET]
         diag_psth = np.diag(block["Cpsth"])
@@ -106,7 +114,7 @@ def _load_fig2_alpha_by_session():
             "neuron_mask": sr["neuron_mask"],
             "subject": subject,
         }
-    print(f"  Loaded one-bin Figure 2 variances for {len(out)} sessions")
+    print(f"  Loaded {window_bins}-bin Figure 2 variances for {len(out)} sessions")
     return out
 
 

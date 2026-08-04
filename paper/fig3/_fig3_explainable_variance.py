@@ -18,7 +18,7 @@ report, so it is the stable denominator. `estimate_matched_rate_variance` is
 retained as a diagnostic of that decision; it never gates the score.
 
 The two quantities are therefore measured on different sample sets: matched
-Var(y) is a median 0.90 of Figure 2's diag(Ctotal). `total_variance_ratio`
+Var(y) is a median 0.88 of Figure 2's diag(Ctotal). `total_variance_ratio`
 reports that mismatch per unit instead of asserting it away.
 
 A non-positive or non-finite Figure 2 rate-variance estimate is undefined.
@@ -35,8 +35,26 @@ from VisionCore.covariance import extract_valid_segments
 
 FIG2_FIXATION_RADIUS = 0.5
 FIG2_MIN_SEGMENT_BINS = 36
-FIG2_HISTORY_BINS = 1
-FIG2_COUNT_BINS = 1
+
+
+def _window_contract():
+    """Read the shared Figure 2 / Figure 3 counting-window contract."""
+    import sys
+    from pathlib import Path
+    from VisionCore.paths import VISIONCORE_ROOT
+    covd = str(Path(VISIONCORE_ROOT) / "paper" / "covariance_decomposition")
+    if covd not in sys.path:
+        sys.path.insert(0, covd)
+    import fig3_windows
+    return fig3_windows
+
+
+# Figure 2 uses a fixed matching history at every counting window, so the
+# one-bin window this module scores on carries a 3-bin history, not a 1-bin one.
+# Both come from `covariance_decomposition/fig3_windows.py` -- restating them
+# here is what let them drift apart from Figure 2 once already.
+FIG2_HISTORY_BINS = _window_contract().fig2_history_bins()
+FIG2_COUNT_BINS = _window_contract().FIG3_SINGLETRIAL_WINDOW_BINS
 
 # A unit's numerator is a difference of two sample variances over the same bins,
 # so its relative sampling error scales as sqrt(2/(n-1)) -- about 20% at this
@@ -127,18 +145,28 @@ def compute_matched_captured_variance(
     dfs,
     *,
     min_segment_bins=FIG2_MIN_SEGMENT_BINS,
+    count_bins=FIG2_COUNT_BINS,
     min_scored_windows=MIN_SCORED_WINDOWS,
 ):
-    """Captured count variance per unit on Figure 2-matched, model-valid bins.
+    """Captured count variance per unit on Figure 2-matched, model-valid windows.
 
     Figure 2's segment rule is applied to the fixation frame first and model
     validity filters the extracted samples afterwards, so the twin's 33-frame
     history does not split an otherwise eligible fixation segment.
 
-    Every condition is scored on one common per-unit bin set -- the bins where
-    the response, the data filter, and all predictions are valid. Var(y) and
-    Var(y - yhat) then refer to the same samples, which is what makes their
+    Every condition is scored on one common per-unit window set -- the windows
+    where the response, the data filter, and all predictions are valid. Var(y)
+    and Var(y - yhat) then refer to the same samples, which is what makes their
     difference a captured variance, and the conditions stay comparable.
+
+    ``count_bins`` is Figure 2's counting window. Above one bin, the response and
+    every prediction are SUMMED over the window's bins, because Figure 2's
+    ``extract_windows`` sums ``robs`` over the counting window and so
+    ``diag(Crate)`` -- the denominator this numerator is divided by -- is a
+    variance of summed counts. Averaging instead would put the numerator a factor
+    ``count_bins**2`` below its denominator. A window is scored only if every one
+    of its bins is valid, so a summed count and its summed prediction always
+    refer to the same complete window.
     """
     robs = np.asarray(robs, dtype=float)
     eyepos = np.asarray(eyepos, dtype=float)
@@ -152,9 +180,10 @@ def compute_matched_captured_variance(
     n_units = robs.shape[2]
 
     trial, time = matched_count_indices(
-        figure2_valid_mask(robs, eyepos), min_segment_bins=min_segment_bins
+        figure2_valid_mask(robs, eyepos), min_segment_bins=min_segment_bins,
+        count_bins=count_bins,
     )
-    n_base_windows = int(trial.size)
+    n_base_windows = int(trial.size // count_bins)
 
     var_y = np.full(n_units, np.nan)
     n_windows = np.zeros(n_units, dtype=int)
@@ -162,12 +191,25 @@ def compute_matched_captured_variance(
     var_residual = {key: np.full(n_units, np.nan) for key in predictions}
 
     if n_base_windows:
-        y = robs[trial, time]
-        pred = {key: value[trial, time] for key, value in predictions.items()}
-        df = dfs[trial, time]
-        score_valid = np.isfinite(y) & np.isfinite(df) & (df > 0)
-        for value in pred.values():
-            score_valid &= np.isfinite(value)
+        def _by_window(arr):
+            """(n_base_windows, count_bins, n_units) view of the chosen bins.
+
+            `matched_count_indices` emits each window's bins contiguously, so the
+            reshape recovers the window grouping.
+            """
+            return arr[trial, time].reshape(n_base_windows, count_bins, n_units)
+
+        y_bins = _by_window(robs)
+        pred_bins = {key: _by_window(value) for key, value in predictions.items()}
+        df_bins = _by_window(dfs)
+
+        bin_valid = np.isfinite(y_bins) & np.isfinite(df_bins) & (df_bins > 0)
+        for value in pred_bins.values():
+            bin_valid &= np.isfinite(value)
+        score_valid = bin_valid.all(axis=1)
+
+        y = y_bins.sum(axis=1)
+        pred = {key: value.sum(axis=1) for key, value in pred_bins.items()}
 
         for unit in range(n_units):
             keep = score_valid[:, unit]
@@ -243,7 +285,6 @@ def _estimate_rate_variance_from_samples(counts, trajectories, time_index):
         THRESHOLD_DEFAULT,
         TIME_BIN_WEIGHTING_DEFAULT,
         WEIGHT_CLIP_DEFAULT,
-        _ctotal_unweighted,
         _uncentred_crate,
     )
 
@@ -261,7 +302,9 @@ def _estimate_rate_variance_from_samples(counts, trajectories, time_index):
         min_trials_per_time_bin=10,
         closepair_density=CLOSEPAIR_DENSITY_DEFAULT,
     )
-    c_rate, n_pairs, _, _, _ = _uncentred_crate(
+    # No shuffle null here, so `pair_density_ok` is informational only; the real
+    # close-pair set is never small enough to make it False (see _fit_pair_density).
+    c_rate, n_pairs, _, _, _, _pair_density_ok = _uncentred_crate(
         counts,
         trajectories,
         time_index,
@@ -272,7 +315,12 @@ def _estimate_rate_variance_from_samples(counts, trajectories, time_index):
         weight_clip=WEIGHT_CLIP_DEFAULT,
         closepair_density=CLOSEPAIR_DENSITY_DEFAULT,
     )
-    return _ctotal_unweighted(counts), c_rate, int(n_pairs)
+    # Ctotal under Figure 2's pair-count time-bin weighting, centred on the same
+    # weighted Erate as Cpsth/Crate (decompose_trajectory computes it that way).
+    # Matches paper/covariance_decomposition/decompose.py; the previous
+    # unweighted np.cov here left Figure 3 on a different Ctotal convention
+    # than Figure 2.
+    return real["Ctotal"], c_rate, int(n_pairs)
 
 
 def estimate_matched_rate_variance(

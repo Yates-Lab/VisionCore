@@ -53,7 +53,9 @@ TARGET = "full"
 # per-bin single-trial r^2 must be normalized. R2_max is strongly
 # window-dependent -- summing counts averages private noise down faster than
 # rate variance -- so this is not a free choice.
-PRODUCTION_WINDOW_BINS = 1
+from fig3_windows import FIG3_SINGLETRIAL_WINDOW_BINS
+
+PRODUCTION_WINDOW_BINS = FIG3_SINGLETRIAL_WINDOW_BINS
 
 CEILING_CACHE = CACHE_DIR / "covdecomp_ceiling.pkl"
 
