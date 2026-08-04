@@ -52,6 +52,15 @@ TRACE_COMPONENT_MOVIE_METRICS_CSV = CACHE_DIR / "fig4_trace_component_movie_metr
 # Spatial-frequency tuning groups.
 SF_TUNING_UNIT_GROUPS_CSV = CACHE_DIR / "fig4_sf_tuning_unit_groups.csv"
 
+# Refresh-only inputs that `refresh/_fig4_geometry_story.py` reads. Both are
+# absent from `outputs/cache/`, so they are declared here (see
+# `REFRESH_ONLY_INPUTS`) rather than left undeclared. They are deliberately NOT
+# in `REQUIRED_INPUTS`: the compose path never imports the geometry-story
+# module, and listing them there would make `generate_figure4.py` refuse to
+# render a figure it can in fact render.
+PHASE1_MOVIE_ANALYSIS_TABLE_CSV = CACHE_DIR / "fig4_phase1_movie_analysis_table.csv"
+TRACE_BANK_METADATA_FILTERED_CSV = CACHE_DIR / "fig4_trace_bank_metadata_filtered.csv"
+
 # Panel A schematic endpoint maps.
 SCHEMATIC_FINAL_MAPS_NPZ = CACHE_DIR / "fig4_schematic_final_maps.npz"
 SCHEMATIC_FINAL_MAP_UNIT_METRICS_CSV = CACHE_DIR / "fig4_schematic_final_map_unit_metrics.csv"
@@ -100,17 +109,37 @@ MATCHED_BINS_BRACKET_SUMMARY_JSON = CACHE_DIR / "fig4_matched_bins_bracket_summa
 # does not -- several caches come from runs that live outside this repo and
 # need the raw recordings, so the honest answer is a name, not a path.
 REFRESH_SOURCES = {
-    UNIT_MAPS_NPZ: "run_backimage_contour_axis_rr100_spatial_ssi.py (upstream)",
-    UNIT_MAPS_SELECTED_PATCH_NPY: "run_backimage_contour_axis_rr100_spatial_ssi.py (upstream)",
-    UNIT_MAPS_SSI_ALL_UNITS_CSV: "run_backimage_contour_axis_rr100_spatial_ssi.py (upstream)",
-    UNIT_MAPS_ORIENTATION_GROUPS_CSV: "run_backimage_contour_axis_rr100_spatial_ssi.py (upstream)",
+    # Producer confirmed by md5: each of these four is byte-identical to a file
+    # in this script's out-dir. It reads the spatial-SSI run via
+    # `--source-run-dir`, which is an input to it, not its producer.
+    UNIT_MAPS_NPZ: "plot_backimage_rr100_instantaneous_unit_maps.py (upstream)",
+    UNIT_MAPS_SELECTED_PATCH_NPY: "plot_backimage_rr100_instantaneous_unit_maps.py (upstream)",
+    UNIT_MAPS_SSI_ALL_UNITS_CSV: "plot_backimage_rr100_instantaneous_unit_maps.py (upstream)",
+    UNIT_MAPS_ORIENTATION_GROUPS_CSV: "plot_backimage_rr100_instantaneous_unit_maps.py (upstream)",
     IMAGE_FEATURE_TABLE_CSV: "merge_backimage_real_trace_ssi_matrix_shards.py (upstream)",
     TRACE_XY_NPY: "merge_backimage_real_trace_ssi_matrix_shards.py (upstream)",
-    TRACE_COMPONENT_MOVIE_METRICS_CSV: "analyze_backimage_real_trace_ssi_matrix_phase1_phase2.py (upstream)",
-    SF_TUNING_UNIT_GROUPS_CSV: "run_backimage_rr100_frequency_tuning_probe.py (upstream)",
+    # Producer confirmed by md5 against
+    # `merged/phase1_phase2_conditioning_v1/trace_component_conditioning_v1/
+    # phase2_contour_relative_trace_component_movie_metrics.csv`. Previously
+    # credited to phase1_phase2, which does not emit 10+ of its 27 columns.
+    TRACE_COMPONENT_MOVIE_METRICS_CSV: "analyze_backimage_contour_matched_trace_components.py (upstream)",
+    # Producer confirmed by md5. Emitted as
+    # `dynamic_log_gaussian_marginal_sf_tuning_unit_groups.csv`; the frequency
+    # tuning probe writes to an unrelated out-dir and never produces this.
+    SF_TUNING_UNIT_GROUPS_CSV: "plot_backimage_rr100_sf_group_ssi_modulation.py (upstream)",
+    PHASE1_MOVIE_ANALYSIS_TABLE_CSV: "analyze_backimage_real_trace_ssi_matrix_phase1_phase2.py (upstream)",
+    # Producer unknown. Lives in the trace-bank diffusion sampling run
+    # `backimage_trace_bank_diffusion_large_fixation_sample_n5000_n40_v1/
+    # filtered_path_length_le350arcmin/`; five recovered scripts read it and
+    # none writes it, so the producer is outside the recovered tree.
+    TRACE_BANK_METADATA_FILTERED_CSV: "UNKNOWN -- producer not in the recovered tree (upstream)",
     SCHEMATIC_FINAL_MAPS_NPZ: "compute_schematic_rr100_final_maps.py (upstream)",
     SCHEMATIC_FINAL_MAP_UNIT_METRICS_CSV: "compute_schematic_rr100_final_maps.py (upstream)",
-    SCHEMATIC_TRACE_CENTER40_CSV: "compute_schematic_rr100_final_maps.py (upstream)",
+    # Producer confirmed by md5 against
+    # `outputs/fig_ssi/trace_provenance/schematic_crop_real_backimage_trace_center40.csv`.
+    # compute_schematic_rr100_final_maps.py *reads* this trace, it does not
+    # write it, so crediting it here made a consumer look like a producer.
+    SCHEMATIC_TRACE_CENTER40_CSV: "make_ssi_contour_schematic.py (upstream)",
     PANEL_A_NETWORK_ICON_PDF: "_fig4_network_icon.py",
     PANEL_A_NETWORK_ICON_PROVENANCE_JSON: "_fig4_network_icon.py",
     PANEL_A_LAYOUT_OVERRIDES_JSON: "hand-tuned layout overrides (tracked provenance, not regenerated)",
@@ -123,8 +152,10 @@ REFRESH_SOURCES = {
     BEHAVIOR_PATH_WINDOWS_CSV: "refresh/behavior_component_path_by_coherence.py",
     BRIDGE_PREDICTION_BY_COHERENCE_SUMMARY_CSV: "refresh/_fig4_bridge_by_coherence.py",
     BRIDGE_MATCH_NULL_SUMMARY_CSV: "refresh/_fig4_bridge_rotation_null.py",
-    EDGE_COHERENCE_PROFILES_CSV: "fixation_stats/plot_backimage_contour_motion_components.py",
-    EDGE_COHERENCE_RANDOM_BASELINE_CSV: "fixation_stats/plot_backimage_contour_motion_components.py",
+    # `plot_backimage_contour_motion_components.py` writes neither -- all 22 of
+    # its CSV outputs were checked. The real producer is the followups script.
+    EDGE_COHERENCE_PROFILES_CSV: "generate_backimage_contour_position_spread_followups.py (upstream)",
+    EDGE_COHERENCE_RANDOM_BASELINE_CSV: "generate_backimage_contour_position_spread_followups.py (upstream)",
     PATCH_RADIUS_ALIGNMENT_SLOPE_CSV: "refresh/summarize_backimage_patch_radius_sensitivity.py",
     PATCH_RADIUS_ALIGNMENT_BY_COHERENCE_PDF: "refresh/summarize_backimage_patch_radius_sensitivity.py",
     STORY_COMPONENT_VALUES_CSV: "refresh/_fig4_geometry_story_cde8bins.py",
@@ -163,9 +194,30 @@ REQUIRED_INPUTS = (
 )
 
 
+# Inputs the refresh path reads that the compose path does not. Kept separate
+# from REQUIRED_INPUTS so `missing_inputs()` stays an honest answer to "can this
+# figure be composed?" while these stop being silently undeclared. Both are
+# absent from `outputs/cache/` today.
+REFRESH_ONLY_INPUTS = (
+    PHASE1_MOVIE_ANALYSIS_TABLE_CSV,
+    TRACE_BANK_METADATA_FILTERED_CSV,
+)
+
+
 def missing_inputs(required=REQUIRED_INPUTS):
     """Every required input that is absent, so a caller can report them all at
     once instead of failing on whichever happens to be read first."""
+    return [path for path in required if not path.exists()]
+
+
+def missing_refresh_inputs(required=REFRESH_ONLY_INPUTS):
+    """Every refresh-path input that is absent.
+
+    Separate from `missing_inputs()` because these do not block composing the
+    figure. Reporting them together would have made a composable figure look
+    broken; not reporting them at all is what let two real gaps sit behind a
+    reassuring count of zero.
+    """
     return [path for path in required if not path.exists()]
 
 

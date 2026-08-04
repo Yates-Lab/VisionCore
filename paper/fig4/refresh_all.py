@@ -55,6 +55,7 @@ RECOVERED_ROOT = Path(os.environ.get(
     "FIG4_RECOVERED_ROOT", "/home/ryanress/declan_recovery/VisionCore/declan"))
 UPSTREAM_SCRIPT_DIR = RECOVERED_ROOT / "active_sensing_movie_information"
 FIG_SSI_SCRIPT_DIR = RECOVERED_ROOT / "fig_ssi"
+FIXSTATS_SCRIPT_DIR = RECOVERED_ROOT / "fixation_statistics_by_stimulus"
 
 # Upstream output trees the producers read. Neither is in this repo; both lived
 # in a collaborator's home directory. Named here so the preflight can say which
@@ -80,12 +81,12 @@ TRACE_BANK_MEMBERS = (
 )
 
 # Two caches `refresh/_fig4_geometry_story.py` reads that are absent from
-# `outputs/cache/` and absent from REQUIRED_INPUTS -- an undeclared break the
-# preflight would otherwise not mention.
-UNDECLARED_INPUTS = (
-    CACHE_DIR / "fig4_phase1_movie_analysis_table.csv",
-    CACHE_DIR / "fig4_trace_bank_metadata_filtered.csv",
-)
+# `outputs/cache/`. They are now declared in `_fig4_paths.REFRESH_ONLY_INPUTS`
+# with entries in REFRESH_SOURCES, so this alias exists only so the rest of this
+# module keeps reading from one place. They stay out of REQUIRED_INPUTS on
+# purpose: the compose path never imports the geometry-story module, so listing
+# them there would break rendering a figure that in fact renders.
+UNDECLARED_INPUTS = _paths.REFRESH_ONLY_INPUTS
 
 
 @dataclass
@@ -110,6 +111,17 @@ class Stage:
     #: dotted module name, and `cwd` is the directory to run it from.
     module: str | None = None
     cwd: Path | None = None
+    #: Extra CLI arguments. "{prev_out}" expands to the scratch out-dir of the
+    #: first entry in `needs`, so a stage can consume an upstream stage's
+    #: freshly regenerated output rather than a pre-existing copy.
+    extra_args: tuple[str, ...] = ()
+    #: Directory to prepend to PYTHONPATH so `module` resolves. Defaults to the
+    #: fig4 dir; recovered upstream packages live elsewhere.
+    pythonpath: Path | None = None
+    #: Directory whose contents are copied into the scratch out-dir before the
+    #: stage runs. For producers whose out-dir is also an input root, so they can
+    #: read-modify-write in scratch instead of over the original.
+    seed_from: Path | None = None
     needs: tuple[str, ...] = ()
     note: str = ""
 
@@ -151,26 +163,91 @@ WINDOW_FEATURES_CSV = UPSTREAM_FIXSTATS / "window_features.csv"
 _BANK = _paths.TRACE_BANK_MERGED_DIR
 _BANK_INPUTS = tuple(_BANK / name for name in TRACE_BANK_MEMBERS)
 
+# Panel H's radius sweep. `summarize_backimage_patch_radius_sensitivity` reads
+# one pole table and one sf-scaling table per radius; both sets come from
+# screening scripts that the declared graph did not mention.
+_PATCH_RADIUS_ROOT = UPSTREAM_FIXSTATS / "backimage_patch_radius_sensitivity_v1"
+_PATCH_RADIUS_LABELS = ("r0p25", "r0p5", "r1p0")
+_PATCH_RADIUS_POLE_INPUTS = tuple(
+    _PATCH_RADIUS_ROOT / f"local_feature_poles_{label}" / "pole_eye_metric_high_low_contrasts.csv"
+    for label in _PATCH_RADIUS_LABELS
+)
+_PATCH_RADIUS_SF_INPUTS = tuple(
+    _PATCH_RADIUS_ROOT / f"sf_scaling_{label}" / "sf_controlled_slope_summary.csv"
+    for label in _PATCH_RADIUS_LABELS
+)
+
+# The RR100 branch. These two paths are NOT the script defaults and NOT the
+# similarly-named run dirs that sit beside them: they are the values recorded in
+# `cache_identity_json` inside the shipped `fig4_unit_maps.npz`, which is the
+# only statement of what actually produced the cache. The plausible-by-name
+# alternative (`..._sf_contour_alignment_long_axis30_...`) postdates the cache.
+UNIT_MAPS_SOURCE_RUN_DIR = (
+    UPSTREAM_MOVIE_INFO / "backimage_contour_axis_rr100_spatial_ssi_n128_across_sweep_v1"
+)
+UNIT_MAPS_AXIS_RUN_DIR = (
+    UPSTREAM_FIXSTATS
+    / "backimage_axis_conditioned_matched_static_percandidate_gpu1_n128_c4_k16_scales_0p5_1_2_bconsistent_v1"
+)
+UNIT_MAPS_RUN_DIR = UPSTREAM_MOVIE_INFO / "backimage_rr100_instantaneous_unit_maps_latest_v1"
+SF_TUNING_DIR = (
+    UPSTREAM_MOVIE_INFO / "backimage_rr100_frequency_tuning_center_pixel_all_rr100_fast_nyquist_v1"
+)
+
+# The shard tree `merge_backimage_real_trace_ssi_matrix_shards.py` merges.
+SSI_SHARDS_DIR = (
+    UPSTREAM_MOVIE_INFO
+    / "backimage_real_trace_ssi_matrix_large_contour_no_driftgate_ms200_n100x1000_v1"
+    / "shards"
+)
+
+# Dataset configs pinned to the revision whose per-session `cids` match the
+# checkpoint's readout shapes. Without this the twin model refuses to load:
+# `MultiDatasetModel` sizes each readout from `len(cids)` read live off disk, the
+# checkpoint stores no cids of its own, and the configs it points at have since
+# drifted. Verified: readouts load at strict=True and the canonical selection
+# comes to 756 units, the number `CanonicalTwinScorer` documents.
+PINNED_DATASET_CONFIGS_REV = "e6c85ae"
+PINNED_DATASET_CONFIGS = Path(os.environ.get(
+    "FIG4_DATASET_CONFIGS",
+    str(FIG4_DIR / "upstream" / "dataset_configs" / "multi_basic_120_long.yaml"),
+))
+
 
 STAGES: tuple[Stage, ...] = (
     # -- Tier 0: producers that exist nowhere ------------------------------
     Stage(
-        key="rr100_spatial_ssi",
-        script=UPSTREAM_SCRIPT_DIR / "run_backimage_contour_axis_rr100_spatial_ssi.py",
-        upstream_name="run_backimage_contour_axis_rr100_spatial_ssi.py",
+        key="instantaneous_unit_maps",
+        script=UPSTREAM_SCRIPT_DIR / "plot_backimage_rr100_instantaneous_unit_maps.py",
+        upstream_name="plot_backimage_rr100_instantaneous_unit_maps.py",
+        inputs=(
+            UNIT_MAPS_SOURCE_RUN_DIR / "cache" / "backimage_contour_axis_rr100_spatial_ssi_cache.npz",
+            UNIT_MAPS_AXIS_RUN_DIR,
+        ),
         produces={
-            "unit_maps.npz": _paths.UNIT_MAPS_NPZ,
-            "unit_maps_selected_patch.npy": _paths.UNIT_MAPS_SELECTED_PATCH_NPY,
-            "unit_maps_ssi_all_units.csv": _paths.UNIT_MAPS_SSI_ALL_UNITS_CSV,
-            "unit_maps_orientation_groups.csv": _paths.UNIT_MAPS_ORIENTATION_GROUPS_CSV,
+            # Real emitted filenames. The previous four names ("unit_maps.npz"
+            # etc.) match nothing this producer writes, so the stage would have
+            # staged zero files and still reported success -- the same silent
+            # failure the bracket stage had.
+            "cache/backimage_rr100_instantaneous_unit_maps.npz": _paths.UNIT_MAPS_NPZ,
+            "cache/selected_patch.npy": _paths.UNIT_MAPS_SELECTED_PATCH_NPY,
+            "displayed_movie_instantaneous_ssi_all_units.csv": _paths.UNIT_MAPS_SSI_ALL_UNITS_CSV,
+            "orientation_tuning_groups.csv": _paths.UNIT_MAPS_ORIENTATION_GROUPS_CSV,
         },
-        note="RR100 movie run over the recordings; panel A/C instantaneous unit maps.",
+        note=(
+            "RR100 movie run over the recordings; panel A/C instantaneous unit maps. "
+            "Needs the twin model, so it needs FIG4_DATASET_CONFIGS pinned (see "
+            "PINNED_DATASET_CONFIGS). Its --source-run-dir and --axis-run-dir come "
+            "from cache_identity_json inside the shipped fig4_unit_maps.npz, not from "
+            "the defaults in the script."
+        ),
         out_dir_flag="--out-dir",
     ),
     Stage(
         key="merge_ssi_shards",
         script=UPSTREAM_SCRIPT_DIR / "merge_backimage_real_trace_ssi_matrix_shards.py",
         upstream_name="merge_backimage_real_trace_ssi_matrix_shards.py",
+        inputs=(SSI_SHARDS_DIR,),
         produces={
             "image_feature_table.csv": _paths.IMAGE_FEATURE_TABLE_CSV,
             "trace_xy.npy": _paths.TRACE_XY_NPY,
@@ -186,16 +263,49 @@ STAGES: tuple[Stage, ...] = (
         script=UPSTREAM_SCRIPT_DIR / "analyze_backimage_real_trace_ssi_matrix_phase1_phase2.py",
         upstream_name="analyze_backimage_real_trace_ssi_matrix_phase1_phase2.py",
         inputs=_BANK_INPUTS,
-        produces={"trace_component_movie_metrics.csv": _paths.TRACE_COMPONENT_MOVIE_METRICS_CSV},
+        produces={"phase1_movie_analysis_table.csv": _paths.PHASE1_MOVIE_ANALYSIS_TABLE_CSV},
         needs=("merge_ssi_shards",),
+        note=(
+            "Does NOT produce trace_component_movie_metrics.csv -- 10+ of that file's "
+            "27 columns never appear in this script's output. See matched_trace_components."
+        ),
         out_dir_flag="--out-dir",
     ),
     Stage(
-        key="frequency_tuning_probe",
-        script=UPSTREAM_SCRIPT_DIR / "run_backimage_rr100_frequency_tuning_probe.py",
-        upstream_name="run_backimage_rr100_frequency_tuning_probe.py",
-        produces={"sf_tuning_unit_groups.csv": _paths.SF_TUNING_UNIT_GROUPS_CSV},
+        key="matched_trace_components",
+        script=UPSTREAM_SCRIPT_DIR / "analyze_backimage_contour_matched_trace_components.py",
+        upstream_name="analyze_backimage_contour_matched_trace_components.py",
+        inputs=_BANK_INPUTS,
+        produces={
+            "phase2_contour_relative_trace_component_movie_metrics.csv":
+                _paths.TRACE_COMPONENT_MOVIE_METRICS_CSV,
+        },
+        needs=("merge_ssi_shards",),
         note=(
+            "True producer of fig4_trace_component_movie_metrics.csv, confirmed by md5 "
+            "against the recovered output. Writes into "
+            "merged/phase1_phase2_conditioning_v1/trace_component_conditioning_v1/."
+        ),
+        out_dir_flag="--out-dir",
+    ),
+    Stage(
+        key="sf_group_ssi_modulation",
+        script=UPSTREAM_SCRIPT_DIR / "plot_backimage_rr100_sf_group_ssi_modulation.py",
+        upstream_name="plot_backimage_rr100_sf_group_ssi_modulation.py",
+        inputs=(
+            SF_TUNING_DIR / "frequency_tuning_summary.csv",
+            SF_TUNING_DIR / "frequency_tuning_grouped.csv",
+            UNIT_MAPS_RUN_DIR / "displayed_movie_instantaneous_ssi_all_units.csv",
+        ),
+        needs=("instantaneous_unit_maps",),
+        produces={
+            "dynamic_log_gaussian_marginal_sf_tuning_unit_groups.csv":
+                _paths.SF_TUNING_UNIT_GROUPS_CSV,
+        },
+        note=(
+            "True producer of fig4_sf_tuning_unit_groups.csv, confirmed by md5. The "
+            "filename prefix is the --sf-metric value. run_backimage_rr100_frequency_"
+            "tuning_probe.py writes to an unrelated out-dir and never emits this file. "
             "Self-documenting output: frequency_tuning_contract and sf_split_metric_column "
             "record the formula, so the method is reconstructable from the cache if the script is not."
         ),
@@ -205,23 +315,50 @@ STAGES: tuple[Stage, ...] = (
         key="schematic_final_maps",
         script=FIG_SSI_SCRIPT_DIR / "compute_schematic_rr100_final_maps.py",
         upstream_name="compute_schematic_rr100_final_maps.py",
+        inputs=(UNIT_MAPS_RUN_DIR,),
         produces={
-            "schematic_final_maps.npz": _paths.SCHEMATIC_FINAL_MAPS_NPZ,
-            "schematic_final_map_unit_metrics.csv": _paths.SCHEMATIC_FINAL_MAP_UNIT_METRICS_CSV,
-            "schematic_trace_center40.csv": _paths.SCHEMATIC_TRACE_CENTER40_CSV,
+            # Real emitted names/locations, md5-confirmed against the recovered
+            # run dir. This stage emits only two of the three schematic caches;
+            # trace_center40 comes from make_ssi_contour_schematic (below).
+            "cache/schematic_rr100_final_maps.npz": _paths.SCHEMATIC_FINAL_MAPS_NPZ,
+            "schematic_rr100_final_map_unit_metrics.csv": _paths.SCHEMATIC_FINAL_MAP_UNIT_METRICS_CSV,
         },
-        needs=("rr100_spatial_ssi",),
+        needs=("instantaneous_unit_maps",),
+        note=(
+            "Reads only the instantaneous unit-maps run dir (its RUN_DIR), so it is the "
+            "shallowest stage that exercises the twin model end to end. Defaults to cuda:1."
+        ),
         out_dir_flag="--out-dir",
+    ),
+    Stage(
+        key="contour_schematic_trace",
+        script=FIG_SSI_SCRIPT_DIR / "make_ssi_contour_schematic.py",
+        upstream_name="make_ssi_contour_schematic.py",
+        produces={
+            "schematic_crop_real_backimage_trace_center40.csv":
+                _paths.SCHEMATIC_TRACE_CENTER40_CSV,
+        },
+        default_out_dir=ROOT / "outputs" / "fig_ssi" / "trace_provenance",
+        note=(
+            "True producer of fig4_schematic_trace_center40.csv, confirmed by md5. "
+            "compute_schematic_rr100_final_maps.py reads this trace rather than "
+            "writing it, so the previous mapping credited a consumer."
+        ),
+        out_dir_flag=None,
     ),
     Stage(
         key="matched_bins_bracket",
         script=UPSTREAM_SCRIPT_DIR / "make_backimage_panel_c_sf05_match15_matched_bins_bracket.py",
         upstream_name="make_backimage_panel_c_sf05_match15_matched_bins_bracket.py",
+        default_out_dir=(UPSTREAM_MOVIE_INFO
+                         / "backimage_real_trace_ssi_matrix_large_contour_no_driftgate_ms200_n100x1000_v1"
+                         / "merged" / "phase1_phase2_conditioning_v1" / "plot_collections"),
+        pythonpath=RECOVERED_ROOT.parent,
         inputs=_BANK_INPUTS,
         produces={
-            "matched_bins_bracket_values.csv": _paths.MATCHED_BINS_BRACKET_VALUES_CSV,
-            "matched_bins_bracket_last_bin_contrast.csv": _paths.MATCHED_BINS_BRACKET_LAST_BIN_CONTRAST_CSV,
-            "matched_bins_bracket_summary.json": _paths.MATCHED_BINS_BRACKET_SUMMARY_JSON,
+            "backimage_real_trace_panel_c_aligned_sf_ge_0p5_match15_matched_bins_bracket_values.csv": _paths.MATCHED_BINS_BRACKET_VALUES_CSV,
+            "backimage_real_trace_panel_c_aligned_sf_ge_0p5_match15_matched_bins_bracket_last_bin_contrast.csv": _paths.MATCHED_BINS_BRACKET_LAST_BIN_CONTRAST_CSV,
+            "backimage_real_trace_panel_c_aligned_sf_ge_0p5_match15_matched_bins_bracket_summary.json": _paths.MATCHED_BINS_BRACKET_SUMMARY_JSON,
         },
         needs=("merge_ssi_shards",),
         note=(
@@ -234,25 +371,55 @@ STAGES: tuple[Stage, ...] = (
         key="contour_motion_components",
         script=FIXSTATS_DIR / "plot_backimage_contour_motion_components.py",
         inputs=(WINDOW_FEATURES_CSV,),
-        produces={
-            "edge_coherence_profiles.csv": _paths.EDGE_COHERENCE_PROFILES_CSV,
-            "edge_coherence_random_baseline.csv": _paths.EDGE_COHERENCE_RANDOM_BASELINE_CSV,
-        },
+        produces={},
         default_out_dir=UPSTREAM_FIXSTATS / "backimage_contour_motion_component_plots_v1",
         out_dir_flag="--out-dir",
         module="fixation_stats.plot_backimage_contour_motion_components",
-        note="Panel F. Also emits contour_motion_component_windows.csv, which panel G's chain reads.",
+        note=("Emits contour_motion_component_windows.csv only. REFRESH_SOURCES credits it "
+              "with the two panel F edge-coherence caches, but it does not write them -- "
+              "edge_coherence_followups does."),
+    ),
+    Stage(
+        key="local_feature_poles",
+        script=FIXSTATS_SCRIPT_DIR / "screen_backimage_local_feature_eye_metric_poles.py",
+        upstream_name="screen_backimage_local_feature_eye_metric_poles.py",
+        produces={},
+        default_out_dir=_PATCH_RADIUS_ROOT,
+        out_dir_flag="--out-dir",
+        note=(
+            "Undeclared panel H prerequisite. Run once per radius into "
+            "local_feature_poles_{r0p25,r0p5,r1p0}/. Produces no fig4_* cache directly; "
+            "panel H reads its pole_eye_metric_high_low_contrasts.csv."
+        ),
+    ),
+    Stage(
+        key="sf_eye_metric_scaling",
+        script=FIXSTATS_SCRIPT_DIR / "screen_backimage_spatial_frequency_eye_metric_scaling.py",
+        upstream_name="screen_backimage_spatial_frequency_eye_metric_scaling.py",
+        produces={},
+        default_out_dir=_PATCH_RADIUS_ROOT,
+        out_dir_flag="--out-dir",
+        note=(
+            "Second undeclared panel H prerequisite. Run once per radius into "
+            "sf_scaling_{r0p25,r0p5,r1p0}/. Panel H reads its sf_controlled_slope_summary.csv."
+        ),
     ),
     Stage(
         key="patch_radius_sensitivity",
         script=REFRESH_DIR / "summarize_backimage_patch_radius_sensitivity.py",
-        inputs=(WINDOW_FEATURES_CSV,),
+        # The pole and sf-scaling tables are real inputs. They were previously
+        # undeclared and happened to be satisfied by `seed_from`, so the stage
+        # passed while two of its prerequisites were invisible. Declared here so
+        # a missing one blocks the stage instead of quietly seeding a pass.
+        inputs=(WINDOW_FEATURES_CSV,) + _PATCH_RADIUS_POLE_INPUTS + _PATCH_RADIUS_SF_INPUTS,
         produces={
             "patch_radius_alignment_slope_coherence_gt0p3.csv": _paths.PATCH_RADIUS_ALIGNMENT_SLOPE_CSV,
             "patch_radius_alignment_by_coherence.pdf": _paths.PATCH_RADIUS_ALIGNMENT_BY_COHERENCE_PDF,
         },
-        default_out_dir=UPSTREAM_FIXSTATS,
+        default_out_dir=_PATCH_RADIUS_ROOT,
         out_dir_flag="--root",
+        seed_from=_PATCH_RADIUS_ROOT,
+        needs=("local_feature_poles", "sf_eye_metric_scaling"),
         note="Panel H.",
     ),
     Stage(
@@ -272,6 +439,23 @@ STAGES: tuple[Stage, ...] = (
         default_out_dir=PANELS_V2,
         out_dir_flag="--out-dir",
         needs=("contour_motion_components",),
+    ),
+    Stage(
+        key="edge_coherence_followups",
+        script=FIXSTATS_SCRIPT_DIR / "generate_backimage_contour_position_spread_followups.py",
+        upstream_name="generate_backimage_contour_position_spread_followups.py",
+        produces={
+            "b_position_spread_unwrapped_profiles_by_edge_coherence.csv": _paths.EDGE_COHERENCE_PROFILES_CSV,
+            "b_position_spread_random_orientation_baseline_by_edge_coherence.csv":
+                _paths.EDGE_COHERENCE_RANDOM_BASELINE_CSV,
+        },
+        default_out_dir=UPSTREAM_FIXSTATS / "backimage_contour_motion_component_plots_v1",
+        out_dir_flag="--out-dir",
+        extra_args=("--input-windows", "{prev_out}/contour_motion_component_windows.csv"),
+        module="fixation_statistics_by_stimulus.generate_backimage_contour_position_spread_followups",
+        pythonpath=RECOVERED_ROOT,
+        needs=("contour_motion_components",),
+        note="Panel F. The producer REFRESH_SOURCES omits entirely.",
     ),
     # -- Tier 2: in-repo producers reading the merged trace bank ------------
     Stage(
@@ -419,9 +603,11 @@ def preflight() -> int:
             if not (_BANK / member).exists():
                 print(f"            missing member: {member}")
 
-    print("\n-- caches read by producers but absent and undeclared " + "-" * 45)
+    print("\n-- refresh-only caches (declared; not required to compose) " + "-" * 39)
     for path in UNDECLARED_INPUTS:
-        print(f"  [{'present' if path.exists() else 'ABSENT ':7}] {path.name}   <- refresh/_fig4_geometry_story.py")
+        source = _paths.REFRESH_SOURCES.get(path, "unknown")
+        print(f"  [{'present' if path.exists() else 'ABSENT ':7}] {path.name}")
+        print(f"            read by refresh/_fig4_geometry_story.py  <- {source}")
 
     print("\n-- stages, in dependency order " + "-" * 68)
     counts: dict[str, int] = {}
@@ -494,13 +680,40 @@ def run(scratch: Path, only: set[str] | None, allow_in_place: bool) -> int:
 
         out_dir = scratch / stage.key
         out_dir.mkdir(parents=True, exist_ok=True)
+        if stage.seed_from is not None:
+            if not stage.seed_from.exists():
+                results.append({"stage": stage.key, "result": "BLOCKED",
+                                "detail": f"seed dir {_short(stage.seed_from)} absent"})
+                print(f"[skip BLOCKED   ] {stage.key}: seed dir {_short(stage.seed_from)} absent")
+                continue
+            shutil.copytree(stage.seed_from, out_dir, dirs_exist_ok=True)
+            # The seed root generally already holds this stage's own outputs.
+            # Delete them, or a stage that silently fails to rewrite a file
+            # would have its seeded copy staged and verify as a false PASS.
+            cleared = 0
+            for out_name in stage.produces:
+                seeded = out_dir / out_name
+                if seeded.exists():
+                    seeded.unlink()
+                    cleared += 1
+            print(f"[seed           ] {stage.key}: from {_short(stage.seed_from)}"
+                  f" ({cleared} pre-existing output(s) cleared)")
         cmd = ([sys.executable, "-m", stage.module] if stage.module
                else [sys.executable, str(stage.script)])
+        if stage.extra_args:
+            prev_out = str(scratch / stage.needs[0]) if stage.needs else ""
+            cmd += [a.replace("{prev_out}", prev_out) for a in stage.extra_args]
         if stage.out_dir_flag:
             cmd += [stage.out_dir_flag, str(out_dir)]
             effective_out = out_dir
         else:
             effective_out = stage.default_out_dir
+            if effective_out is None:
+                results.append({"stage": stage.key, "result": "NO-OUT-DIR",
+                                "detail": "no --out-dir flag and no declared default_out_dir; "
+                                          "cannot locate its outputs to stage"})
+                print(f"[NO-OUT-DIR     ] {stage.key}: cannot locate outputs")
+                continue
             if _is_under(effective_out, CACHE_DIR):
                 results.append({
                     "stage": stage.key,
@@ -517,7 +730,8 @@ def run(scratch: Path, only: set[str] | None, allow_in_place: bool) -> int:
         # their data paths relative to the repo root.
         if stage.module:
             env["PYTHONPATH"] = os.pathsep.join(
-                [str(FIG4_DIR)] + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
+                [str(stage.pythonpath or FIG4_DIR)]
+                + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
         proc = subprocess.run(cmd, cwd=str(stage.cwd or ROOT), env=env, capture_output=True, text=True)
         if proc.returncode != 0:
             tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-15:]
@@ -632,13 +846,17 @@ def _compare(new: Path, old: Path, rtol: float, atol: float, np, pd) -> tuple[st
             # Column *order* is not a reproducibility failure -- the figure reads
             # by name. Reorder and say so; only a set difference is a real fail.
             note = ""
+            superset: list[str] = []
             if list(a.columns) != list(b.columns):
-                if set(a.columns) != set(b.columns):
-                    only_new = set(a.columns) - set(b.columns)
-                    only_old = set(b.columns) - set(a.columns)
-                    return "FAIL", f"columns differ: only-new={sorted(only_new)} only-baseline={sorted(only_old)}"
+                only_new = set(a.columns) - set(b.columns)
+                only_old = set(b.columns) - set(a.columns)
+                if only_old:
+                    return "FAIL", (f"columns missing from regenerated file: {sorted(only_old)}"
+                                    + (f" (also new: {sorted(only_new)})" if only_new else ""))
+                if only_new:
+                    superset = sorted(only_new)
                 a = a[list(b.columns)]
-                note = ", column order differs"
+                note = ", column order differs" if not superset else ""
             if a.shape != b.shape:
                 return "FAIL", f"shape {a.shape} vs {b.shape}"
             worst_col, worst = None, 0.0
@@ -657,8 +875,11 @@ def _compare(new: Path, old: Path, rtol: float, atol: float, np, pd) -> tuple[st
                 else:
                     if not a[col].astype(str).equals(b[col].astype(str)):
                         return "FAIL", f"{col}: non-numeric values differ"
-            return "PASS", (f"{a.shape[0]}x{a.shape[1]}, worst rel dev {worst:.2e}"
-                            + (f" ({worst_col})" if worst_col else "") + note)
+            detail = (f"{a.shape[0]}x{a.shape[1]}, worst rel dev {worst:.2e}"
+                      + (f" ({worst_col})" if worst_col else "") + note)
+            if superset:
+                return "PASS-STALE-CACHE", detail + f"; regenerated adds {superset}"
+            return "PASS", detail
 
         if suffix == ".npy":
             a, b = np.load(new, allow_pickle=False), np.load(old, allow_pickle=False)
@@ -669,14 +890,17 @@ def _compare(new: Path, old: Path, rtol: float, atol: float, np, pd) -> tuple[st
             return "PASS", f"shape {a.shape}"
 
         if suffix == ".npz":
-            a, b = np.load(new, allow_pickle=False), np.load(old, allow_pickle=False)
+            a, b = np.load(new, allow_pickle=True), np.load(old, allow_pickle=True)
             if set(a.files) != set(b.files):
                 return "FAIL", f"keys differ: {set(a.files) ^ set(b.files)}"
             for key in b.files:
                 x, y = a[key], b[key]
                 if x.shape != y.shape:
                     return "FAIL", f"{key}: shape {x.shape} vs {y.shape}"
-                if x.dtype.kind in "fc":
+                if x.dtype.kind == "O":
+                    if not np.array_equal(x, y):
+                        return "FAIL", f"{key}: object-array values differ"
+                elif x.dtype.kind in "fc":
                     if not np.allclose(x, y, rtol=rtol, atol=atol, equal_nan=True):
                         return "FAIL", f"{key}: max abs dev {float(np.nanmax(np.abs(x - y))):.3g}"
                 elif not np.array_equal(x, y):
@@ -684,8 +908,14 @@ def _compare(new: Path, old: Path, rtol: float, atol: float, np, pd) -> tuple[st
             return "PASS", f"{len(b.files)} array(s)"
 
         if suffix == ".json":
-            bad = _json_diff(json.loads(new.read_text()), json.loads(old.read_text()), rtol, atol, "")
-            return ("FAIL", bad) if bad else ("PASS", "")
+            na, nb = json.loads(new.read_text()), json.loads(old.read_text())
+            bad = _json_diff(na, nb, rtol, atol, "")
+            if not bad:
+                return "PASS", ""
+            stripped = _json_diff(_drop_provenance(na), _drop_provenance(nb), rtol, atol, "")
+            if not stripped:
+                return "PASS-PROVENANCE", f"differs only in recorded paths ({bad.split(':')[0]})"
+            return "FAIL", stripped
 
         if suffix == ".pdf":
             # Vector output is not byte-reproducible (timestamps, font subset ids).
@@ -694,6 +924,29 @@ def _compare(new: Path, old: Path, rtol: float, atol: float, np, pd) -> tuple[st
         return "SKIP-BINARY", f"no comparator for {suffix}"
     except Exception as exc:  # noqa: BLE001 - the comparison itself failing is a result
         return "FAIL", f"comparison raised {type(exc).__name__}: {exc}"
+
+
+#: JSON keys that record where an analysis ran rather than what it found.
+PROVENANCE_KEYS = frozenset({
+    "matrix_dir", "out_dir", "root", "input_windows", "cache_dir", "source_dir",
+    "generated_at", "timestamp", "command", "argv", "hostname", "script",
+})
+
+
+def _drop_provenance(obj):
+    """Normalise recorded locations without discarding what was recorded.
+
+    Path-valued strings are reduced to their basename, so a run from a different
+    directory still has to name the same files -- only the prefix is forgiven.
+    Keys that record run identity rather than result are dropped outright.
+    """
+    if isinstance(obj, dict):
+        return {k: _drop_provenance(v) for k, v in obj.items() if k not in PROVENANCE_KEYS}
+    if isinstance(obj, list):
+        return [_drop_provenance(v) for v in obj]
+    if isinstance(obj, str) and "/" in obj and not obj.strip().startswith("http"):
+        return obj.rstrip("/").rsplit("/", 1)[-1]
+    return obj
 
 
 def _json_diff(a, b, rtol: float, atol: float, path: str) -> str:
