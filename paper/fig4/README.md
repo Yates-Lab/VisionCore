@@ -89,15 +89,18 @@ difference against `reference/figure4_reference.pdf`.
 
 ## What blocks full reproduction
 
-Four stages are `BLOCKED` in the preflight. All four block on data that exists
-only under `/home/declan`, which is mode 700:
+Cache-first composition is reproducible from the bundle. Source refresh is more
+honest now: on a clean checkout `refresh_all.py` reports 14 blocked stages
+because the lower upstream trees and merged trace bank are absent. Those blocked
+stages collapse to these source boundaries:
 
-| Stage | Needs |
+| Boundary | State |
 |---|---|
-| `merge_ssi_shards` | `.../backimage_real_trace_ssi_matrix_large_contour_no_driftgate_ms200_n100x1000_v1/shards` (169 MB). Confirmed present. Without it the merged bank is the earliest reproducible point. |
-| `instantaneous_unit_maps` | `backimage_contour_axis_rr100_spatial_ssi_n128_across_sweep_v1/` and `backimage_axis_conditioned_matched_static_percandidate_gpu1_n128_c4_k16_scales_0p5_1_2_bconsistent_v1/` |
-| `sf_group_ssi_modulation` | `backimage_rr100_frequency_tuning_center_pixel_all_rr100_fast_nyquist_v1/` (74 MB) |
-| `schematic_final_maps` | `backimage_rr100_instantaneous_unit_maps_latest_v1/` (597 MB) — i.e. the output of `instantaneous_unit_maps` |
+| Real-trace SSI matrix scorer | The canonical launcher is now in repo (`upstream/run_real_trace_matrix.py`) and records the recovered 100 image x 1000 trace production profile, but the scorer body is still not ported from the recovered `declan` tree. |
+| Real-trace SSI matrix merge | In repo (`upstream/merge_backimage_real_trace_ssi_matrix_shards.py`). It needs generated shard dirs `.../backimage_real_trace_ssi_matrix_large_contour_no_driftgate_ms200_n100x1000_v1/shards/images_000_050` and `images_050_100`. |
+| Upstream fixation-window data | `window_features.csv` is a true upstream input outside this compact Fig. 4 module (`sha256 e8e2fa28c39d4d0222502bbe73fc221210260212fbed25bdc6c2e6c6217f73ba`, 76,832 rows, 57 columns). |
+| RR100/model assets | The recovered production checkpoint is `/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_120_long/checkpoints/learned_resnet_none_convgru_gaussian_ddp_bs128_ds30_lr1e-3_wd1e-4_corelrscale.5_warmup5/epoch=147-val_bps_overall=0.5702.ckpt` (`sha256 55d084aa0beb7d65614aecb9122edf7ad49c5799d370dbbd5dcf60b815c62de3`). The RR100 population spec hashes are recorded in the launcher. |
+| Other RR100 panel producers | `instantaneous_unit_maps`, `sf_group_ssi_modulation`, and `schematic_final_maps` still need lower output trees under `outputs/active_sensing_movie_information/` and `outputs/fixation_statistics_by_stimulus_all_sessions_after_review/`. |
 
 The two run directories for `instantaneous_unit_maps` are **not** the
 similarly-named directories sitting beside them. They are the values recorded
@@ -108,6 +111,54 @@ alternative (`..._sf_contour_alignment_long_axis30_...`) postdates it.
 One producer is still unidentified: `fig4_trace_bank_metadata_filtered.csv`,
 from `backimage_trace_bank_diffusion_large_fixation_sample_n5000_n40_v1/filtered_path_length_le350arcmin/`.
 Five recovered scripts read it; none writes it.
+
+## Deep real-trace matrix launcher
+
+The recovered production command is now captured by a safe-by-default launcher:
+
+```bash
+uv run python paper/fig4/upstream/run_real_trace_matrix.py --profile production
+```
+
+That writes `outputs/figures/fig4/provenance/real_trace_matrix_production_plan.json`
+and prints the shard, merge, and stabilized-baseline commands without running
+the 20-hour scorer. It explicitly records the 32-frame model-history versus
+40-scored-sample analysis boundary, checkpoint identity, pinned dataset config,
+RR100 population spec hashes, direct inputs, and expected outputs.
+
+Use the smoke profile for the same schemas at tiny scale:
+
+```bash
+uv run python paper/fig4/upstream/run_real_trace_matrix.py --profile smoke
+```
+
+Until the scorer body is ported into this repo, execution requires naming the
+recovered runner explicitly:
+
+```bash
+FIG4_REAL_TRACE_MATRIX_RUNNER=/path/to/run_backimage_real_trace_ssi_matrix_pilot.py \
+FIG4_STABILIZED_BASELINE_RUNNER=/path/to/run_backimage_real_trace_stabilized_baseline.py \
+FIG4_RR100_POPULATION_SPEC_DIR=/path/to/step1_activation_fingerprints \
+uv run python paper/fig4/upstream/run_real_trace_matrix.py --run-all --force
+```
+
+For a single production shard:
+
+```bash
+uv run python paper/fig4/upstream/run_real_trace_matrix.py \
+  --only-shard 0:50 \
+  --run-shards \
+  --force
+```
+
+The merge step itself is standalone in this repo:
+
+```bash
+uv run python paper/fig4/upstream/merge_backimage_real_trace_ssi_matrix_shards.py \
+  --out-dir DIR/merged \
+  DIR/shards/images_000_050 \
+  DIR/shards/images_050_100
+```
 
 ## The model pin — `upstream/dataset_configs/`
 

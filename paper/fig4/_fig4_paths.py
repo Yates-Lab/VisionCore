@@ -117,8 +117,8 @@ REFRESH_SOURCES = {
     UNIT_MAPS_SELECTED_PATCH_NPY: "plot_backimage_rr100_instantaneous_unit_maps.py (upstream)",
     UNIT_MAPS_SSI_ALL_UNITS_CSV: "plot_backimage_rr100_instantaneous_unit_maps.py (upstream)",
     UNIT_MAPS_ORIENTATION_GROUPS_CSV: "plot_backimage_rr100_instantaneous_unit_maps.py (upstream)",
-    IMAGE_FEATURE_TABLE_CSV: "merge_backimage_real_trace_ssi_matrix_shards.py (upstream)",
-    TRACE_XY_NPY: "merge_backimage_real_trace_ssi_matrix_shards.py (upstream)",
+    IMAGE_FEATURE_TABLE_CSV: "paper/fig4/upstream/merge_backimage_real_trace_ssi_matrix_shards.py",
+    TRACE_XY_NPY: "paper/fig4/upstream/merge_backimage_real_trace_ssi_matrix_shards.py",
     # Producer confirmed by md5 against
     # `merged/phase1_phase2_conditioning_v1/trace_component_conditioning_v1/
     # phase2_contour_relative_trace_component_movie_metrics.csv`. Previously

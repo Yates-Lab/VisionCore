@@ -45,6 +45,7 @@ from VisionCore.paths import CACHE_DIR, VISIONCORE_ROOT as ROOT  # noqa: E402
 FIG4_DIR = Path(__file__).resolve().parent
 REFRESH_DIR = FIG4_DIR / "refresh"
 FIXSTATS_DIR = FIG4_DIR / "fixation_stats"
+UPSTREAM_HELPER_DIR = FIG4_DIR / "upstream"
 
 # The six upstream producers. They were never committed to either repo, but they
 # do exist on disk -- in two directories that were mode 700, which is why an
@@ -245,8 +246,8 @@ STAGES: tuple[Stage, ...] = (
     ),
     Stage(
         key="merge_ssi_shards",
-        script=UPSTREAM_SCRIPT_DIR / "merge_backimage_real_trace_ssi_matrix_shards.py",
-        upstream_name="merge_backimage_real_trace_ssi_matrix_shards.py",
+        script=UPSTREAM_HELPER_DIR / "merge_backimage_real_trace_ssi_matrix_shards.py",
+        upstream_name="merge_backimage_real_trace_ssi_matrix_shards.py (in-repo)",
         inputs=(SSI_SHARDS_DIR,),
         produces={
             "image_feature_table.csv": _paths.IMAGE_FEATURE_TABLE_CSV,
