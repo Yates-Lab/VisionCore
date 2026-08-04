@@ -43,10 +43,6 @@ data = [
     "DataRowleyV1V2 @ git+https://github.com/Yates-Lab/DataRowleyV1V2",
 ]
 
-[tool.uv.sources]
-DataYatesV1 = { workspace = true }
-DataRowleyV1V2 = { workspace = true }
-
 # loggabor and slip import these packages during setup.py execution but don't declare them as build dependencies
 [tool.uv.extra-build-dependencies]
 loggabor = ["SLIP", "matplotlib", "NeuroTools"]
@@ -54,4 +50,3 @@ slip = ["numpy", "matplotlib", "NeuroTools"]
 
 [tool.setuptools]
 packages = ["models", "training", "eval", "tejas", "scripts", "VisionCore"]
-

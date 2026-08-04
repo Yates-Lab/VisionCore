@@ -25,12 +25,15 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from textwrap import wrap
 
 import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib import patches
 from pypdf import PdfReader, PdfWriter, Transformation
 
 from VisionCore.paths import VISIONCORE_ROOT as ROOT
@@ -107,6 +110,48 @@ DISPLAY_SPECS = {
     },
 }
 
+SCHEMATIC_REQUIRED_INPUTS = (
+    _paths.UNIT_MAPS_NPZ,
+    _paths.UNIT_MAPS_SELECTED_PATCH_NPY,
+    _paths.UNIT_MAPS_SSI_ALL_UNITS_CSV,
+    _paths.UNIT_MAPS_ORIENTATION_GROUPS_CSV,
+    _paths.IMAGE_FEATURE_TABLE_CSV,
+    _paths.TRACE_XY_NPY,
+    _paths.TRACE_COMPONENT_MOVIE_METRICS_CSV,
+    _paths.SF_TUNING_UNIT_GROUPS_CSV,
+    _paths.SCHEMATIC_FINAL_MAPS_NPZ,
+    _paths.SCHEMATIC_FINAL_MAP_UNIT_METRICS_CSV,
+    _paths.SCHEMATIC_TRACE_CENTER40_CSV,
+    _paths.SCHEMATIC_STIMULUS_PAYLOAD_NPZ,
+)
+
+PANEL_REQUIRED_INPUTS = {
+    "A": (
+        *SCHEMATIC_REQUIRED_INPUTS,
+        _paths.PANEL_A_NETWORK_ICON_PDF,
+        _paths.PANEL_A_LAYOUT_OVERRIDES_JSON,
+    ),
+    "BC": (_paths.STORY_PANEL_B_VALUES_CSV,),
+    "D": (
+        *SCHEMATIC_REQUIRED_INPUTS,
+        _paths.PANEL_D_LAYOUT_OVERRIDES_JSON,
+        _paths.COHERENCE_GALLERY_NPZ,
+    ),
+    "EF": (_paths.STORY_PANEL_B_VALUES_CSV,),
+    "G": (
+        _paths.PATH_BINS_VALUES_CSV,
+        _paths.PATH_BINS_LAST_BIN_CONTRASTS_CSV,
+        _paths.PATH_BINS_TRACE_BANK_REFERENCE_CSV,
+        _paths.PATH_BINS_POPULATIONS_CSV,
+    ),
+    "I": (
+        _paths.EDGE_COHERENCE_PROFILES_CSV,
+        _paths.EDGE_COHERENCE_RANDOM_BASELINE_CSV,
+    ),
+    "J": (_paths.BRIDGE_PREDICTION_BY_COHERENCE_SUMMARY_CSV,),
+    "K": (_paths.PATCH_RADIUS_ALIGNMENT_SLOPE_CSV,),
+}
+
 
 def _union_box(*boxes: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
     left = min(box[0] for box in boxes)
@@ -141,22 +186,158 @@ def build_title_panel(page_w_in: float, out_dir: Path = PANELS_OUT_DIR) -> Path:
     return out_path
 
 
+def _relative_to_root(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
+def _summarize_missing_inputs(paths: list[Path]) -> str:
+    names = [path.name for path in paths]
+    shown = ", ".join(names[:5])
+    if len(names) > 5:
+        shown = f"{shown}, +{len(names) - 5} more"
+    return "\n".join(wrap(shown, width=48))
+
+
+def _summarize_exception(exc: BaseException) -> str:
+    lines = [line.strip() for line in str(exc).splitlines() if line.strip()]
+    if not lines:
+        return exc.__class__.__name__
+    return "\n".join(wrap(lines[0], width=48))
+
+
+def _build_missing_panel_pdf(
+    key: str,
+    *,
+    figsize: tuple[float, float],
+    out_dir: Path,
+    missing: list[Path] | None = None,
+    exception: BaseException | None = None,
+) -> Path:
+    display = DISPLAY_SPECS[key]
+    fig = plt.figure(figsize=figsize)
+    ax = fig.add_axes([0.0, 0.0, 1.0, 1.0])
+    ax.set_axis_off()
+    ax.set_xlim(0.0, 1.0)
+    ax.set_ylim(0.0, 1.0)
+
+    ax.add_patch(
+        patches.Rectangle(
+            (0.035, 0.045),
+            0.93,
+            0.87,
+            facecolor="#fff8f6",
+            edgecolor="#c0392b",
+            linewidth=0.9,
+        )
+    )
+    ax.text(0.07, 0.86, display["label"], ha="left", va="center", fontsize=12, fontweight="bold")
+    ax.text(
+        0.18,
+        0.86,
+        display["title"].replace("\n", " "),
+        ha="left",
+        va="center",
+        fontsize=8.2,
+        color="#222222",
+    )
+    ax.text(
+        0.50,
+        0.56,
+        "Missing cached input",
+        ha="center",
+        va="center",
+        fontsize=9.6,
+        fontweight="bold",
+        color="#c0392b",
+    )
+    if missing:
+        detail = _summarize_missing_inputs(missing)
+    elif exception is not None:
+        detail = _summarize_exception(exception)
+    else:
+        detail = "No cache details were reported."
+    ax.text(
+        0.50,
+        0.43,
+        detail,
+        ha="center",
+        va="center",
+        fontsize=6.8,
+        color="#7a2d22",
+        linespacing=1.12,
+    )
+    ax.text(
+        0.50,
+        0.20,
+        "--allow-missing smoke render only",
+        ha="center",
+        va="center",
+        fontsize=6.6,
+        color="#7a2d22",
+    )
+
+    out_path = out_dir / f"panel_{key.lower()}_missing.pdf"
+    fig.savefig(out_path, transparent=True)
+    plt.close(fig)
+    return out_path
+
+
+def _build_real_or_missing(
+    key: str,
+    builder: Callable[[], Path],
+    *,
+    figsize: tuple[float, float],
+    out_dir: Path,
+) -> Path:
+    missing = [path for path in PANEL_REQUIRED_INPUTS.get(key, ()) if not path.exists()]
+    if _paths.ALLOW_MISSING and missing:
+        print(
+            f"WARNING: rendering placeholder for panel {DISPLAY_SPECS[key]['label']} "
+            f"({len(missing)} missing cached input(s)).",
+            file=sys.stderr,
+        )
+        return _build_missing_panel_pdf(key, figsize=figsize, out_dir=out_dir, missing=missing)
+    try:
+        return builder()
+    except (FileNotFoundError, _paths.Fig4MissingInput) as exc:
+        if not _paths.ALLOW_MISSING:
+            raise
+        print(
+            f"WARNING: rendering placeholder for panel {DISPLAY_SPECS[key]['label']}: {exc}",
+            file=sys.stderr,
+        )
+        return _build_missing_panel_pdf(key, figsize=figsize, out_dir=out_dir, exception=exc)
+
+
 def build_all_panels(out_dir: Path = PANELS_OUT_DIR) -> dict[str, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     placement_boxes = v4_placement_boxes()
 
     paths: dict[str, Path] = {}
-    paths["A"] = panel_a_motion_schematic.build_panel(
+    paths["A"] = _build_real_or_missing(
+        "A",
+        lambda: panel_a_motion_schematic.build_panel(
+            figsize=placement_boxes["A"][2:4],
+            out_dir=out_dir,
+            panel_label=DISPLAY_SPECS["A"]["label"],
+            panel_title=DISPLAY_SPECS["A"]["title"],
+        ),
         figsize=placement_boxes["A"][2:4],
         out_dir=out_dir,
-        panel_label=DISPLAY_SPECS["A"]["label"],
-        panel_title=DISPLAY_SPECS["A"]["title"],
     )
-    paths["D"] = panel_c_contour_relative_stimulus.build_panel(
+    paths["D"] = _build_real_or_missing(
+        "D",
+        lambda: panel_c_contour_relative_stimulus.build_panel(
+            figsize=placement_boxes["D"][2:4],
+            out_dir=out_dir,
+            panel_label=DISPLAY_SPECS["D"]["label"],
+            panel_title=DISPLAY_SPECS["D"]["title"],
+        ),
         figsize=placement_boxes["D"][2:4],
         out_dir=out_dir,
-        panel_label=DISPLAY_SPECS["D"]["label"],
-        panel_title=DISPLAY_SPECS["D"]["title"],
     )
     # Panels B and D share their drawing code (_fig4_path_bins) but not their
     # layout, so each owns its own module. This loop used to branch on
@@ -164,39 +345,64 @@ def build_all_panels(out_dir: Path = PANELS_OUT_DIR) -> dict[str, Path]:
     # choices now live with the panel they describe.
     for pair_key, panel_module in (("BC", panel_b_path_bins), ("EF", panel_d_path_bins)):
         display = DISPLAY_SPECS[pair_key]
-        paths[pair_key] = panel_module.build_panel(
+        paths[pair_key] = _build_real_or_missing(
+            pair_key,
+            lambda pair_key=pair_key, panel_module=panel_module, display=display: panel_module.build_panel(
+                figsize=placement_boxes[pair_key][2:4],
+                out_dir=out_dir,
+                panel_label=display["label"],
+                panel_title=display["title"],
+                panel_subtitle=display.get("subtitle"),
+                xlabel=display.get("xlabel"),
+            ),
             figsize=placement_boxes[pair_key][2:4],
             out_dir=out_dir,
-            panel_label=display["label"],
-            panel_title=display["title"],
-            panel_subtitle=display.get("subtitle"),
-            xlabel=display.get("xlabel"),
         )
     display_g = DISPLAY_SPECS["G"]
-    paths["G"] = panel_e_rms_excursion.build_panel(
-        out_dir=out_dir,
+    paths["G"] = _build_real_or_missing(
+        "G",
+        lambda: panel_e_rms_excursion.build_panel(
+            out_dir=out_dir,
+            figsize=placement_boxes["G"][2:4],
+            panel_label=display_g["label"],
+            panel_title=display_g["title"],
+        )["pdf"],
         figsize=placement_boxes["G"][2:4],
-        panel_label=display_g["label"],
-        panel_title=display_g["title"],
-    )["pdf"]
-    paths["I"] = panel_f_unwrapped_edge_coherence.build_panel(
         out_dir=out_dir,
+    )
+    paths["I"] = _build_real_or_missing(
+        "I",
+        lambda: panel_f_unwrapped_edge_coherence.build_panel(
+            out_dir=out_dir,
+            figsize=placement_boxes["I"][2:4],
+            label=DISPLAY_SPECS["I"]["label"],
+            title=DISPLAY_SPECS["I"]["title"],
+        )["pdf"],
         figsize=placement_boxes["I"][2:4],
-        label=DISPLAY_SPECS["I"]["label"],
-        title=DISPLAY_SPECS["I"]["title"],
-    )["pdf"]
-    paths["J"] = panel_g_match_advantage.build_panel(
         out_dir=out_dir,
+    )
+    paths["J"] = _build_real_or_missing(
+        "J",
+        lambda: panel_g_match_advantage.build_panel(
+            out_dir=out_dir,
+            figsize=placement_boxes["J"][2:4],
+            label=DISPLAY_SPECS["J"]["label"],
+            title=DISPLAY_SPECS["J"]["title"],
+        )["pdf"],
         figsize=placement_boxes["J"][2:4],
-        label=DISPLAY_SPECS["J"]["label"],
-        title=DISPLAY_SPECS["J"]["title"],
-    )["pdf"]
-    paths["K"] = panel_h_patch_radius_alignment_slope.build_panel(
         out_dir=out_dir,
+    )
+    paths["K"] = _build_real_or_missing(
+        "K",
+        lambda: panel_h_patch_radius_alignment_slope.build_panel(
+            out_dir=out_dir,
+            figsize=placement_boxes["K"][2:4],
+            label=DISPLAY_SPECS["K"]["label"],
+            title=DISPLAY_SPECS["K"]["title"],
+        )["pdf"],
         figsize=placement_boxes["K"][2:4],
-        label=DISPLAY_SPECS["K"]["label"],
-        title=DISPLAY_SPECS["K"]["title"],
-    )["pdf"]
+        out_dir=out_dir,
+    )
     return paths
 
 
@@ -270,6 +476,11 @@ All cached inputs live flat under `outputs/cache/` as `fig4_*`.
 build preflights every required input and reports all missing files at once.
 Several caches come from analyses that need the raw recordings and do not run
 in this repo; those are marked `(upstream)`.
+
+Historical handoff bundles can be migrated into the flat cache namespace with
+`paper/fig4/stage_cache_overlay.py`. The compact cache tarball is partial; a
+full old output tree supplies the lower-root RR100, merged-bank, CI-bearing
+path-bin, producer-schema edge-coherence and schematic-stimulus artifacts.
 
 `--allow-missing` renders placeholder panels instead of failing, and stamps a
 red "DEGRADED RENDER - NOT PUBLISHABLE" banner across the page. It is for layout
@@ -386,7 +597,7 @@ def compose(out_dir: Path = OUT_DIR, allow_missing: bool = False) -> dict[str, P
             }
             for pair_key, letters in BCEF_PAIR_LABELS.items()
         },
-        "output_pdf": str(out_pdf.relative_to(ROOT)),
+        "output_pdf": _relative_to_root(out_pdf),
     }
     manifest_path = out_dir / "figure4_manifest.json"
     manifest_path.write_text(json.dumps(provenance, indent=2, sort_keys=True) + "\n", encoding="utf-8")

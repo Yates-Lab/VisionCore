@@ -347,6 +347,21 @@ STAGES: tuple[Stage, ...] = (
         out_dir_flag=None,
     ),
     Stage(
+        key="schematic_stimulus_payload",
+        script=REFRESH_DIR / "build_schematic_stimulus_cache.py",
+        inputs=(_paths.IMAGE_FEATURE_TABLE_CSV, _paths.SCHEMATIC_TRACE_CENTER40_CSV),
+        produces={
+            "fig4_schematic_stimulus_payload.npz": _paths.SCHEMATIC_STIMULUS_PAYLOAD_NPZ,
+        },
+        default_out_dir=CACHE_DIR,
+        out_dir_flag="--out-dir",
+        needs=("merge_ssi_shards", "contour_schematic_trace"),
+        note=(
+            "Cache-only boundary for panel A/C. Requires DataYatesV1/raw BackImage "
+            "data when run, but compose reads only the staged npz."
+        ),
+    ),
+    Stage(
         key="matched_bins_bracket",
         script=UPSTREAM_SCRIPT_DIR / "make_backimage_panel_c_sf05_match15_matched_bins_bracket.py",
         upstream_name="make_backimage_panel_c_sf05_match15_matched_bins_bracket.py",
@@ -547,8 +562,9 @@ STAGES: tuple[Stage, ...] = (
     ),
 )
 
-# Hand-tuned, declared not regenerated. Listed so the report accounts for all 23
-# required inputs rather than silently covering 21.
+# Hand-tuned, declared not regenerated. Listed so the report accounts for all
+# required inputs rather than silently treating layout-only artifacts as missing
+# producer coverage.
 NOT_REGENERATED = {
     _paths.PANEL_A_LAYOUT_OVERRIDES_JSON: "hand-tuned layout overrides",
     _paths.PANEL_D_LAYOUT_OVERRIDES_JSON: "hand-tuned layout overrides",

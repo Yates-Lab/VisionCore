@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Build a contour-relative SSI schematic with a fig3-style model-input cube."""
 
+import json
 import sys
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -58,6 +60,7 @@ TRACE_COMPONENT_METRICS_CSV = _paths.TRACE_COMPONENT_MOVIE_METRICS_CSV
 TRACE_XY_NPY = _paths.TRACE_XY_NPY
 NEW_BANK_IMAGE_TABLE = _paths.IMAGE_FEATURE_TABLE_CSV
 SCHEMATIC_REAL_TRACE_CENTER40_CSV = _paths.SCHEMATIC_TRACE_CENTER40_CSV
+SCHEMATIC_STIMULUS_PAYLOAD_NPZ = _paths.SCHEMATIC_STIMULUS_PAYLOAD_NPZ
 
 
 RED = "#c51f27"
@@ -236,8 +239,8 @@ def load_schematic_center40_trace():
         return None
     try:
         trace_df = pd.read_csv(SCHEMATIC_REAL_TRACE_CENTER40_CSV)
-    except Exception:
-        return None
+    except Exception as exc:
+        raise ValueError(f"Could not read schematic stimulus payload cache {cache_path}: {exc}") from exc
     if trace_df.empty or not {"x_centered_deg", "y_centered_deg"}.issubset(trace_df.columns):
         return None
     if "sample_idx" in trace_df.columns:
@@ -287,7 +290,34 @@ def load_schematic_rr100_final_maps():
     return payload
 
 
-def load_new_bank_stimulus_patch(image_index=SCHEMATIC_NEW_BANK_IMAGE_INDEX):
+def load_cached_new_bank_stimulus_patch(cache_path=SCHEMATIC_STIMULUS_PAYLOAD_NPZ):
+    if not cache_path.exists():
+        return None
+    try:
+        with np.load(cache_path, allow_pickle=False) as data:
+            row = json.loads(str(data["row_json"].item()))
+            center = tuple(float(v) for v in data["crop_center_xy"].astype(float).tolist())
+            return {
+                "patch": data["patch"].astype(np.float64),
+                "model_source_patch": data["model_source_patch"].astype(np.float64),
+                "canvas": data["canvas"].astype(np.float64),
+                "row": row,
+                "image_index": int(data["image_index"].item()),
+                "source_row": int(data["source_row"].item()),
+                "crop_center_xy": center,
+                "crop_size_px": int(data["crop_size_px"].item()),
+                "model_source_patch_size_px": int(data["model_source_patch_size_px"].item()),
+                "contour_axis_deg": float(data["contour_axis_deg"].item()),
+                "contour_axis_image_deg": float(data["contour_axis_image_deg"].item()),
+                "real_trace_center40": data["real_trace_center40"].astype(np.float32),
+                "real_trace_lag32": data["real_trace_lag32"].astype(np.float32),
+                "endpoint_stabilized_trace_lag32": data["endpoint_stabilized_trace_lag32"].astype(np.float32),
+            }
+    except Exception:
+        return None
+
+
+def build_new_bank_stimulus_patch_from_data(image_index=SCHEMATIC_NEW_BANK_IMAGE_INDEX):
     if not NEW_BANK_IMAGE_TABLE.exists():
         return None
     images = pd.read_csv(NEW_BANK_IMAGE_TABLE)
@@ -325,6 +355,46 @@ def load_new_bank_stimulus_patch(image_index=SCHEMATIC_NEW_BANK_IMAGE_INDEX):
         "real_trace_lag32": real_trace_lag32,
         "endpoint_stabilized_trace_lag32": stable_trace_lag32,
     }
+
+
+def write_new_bank_stimulus_cache(
+    out_path=SCHEMATIC_STIMULUS_PAYLOAD_NPZ,
+    image_index=SCHEMATIC_NEW_BANK_IMAGE_INDEX,
+):
+    payload = build_new_bank_stimulus_patch_from_data(image_index=image_index)
+    if payload is None:
+        raise FileNotFoundError(
+            f"could not build schematic stimulus payload from {NEW_BANK_IMAGE_TABLE}"
+        )
+    out_path = Path(out_path)
+    if not out_path.is_absolute():
+        out_path = _paths.CACHE_DIR / out_path
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(
+        out_path,
+        patch=np.asarray(payload["patch"], dtype=np.float32),
+        model_source_patch=np.asarray(payload["model_source_patch"], dtype=np.float32),
+        canvas=np.asarray(payload["canvas"], dtype=np.float32),
+        row_json=np.asarray(json.dumps(payload["row"], sort_keys=True, allow_nan=True)),
+        image_index=np.asarray(payload["image_index"], dtype=np.int64),
+        source_row=np.asarray(payload["source_row"], dtype=np.int64),
+        crop_center_xy=np.asarray(payload["crop_center_xy"], dtype=np.float64),
+        crop_size_px=np.asarray(payload["crop_size_px"], dtype=np.int64),
+        model_source_patch_size_px=np.asarray(payload["model_source_patch_size_px"], dtype=np.int64),
+        contour_axis_deg=np.asarray(payload["contour_axis_deg"], dtype=np.float64),
+        contour_axis_image_deg=np.asarray(payload["contour_axis_image_deg"], dtype=np.float64),
+        real_trace_center40=np.asarray(payload["real_trace_center40"], dtype=np.float32),
+        real_trace_lag32=np.asarray(payload["real_trace_lag32"], dtype=np.float32),
+        endpoint_stabilized_trace_lag32=np.asarray(payload["endpoint_stabilized_trace_lag32"], dtype=np.float32),
+    )
+    return out_path
+
+
+def load_new_bank_stimulus_patch(image_index=SCHEMATIC_NEW_BANK_IMAGE_INDEX):
+    cached = load_cached_new_bank_stimulus_patch()
+    if cached is not None:
+        return cached
+    return build_new_bank_stimulus_patch_from_data(image_index=image_index)
 
 
 def load_component_sorted_eye_traces(target_contour_axis_deg, image_index=None):

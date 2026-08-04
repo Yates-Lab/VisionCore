@@ -6,14 +6,16 @@ Compose the figure:
 uv run python paper/fig4/generate_figure4.py
 ```
 
-That works today and needs nothing from this README. Everything below is about
-*regenerating the cached data* the figure composes from, which does not yet work
-end to end.
+This is cache-first. The command fails loudly if the required caches are not in
+`outputs/cache/`; use `--allow-missing` only for a visibly degraded layout smoke
+render.
 
 ## State of reproducibility — read this first
 
-The figure renders from 36 `fig4_*` files in `outputs/cache/`. Those files are
-**untracked and gitignored**. They are the only copy of this figure's data.
+The compose path preflights 25 required `fig4_*` files in `outputs/cache/`.
+Those files are **untracked and gitignored**. `REFRESH_SOURCES` also names
+refresh-only/support artifacts so the producer graph can account for everything
+without making the compose path stricter than the figure actually needs.
 
 Reproducibility is partial, and the parts are not equally solid:
 
@@ -32,6 +34,39 @@ before the producer mapping was corrected (see below). Six mappings changed
 since, so the verdicts should be re-established with `--verify` before anyone
 relies on them. Nothing suggests they will fail; they simply have not been
 re-run against the corrected graph.
+
+## Staging the handoff caches
+
+The historical handoff archive keeps Declan's original output paths; the current
+figure reads flat `outputs/cache/fig4_*` names. Stage through the explicit mapper
+rather than extracting the archive into this repo:
+
+```bash
+uv run python paper/fig4/stage_cache_overlay.py /path/to/ssi_figure_v4_cache_overlay.tar.gz
+```
+
+The compact cache tarball supplies 16 of the 25 compose-required inputs. The
+remaining nine are lower-root or raw-data products: the four RR100 unit-map
+caches, merged real-trace `image_feature_table.csv`/`trace_xy.npy`,
+contour-relative trace component movie metrics, RR100 SF tuning groups, and the
+cached schematic stimulus payload.
+
+If you have the old full output tree available, stage from that root instead:
+
+```bash
+uv run python paper/fig4/stage_cache_overlay.py /home/declan/VisionCore
+```
+
+When a sibling `DataYatesV1` checkout is available next to that source tree, the
+stager also builds `fig4_schematic_stimulus_payload.npz`. Use
+`--data-package-root PATH` if the data package lives elsewhere. Use `--dry-run`
+to audit the mapping first and `--strict` when a missing required cache should
+be treated as a failed staging step. A JSON manifest with copied files, hashes,
+and remaining missing required inputs is written beside the staged caches.
+
+The full-tree stage is the reference path today: it supplies the CI-bearing
+path-bin cache and producer-schema edge-coherence files needed for an exact
+match to `reference/figure4_reference.pdf`.
 
 ## What blocks full reproduction
 
