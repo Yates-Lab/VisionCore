@@ -1309,7 +1309,7 @@ def _route_behavior_to_concat(ax, out_x, out_mid_y, concat_xy):
     #    (red, right-justified at the end of the extended lever). ─────────────
     ax.text(gx, mid + 0.14, "Full", ha="center", va="bottom",
             fontsize=8.5, color=COND_FULL_COLOR, fontweight="bold", zorder=7)
-    ax.text(txt_r, txt_cy + 0.13, "Ablated", ha="right", va="center",
+    ax.text(txt_r, txt_cy + 0.13, "Retinal only", ha="right", va="center",
             fontsize=9.0, color=COND_ABLATED_COLOR, fontweight="bold", zorder=7)
     ax.text(txt_r, txt_cy - 0.13, "extraretinal input → 0", ha="right", va="center",
             fontsize=6.8, color=COND_ABLATED_COLOR, style="italic", zorder=7)

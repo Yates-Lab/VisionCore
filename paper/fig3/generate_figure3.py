@@ -422,7 +422,7 @@ def _plot_explainable_variance_boxes(ax, abl):
         "Retinal\nonly",
         "Stabilized\nretina",
     ], fontsize=4.9)
-    ax.set_ylabel("Fraction of consistent variance\nexplained ($r^2/R^2_{max}$)")
+    ax.set_ylabel("Fraction of conditional rate\nvariance explained")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
 
@@ -670,7 +670,7 @@ def _plot_femfraction(ax, femdata, *, margin=TOST_MARGIN):
                Line2D([0], [0], color=INTACT_COLOR, lw=1.6),
                Line2D([0], [0], color=ABLATED_COLOR, lw=1.6),
                Line2D([0], [0], color=STABILIZED_COLOR, lw=1.6)]
-    labels = ["Empirical", "Model (full)", "Model (ablated)", "Model (stabilized)"]
+    labels = ["Empirical", "Model (full)", "Model (retinal-only)", "Model (stabilized)"]
     leg = ax.legend(handles, labels, frameon=False, fontsize=7.2, loc="upper left",
                     handlelength=1.3, handletextpad=0.5, labelspacing=0.35,
                     borderaxespad=0.2)
