@@ -19,7 +19,31 @@ from VisionCore.paths import VISIONCORE_ROOT, CACHE_DIR, FIGURES_DIR, STATS_DIR
 DT = 1 / 120                # seconds per bin
 VALID_TIME_BINS = 120        # max within-trial time bins
 MIN_FIX_DUR = 20             # minimum fixation duration (bins)
-MIN_TOTAL_SPIKES = 200       # neuron inclusion threshold
+# Neuron inclusion threshold, in total spikes over the inference trials.
+#
+# This was lowered to 0 on 2026-08-04 to match fig2's `align_fixrsvp_trials`,
+# recovering the 28 of fig2's 1022 analyzed cells (2.7%) that it alone dropped
+# from the fig3 population. It was reverted to 200 the same day, because the
+# recovered cells are not free: panel D scores every cell in a session on one
+# *shared* window set, built by `_fig3_explainable_variance.figure2_valid_mask`
+# as `np.isfinite(robs).all(axis=2)` -- a bin survives only where every unit in
+# the array is finite. A cell that was isolated for only part of a session
+# therefore deletes its absent bins for all of its neighbours, and low-spike
+# cells are exactly the cells with that pattern.
+#
+# Measured over the two caches: 10 of 24 sessions lost base windows, 8 of them
+# by more than a quarter (Allen_2022-04-01 1260 -> 539; Allen_2022-03-30
+# 1429 -> 679; Logan_2020-02-28 5034 -> 2626 on just 2 added units), and the
+# per-session median windows/unit equals n_base_windows, so every cell in an
+# affected session takes the full hit. That cost up to half of panel D's
+# scored windows to gain 25 panel C cells.
+#
+# The superset invariant this was meant to serve (fig2_analyzed subset of
+# twin_readout, TWIN_IMPROVEMENTS item 5) holds at the readout level regardless
+# of this analysis threshold, so nothing depends on it being 0. Fixing the cost
+# properly means making the base mask per-unit, which changes the fig2/fig3
+# shared-window contract and needs its own verification pass.
+MIN_TOTAL_SPIKES = 200
 CCNORM_N_SPLITS = 500        # split-half iterations for ccnorm
 
 SUBJECTS = ["Allen", "Logan"]
@@ -165,7 +189,6 @@ def _run_inference():
     print(f"Loading model from: {CHECKPOINT_PATH}")
     model, model_info = load_model(checkpoint_path=CHECKPOINT_PATH, device=str(device))
     model.model.eval()
-    model.model.convnet.use_checkpointing = False
     print(f"Model loaded: {model_info['experiment']}, epoch {model_info['epoch']}")
     print(f"  {len(model.names)} datasets: {model.names}")
 
