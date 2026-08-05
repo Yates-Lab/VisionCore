@@ -93,6 +93,28 @@ def load_panel_values(profile_csv: Path = PROFILE_CSV) -> pd.DataFrame:
     if not profile_csv.exists():
         raise FileNotFoundError(profile_csv)
     values = pd.read_csv(profile_csv)
+    wide_required = [
+        "wide_band_order",
+        "wide_coherence_bin",
+        "wide_bin_low",
+        "wide_bin_high",
+        "relative_angle_deg",
+        "rms_arcmin",
+        "n_windows",
+    ]
+    if set(wide_required).issubset(values.columns):
+        for col in ["wide_band_order", "wide_bin_low", "wide_bin_high", "relative_angle_deg", "rms_arcmin", "n_windows"]:
+            values[col] = pd.to_numeric(values[col], errors="coerce")
+        values = values[
+            values["wide_coherence_bin"].notna()
+            & np.isfinite(values["relative_angle_deg"])
+            & np.isfinite(values["rms_arcmin"])
+            & np.isfinite(values["n_windows"])
+        ].copy()
+        if values.empty:
+            raise ValueError(f"No selected wider-bin values in {profile_csv}")
+        return values.sort_values(["wide_band_order", "relative_angle_deg"]).reset_index(drop=True)
+
     required = ["coherence_bin", "relative_angle_deg", "rms_arcmin", "n_windows"]
     missing = [col for col in required if col not in values.columns]
     if missing:
@@ -145,6 +167,36 @@ def load_random_orientation_reference(baseline_csv: Path = BASELINE_CSV) -> pd.D
     if not baseline_csv.exists():
         raise FileNotFoundError(baseline_csv)
     values = pd.read_csv(baseline_csv)
+    wide_required = [
+        "wide_band_order",
+        "wide_coherence_bin",
+        "wide_bin_low",
+        "wide_bin_high",
+        "random_orientation_median_rms_arcmin",
+        "random_orientation_ci95_low_arcmin",
+        "random_orientation_ci95_high_arcmin",
+        "n_windows",
+    ]
+    if set(wide_required).issubset(values.columns):
+        for col in [
+            "wide_band_order",
+            "wide_bin_low",
+            "wide_bin_high",
+            "random_orientation_median_rms_arcmin",
+            "random_orientation_ci95_low_arcmin",
+            "random_orientation_ci95_high_arcmin",
+            "n_windows",
+        ]:
+            values[col] = pd.to_numeric(values[col], errors="coerce")
+        values = values[
+            values["wide_coherence_bin"].notna()
+            & np.isfinite(values["random_orientation_median_rms_arcmin"])
+            & np.isfinite(values["n_windows"])
+        ].copy()
+        if values.empty:
+            raise ValueError(f"No flat random-orientation references in {baseline_csv}")
+        return values.sort_values("wide_band_order").reset_index(drop=True)
+
     required = [
         "coherence_bin",
         "relative_angle_deg",

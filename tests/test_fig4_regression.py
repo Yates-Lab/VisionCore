@@ -96,7 +96,11 @@ def test_figure4_matches_reference():
         # A missing cache is an environment gap, not a regression; the build
         # itself is responsible for saying so explicitly (see the fig4
         # preflight), and that message is what distinguishes the two.
-        if "cache" in combined.lower() and "not found" in combined.lower():
+        lowered = combined.lower()
+        if (
+            "required fig4 inputs are missing" in lowered
+            or ("cache" in lowered and "not found" in lowered)
+        ):
             pytest.skip(f"fig4 caches unavailable:\n{combined}")
         pytest.fail(f"fig4 build failed (exit {result.returncode}):\n{combined}")
 

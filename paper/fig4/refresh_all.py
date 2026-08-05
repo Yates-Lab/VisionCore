@@ -45,14 +45,15 @@ from VisionCore.paths import CACHE_DIR, VISIONCORE_ROOT as ROOT  # noqa: E402
 FIG4_DIR = Path(__file__).resolve().parent
 REFRESH_DIR = FIG4_DIR / "refresh"
 FIXSTATS_DIR = FIG4_DIR / "fixation_stats"
+UPSTREAM_HELPER_DIR = FIG4_DIR / "upstream"
 
-# The six upstream producers. They were never committed to either repo, but they
-# do exist on disk -- in two directories that were mode 700, which is why an
-# earlier search concluded they were absent. Recovered by copying those
-# directories out; the agent transcripts that named them are the provenance.
-# Override with FIG4_RECOVERED_ROOT if the copy lives elsewhere.
+# The legacy upstream producers were not brought into the clean Fig. 4 module.
+# Keep their locations explicit for provenance/preflight, but default to an
+# optional local recovery overlay rather than a developer's home directory.
+# Override with FIG4_RECOVERED_ROOT if you intentionally want to run a recovered
+# script tree.
 RECOVERED_ROOT = Path(os.environ.get(
-    "FIG4_RECOVERED_ROOT", "/home/ryanress/declan_recovery/VisionCore/declan"))
+    "FIG4_RECOVERED_ROOT", str(UPSTREAM_HELPER_DIR / "recovered_legacy")))
 UPSTREAM_SCRIPT_DIR = RECOVERED_ROOT / "active_sensing_movie_information"
 FIG_SSI_SCRIPT_DIR = RECOVERED_ROOT / "fig_ssi"
 FIXSTATS_SCRIPT_DIR = RECOVERED_ROOT / "fixation_statistics_by_stimulus"
@@ -245,8 +246,8 @@ STAGES: tuple[Stage, ...] = (
     ),
     Stage(
         key="merge_ssi_shards",
-        script=UPSTREAM_SCRIPT_DIR / "merge_backimage_real_trace_ssi_matrix_shards.py",
-        upstream_name="merge_backimage_real_trace_ssi_matrix_shards.py",
+        script=UPSTREAM_HELPER_DIR / "merge_backimage_real_trace_ssi_matrix_shards.py",
+        upstream_name="merge_backimage_real_trace_ssi_matrix_shards.py (in-repo)",
         inputs=(SSI_SHARDS_DIR,),
         produces={
             "image_feature_table.csv": _paths.IMAGE_FEATURE_TABLE_CSV,
@@ -345,6 +346,21 @@ STAGES: tuple[Stage, ...] = (
             "writing it, so the previous mapping credited a consumer."
         ),
         out_dir_flag=None,
+    ),
+    Stage(
+        key="schematic_stimulus_payload",
+        script=REFRESH_DIR / "build_schematic_stimulus_cache.py",
+        inputs=(_paths.IMAGE_FEATURE_TABLE_CSV, _paths.SCHEMATIC_TRACE_CENTER40_CSV),
+        produces={
+            "fig4_schematic_stimulus_payload.npz": _paths.SCHEMATIC_STIMULUS_PAYLOAD_NPZ,
+        },
+        default_out_dir=CACHE_DIR,
+        out_dir_flag="--out-dir",
+        needs=("merge_ssi_shards", "contour_schematic_trace"),
+        note=(
+            "Cache-only boundary for panel A/C. Requires DataYatesV1/raw BackImage "
+            "data when run, but compose reads only the staged npz."
+        ),
     ),
     Stage(
         key="matched_bins_bracket",
@@ -457,6 +473,22 @@ STAGES: tuple[Stage, ...] = (
         needs=("contour_motion_components",),
         note="Panel F. The producer REFRESH_SOURCES omits entirely.",
     ),
+    Stage(
+        key="trace_bank_metadata",
+        script=UPSTREAM_HELPER_DIR / "build_trace_bank_metadata.py",
+        inputs=(BACKIMAGE_WINDOWS_CSV,),
+        produces={
+            "filtered_path_length_le350arcmin/trace_bank_metadata_filtered.csv":
+                _paths.TRACE_BANK_METADATA_FILTERED_CSV,
+        },
+        default_out_dir=UPSTREAM_MOVIE_INFO / "backimage_trace_bank_diffusion_large_fixation_sample_n5000_n40_v1",
+        out_dir_flag="--out-dir",
+        extra_args=("--force",),
+        note=(
+            "Refresh-only geometry-story input. Requires local DataYatesV1/DataRowleyV1V2 "
+            "availability, e.g. via PYTHONPATH."
+        ),
+    ),
     # -- Tier 2: in-repo producers reading the merged trace bank ------------
     Stage(
         key="path_bins",
@@ -547,8 +579,9 @@ STAGES: tuple[Stage, ...] = (
     ),
 )
 
-# Hand-tuned, declared not regenerated. Listed so the report accounts for all 23
-# required inputs rather than silently covering 21.
+# Hand-tuned, declared not regenerated. Listed so the report accounts for all
+# required inputs rather than silently treating layout-only artifacts as missing
+# producer coverage.
 NOT_REGENERATED = {
     _paths.PANEL_A_LAYOUT_OVERRIDES_JSON: "hand-tuned layout overrides",
     _paths.PANEL_D_LAYOUT_OVERRIDES_JSON: "hand-tuned layout overrides",

@@ -27,9 +27,10 @@ device = get_free_device()
 
 from models.config_loader import load_dataset_configs
 
-dataset_configs_path = "/home/declan/VisionCore/experiments/dataset_configs/multi_basic_120_long_rowley.yaml"
+ROOT = Path(__file__).resolve().parents[1]
+dataset_configs_path = ROOT / "experiments/dataset_configs/multi_basic_120_long_rowley.yaml"
     
-dataset_configs = load_dataset_configs(dataset_configs_path)
+dataset_configs = load_dataset_configs(str(dataset_configs_path))
 
 print(dataset_configs)
 

@@ -65,6 +65,7 @@ TRACE_BANK_METADATA_FILTERED_CSV = CACHE_DIR / "fig4_trace_bank_metadata_filtere
 SCHEMATIC_FINAL_MAPS_NPZ = CACHE_DIR / "fig4_schematic_final_maps.npz"
 SCHEMATIC_FINAL_MAP_UNIT_METRICS_CSV = CACHE_DIR / "fig4_schematic_final_map_unit_metrics.csv"
 SCHEMATIC_TRACE_CENTER40_CSV = CACHE_DIR / "fig4_schematic_trace_center40.csv"
+SCHEMATIC_STIMULUS_PAYLOAD_NPZ = CACHE_DIR / "fig4_schematic_stimulus_payload.npz"
 
 # Panel A network icon (extracted from the Illustrator reference).
 PANEL_A_NETWORK_ICON_PDF = CACHE_DIR / "fig4_panel_a_network_icon.pdf"
@@ -116,8 +117,8 @@ REFRESH_SOURCES = {
     UNIT_MAPS_SELECTED_PATCH_NPY: "plot_backimage_rr100_instantaneous_unit_maps.py (upstream)",
     UNIT_MAPS_SSI_ALL_UNITS_CSV: "plot_backimage_rr100_instantaneous_unit_maps.py (upstream)",
     UNIT_MAPS_ORIENTATION_GROUPS_CSV: "plot_backimage_rr100_instantaneous_unit_maps.py (upstream)",
-    IMAGE_FEATURE_TABLE_CSV: "merge_backimage_real_trace_ssi_matrix_shards.py (upstream)",
-    TRACE_XY_NPY: "merge_backimage_real_trace_ssi_matrix_shards.py (upstream)",
+    IMAGE_FEATURE_TABLE_CSV: "paper/fig4/upstream/merge_backimage_real_trace_ssi_matrix_shards.py",
+    TRACE_XY_NPY: "paper/fig4/upstream/merge_backimage_real_trace_ssi_matrix_shards.py",
     # Producer confirmed by md5 against
     # `merged/phase1_phase2_conditioning_v1/trace_component_conditioning_v1/
     # phase2_contour_relative_trace_component_movie_metrics.csv`. Previously
@@ -128,11 +129,7 @@ REFRESH_SOURCES = {
     # tuning probe writes to an unrelated out-dir and never produces this.
     SF_TUNING_UNIT_GROUPS_CSV: "plot_backimage_rr100_sf_group_ssi_modulation.py (upstream)",
     PHASE1_MOVIE_ANALYSIS_TABLE_CSV: "analyze_backimage_real_trace_ssi_matrix_phase1_phase2.py (upstream)",
-    # Producer unknown. Lives in the trace-bank diffusion sampling run
-    # `backimage_trace_bank_diffusion_large_fixation_sample_n5000_n40_v1/
-    # filtered_path_length_le350arcmin/`; five recovered scripts read it and
-    # none writes it, so the producer is outside the recovered tree.
-    TRACE_BANK_METADATA_FILTERED_CSV: "UNKNOWN -- producer not in the recovered tree (upstream)",
+    TRACE_BANK_METADATA_FILTERED_CSV: "paper/fig4/upstream/build_trace_bank_metadata.py",
     SCHEMATIC_FINAL_MAPS_NPZ: "compute_schematic_rr100_final_maps.py (upstream)",
     SCHEMATIC_FINAL_MAP_UNIT_METRICS_CSV: "compute_schematic_rr100_final_maps.py (upstream)",
     # Producer confirmed by md5 against
@@ -140,6 +137,7 @@ REFRESH_SOURCES = {
     # compute_schematic_rr100_final_maps.py *reads* this trace, it does not
     # write it, so crediting it here made a consumer look like a producer.
     SCHEMATIC_TRACE_CENTER40_CSV: "make_ssi_contour_schematic.py (upstream)",
+    SCHEMATIC_STIMULUS_PAYLOAD_NPZ: "refresh/build_schematic_stimulus_cache.py (requires DataYatesV1/raw BackImage data)",
     PANEL_A_NETWORK_ICON_PDF: "_fig4_network_icon.py",
     PANEL_A_NETWORK_ICON_PROVENANCE_JSON: "_fig4_network_icon.py",
     PANEL_A_LAYOUT_OVERRIDES_JSON: "hand-tuned layout overrides (tracked provenance, not regenerated)",
@@ -179,10 +177,12 @@ REQUIRED_INPUTS = (
     SCHEMATIC_FINAL_MAPS_NPZ,
     SCHEMATIC_FINAL_MAP_UNIT_METRICS_CSV,
     SCHEMATIC_TRACE_CENTER40_CSV,
+    SCHEMATIC_STIMULUS_PAYLOAD_NPZ,
     PANEL_A_NETWORK_ICON_PDF,
     PANEL_A_LAYOUT_OVERRIDES_JSON,
     PANEL_D_LAYOUT_OVERRIDES_JSON,
     COHERENCE_GALLERY_NPZ,
+    STORY_PANEL_B_VALUES_CSV,
     PATH_BINS_VALUES_CSV,
     PATH_BINS_LAST_BIN_CONTRASTS_CSV,
     PATH_BINS_TRACE_BANK_REFERENCE_CSV,
@@ -197,7 +197,7 @@ REQUIRED_INPUTS = (
 # Inputs the refresh path reads that the compose path does not. Kept separate
 # from REQUIRED_INPUTS so `missing_inputs()` stays an honest answer to "can this
 # figure be composed?" while these stop being silently undeclared. Both are
-# absent from `outputs/cache/` today.
+# not required by the compose path and may be absent from compact cache bundles.
 REFRESH_ONLY_INPUTS = (
     PHASE1_MOVIE_ANALYSIS_TABLE_CSV,
     TRACE_BANK_METADATA_FILTERED_CSV,

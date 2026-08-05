@@ -1,6 +1,7 @@
 #%%
 
 import sys
+from pathlib import Path
 
 sys.path.append('./scripts')
 import numpy as np
@@ -26,9 +27,10 @@ from utils import get_model_and_dataset_configs
 
 from models.config_loader import load_dataset_configs
 
-dataset_configs_path = "/home/declan/VisionCore/experiments/dataset_configs/single_basic_120_long_rowley.yaml"
+ROOT = Path(__file__).resolve().parents[1]
+dataset_configs_path = ROOT / "experiments/dataset_configs/single_basic_120_long_rowley.yaml"
     
-dataset_configs = load_dataset_configs(dataset_configs_path)
+dataset_configs = load_dataset_configs(str(dataset_configs_path))
 
 print(dataset_configs)
 
@@ -42,7 +44,6 @@ train_data, val_data, dataset_config = prepare_data(dataset_configs[0], strict=F
 
 #%% Directly load Luke_2025-08-04 fixrsvp.dset (bypass YAML / prepare_data)
 
-from pathlib import Path
 from DataRowleyV1V2.data.registry import get_session
 from DataYatesV1 import DictDataset  # same DictDataset class used elsewhere
 
