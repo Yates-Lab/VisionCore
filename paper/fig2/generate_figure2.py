@@ -388,13 +388,13 @@ def _plot_compact_cov_decomp(fig, subplot_spec, data, letter="D",
     top_titles = [
         "Total covariance",
         "Stimulus covariance",
-        "Classical residual",
+        "Uncorrected residual",
     ]
     bot_titles = [
         "Total covariance",
         "Stimulus covariance",
         "FEM component",
-        "Corrected residual",
+        "Residual",
     ]
     matrix_image = None
     for ax, mat, title in zip(

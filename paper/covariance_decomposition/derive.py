@@ -24,7 +24,8 @@ if str(THIS_DIR) not in sys.path:
 from VisionCore.paths import CACHE_DIR
 from VisionCore.covariance import cov_to_corr, project_to_psd, get_upper_triangle
 from VisionCore.stats import (
-    geomean, iqr_25_75, bootstrap_mean_ci, fisher_z_mean, emp_p_one_sided,
+    geomean, iqr_25_75, bootstrap_mean_ci, bootstrap_median_ci,
+    fisher_z_mean, emp_p_one_sided,
     wilcoxon_signed_rank, paired_valid,
 )
 from VisionCore.subspace import (
@@ -351,7 +352,7 @@ def _compute_alpha_stats(metrics, windows_ms):
         subject_per_neuron_by_window.append(subj_raw[in_range])
 
         mean_m, (ci_lo, ci_hi) = bootstrap_mean_ci(m, nboot=5000, seed=0)
-        med_m = float(np.nanmedian(m))
+        med_m, (med_ci_lo, med_ci_hi) = bootstrap_median_ci(m, nboot=5000, seed=0)
         q25, q75 = iqr_25_75(m)
 
         shuff_m = [
@@ -385,7 +386,8 @@ def _compute_alpha_stats(metrics, windows_ms):
 
         alpha_stats[windows_ms[w_idx]] = {
             "n": len(m), "mean": mean_m, "ci": (ci_lo, ci_hi),
-            "median": med_m, "iqr": (q25, q75),
+            "median": med_m, "median_ci": (med_ci_lo, med_ci_hi),
+            "iqr": (q25, q75),
             "null_ci": null_mean_ci, "p_emp": p_emp,
             "null_median_ci": null_median_ci, "p_emp_median": p_emp_median,
             "n_dropped": n_dropped, "n_total": n_total,

@@ -86,7 +86,8 @@ def report_alpha(bundles):
         for w in windows:
             s = astats[w]
             line = (f"    {w:5.1f} ms: n={s['n']:4d}  "
-                    f"median={_fmt(s['median'])} IQR=[{_fmt(s['iqr'][0])}, "
+                    f"median={_fmt(s['median'])} 95%CI={_ci(s['median_ci'])} "
+                    f"IQR=[{_fmt(s['iqr'][0])}, "
                     f"{_fmt(s['iqr'][1])}]  mean={_fmt(s['mean'])} "
                     f"95%CI={_ci(s['ci'])}")
             if label == "pooled":
