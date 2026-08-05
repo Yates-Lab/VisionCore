@@ -473,6 +473,22 @@ STAGES: tuple[Stage, ...] = (
         needs=("contour_motion_components",),
         note="Panel F. The producer REFRESH_SOURCES omits entirely.",
     ),
+    Stage(
+        key="trace_bank_metadata",
+        script=UPSTREAM_HELPER_DIR / "build_trace_bank_metadata.py",
+        inputs=(BACKIMAGE_WINDOWS_CSV,),
+        produces={
+            "filtered_path_length_le350arcmin/trace_bank_metadata_filtered.csv":
+                _paths.TRACE_BANK_METADATA_FILTERED_CSV,
+        },
+        default_out_dir=UPSTREAM_MOVIE_INFO / "backimage_trace_bank_diffusion_large_fixation_sample_n5000_n40_v1",
+        out_dir_flag="--out-dir",
+        extra_args=("--force",),
+        note=(
+            "Refresh-only geometry-story input. Requires local DataYatesV1/DataRowleyV1V2 "
+            "availability, e.g. via PYTHONPATH."
+        ),
+    ),
     # -- Tier 2: in-repo producers reading the merged trace bank ------------
     Stage(
         key="path_bins",

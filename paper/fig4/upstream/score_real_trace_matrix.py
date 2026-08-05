@@ -32,6 +32,7 @@ from real_trace_matrix.core import (
     score_matrix,
     trace_bank_metadata_row,
     trace_bank_metric_summary_rows,
+    trace_items_from_table_and_array,
     write_csv,
     write_json,
     write_unit_feature_table,
@@ -79,6 +80,30 @@ DEFAULT_POPULATION_SPEC_DIR = Path(
 DEFAULT_MCFARLAND_OUTPUTS = os.environ.get("FIG4_MCFARLAND_OUTPUTS")
 
 
+def parse_session_filter(text: str | None) -> list[str]:
+    if text is None:
+        return []
+    return [part.strip() for part in str(text).split(",") if part.strip()]
+
+
+def filter_source_rows(rows: pd.DataFrame, session_filter: list[str]) -> pd.DataFrame:
+    if not session_filter:
+        return rows
+    if "session" not in rows.columns:
+        raise ValueError("--session-filter requires a 'session' column in --source-csv.")
+    mask = rows["session"].astype(str).isin(session_filter)
+    filtered = rows.loc[mask].copy()
+    if filtered.empty:
+        available = sorted(rows["session"].astype(str).dropna().unique().tolist())
+        preview = ", ".join(available[:8])
+        suffix = "..." if len(available) > 8 else ""
+        raise ValueError(
+            "No source rows matched --session-filter "
+            f"{','.join(session_filter)!r}. Available sessions include: {preview}{suffix}"
+        )
+    return filtered
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-csv", type=Path, default=DEFAULT_SOURCE_CSV)
@@ -92,6 +117,18 @@ def parse_args() -> argparse.Namespace:
         "--mcfarland-outputs",
         type=Path,
         default=Path(DEFAULT_MCFARLAND_OUTPUTS) if DEFAULT_MCFARLAND_OUTPUTS else None,
+    )
+    parser.add_argument(
+        "--session-filter",
+        type=str,
+        default="",
+        help="Comma-separated session names to keep from --source-csv before image/trace sampling.",
+    )
+    parser.add_argument(
+        "--replay-matrix-dir",
+        type=Path,
+        default=None,
+        help="Replay selected image/trace tables from a historical matrix dir instead of resampling from source.",
     )
     parser.add_argument("--n-images", type=int, default=10)
     parser.add_argument("--n-traces", type=int, default=100)
@@ -117,6 +154,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pilot-trace-batch-size", type=int, default=8)
     parser.add_argument("--image-shard-start", type=int, default=0)
     parser.add_argument("--image-shard-stop", type=int, default=0)
+    parser.add_argument("--trace-shard-start", type=int, default=0)
+    parser.add_argument("--trace-shard-stop", type=int, default=0)
     parser.add_argument("--skip-benchmark", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--benchmark-only", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--force", action="store_true")
@@ -162,6 +201,96 @@ def build_trace_bank(args: argparse.Namespace, rows: pd.DataFrame) -> tuple[list
     return eligible, meta
 
 
+def replay_selection(args: argparse.Namespace, out_dir: Path) -> dict[str, Any]:
+    replay_dir = Path(args.replay_matrix_dir)
+    image_path = replay_dir / "image_feature_table.csv"
+    trace_path = replay_dir / "trace_feature_table.csv"
+    trace_xy_path = replay_dir / "trace_xy.npy"
+    for path in (image_path, trace_path, trace_xy_path):
+        if not path.exists():
+            raise FileNotFoundError(f"Replay input is missing: {path}")
+
+    image_table = pd.read_csv(image_path)
+    trace_table_all = pd.read_csv(trace_path)
+    trace_xy_all = np.load(trace_xy_path)
+    if "image_index" not in image_table.columns:
+        raise ValueError(f"{image_path} must contain image_index.")
+    if int(trace_xy_all.shape[0]) != int(trace_table_all.shape[0]):
+        raise ValueError(
+            f"{trace_xy_path} rows ({trace_xy_all.shape[0]}) do not match "
+            f"{trace_path} rows ({trace_table_all.shape[0]})."
+        )
+
+    image_table.to_csv(out_dir / "image_feature_table.csv", index=False)
+    image_start = max(0, int(args.image_shard_start))
+    default_image_stop = image_start + int(args.n_images)
+    image_stop = int(args.image_shard_stop) if int(args.image_shard_stop) > 0 else default_image_stop
+    image_stop = min(image_stop, int(image_table.shape[0]))
+    if image_start >= image_stop:
+        raise ValueError(
+            f"Empty replay image shard: start={image_start}, stop={image_stop}, "
+            f"n_reference_images={image_table.shape[0]}."
+        )
+    score_images = image_table.iloc[image_start:image_stop].copy().reset_index(drop=True)
+    score_images.to_csv(out_dir / "scored_image_feature_table.csv", index=False)
+
+    trace_start = max(0, int(args.trace_shard_start))
+    default_trace_stop = trace_start + int(args.n_traces)
+    trace_stop = int(args.trace_shard_stop) if int(args.trace_shard_stop) > 0 else default_trace_stop
+    trace_stop = min(trace_stop, int(trace_table_all.shape[0]))
+    if trace_start >= trace_stop:
+        raise ValueError(
+            f"Empty replay trace shard: start={trace_start}, stop={trace_stop}, "
+            f"n_reference_traces={trace_table_all.shape[0]}."
+        )
+    trace_table = trace_table_all.iloc[trace_start:trace_stop].copy().reset_index(drop=True)
+    trace_xy = np.asarray(trace_xy_all[trace_start:trace_stop], dtype=np.float32)
+    traces = trace_items_from_table_and_array(trace_table, trace_xy, n_timepoints=int(args.n_timepoints))
+    trace_table.to_csv(out_dir / "trace_feature_table.csv", index=False)
+    write_csv(out_dir / "trace_bank_metric_summary.csv", trace_bank_metric_summary_rows(trace_table.to_dict("records")))
+
+    return {
+        "source_filter": {
+            "mode": "replay",
+            "replay_matrix_dir": replay_dir,
+            "source_csv": None,
+        },
+        "image_sampling": {
+            "mode": "replay",
+            "reference_matrix_dir": replay_dir,
+            "n_reference_images": int(image_table.shape[0]),
+            "n_images": int(score_images.shape[0]),
+            "image_start": int(image_start),
+            "image_stop": int(image_stop),
+            "global_image_indices": score_images["image_index"].astype(int).to_list(),
+        },
+        "trace_sampling": {
+            "mode": "replay",
+            "reference_matrix_dir": replay_dir,
+            "n_reference_traces": int(trace_table_all.shape[0]),
+            "n_traces": int(len(traces)),
+            "trace_start": int(trace_start),
+            "trace_stop": int(trace_stop),
+            "trace_scale_metric": str(args.trace_scale_metric),
+            "trace_bank_eligible_rows": int(trace_table_all.shape[0]),
+            "selected_microsaccade_traces": int(sum(microsaccade_event_count(item) > 0 for item in traces)),
+        },
+        "trace_bank": {
+            "trace_bank_snippet_policy": "replay_trace_xy",
+            "trace_bank_native_snippet_n_timepoints": int(args.n_timepoints),
+            "trace_xy": trace_xy_path,
+            "trace_feature_table": trace_path,
+        },
+        "image_start": int(image_start),
+        "image_stop": int(image_stop),
+        "image_table": image_table,
+        "score_images": score_images,
+        "traces": traces,
+        "trace_index_offset": int(trace_start),
+        "movie_index_stride": int(trace_table_all.shape[0]),
+    }
+
+
 def main() -> int:
     args = parse_args()
     if not bool(args.skip_benchmark) or bool(args.benchmark_only):
@@ -175,54 +304,92 @@ def main() -> int:
         raise FileExistsError(f"{out_dir} already exists and is not empty. Pass --force to append/overwrite files.")
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    rng = np.random.default_rng(int(args.seed))
-    rows = load_source_rows(Path(args.source_csv))
-    image_candidates = image_candidate_rows(
-        rows,
-        contrast_quantile=float(args.image_contrast_quantile),
-        n_timepoints=int(args.n_timepoints),
-        min_orientation_coherence=float(args.image_min_orientation_coherence),
-        min_drift_anisotropy=float(args.image_min_drift_anisotropy),
-    )
-    images = sample_image_rows(
-        image_candidates,
-        int(args.n_images),
-        rng=rng,
-        min_strong_contour_images=int(args.min_strong_contour_images),
-        strong_contour_orientation_coherence_min=float(args.strong_contour_orientation_coherence_min),
-    )
-    image_table = annotate_selected_image_flags(
-        images.copy().reset_index(drop=True),
-        reliable_min=max(0.2, float(args.image_min_orientation_coherence)),
-        strong_min=float(args.strong_contour_orientation_coherence_min),
-    )
-    image_table.insert(0, "image_index", np.arange(image_table.shape[0], dtype=int))
-    image_table.to_csv(out_dir / "image_feature_table.csv", index=False)
+    if args.replay_matrix_dir is not None:
+        selection = replay_selection(args, out_dir)
+    else:
+        rng = np.random.default_rng(int(args.seed))
+        rows = load_source_rows(Path(args.source_csv))
+        rows_before_filter = int(rows.shape[0])
+        session_filter = parse_session_filter(args.session_filter)
+        rows = filter_source_rows(rows, session_filter)
+        rows_after_filter = int(rows.shape[0])
+        image_candidates = image_candidate_rows(
+            rows,
+            contrast_quantile=float(args.image_contrast_quantile),
+            n_timepoints=int(args.n_timepoints),
+            min_orientation_coherence=float(args.image_min_orientation_coherence),
+            min_drift_anisotropy=float(args.image_min_drift_anisotropy),
+        )
+        images = sample_image_rows(
+            image_candidates,
+            int(args.n_images),
+            rng=rng,
+            min_strong_contour_images=int(args.min_strong_contour_images),
+            strong_contour_orientation_coherence_min=float(args.strong_contour_orientation_coherence_min),
+        )
+        image_table = annotate_selected_image_flags(
+            images.copy().reset_index(drop=True),
+            reliable_min=max(0.2, float(args.image_min_orientation_coherence)),
+            strong_min=float(args.strong_contour_orientation_coherence_min),
+        )
+        image_table.insert(0, "image_index", np.arange(image_table.shape[0], dtype=int))
+        image_table.to_csv(out_dir / "image_feature_table.csv", index=False)
 
-    shard_start = max(0, int(args.image_shard_start))
-    shard_stop = int(args.image_shard_stop) if int(args.image_shard_stop) > 0 else int(image_table.shape[0])
-    shard_stop = min(shard_stop, int(image_table.shape[0]))
-    if shard_start >= shard_stop:
-        raise ValueError(f"Empty image shard: start={shard_start}, stop={shard_stop}, n_images={image_table.shape[0]}.")
-    score_images = image_table.iloc[shard_start:shard_stop].copy().reset_index(drop=True)
-    score_images.to_csv(out_dir / "scored_image_feature_table.csv", index=False)
+        shard_start = max(0, int(args.image_shard_start))
+        shard_stop = int(args.image_shard_stop) if int(args.image_shard_stop) > 0 else int(image_table.shape[0])
+        shard_stop = min(shard_stop, int(image_table.shape[0]))
+        if shard_start >= shard_stop:
+            raise ValueError(
+                f"Empty image shard: start={shard_start}, stop={shard_stop}, n_images={image_table.shape[0]}."
+            )
+        score_images = image_table.iloc[shard_start:shard_stop].copy().reset_index(drop=True)
+        score_images.to_csv(out_dir / "scored_image_feature_table.csv", index=False)
 
-    trace_bank, trace_bank_meta = build_trace_bank(args, rows)
-    traces = sample_trace_items(
-        trace_bank,
-        int(args.n_traces),
-        metric=str(args.trace_scale_metric),
-        sampling=str(args.trace_sampling),
-        rng=rng,
-        min_microsaccade_traces=int(args.min_microsaccade_traces),
-    )
-    trace_rows = feature_rows_from_items(
-        traces,
-        scale_metric=str(args.trace_scale_metric),
-        n_timepoints=int(args.n_timepoints),
-    )
-    write_csv(out_dir / "trace_feature_table.csv", trace_rows)
-    write_csv(out_dir / "trace_bank_metric_summary.csv", trace_bank_metric_summary_rows(trace_rows))
+        trace_bank, trace_bank_meta = build_trace_bank(args, rows)
+        traces = sample_trace_items(
+            trace_bank,
+            int(args.n_traces),
+            metric=str(args.trace_scale_metric),
+            sampling=str(args.trace_sampling),
+            rng=rng,
+            min_microsaccade_traces=int(args.min_microsaccade_traces),
+        )
+        trace_rows = feature_rows_from_items(
+            traces,
+            scale_metric=str(args.trace_scale_metric),
+            n_timepoints=int(args.n_timepoints),
+        )
+        write_csv(out_dir / "trace_feature_table.csv", trace_rows)
+        write_csv(out_dir / "trace_bank_metric_summary.csv", trace_bank_metric_summary_rows(trace_rows))
+        selection = {
+            "source_filter": {
+                "session_filter": session_filter,
+                "rows_before_filter": rows_before_filter,
+                "rows_after_filter": rows_after_filter,
+            },
+            "image_sampling": image_sampling_summary(images, n_candidates=image_candidates.shape[0], args=args),
+            "trace_sampling": {
+                "n_traces": int(args.n_traces),
+                "trace_sampling": str(args.trace_sampling),
+                "trace_scale_metric": str(args.trace_scale_metric),
+                "max_trace_path_length_arcmin": float(args.max_trace_path_length_arcmin),
+                "trace_bank_eligible_rows": int(len(trace_bank)),
+                "min_microsaccade_traces": int(args.min_microsaccade_traces),
+                "selected_microsaccade_traces": int(sum(microsaccade_event_count(item) > 0 for item in traces)),
+            },
+            "trace_bank": trace_bank_meta,
+            "image_start": int(shard_start),
+            "image_stop": int(shard_stop),
+            "image_table": image_table,
+            "score_images": score_images,
+            "traces": traces,
+            "trace_index_offset": 0,
+            "movie_index_stride": None,
+        }
+
+    image_table = selection["image_table"]
+    score_images = selection["score_images"]
+    traces = selection["traces"]
 
     scorer = RealTraceMatrixScorer.load(
         checkpoint_path=Path(args.checkpoint_path),
@@ -252,34 +419,30 @@ def main() -> int:
         patch_size_px=int(args.patch_size_px),
         write_outputs=True,
         out_dir=out_dir,
+        trace_index_offset=int(selection["trace_index_offset"]),
+        movie_index_stride=selection["movie_index_stride"],
     )
     payload = {
         "analysis": "backimage_real_trace_ssi_matrix",
-        "source_csv": Path(args.source_csv),
+        "source_csv": None if args.replay_matrix_dir is not None else Path(args.source_csv),
+        "replay_matrix_dir": Path(args.replay_matrix_dir) if args.replay_matrix_dir is not None else None,
         "unit_tuning_csv": Path(args.unit_tuning_csv),
         "out_dir": out_dir,
         "rr100_version": str(args.rr100_version),
         "n_timepoints": int(args.n_timepoints),
         "bin_seconds": float(args.bin_seconds),
         "patch_size_px": int(args.patch_size_px),
-        "image_sampling": image_sampling_summary(images, n_candidates=image_candidates.shape[0], args=args),
+        "source_filter": selection["source_filter"],
+        "image_sampling": selection["image_sampling"],
         "image_shard": {
-            "start": int(shard_start),
-            "stop": int(shard_stop),
+            "start": int(selection["image_start"]),
+            "stop": int(selection["image_stop"]),
             "n_total_images": int(image_table.shape[0]),
             "n_scored_images": int(score_images.shape[0]),
             "global_image_indices": score_images["image_index"].astype(int).to_list(),
         },
-        "trace_sampling": {
-            "n_traces": int(args.n_traces),
-            "trace_sampling": str(args.trace_sampling),
-            "trace_scale_metric": str(args.trace_scale_metric),
-            "max_trace_path_length_arcmin": float(args.max_trace_path_length_arcmin),
-            "trace_bank_eligible_rows": int(len(trace_bank)),
-            "min_microsaccade_traces": int(args.min_microsaccade_traces),
-            "selected_microsaccade_traces": int(sum(microsaccade_event_count(item) > 0 for item in traces)),
-        },
-        "trace_bank": trace_bank_meta,
+        "trace_sampling": selection["trace_sampling"],
+        "trace_bank": selection["trace_bank"],
         "pilot": {
             "frame_batch_size": int(pilot_frame_batch),
             "trace_batch_size": int(pilot_trace_batch),

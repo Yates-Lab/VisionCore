@@ -38,17 +38,21 @@ RR100_VERSION = (
     "V1-RR_MS_min_complete0p65_split0p75_pair0p60_anyfail_finalsplit0p75_"
     "medoidPosthocminRepcomplete0p45_movieMedoid"
 )
+MODEL_CHECKPOINT_FILENAME = "epoch=147-val_bps_overall=0.5702.ckpt"
 MODEL_CHECKPOINT_PATH = Path(
     "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_120_long/"
     "checkpoints/learned_resnet_none_convgru_gaussian_ddp_bs128_ds30_lr1e-3_wd1e-4_"
-    "corelrscale.5_warmup5/epoch=147-val_bps_overall=0.5702.ckpt"
+    f"corelrscale.5_warmup5/{MODEL_CHECKPOINT_FILENAME}"
 )
+STAGED_MODEL_CHECKPOINT_PATH = ROOT / "outputs/artifacts/model_checkpoints/fig4_twin" / MODEL_CHECKPOINT_FILENAME
 MODEL_CHECKPOINT_SHA256 = "55d084aa0beb7d65614aecb9122edf7ad49c5799d370dbbd5dcf60b815c62de3"
 DATASET_CONFIGS_REV = "e6c85ae"
 DATASET_CONFIGS_MAIN_SHA256 = "c42906b90c340d64d35247baaa6b715e452d043dcff6439e02147aed6b7322d8"
 RR100_SPEC_JSON_SHA256 = "d599fb0718faa363520a91b8f0819edafbff74ec501899b590e4061fef557f08"
 RR100_SPEC_NPZ_SHA256 = "ffdbf4deee0d2bf4cc82d1bb7363e4271ee61be2cb6e87962bf6909a5b80c3d4"
 WINDOW_FEATURES_SHA256 = "e8e2fa28c39d4d0222502bbe73fc221210260212fbed25bdc6c2e6c6217f73ba"
+DIRECT_MATRIX_SOURCE_CSV_SHA256 = "ac2364e22ede162940a9ba7de5c8ab2c2ef2ea9c9985d851e302769d17c12567"
+UNIT_TUNING_CSV_SHA256 = "7a506b617ccbda563cab1e7f10173f9015448f88ce71a1abec7b05dc8aaa92f2"
 
 DEFAULT_SOURCE_CSV = ROOT / (
     "outputs/fixation_statistics_by_stimulus_all_sessions_after_review/"
@@ -102,6 +106,7 @@ PROFILES: dict[str, dict[str, Any]] = {
         "trace_scale_metric": "rendered_path_length_arcmin",
         "trace_sampling": "quantile",
         "min_microsaccade_traces": 200,
+        "session_filter": "",
         "device": "cuda:1",
         "frame_batch_size": 16,
         "trace_batch_size": 8,
@@ -125,6 +130,7 @@ PROFILES: dict[str, dict[str, Any]] = {
         "trace_scale_metric": "rendered_path_length_arcmin",
         "trace_sampling": "quantile",
         "min_microsaccade_traces": 0,
+        "session_filter": "Allen_2022-02-16",
         "device": "cpu",
         "frame_batch_size": 4,
         "trace_batch_size": 1,
@@ -163,6 +169,14 @@ class CommandPlan:
         }
 
 
+def default_checkpoint_path() -> Path:
+    if CHECKPOINT_ENV in os.environ:
+        return Path(os.environ[CHECKPOINT_ENV])
+    if STAGED_MODEL_CHECKPOINT_PATH.exists():
+        return STAGED_MODEL_CHECKPOINT_PATH
+    return MODEL_CHECKPOINT_PATH
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", choices=sorted(PROFILES), default="production")
@@ -184,7 +198,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--checkpoint-path",
         type=Path,
-        default=Path(os.environ.get(CHECKPOINT_ENV, str(MODEL_CHECKPOINT_PATH))),
+        default=default_checkpoint_path(),
     )
     parser.add_argument(
         "--dataset-configs",
@@ -202,6 +216,12 @@ def parse_args() -> argparse.Namespace:
         default=Path(os.environ[MCFARLAND_OUTPUTS_ENV]) if MCFARLAND_OUTPUTS_ENV in os.environ else None,
     )
     parser.add_argument("--device", type=str, default=None, help="Override the profile's device.")
+    parser.add_argument(
+        "--session-filter",
+        type=str,
+        default=None,
+        help="Override the profile's comma-separated source-session filter.",
+    )
     parser.add_argument(
         "--only-shard",
         action="append",
@@ -371,6 +391,30 @@ def score_asset_blocker(args: argparse.Namespace, *, include_source_tables: bool
     return "Missing required source/model asset(s): " + "; ".join(missing)
 
 
+def runner_supports_source_asset_flags(runner: Path | None) -> bool:
+    if runner is None:
+        return False
+    try:
+        resolved = Path(runner).resolve()
+    except OSError:
+        resolved = Path(runner)
+    return resolved in {DEFAULT_MATRIX_RUNNER.resolve(), DEFAULT_BASELINE_RUNNER.resolve()}
+
+
+def source_asset_cli_args(args: argparse.Namespace, *, include_mcfarland: bool = True) -> list[str]:
+    out = [
+        "--checkpoint-path",
+        str(args.checkpoint_path),
+        "--dataset-configs",
+        str(args.dataset_configs),
+        "--population-spec-dir",
+        str(args.population_spec_dir),
+    ]
+    if include_mcfarland and args.mcfarland_outputs is not None:
+        out.extend(["--mcfarland-outputs", str(args.mcfarland_outputs)])
+    return out
+
+
 def matrix_command(
     *,
     runner: Path | None,
@@ -435,6 +479,10 @@ def matrix_command(
     ]
     if bool(args.force):
         producer_args.append("--force")
+    if runner_supports_source_asset_flags(runner):
+        producer_args.extend(source_asset_cli_args(args))
+    if str(profile.get("session_filter", "")).strip():
+        producer_args.extend(["--session-filter", str(profile["session_filter"])])
 
     display_argv = ["uv", "run", "python", runner_token, *producer_args]
     runner_ready = runner is not None and Path(runner).exists()
@@ -546,6 +594,8 @@ def baseline_command(
     ]
     if bool(args.force):
         producer_args.append("--force")
+    if runner_supports_source_asset_flags(runner):
+        producer_args.extend(source_asset_cli_args(args))
     display_argv = ["uv", "run", "python", runner_token, *producer_args]
     runner_missing = runner is None or not Path(runner).exists()
     asset_blocker = score_asset_blocker(args, include_source_tables=False)
@@ -590,14 +640,14 @@ def input_checks(args: argparse.Namespace, *, hash_inputs: bool) -> list[dict[st
             label="direct_matrix_source_csv",
             path=Path(args.source_csv),
             required_for=("score_shard",),
-            hash_if_present=hash_inputs,
+            expected_sha256=DIRECT_MATRIX_SOURCE_CSV_SHA256,
             note="Direct input opened by the matrix scorer.",
         ),
         path_check(
             label="unit_tuning_csv",
             path=Path(args.unit_tuning_csv),
             required_for=("score_shard",),
-            hash_if_present=hash_inputs,
+            expected_sha256=UNIT_TUNING_CSV_SHA256,
             note="Adds SF/group metadata to unit_feature_table.csv.",
         ),
         path_check(
@@ -790,6 +840,8 @@ def main() -> int:
     profile = dict(PROFILES[args.profile])
     if args.device is not None:
         profile["device"] = str(args.device)
+    if args.session_filter is not None:
+        profile["session_filter"] = str(args.session_filter)
     out_root = Path(args.out_root) if args.out_root is not None else default_out_root(args.profile)
     plan_json = Path(args.plan_json) if args.plan_json is not None else default_plan_json(args.profile)
     shards = selected_shards(profile, list(args.only_shard))

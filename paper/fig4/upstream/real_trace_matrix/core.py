@@ -11,6 +11,7 @@ from typing import Any, Callable
 
 import numpy as np
 import pandas as pd
+from scipy import signal
 
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -21,6 +22,7 @@ if str(FIG4_DIR) not in sys.path:
     sys.path.insert(0, str(FIG4_DIR))
 
 EPS = 1e-8
+DEFAULT_MSD_LAGS = (1, 2, 4, 8, 16)
 IMAGE_FEATURE_COLUMNS = [
     "image_patch_rms_contrast",
     "image_patch_std",
@@ -56,15 +58,266 @@ TRACE_FEATURE_COLUMNS = [
     "rendered_fraction_microsaccade_samples",
     "rendered_peak_microsaccade_speed_dps",
 ]
+TRACE_BANK_METADATA_NUMERIC_COLUMNS = [
+    "observed_rms_deg",
+    "observed_rms_arcmin",
+    "rendered_rms_radius_deg",
+    "rendered_rms_radius_arcmin",
+    "rendered_max_radius_deg",
+    "path_length_deg",
+    "path_length_arcmin",
+    "rendered_path_length_deg",
+    "rendered_path_length_arcmin",
+    "rendered_path_length_deg_s",
+    "rendered_path_speed_arcmin_s",
+    "rendered_speed_mean_deg_s",
+    "rendered_speed_mean_arcmin_s",
+    "rendered_speed_median_deg_s",
+    "rendered_speed_median_arcmin_s",
+    "rendered_speed_p95_deg_s",
+    "rendered_speed_p95_arcmin_s",
+    "rendered_diffusion_constant_deg2_s",
+    "rendered_diffusion_constant_arcmin2_s",
+    "rendered_position_autocorr_lag1",
+    "rendered_velocity_autocorr_lag1",
+    "lag1_autocorr",
+    "source_trace_observed_rms_deg",
+    "source_rms_radius_deg",
+    "source_rms_radius_arcmin",
+    "source_max_radius_deg",
+    "source_path_length_deg",
+    "source_path_length_arcmin",
+    "source_path_length_deg_s",
+    "source_path_speed_arcmin_s",
+    "source_speed_mean_deg_s",
+    "source_speed_mean_arcmin_s",
+    "source_speed_median_deg_s",
+    "source_speed_median_arcmin_s",
+    "source_speed_p95_deg_s",
+    "source_speed_p95_arcmin_s",
+    "source_diffusion_constant_deg2_s",
+    "source_diffusion_constant_arcmin2_s",
+    "source_rendered_diffusion_delta_deg2_s",
+    "source_rendered_diffusion_abs_delta_deg2_s",
+    "trace_cov_anisotropy",
+    "source_trace_cov_anisotropy",
+    "source_anisotropy",
+    "rendered_anisotropy",
+    "source_cov_major_sd_arcmin",
+    "source_cov_minor_sd_arcmin",
+    "source_cov_axis_ratio",
+    "source_cov_orientation_deg",
+    "source_bcea68_arcmin2",
+    "rendered_cov_major_sd_arcmin",
+    "rendered_cov_minor_sd_arcmin",
+    "rendered_cov_axis_ratio",
+    "rendered_cov_orientation_deg",
+    "rendered_bcea68_arcmin2",
+    "trace_cov_shape_xx",
+    "trace_cov_shape_xy",
+    "trace_cov_shape_yy",
+    "microsaccade_threshold_dps",
+    "n_microsaccade_events",
+    "fraction_microsaccade_samples",
+    "peak_microsaccade_speed_dps",
+    "source_microsaccade_threshold_dps",
+    "source_n_microsaccade_events",
+    "source_fraction_microsaccade_samples",
+    "source_peak_microsaccade_speed_dps",
+    "rendered_microsaccade_threshold_dps",
+    "rendered_n_microsaccade_events",
+    "rendered_fraction_microsaccade_samples",
+    "rendered_peak_microsaccade_speed_dps",
+]
 TRACE_BANK_METRIC_SUMMARY_SPECS = (
-    ("rendered_path_length_arcmin", "path length", "arcmin"),
-    ("rendered_path_speed_arcmin_s", "mean speed", "arcmin/s"),
-    ("rendered_rms_radius_arcmin", "RMS radius", "arcmin"),
+    ("path_length_arcmin", "path length", "arcmin"),
+    ("rendered_path_speed_arcmin_s", "path speed", "arcmin/s"),
+    ("observed_rms_arcmin", "RMS radius", "arcmin"),
     ("rendered_bcea68_arcmin2", "BCEA68", "arcmin^2"),
-    ("rendered_cov_anisotropy", "covariance anisotropy", "fraction"),
-    ("rendered_n_microsaccade_events", "microsaccade events", "count"),
-    ("rendered_fraction_microsaccade_samples", "microsaccade samples", "fraction"),
+    ("trace_cov_anisotropy", "covariance anisotropy", "unitless"),
+    ("rendered_cov_axis_ratio", "covariance axis ratio", "unitless"),
+    ("rendered_speed_p95_arcmin_s", "p95 speed", "arcmin/s"),
+    ("rendered_diffusion_constant_arcmin2_s", "MSD diffusion constant", "arcmin^2/s"),
+    ("lag1_autocorr", "lag-1 position autocorrelation", "unitless"),
+    ("n_microsaccade_events", "microsaccade event count", "events/snippet"),
+    ("fraction_microsaccade_samples", "microsaccade sample fraction", "fraction"),
+    ("peak_microsaccade_speed_dps", "peak microsaccade speed", "deg/s"),
 )
+
+
+def _finite_trace(trace: np.ndarray) -> np.ndarray:
+    x = np.asarray(trace, dtype=np.float64)
+    if x.ndim != 2 or x.shape[1] != 2:
+        raise ValueError(f"Expected trace shape (T, 2), got {x.shape}")
+    return x[np.isfinite(x).all(axis=1)]
+
+
+def _safe_mean(values: np.ndarray) -> float:
+    values = np.asarray(values, dtype=np.float64)
+    values = values[np.isfinite(values)]
+    return float(np.mean(values)) if values.size else float("nan")
+
+
+def _safe_quantile(values: np.ndarray, q: float) -> float:
+    values = np.asarray(values, dtype=np.float64)
+    values = values[np.isfinite(values)]
+    return float(np.quantile(values, q)) if values.size else float("nan")
+
+
+def _autocorr_rows(x: np.ndarray, lag: int) -> float:
+    if x.shape[0] <= lag:
+        return float("nan")
+    a = x[:-lag]
+    b = x[lag:]
+    num = float(np.sum(a * b))
+    den = float(np.sqrt(np.sum(a * a) * np.sum(b * b)))
+    return num / den if den > 0 else float("nan")
+
+
+def _velocity_autocorr(step: np.ndarray, lag: int) -> float:
+    if step.shape[0] <= lag:
+        return float("nan")
+    a = step[:-lag]
+    b = step[lag:]
+    num = np.sum(a * b, axis=1)
+    den = np.linalg.norm(a, axis=1) * np.linalg.norm(b, axis=1)
+    valid = den > 1e-12
+    return float(np.mean(num[valid] / den[valid])) if np.any(valid) else float("nan")
+
+
+def _direction_persistence(step: np.ndarray) -> tuple[float, float]:
+    if step.shape[0] < 2:
+        return float("nan"), float("nan")
+    a = step[:-1]
+    b = step[1:]
+    na = np.linalg.norm(a, axis=1)
+    nb = np.linalg.norm(b, axis=1)
+    valid = (na > 1e-12) & (nb > 1e-12)
+    if not np.any(valid):
+        return float("nan"), float("nan")
+    cosang = np.sum(a[valid] * b[valid], axis=1) / (na[valid] * nb[valid])
+    cosang = np.clip(cosang, -1.0, 1.0)
+    angles = np.arccos(cosang)
+    return float(np.mean(cosang)), float(np.mean(np.abs(angles)))
+
+
+def _power_features(centered: np.ndarray, dt: float) -> dict[str, float]:
+    if centered.shape[0] < 8:
+        return {
+            "position_psd_slope_1_30hz": float("nan"),
+            "position_high_freq_power_fraction_15_60hz": float("nan"),
+        }
+    fs = 1.0 / float(dt)
+    nperseg = min(centered.shape[0], 256)
+    freqs, pxx = signal.welch(centered[:, 0], fs=fs, nperseg=nperseg, detrend="constant")
+    _, pyy = signal.welch(centered[:, 1], fs=fs, nperseg=nperseg, detrend="constant")
+    power = np.asarray(pxx + pyy, dtype=np.float64)
+    total = float(np.sum(power[freqs > 0]))
+    high = float(np.sum(power[(freqs >= 15.0) & (freqs <= min(60.0, fs / 2.0))]))
+    slope_mask = (freqs >= 1.0) & (freqs <= min(30.0, fs / 2.0)) & (power > 0)
+    if np.count_nonzero(slope_mask) >= 3:
+        slope = float(np.polyfit(np.log(freqs[slope_mask]), np.log(power[slope_mask]), 1)[0])
+    else:
+        slope = float("nan")
+    return {
+        "position_psd_slope_1_30hz": slope,
+        "position_high_freq_power_fraction_15_60hz": high / total if total > 0 else float("nan"),
+    }
+
+
+def fixation_window_features(
+    trace: np.ndarray,
+    *,
+    dt: float,
+    msd_lags: tuple[int, ...] = DEFAULT_MSD_LAGS,
+) -> dict[str, float]:
+    x = _finite_trace(trace)
+    out: dict[str, float] = {"n_samples": float(x.shape[0]), "duration_s": float(x.shape[0] * dt)}
+    if x.shape[0] < 3:
+        return out
+
+    mean = np.mean(x, axis=0)
+    centered = x - mean
+    radius = np.linalg.norm(centered, axis=1)
+    step = np.diff(x, axis=0)
+    step_radius = np.linalg.norm(step, axis=1)
+    speed = step_radius / float(dt)
+    cov = np.cov(centered.T) if x.shape[0] > 1 else np.full((2, 2), np.nan)
+    cov = np.asarray(cov, dtype=np.float64)
+    if np.isfinite(cov).all():
+        evals = np.linalg.eigvalsh(cov)
+        evals = np.maximum(evals, 0.0)
+        lam_min, lam_max = float(evals[0]), float(evals[1])
+        drift_orientation = 0.5 * np.arctan2(2.0 * float(cov[0, 1]), float(cov[0, 0] - cov[1, 1]))
+    else:
+        lam_min = lam_max = float("nan")
+        drift_orientation = float("nan")
+
+    path = float(np.sum(step_radius))
+    persistence, curvature = _direction_persistence(step)
+    dot = np.sum(centered[:-1] * step, axis=1)
+    r2 = np.sum(centered[:-1] * centered[:-1], axis=1)
+    valid_r = r2 > 1e-12
+    return_strength = -float(np.mean(dot[valid_r] / r2[valid_r])) if np.any(valid_r) else float("nan")
+
+    out.update(
+        {
+            "mean_x_deg": float(mean[0]),
+            "mean_y_deg": float(mean[1]),
+            "abs_mean_radius_deg": float(np.linalg.norm(mean)),
+            "rms_radius_deg": float(np.sqrt(np.mean(radius**2))),
+            "median_radius_deg": float(np.median(radius)),
+            "p05_radius_deg": _safe_quantile(radius, 0.05),
+            "p95_radius_deg": _safe_quantile(radius, 0.95),
+            "max_radius_deg": float(np.max(radius)),
+            "cov_xx_deg2": float(cov[0, 0]),
+            "cov_xy_deg2": float(cov[0, 1]),
+            "cov_yy_deg2": float(cov[1, 1]),
+            "cloud_area_deg2": float(np.pi * np.sqrt(max(lam_min * lam_max, 0.0)))
+            if np.isfinite(lam_min + lam_max)
+            else float("nan"),
+            "anisotropy": (lam_max - lam_min) / (lam_max + lam_min) if (lam_max + lam_min) > 0 else float("nan"),
+            "drift_orientation_deg": float(np.degrees(drift_orientation)),
+            "step_mean_deg": _safe_mean(step_radius),
+            "step_median_deg": float(np.median(step_radius)),
+            "step_p95_deg": _safe_quantile(step_radius, 0.95),
+            "speed_mean_deg_s": _safe_mean(speed),
+            "speed_median_deg_s": float(np.median(speed)),
+            "speed_p95_deg_s": _safe_quantile(speed, 0.95),
+            "path_length_deg": path,
+            "path_length_deg_s": path / ((x.shape[0] - 1) * float(dt)),
+            "direction_persistence": persistence,
+            "curvature_rad": curvature,
+            "return_to_center_strength": return_strength,
+            "position_autocorr_lag1": _autocorr_rows(centered, 1),
+            "position_autocorr_lag4": _autocorr_rows(centered, 4),
+            "velocity_autocorr_lag1": _velocity_autocorr(step, 1),
+            "velocity_autocorr_lag4": _velocity_autocorr(step, 4),
+            "fraction_within_0p05deg": float(np.mean(radius <= 0.05)),
+            "fraction_within_0p10deg": float(np.mean(radius <= 0.10)),
+            "fraction_within_0p25deg": float(np.mean(radius <= 0.25)),
+        }
+    )
+
+    msd_x: list[float] = []
+    msd_t: list[float] = []
+    for lag in msd_lags:
+        lag = int(lag)
+        if lag <= 0 or x.shape[0] <= lag:
+            out[f"msd_lag{lag}_deg2"] = float("nan")
+            continue
+        disp = x[lag:] - x[:-lag]
+        msd = float(np.mean(np.sum(disp * disp, axis=1)))
+        out[f"msd_lag{lag}_deg2"] = msd
+        msd_x.append(msd)
+        msd_t.append(lag * float(dt))
+    if len(msd_x) >= 2:
+        slope = float(np.polyfit(np.asarray(msd_t), np.asarray(msd_x), 1)[0])
+        out["diffusion_constant_deg2_s"] = max(slope / 4.0, 0.0)
+    else:
+        out["diffusion_constant_deg2_s"] = float("nan")
+    out.update(_power_features(centered, dt))
+    return out
 
 
 def progress(message: str) -> None:
@@ -232,8 +485,8 @@ def annotate_selected_image_flags(images: pd.DataFrame, *, reliable_min: float, 
 
 
 def trace_hash(trace: np.ndarray) -> str:
-    arr = np.asarray(trace, dtype=np.float32)
-    return hashlib.sha256(np.ascontiguousarray(arr).view(np.uint8)).hexdigest()
+    arr = np.ascontiguousarray(np.asarray(trace, dtype=np.float32))
+    return hashlib.sha256(arr.view(np.uint8)).hexdigest()[:20]
 
 
 def trace_rms(trace: np.ndarray) -> float:
@@ -252,74 +505,59 @@ def path_length(trace: np.ndarray) -> float:
 def lag1_autocorr(values: np.ndarray) -> float:
     arr = np.asarray(values, dtype=np.float64)
     if arr.shape[0] < 3:
-        return float("nan")
-    x = arr[:-1].reshape(arr.shape[0] - 1, -1)
-    y = arr[1:].reshape(arr.shape[0] - 1, -1)
-    x = x - np.nanmean(x, axis=0, keepdims=True)
-    y = y - np.nanmean(y, axis=0, keepdims=True)
-    denom = float(np.sqrt(np.nansum(x * x) * np.nansum(y * y)))
-    if denom <= 0.0:
-        return float("nan")
-    return float(np.nansum(x * y) / denom)
+        return 0.0
+    vals = []
+    flat = arr.reshape(arr.shape[0], -1)
+    for dim in range(flat.shape[1]):
+        a = flat[:-1, dim] - np.mean(flat[:-1, dim])
+        b = flat[1:, dim] - np.mean(flat[1:, dim])
+        den = float(np.sqrt(np.sum(a * a) * np.sum(b * b)))
+        if den > 1e-12:
+            vals.append(float(np.sum(a * b) / den))
+    if not vals:
+        return 0.0
+    return float(np.clip(np.mean(vals), -0.95, 0.98))
 
 
-def trace_covariance_shape(trace: np.ndarray) -> dict[str, float]:
+def trace_covariance_shape(trace: np.ndarray) -> np.ndarray:
     arr = np.asarray(trace, dtype=np.float64)
-    if arr.shape[0] < 2:
-        return {
-            "cov_xx_deg2": float("nan"),
-            "cov_xy_deg2": float("nan"),
-            "cov_yy_deg2": float("nan"),
-            "cov_major_var_deg2": float("nan"),
-            "cov_minor_var_deg2": float("nan"),
-            "cov_axis_ratio": float("nan"),
-            "cov_orientation_deg": float("nan"),
-        }
-    centered = arr - np.nanmean(arr, axis=0, keepdims=True)
-    cov = np.cov(centered.T)
-    vals, vecs = np.linalg.eigh(cov)
-    order = np.argsort(vals)[::-1]
-    vals = vals[order]
-    vecs = vecs[:, order]
-    major = max(float(vals[0]), 0.0)
-    minor = max(float(vals[1]), 0.0)
-    axis_ratio = float(np.sqrt(major / max(minor, EPS))) if major > 0 else float("nan")
-    orientation = float(np.degrees(np.arctan2(vecs[1, 0], vecs[0, 0])))
-    return {
-        "cov_xx_deg2": float(cov[0, 0]),
-        "cov_xy_deg2": float(cov[0, 1]),
-        "cov_yy_deg2": float(cov[1, 1]),
-        "cov_major_var_deg2": major,
-        "cov_minor_var_deg2": minor,
-        "cov_axis_ratio": axis_ratio,
-        "cov_orientation_deg": orientation,
-    }
+    cov = np.cov(arr, rowvar=False) if arr.shape[0] > 1 else np.eye(2)
+    if not np.all(np.isfinite(cov)):
+        cov = np.eye(2)
+    vals, vecs = np.linalg.eigh(cov + 1e-9 * np.eye(2))
+    vals = np.maximum(vals, 1e-9)
+    shape = vecs @ np.diag(np.sqrt(vals / np.mean(vals))) @ vecs.T
+    return shape.astype(np.float64)
 
 
 def trace_covariance_anisotropy(trace: np.ndarray) -> float:
-    shape = trace_covariance_shape(trace)
-    major = float(shape["cov_major_var_deg2"])
-    minor = float(shape["cov_minor_var_deg2"])
-    denom = major + minor
-    if not math.isfinite(denom) or denom <= 0.0:
+    arr = np.asarray(trace, dtype=np.float64)
+    cov = np.cov(arr, rowvar=False) if arr.shape[0] > 1 else np.eye(2)
+    if not np.all(np.isfinite(cov)):
         return float("nan")
-    return float((major - minor) / denom)
+    vals = np.linalg.eigvalsh(cov + 1e-12 * np.eye(2))
+    vals = np.maximum(vals, 0.0)
+    total = float(np.sum(vals))
+    if total <= 1e-12:
+        return 0.0
+    return float((np.max(vals) - np.min(vals)) / total)
 
 
 def bcea68_arcmin2(trace: np.ndarray) -> float:
-    shape = trace_covariance_shape(trace)
-    major = max(float(shape["cov_major_var_deg2"]), 0.0)
-    minor = max(float(shape["cov_minor_var_deg2"]), 0.0)
-    if not math.isfinite(major) or not math.isfinite(minor):
+    arr = np.asarray(trace, dtype=np.float64)
+    cov = np.cov(arr, rowvar=False) if arr.shape[0] > 1 else np.eye(2)
+    if not np.all(np.isfinite(cov)):
         return float("nan")
-    return float(2.279 * math.pi * math.sqrt(major * minor) * 3600.0)
+    det = max(float(np.linalg.det(cov)), 0.0)
+    bcea68_deg2 = 2.0 * (-math.log(1.0 - 0.68)) * math.pi * math.sqrt(det)
+    return float(bcea68_deg2 * 3600.0)
 
 
 def speed_threshold_mad(trace: np.ndarray, *, dt: float, z: float) -> float:
     arr = np.asarray(trace, dtype=np.float64)
     if arr.shape[0] < 2:
         return float("inf")
-    speed = np.linalg.norm(np.diff(arr, axis=0, prepend=arr[:1]), axis=1) / float(dt)
+    speed = np.linalg.norm(np.diff(arr, axis=0), axis=1) / float(dt)
     speed = speed[np.isfinite(speed)]
     if speed.size < 3:
         return float("inf")
@@ -356,61 +594,65 @@ def microsaccade_stats(
             padded[lo:hi] = True
         mask = padded
     events = 0
+    event_peak = 0.0
     i = 0
     while i < mask.size:
         if not mask[i]:
             i += 1
             continue
+        start = i
         events += 1
         while i < mask.size and mask[i]:
             i += 1
+        event_peak = max(event_peak, float(np.nanmax(speed[start:i])))
     return {
         "microsaccade_threshold_dps": threshold,
         "n_microsaccade_events": int(events),
         "fraction_microsaccade_samples": float(np.mean(mask)),
-        "peak_microsaccade_speed_dps": float(np.nanmax(speed)) if speed.size else 0.0,
+        "peak_microsaccade_speed_dps": float(event_peak),
         "microsaccade_event_mask": mask,
     }
 
 
 def trace_scale_metrics(trace: np.ndarray, *, dt: float, prefix: str) -> dict[str, float]:
-    arr = np.asarray(trace, dtype=np.float64)
-    centered = arr - np.nanmean(arr, axis=0, keepdims=True)
-    velocity = np.diff(arr, axis=0, prepend=arr[:1]) / float(dt)
-    speed = np.linalg.norm(velocity, axis=1)
-    shape = trace_covariance_shape(arr)
-    path_deg = path_length(arr)
-    duration_s = max((arr.shape[0] - 1) * float(dt), float(dt))
-    out = {
-        f"{prefix}path_length_deg": path_deg,
-        f"{prefix}path_length_arcmin": path_deg * 60.0,
-        f"{prefix}path_speed_deg_s": path_deg / duration_s,
-        f"{prefix}path_speed_arcmin_s": path_deg * 60.0 / duration_s,
-        f"{prefix}rms_radius_deg": trace_rms(arr),
-        f"{prefix}rms_radius_arcmin": trace_rms(arr) * 60.0,
-        f"{prefix}max_radius_deg": float(np.nanmax(np.linalg.norm(centered, axis=1))) if centered.size else 0.0,
-        f"{prefix}speed_p95_deg_s": float(np.nanpercentile(speed, 95)) if speed.size else 0.0,
-        f"{prefix}speed_p95_arcmin_s": float(np.nanpercentile(speed * 60.0, 95)) if speed.size else 0.0,
-        f"{prefix}diffusion_constant_deg2_s": float(np.nanmean(np.sum(np.diff(arr, axis=0) ** 2, axis=1)) / (4.0 * float(dt)))
-        if arr.shape[0] > 1
-        else 0.0,
-        f"{prefix}position_autocorr_lag1": lag1_autocorr(arr),
-        f"{prefix}velocity_autocorr_lag1": lag1_autocorr(velocity),
-        f"{prefix}bcea68_arcmin2": bcea68_arcmin2(arr),
-        f"{prefix}cov_anisotropy": trace_covariance_anisotropy(arr),
-        f"{prefix}cov_axis_ratio": float(shape["cov_axis_ratio"]),
-        f"{prefix}cov_orientation_deg": float(shape["cov_orientation_deg"]),
-    }
-    out[f"{prefix}diffusion_constant_arcmin2_s"] = out[f"{prefix}diffusion_constant_deg2_s"] * 3600.0
+    try:
+        metrics = fixation_window_features(np.asarray(trace, dtype=np.float64), dt=float(dt))
+    except Exception:
+        metrics = {}
+    out: dict[str, float] = {}
+    for key, value in metrics.items():
+        if isinstance(value, (int, float, np.integer, np.floating)):
+            out[f"{prefix}{key}"] = float(value)
+    d_key = f"{prefix}diffusion_constant_deg2_s"
+    if d_key in out and math.isfinite(float(out[d_key])):
+        out[f"{prefix}diffusion_constant_arcmin2_s"] = float(out[d_key]) * 3600.0
+    rms_key = f"{prefix}rms_radius_deg"
+    if rms_key in out and math.isfinite(float(out[rms_key])):
+        out[f"{prefix}rms_radius_arcmin"] = float(out[rms_key]) * 60.0
+    path_key = f"{prefix}path_length_deg"
+    if path_key in out and math.isfinite(float(out[path_key])):
+        out[f"{prefix}path_length_arcmin"] = float(out[path_key]) * 60.0
     return out
 
 
 def trace_metric_value(item: dict[str, Any], metric: str) -> float:
-    candidates = [str(metric)]
-    if not str(metric).startswith("rendered_"):
-        candidates.append(f"rendered_{metric}")
-    if not str(metric).startswith("source_"):
-        candidates.append(f"source_{metric}")
+    key = str(metric)
+    aliases = {
+        "diffusion_constant_deg2_s": "rendered_diffusion_constant_deg2_s",
+        "diffusion_constant_arcmin2_s": "rendered_diffusion_constant_arcmin2_s",
+        "rms_radius_deg": "rendered_rms_radius_deg",
+        "rms_radius_arcmin": "rendered_rms_radius_arcmin",
+        "path_length_arcmin": "rendered_path_length_arcmin",
+        "speed_p95_deg_s": "rendered_speed_p95_deg_s",
+        "observed_rms_arcmin": "observed_rms_arcmin",
+    }
+    candidates = [key]
+    if key in aliases:
+        candidates.append(aliases[key])
+    if not key.startswith("rendered_"):
+        candidates.append(f"rendered_{key}")
+    if not key.startswith("source_"):
+        candidates.append(f"source_{key}")
     for key in candidates:
         if key not in item:
             continue
@@ -423,11 +665,95 @@ def trace_metric_value(item: dict[str, Any], metric: str) -> float:
     return float("nan")
 
 
+def _finite_float(value: object, default: float = float("nan")) -> float:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return default
+    return out if math.isfinite(out) else default
+
+
+def covariance_component_payload(item: dict[str, Any], prefix: str) -> dict[str, float]:
+    cov_xx = _finite_float(item.get(f"{prefix}cov_xx_deg2", np.nan))
+    cov_xy = _finite_float(item.get(f"{prefix}cov_xy_deg2", np.nan))
+    cov_yy = _finite_float(item.get(f"{prefix}cov_yy_deg2", np.nan))
+    if not all(math.isfinite(v) for v in (cov_xx, cov_xy, cov_yy)):
+        return {}
+    cov = np.asarray([[cov_xx, cov_xy], [cov_xy, cov_yy]], dtype=np.float64)
+    if not np.all(np.isfinite(cov)):
+        return {}
+    vals, vecs = np.linalg.eigh(cov)
+    vals = np.maximum(vals, 0.0)
+    order = np.argsort(vals)
+    minor = float(vals[order[0]])
+    major = float(vals[order[-1]])
+    total = major + minor
+    major_vec = vecs[:, order[-1]]
+    orientation = float(np.degrees(np.arctan2(float(major_vec[1]), float(major_vec[0]))))
+    orientation = float((orientation + 180.0) % 180.0)
+    det = max(float(np.linalg.det(cov)), 0.0)
+    bcea68_deg2 = 2.0 * (-math.log(1.0 - 0.68)) * math.pi * math.sqrt(det)
+    out = {
+        f"{prefix}cov_major_var_deg2": major,
+        f"{prefix}cov_minor_var_deg2": minor,
+        f"{prefix}cov_major_sd_arcmin": math.sqrt(major) * 60.0,
+        f"{prefix}cov_minor_sd_arcmin": math.sqrt(minor) * 60.0,
+        f"{prefix}cov_axis_ratio": math.sqrt(major / minor) if minor > 0.0 else float("inf"),
+        f"{prefix}cov_orientation_deg": orientation,
+        f"{prefix}bcea68_deg2": bcea68_deg2,
+        f"{prefix}bcea68_arcmin2": bcea68_deg2 * 3600.0,
+    }
+    if total > 1e-12:
+        out[f"{prefix}cov_anisotropy"] = float((major - minor) / total)
+    return out
+
+
+def covariance_shape_payload(item: dict[str, Any]) -> dict[str, float]:
+    shape = item.get("covariance_shape")
+    if shape is None:
+        return {}
+    try:
+        arr = np.asarray(shape, dtype=np.float64)
+    except (TypeError, ValueError):
+        return {}
+    if arr.shape != (2, 2) or not np.all(np.isfinite(arr)):
+        return {}
+    return {
+        "trace_cov_shape_xx": float(arr[0, 0]),
+        "trace_cov_shape_xy": float(arr[0, 1]),
+        "trace_cov_shape_yy": float(arr[1, 1]),
+    }
+
+
 def trace_bank_metric_payload(item: dict[str, Any]) -> dict[str, Any]:
     payload: dict[str, Any] = {}
-    for key, value in item.items():
-        if key == "trace":
+    payload.update(covariance_shape_payload(item))
+    payload.update(covariance_component_payload(item, "source_"))
+    payload.update(covariance_component_payload(item, "rendered_"))
+    for prefix in ("source_", "rendered_"):
+        speed_mean = _finite_float(item.get(f"{prefix}speed_mean_deg_s", np.nan))
+        speed_median = _finite_float(item.get(f"{prefix}speed_median_deg_s", np.nan))
+        speed_p95 = _finite_float(item.get(f"{prefix}speed_p95_deg_s", np.nan))
+        path_speed = _finite_float(item.get(f"{prefix}path_length_deg_s", np.nan))
+        if math.isfinite(speed_mean):
+            payload[f"{prefix}speed_mean_arcmin_s"] = speed_mean * 60.0
+        if math.isfinite(speed_median):
+            payload[f"{prefix}speed_median_arcmin_s"] = speed_median * 60.0
+        if math.isfinite(speed_p95):
+            payload[f"{prefix}speed_p95_arcmin_s"] = speed_p95 * 60.0
+        if math.isfinite(path_speed):
+            payload[f"{prefix}path_speed_arcmin_s"] = path_speed * 60.0
+    source_d = _finite_float(item.get("source_diffusion_constant_deg2_s", np.nan))
+    rendered_d = _finite_float(item.get("rendered_diffusion_constant_deg2_s", np.nan))
+    if math.isfinite(source_d) and math.isfinite(rendered_d):
+        payload["source_rendered_diffusion_delta_deg2_s"] = rendered_d - source_d
+        payload["source_rendered_diffusion_abs_delta_deg2_s"] = abs(rendered_d - source_d)
+    for key in TRACE_BANK_METADATA_NUMERIC_COLUMNS:
+        if key in payload:
             continue
+        if key not in item:
+            continue
+        value = item[key]
         if isinstance(value, (int, np.integer)):
             payload[key] = int(value)
         elif isinstance(value, (float, np.floating)):
@@ -455,6 +781,38 @@ def trace_bank_metadata_row(item: dict[str, Any], idx: int, *, n_timepoints: int
     }
     row.update(trace_bank_metric_payload(item))
     return row
+
+
+def trace_items_from_table_and_array(
+    trace_table: pd.DataFrame,
+    trace_xy: np.ndarray,
+    *,
+    n_timepoints: int,
+) -> list[dict[str, Any]]:
+    traces = np.asarray(trace_xy, dtype=np.float32)
+    if traces.ndim != 3 or traces.shape[1:] != (int(n_timepoints), 2):
+        raise ValueError(
+            f"trace_xy must have shape (n_traces, {int(n_timepoints)}, 2), got {tuple(traces.shape)}."
+        )
+    if int(trace_table.shape[0]) != int(traces.shape[0]):
+        raise ValueError(
+            f"trace_feature_table rows ({trace_table.shape[0]}) do not match trace_xy rows ({traces.shape[0]})."
+        )
+    out: list[dict[str, Any]] = []
+    for idx, (_, row) in enumerate(trace_table.reset_index(drop=True).iterrows()):
+        item = row.to_dict()
+        if "source_row" in item and pd.notna(item["source_row"]):
+            item["source_row"] = int(item["source_row"])
+        else:
+            item["source_row"] = int(idx)
+        if "trial_idx" in item and pd.notna(item["trial_idx"]):
+            item["trial_idx"] = int(item["trial_idx"])
+        if "session" not in item or pd.isna(item["session"]):
+            item["session"] = ""
+        item["session"] = str(item["session"])
+        item["trace"] = traces[idx]
+        out.append(item)
+    return out
 
 
 def trace_bank_metric_summary_rows(trace_bank_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -780,6 +1138,8 @@ def score_matrix(
     write_outputs: bool,
     out_dir: Path | None = None,
     patch_loader: Callable[..., tuple[np.ndarray, dict[str, Any]]] = extract_patch,
+    trace_index_offset: int = 0,
+    movie_index_stride: int | None = None,
 ) -> dict[str, Any]:
     traces = [np.asarray(item["trace"], dtype=np.float32) for item in trace_items]
     n_images = int(image_rows.shape[0])
@@ -792,6 +1152,8 @@ def score_matrix(
     population_ssi = np.zeros((n_movies,), dtype=np.float32)
     movie_rows: list[dict[str, Any]] = []
     canvas_cache: dict[tuple[str, int], tuple[np.ndarray, float, tuple[int, int]]] = {}
+    movie_stride = int(movie_index_stride) if movie_index_stride is not None else n_traces
+    trace_index_offset = int(trace_index_offset)
     started = time.perf_counter()
     for shard_image_ordinal, (_, image_row) in enumerate(image_rows.iterrows()):
         global_image_index = int(image_row["image_index"]) if "image_index" in image_row.index else int(shard_image_ordinal)
@@ -810,7 +1172,8 @@ def score_matrix(
         )
         for trace_index in range(n_traces):
             matrix_row_index = shard_image_ordinal * n_traces + trace_index
-            movie_index = global_image_index * n_traces + trace_index
+            global_trace_index = trace_index_offset + trace_index
+            movie_index = global_image_index * movie_stride + global_trace_index
             ssi_matrix[matrix_row_index] = image_ssi[trace_index]
             expected_matrix[matrix_row_index] = image_expected[trace_index]
             mean_rate_matrix[matrix_row_index] = image_mean_rate[trace_index]
@@ -822,7 +1185,7 @@ def score_matrix(
                     "matrix_row_index": int(matrix_row_index),
                     "image_index": int(global_image_index),
                     "shard_image_ordinal": int(shard_image_ordinal),
-                    "trace_index": int(trace_index),
+                    "trace_index": int(global_trace_index),
                     "image_source_row": int(image_row["source_row"]),
                     "trace_source_row": int(trace_item["source_row"]),
                     "image_session": str(image_row["session"]),

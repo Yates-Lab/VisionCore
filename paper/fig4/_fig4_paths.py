@@ -129,11 +129,7 @@ REFRESH_SOURCES = {
     # tuning probe writes to an unrelated out-dir and never produces this.
     SF_TUNING_UNIT_GROUPS_CSV: "plot_backimage_rr100_sf_group_ssi_modulation.py (upstream)",
     PHASE1_MOVIE_ANALYSIS_TABLE_CSV: "analyze_backimage_real_trace_ssi_matrix_phase1_phase2.py (upstream)",
-    # Producer unknown. Lives in the trace-bank diffusion sampling run
-    # `backimage_trace_bank_diffusion_large_fixation_sample_n5000_n40_v1/
-    # filtered_path_length_le350arcmin/`; five recovered scripts read it and
-    # none writes it, so the producer is outside the recovered tree.
-    TRACE_BANK_METADATA_FILTERED_CSV: "UNKNOWN -- producer not in the recovered tree (upstream)",
+    TRACE_BANK_METADATA_FILTERED_CSV: "paper/fig4/upstream/build_trace_bank_metadata.py",
     SCHEMATIC_FINAL_MAPS_NPZ: "compute_schematic_rr100_final_maps.py (upstream)",
     SCHEMATIC_FINAL_MAP_UNIT_METRICS_CSV: "compute_schematic_rr100_final_maps.py (upstream)",
     # Producer confirmed by md5 against
@@ -201,7 +197,7 @@ REQUIRED_INPUTS = (
 # Inputs the refresh path reads that the compose path does not. Kept separate
 # from REQUIRED_INPUTS so `missing_inputs()` stays an honest answer to "can this
 # figure be composed?" while these stop being silently undeclared. Both are
-# absent from `outputs/cache/` today.
+# not required by the compose path and may be absent from compact cache bundles.
 REFRESH_ONLY_INPUTS = (
     PHASE1_MOVIE_ANALYSIS_TABLE_CSV,
     TRACE_BANK_METADATA_FILTERED_CSV,

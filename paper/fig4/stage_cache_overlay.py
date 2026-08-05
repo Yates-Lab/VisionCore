@@ -179,7 +179,7 @@ LOWER_ROOT_MAPPINGS = (
     CacheMapping(
         "outputs/active_sensing_movie_information/backimage_trace_bank_diffusion_large_fixation_sample_n5000_n40_v1/filtered_path_length_le350arcmin/trace_bank_metadata_filtered.csv",
         _paths.TRACE_BANK_METADATA_FILTERED_CSV,
-        "Geometry-story refresh input with unidentified producer.",
+        "Geometry-story refresh input from the native trace-bank metadata generator.",
     ),
     CacheMapping(
         "outputs/active_sensing_movie_information/backimage_real_trace_ssi_matrix_large_contour_no_driftgate_ms200_n100x1000_v1/merged/phase1_phase2_conditioning_v1/plot_collections/backimage_real_trace_panel_b_cell_baseline_sf05_coh020_match15_values.csv",

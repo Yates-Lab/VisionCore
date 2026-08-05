@@ -90,9 +90,10 @@ difference against `reference/figure4_reference.pdf`.
 ## What blocks full reproduction
 
 Cache-first composition is reproducible from the bundle. Source refresh is more
-honest now: on a clean checkout `refresh_all.py` reports 14 blocked stages
-because the lower upstream trees and merged trace bank are absent. Those blocked
-stages collapse to these source boundaries:
+honest now: in the staged working tree used for this recovery, `refresh_all.py`
+reports 12 blocked stages because lower upstream trees and the flat staged
+merged trace bank are absent. Those blocked stages collapse to these source
+boundaries:
 
 | Boundary | State |
 |---|---|
@@ -109,9 +110,17 @@ in `cache_identity_json` inside the shipped `fig4_unit_maps.npz`, which is the
 only statement of what actually produced that cache. The plausible-by-name
 alternative (`..._sf_contour_alignment_long_axis30_...`) postdates it.
 
-One producer is still unidentified: `fig4_trace_bank_metadata_filtered.csv`,
-from `backimage_trace_bank_diffusion_large_fixation_sample_n5000_n40_v1/filtered_path_length_le350arcmin/`.
-Five recovered scripts read it; none writes it.
+`fig4_trace_bank_metadata_filtered.csv` is now recovered as an in-repo
+metadata-only upstream build:
+
+```bash
+uv run python paper/fig4/upstream/build_trace_bank_metadata.py --force
+```
+
+The default contract matches the historical diagnostic cache: sample 5000
+reviewed BackImage/FEM windows with pandas `random_state=20260716`, sort by
+`source_row`, center-crop native 40-sample traces, then write the
+`path_length_arcmin <= 350` filtered subset.
 
 ## Deep real-trace matrix launcher
 
@@ -127,7 +136,9 @@ the 20-hour scorer. It explicitly records the 32-frame model-history versus
 40-scored-sample analysis boundary, checkpoint identity, pinned dataset config,
 RR100 population spec hashes, direct inputs, and expected outputs.
 
-Use the smoke profile for the same schemas at tiny scale:
+Use the smoke profile for the same schemas at tiny scale. It keeps the full
+source CSV as the input contract, then filters to `Allen_2022-02-16` before
+sampling one image and two traces:
 
 ```bash
 uv run python paper/fig4/upstream/run_real_trace_matrix.py --profile smoke
@@ -143,9 +154,102 @@ FIG4_RR100_POPULATION_SPEC_DIR=/path/to/step1_activation_fingerprints \
 uv run python paper/fig4/upstream/run_real_trace_matrix.py --run-all --force
 ```
 
+To stage those assets from a VisionCore-style data tree without importing any
+code from it:
+
+```bash
+# inspect only
+uv run python paper/fig4/upstream/stage_real_trace_source_assets.py /path/to/VisionCore
+
+# local validation without duplicating the 2.5 GB McFarland pickle
+uv run python paper/fig4/upstream/stage_real_trace_source_assets.py \
+  /path/to/VisionCore \
+  --apply \
+  --link-mode symlink
+
+# portable local asset tree
+uv run python paper/fig4/upstream/stage_real_trace_source_assets.py \
+  /path/to/VisionCore \
+  --apply \
+  --link-mode copy
+```
+
+The stager verifies the exact hashes for `backimage_image_fem_windows.csv`
+(`ac2364e22ede162940a9ba7de5c8ab2c2ef2ea9c9985d851e302769d17c12567`),
+`dynamic_log_gaussian_marginal_sf_tuning_unit_groups.csv`
+(`7a506b617ccbda563cab1e7f10173f9015448f88ce71a1abec7b05dc8aaa92f2`), and the
+two RR100 population spec files. It records the McFarland pickle path and size
+by default; pass `--hash-large` if you want to hash that 2.5 GB file too.
+
+To turn a staged source-asset tree into a portable handoff bundle, build a
+separate source bundle:
+
+```bash
+uv run python paper/fig4/upstream/build_real_trace_source_asset_bundle.py
+```
+
+The source bundle is distinct from the flat cache bundle: it packages the
+reviewed image/FEM source table, RR100 unit metadata, RR100 population spec, and
+McFarland readout artifact at the paths expected by the in-repo launcher. It
+dereferences locally staged symlinks, so `stage_real_trace_source_assets.py
+--link-mode symlink` can be used for validation before making a portable
+archive. The recovered model checkpoint is intentionally excluded unless
+`--include-checkpoint` is passed. When included, it extracts to
+`outputs/artifacts/model_checkpoints/fig4_twin/`, which the launcher
+auto-detects unless `FIG4_TWIN_CHECKPOINT` or `--checkpoint-path` is set.
+
+Install the source bundle into another clean checkout with:
+
+```bash
+tar -xzf outputs/figures/fig4/handoff/fig4_real_trace_source_assets_YYYYMMDD.tar.gz \
+  -C /path/to/VisionCoreMain
+```
+
 The raw-data trace-bank step also requires the optional `DataYatesV1` data
 package/environment. The repo records that dependency in `pyproject.toml` under
 the `data` extra, but the large data files are intentionally not git-tracked.
+When local checkouts are used instead of installing the extra, expose them with
+`PYTHONPATH=/path/to/DataYatesV1:/path/to/DataRowleyV1V2`.
+
+After staging, the end-to-end source smoke is:
+
+```bash
+uv run python paper/fig4/upstream/run_real_trace_matrix.py \
+  --profile smoke \
+  --run-all \
+  --force
+```
+
+The recovered production sampler has also been checked against the historical
+matrix cache: with seed `20260717`, the clean source path selects the same 100
+image rows, the same 1000 trace source rows, and the same 1000 trace hashes.
+A one-image/full-trace-bank production shard (`--only-shard 0:1`) then diffed
+cleanly against the old merged cache at `atol=1e-5, rtol=1e-5`, with zero
+array differences for SSI, expected spikes, mean rate, and population SSI.
+The full 100-image production matrix still needs the normal two long shard runs.
+
+To audit the clean scorer against a historical matrix cache without resampling
+images or traces, replay the selected tables and `trace_xy.npy` from that cache.
+The audit launcher plans by default and executes with `--run`:
+
+```bash
+uv run python paper/fig4/upstream/audit_real_trace_matrix_replay.py \
+  --reference-dir /path/to/backimage_real_trace_ssi_matrix.../merged \
+  --image-start 0 \
+  --image-stop 1 \
+  --trace-start 0 \
+  --trace-stop 1000 \
+  --device cuda:1 \
+  --run \
+  --force
+```
+
+This replay mode is an equivalence audit, not a source-regeneration shortcut:
+it fixes the historical image/trace selections and checks that the clean scorer,
+model pin, RR100 population view, and matrix row contract reproduce the old
+cache rows. For a faster spot check, use `--image-stop 5 --trace-stop 100`;
+for the full trace-bank contract on one historical image, use
+`--image-stop 1 --trace-stop 1000`.
 
 For a single production shard:
 
@@ -182,10 +286,11 @@ documents.
 
 Override with `FIG4_DATASET_CONFIGS` if you want a different pin.
 
-This pin is verified to *load the model*. It has **not** been shown to reproduce
-Declan's numbers; that needs a regenerated RR100 output diffed against baseline.
-`schematic_final_maps` is the shallowest stage that would test it — it reads one
-directory and runs on `cuda:1`.
+This pin is verified to load the model and to reproduce the real-trace matrix
+for a one-image/full-trace-bank production slice. Other RR100 panel producers
+still need their own regenerated-output diffs against baseline.
+`schematic_final_maps` is the shallowest remaining stage that would test those
+non-matrix RR100 paths; it reads one directory and runs on `cuda:1`.
 
 ## Running the refresh
 
@@ -254,7 +359,11 @@ the directory `seed_from` already seeds, which is why the stage passed with two
 invisible dependencies. Their tables are now declared inputs.
 
 `fig4_phase1_movie_analysis_table.csv` and `fig4_trace_bank_metadata_filtered.csv`
-are read by `refresh/_fig4_geometry_story.py`, are absent from the cache, and are
-declared in `REFRESH_ONLY_INPUTS` rather than `REQUIRED_INPUTS`. The compose path
-never imports that module, so requiring them would make `generate_figure4.py`
-refuse to render a figure it can in fact render.
+are read by `refresh/_fig4_geometry_story.py`, are absent from the compose cache,
+and are declared in `REFRESH_ONLY_INPUTS` rather than `REQUIRED_INPUTS`. The
+compose path never imports that module, so requiring them would make
+`generate_figure4.py` refuse to render a figure it can in fact render. The
+trace-bank metadata input can be regenerated with
+`paper/fig4/upstream/build_trace_bank_metadata.py`; the phase1 movie-analysis
+table is still regenerated through the phase1/phase2 real-trace matrix analysis
+path.
