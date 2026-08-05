@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import subprocess
 import sys
@@ -11,6 +12,7 @@ import pandas as pd
 
 
 ROOT = Path(__file__).resolve().parents[1]
+REFRESH_ALL = ROOT / "paper" / "fig4" / "refresh_all.py"
 LAUNCHER = ROOT / "paper" / "fig4" / "upstream" / "run_real_trace_matrix.py"
 MERGER = ROOT / "paper" / "fig4" / "upstream" / "merge_backimage_real_trace_ssi_matrix_shards.py"
 STAGER = ROOT / "paper" / "fig4" / "upstream" / "stage_real_trace_source_assets.py"
@@ -32,7 +34,10 @@ from real_trace_matrix.core import (
     trace_scale_metrics,
 )
 import build_trace_bank_metadata as trace_bank_metadata_builder
+import build_real_trace_source_asset_bundle as source_asset_bundle
 import run_real_trace_matrix as real_trace_launcher
+import score_real_trace_matrix as real_trace_scorer
+import score_real_trace_stabilized_baseline as stabilized_baseline
 from score_real_trace_matrix import filter_source_rows, parse_session_filter
 
 RR100_VERSION = (
@@ -42,6 +47,7 @@ RR100_VERSION = (
 SOURCE_ASSET_RELS = (
     "outputs/fixation_statistics_by_stimulus_all_sessions_after_review/"
     "backimage_image_structure_reviewed_v2_screenfiltered_yfix/backimage_image_fem_windows.csv",
+    "outputs/fixation_statistics_by_stimulus_all_sessions_after_review/window_features.csv",
     "outputs/active_sensing_movie_information/"
     "backimage_rr100_frequency_tuning_center_pixel_all_rr100_fast_nyquist_v1/"
     "sf_group_ssi_modulation_dynamic_log_gaussian_marginal_threshold_low0p05_high0p5_v1/"
@@ -50,6 +56,16 @@ SOURCE_ASSET_RELS = (
     f"outputs/redundancy_resolved_v1_twin/step1_activation_fingerprints/population_spec_{RR100_VERSION}.npz",
     "outputs/artifacts/mcfarland/mcfarland_outputs_mono.pkl",
 )
+
+
+def _load_refresh_all_module():
+    spec = importlib.util.spec_from_file_location("fig4_refresh_all_under_test", REFRESH_ALL)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def _run_plan(tmp_path: Path, profile: str, *extra_args: str) -> dict:
@@ -75,6 +91,19 @@ def _run_plan(tmp_path: Path, profile: str, *extra_args: str) -> dict:
 
 def _arg_after(argv: list[str], flag: str) -> str:
     return argv[argv.index(flag) + 1]
+
+
+def test_refresh_graph_declares_recovered_trace_bank_metadata_stage():
+    refresh_all = _load_refresh_all_module()
+    stage = next(stage for stage in refresh_all.STAGES if stage.key == "trace_bank_metadata")
+
+    assert stage.script == TRACE_BANK_METADATA_BUILDER
+    assert stage.out_dir_flag == "--out-dir"
+    assert "--force" in stage.extra_args
+    assert stage.produces == {
+        "filtered_path_length_le350arcmin/trace_bank_metadata_filtered.csv":
+            refresh_all._paths.TRACE_BANK_METADATA_FILTERED_CSV,
+    }
 
 
 def test_production_plan_records_recovered_deep_matrix_contract(tmp_path):
@@ -132,6 +161,9 @@ def test_production_plan_records_recovered_deep_matrix_contract(tmp_path):
     )
     assert checks["unit_tuning_csv"]["expected_sha256"] == (
         "7a506b617ccbda563cab1e7f10173f9015448f88ce71a1abec7b05dc8aaa92f2"
+    )
+    assert checks["window_features_csv"]["expected_sha256"] == (
+        "e8e2fa28c39d4d0222502bbe73fc221210260212fbed25bdc6c2e6c6217f73ba"
     )
     assert checks["model_checkpoint"]["expected_sha256"] == (
         "55d084aa0beb7d65614aecb9122edf7ad49c5799d370dbbd5dcf60b815c62de3"
@@ -191,20 +223,23 @@ def test_trace_metric_helpers_preserve_historical_trace_bank_contract():
     assert "rendered_position_high_freq_power_fraction_15_60hz" in metrics
 
 
-def test_default_checkpoint_path_prefers_env_then_staged(monkeypatch, tmp_path):
-    staged = tmp_path / "staged.ckpt"
-    historical = tmp_path / "historical.ckpt"
-    env_override = tmp_path / "env.ckpt"
-    staged.write_bytes(b"staged\n")
-    monkeypatch.setattr(real_trace_launcher, "STAGED_MODEL_CHECKPOINT_PATH", staged)
-    monkeypatch.setattr(real_trace_launcher, "MODEL_CHECKPOINT_PATH", historical)
-    monkeypatch.delenv(real_trace_launcher.CHECKPOINT_ENV, raising=False)
+def test_checkpoint_defaults_prefer_env_then_staged(monkeypatch, tmp_path):
+    modules = (real_trace_launcher, real_trace_scorer, stabilized_baseline, source_asset_bundle)
+    for module in modules:
+        staged = tmp_path / f"{module.__name__}_staged.ckpt"
+        env_override = tmp_path / f"{module.__name__}_env.ckpt"
+        staged.write_bytes(b"staged\n")
+        staged_attr = "STAGED_MODEL_CHECKPOINT_PATH"
+        if not hasattr(module, staged_attr):
+            staged_attr = "STAGED_CHECKPOINT_PATH"
+        monkeypatch.setattr(module, staged_attr, staged)
+        monkeypatch.delenv(module.CHECKPOINT_ENV, raising=False)
 
-    assert real_trace_launcher.default_checkpoint_path() == staged
+        assert module.default_checkpoint_path() == staged
 
-    monkeypatch.setenv(real_trace_launcher.CHECKPOINT_ENV, str(env_override))
+        monkeypatch.setenv(module.CHECKPOINT_ENV, str(env_override))
 
-    assert real_trace_launcher.default_checkpoint_path() == env_override
+        assert module.default_checkpoint_path() == env_override
 
 
 def test_trace_bank_metadata_sampling_matches_recovered_pandas_contract():
@@ -534,6 +569,7 @@ def test_build_real_trace_source_asset_bundle_packages_portable_assets(tmp_path)
     assert payload["include_checkpoint"] is False
     assert [row["key"] for row in payload["assets"]] == [
         "direct_matrix_source_csv",
+        "window_features_csv",
         "unit_tuning_csv",
         "rr100_population_spec_json",
         "rr100_population_spec_npz",

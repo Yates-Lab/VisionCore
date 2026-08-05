@@ -54,7 +54,7 @@ cached schematic stimulus payload.
 If you have the old full output tree available, stage from that root instead:
 
 ```bash
-uv run python paper/fig4/stage_cache_overlay.py /home/declan/VisionCore
+uv run python paper/fig4/stage_cache_overlay.py /path/to/full/VisionCore-output-tree
 ```
 
 When a sibling `DataYatesV1` checkout is available next to that source tree, the
@@ -99,9 +99,9 @@ boundaries:
 |---|---|
 | Real-trace SSI matrix scorer | In repo (`upstream/score_real_trace_matrix.py`, with shared code in `upstream/real_trace_matrix/`). It records model/checkpoint/readout/RR100 provenance at runtime and keeps the recovered 100 image x 1000 trace production profile in the launcher. |
 | Real-trace SSI matrix merge | In repo (`upstream/merge_backimage_real_trace_ssi_matrix_shards.py`). It needs generated shard dirs `.../backimage_real_trace_ssi_matrix_large_contour_no_driftgate_ms200_n100x1000_v1/shards/images_000_050` and `images_050_100`. |
-| Upstream fixation-window data | `window_features.csv` is a true upstream input outside this compact Fig. 4 module (`sha256 e8e2fa28c39d4d0222502bbe73fc221210260212fbed25bdc6c2e6c6217f73ba`, 76,832 rows, 57 columns). |
+| Upstream fixation-window data | `window_features.csv` is a staged source asset at `outputs/fixation_statistics_by_stimulus_all_sessions_after_review/window_features.csv` (`sha256 e8e2fa28c39d4d0222502bbe73fc221210260212fbed25bdc6c2e6c6217f73ba`, 76,832 rows, 57 columns). |
 | McFarland readout artifact | The source scorer needs `scripts/mcfarland_outputs_mono.pkl` or `scripts/mcfarland_outputs.pkl` to rebuild the canonical 756-channel readout. Override with `FIG4_MCFARLAND_OUTPUTS` or `--mcfarland-outputs`. |
-| RR100/model assets | The recovered production checkpoint is `/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_120_long/checkpoints/learned_resnet_none_convgru_gaussian_ddp_bs128_ds30_lr1e-3_wd1e-4_corelrscale.5_warmup5/epoch=147-val_bps_overall=0.5702.ckpt` (`sha256 55d084aa0beb7d65614aecb9122edf7ad49c5799d370dbbd5dcf60b815c62de3`). The RR100 population spec hashes are recorded in the launcher. |
+| RR100/model assets | The recovered production checkpoint is staged locally at `outputs/artifacts/model_checkpoints/fig4_twin/epoch=147-val_bps_overall=0.5702.ckpt` (`sha256 55d084aa0beb7d65614aecb9122edf7ad49c5799d370dbbd5dcf60b815c62de3`). The RR100 population spec hashes are recorded in the launcher. |
 | Other RR100 panel producers | `instantaneous_unit_maps`, `sf_group_ssi_modulation`, and `schematic_final_maps` still need lower output trees under `outputs/active_sensing_movie_information/` and `outputs/fixation_statistics_by_stimulus_all_sessions_after_review/`. |
 
 The two run directories for `instantaneous_unit_maps` are **not** the
@@ -189,8 +189,9 @@ uv run python paper/fig4/upstream/build_real_trace_source_asset_bundle.py
 ```
 
 The source bundle is distinct from the flat cache bundle: it packages the
-reviewed image/FEM source table, RR100 unit metadata, RR100 population spec, and
-McFarland readout artifact at the paths expected by the in-repo launcher. It
+reviewed image/FEM source table, raw fixation-window table, RR100 unit metadata,
+RR100 population spec, and McFarland readout artifact at the paths expected by
+the in-repo launcher. It
 dereferences locally staged symlinks, so `stage_real_trace_source_assets.py
 --link-mode symlink` can be used for validation before making a portable
 archive. The recovered model checkpoint is intentionally excluded unless
@@ -308,9 +309,11 @@ uv run python paper/fig4/refresh_all.py --verify --scratch DIR --baseline DIR
 uv run python paper/fig4/refresh_all.py --manuscript-numbers --cache-dir DIR
 ```
 
-Upstream producer scripts are located via `FIG4_RECOVERED_ROOT`, defaulting to
-`/home/ryanress/declan_recovery/VisionCore/declan`. On Declan's machine set it
-to `/home/declan/VisionCore/declan`.
+Legacy recovered producer scripts are located via `FIG4_RECOVERED_ROOT`. By
+default the runner looks for an optional local overlay at
+`paper/fig4/upstream/recovered_legacy/`; set `FIG4_RECOVERED_ROOT` only if you
+intentionally want to run an external recovered script tree. The cache-first
+figure and the in-repo real-trace matrix pipeline do not require that overlay.
 
 Verdicts: `PASS`, `PASS-PROVENANCE` (differs only in recorded paths), 
 `PASS-STALE-CACHE` (regenerated file is a strict superset), `FAIL`,

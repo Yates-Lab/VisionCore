@@ -53,6 +53,13 @@ ASSETS = (
         note="Reviewed BackImage image/FEM windows opened by the real-trace matrix scorer.",
     ),
     SourceAsset(
+        key="window_features_csv",
+        source_rel=Path("outputs/fixation_statistics_by_stimulus_all_sessions_after_review/window_features.csv"),
+        target_rel=Path("outputs/fixation_statistics_by_stimulus_all_sessions_after_review/window_features.csv"),
+        expected_sha256="e8e2fa28c39d4d0222502bbe73fc221210260212fbed25bdc6c2e6c6217f73ba",
+        note="Raw fixation-window table used by Fig. 4 fixation-stat refresh stages and provenance checks.",
+    ),
+    SourceAsset(
         key="unit_tuning_csv",
         source_rel=Path(
             "outputs/active_sensing_movie_information/"

@@ -31,14 +31,15 @@ RR100_VERSION = (
     "medoidPosthocminRepcomplete0p45_movieMedoid"
 )
 DEFAULT_MATRIX_DIR = ROOT / "outputs/active_sensing_movie_information" / RUN_STEM / "merged"
-DEFAULT_CHECKPOINT = Path(
-    os.environ.get(
-        "FIG4_TWIN_CHECKPOINT",
-        "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_120_long/"
-        "checkpoints/learned_resnet_none_convgru_gaussian_ddp_bs128_ds30_lr1e-3_wd1e-4_"
-        "corelrscale.5_warmup5/epoch=147-val_bps_overall=0.5702.ckpt",
-    )
-)
+CHECKPOINT_ENV = "FIG4_TWIN_CHECKPOINT"
+MODEL_CHECKPOINT_FILENAME = "epoch=147-val_bps_overall=0.5702.ckpt"
+STAGED_MODEL_CHECKPOINT_PATH = ROOT / "outputs/artifacts/model_checkpoints/fig4_twin" / MODEL_CHECKPOINT_FILENAME
+
+
+def default_checkpoint_path() -> Path:
+    if CHECKPOINT_ENV in os.environ:
+        return Path(os.environ[CHECKPOINT_ENV])
+    return STAGED_MODEL_CHECKPOINT_PATH
 DEFAULT_DATASET_CONFIGS = Path(
     os.environ.get(
         "FIG4_DATASET_CONFIGS",
@@ -67,7 +68,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--matrix-dir", type=Path, default=DEFAULT_MATRIX_DIR)
     parser.add_argument("--out-dir", type=Path, default=None)
     parser.add_argument("--rr100-version", type=str, default=RR100_VERSION)
-    parser.add_argument("--checkpoint-path", type=Path, default=DEFAULT_CHECKPOINT)
+    parser.add_argument("--checkpoint-path", type=Path, default=default_checkpoint_path())
     parser.add_argument("--dataset-configs", type=Path, default=DEFAULT_DATASET_CONFIGS)
     parser.add_argument("--population-spec-dir", type=Path, default=DEFAULT_POPULATION_SPEC_DIR)
     parser.add_argument(

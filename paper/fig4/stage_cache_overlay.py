@@ -11,7 +11,7 @@ Examples:
     uv run python paper/fig4/stage_cache_overlay.py \
         /path/to/ssi_figure_v4_cache_overlay.tar.gz
 
-    uv run python paper/fig4/stage_cache_overlay.py /home/declan/VisionCore
+    uv run python paper/fig4/stage_cache_overlay.py /path/to/full/VisionCore-output-tree
 """
 
 from __future__ import annotations

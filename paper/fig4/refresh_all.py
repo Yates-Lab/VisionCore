@@ -47,13 +47,13 @@ REFRESH_DIR = FIG4_DIR / "refresh"
 FIXSTATS_DIR = FIG4_DIR / "fixation_stats"
 UPSTREAM_HELPER_DIR = FIG4_DIR / "upstream"
 
-# The six upstream producers. They were never committed to either repo, but they
-# do exist on disk -- in two directories that were mode 700, which is why an
-# earlier search concluded they were absent. Recovered by copying those
-# directories out; the agent transcripts that named them are the provenance.
-# Override with FIG4_RECOVERED_ROOT if the copy lives elsewhere.
+# The legacy upstream producers were not brought into the clean Fig. 4 module.
+# Keep their locations explicit for provenance/preflight, but default to an
+# optional local recovery overlay rather than a developer's home directory.
+# Override with FIG4_RECOVERED_ROOT if you intentionally want to run a recovered
+# script tree.
 RECOVERED_ROOT = Path(os.environ.get(
-    "FIG4_RECOVERED_ROOT", "/home/ryanress/declan_recovery/VisionCore/declan"))
+    "FIG4_RECOVERED_ROOT", str(UPSTREAM_HELPER_DIR / "recovered_legacy")))
 UPSTREAM_SCRIPT_DIR = RECOVERED_ROOT / "active_sensing_movie_information"
 FIG_SSI_SCRIPT_DIR = RECOVERED_ROOT / "fig_ssi"
 FIXSTATS_SCRIPT_DIR = RECOVERED_ROOT / "fixation_statistics_by_stimulus"

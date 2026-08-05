@@ -4,9 +4,9 @@
 The bundle is not a figure cache bundle. It contains the source/model-adjacent
 artifacts the clean real-trace scorer needs in a VisionCoreMain checkout:
 source window table, RR100 unit metadata, RR100 population spec, and the
-McFarland readout artifact. The model checkpoint remains external by default
-because it is a machine-level training artifact; pass --include-checkpoint when
-you intentionally want to package it too.
+McFarland readout artifact. The model checkpoint is included only when
+--include-checkpoint is passed, and defaults to the staged local copy when it is
+available.
 """
 
 from __future__ import annotations
@@ -28,16 +28,17 @@ ROOT = UPSTREAM_DIR.parents[2]
 from stage_real_trace_source_assets import ASSETS, RR100_VERSION, SourceAsset  # noqa: E402
 
 
-DEFAULT_CHECKPOINT = Path(
-    os.environ.get(
-        "FIG4_TWIN_CHECKPOINT",
-        "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_120_long/"
-        "checkpoints/learned_resnet_none_convgru_gaussian_ddp_bs128_ds30_lr1e-3_wd1e-4_"
-        "corelrscale.5_warmup5/epoch=147-val_bps_overall=0.5702.ckpt",
-    )
-)
+CHECKPOINT_ENV = "FIG4_TWIN_CHECKPOINT"
+MODEL_CHECKPOINT_FILENAME = "epoch=147-val_bps_overall=0.5702.ckpt"
+STAGED_CHECKPOINT_PATH = ROOT / "outputs/artifacts/model_checkpoints/fig4_twin" / MODEL_CHECKPOINT_FILENAME
 CHECKPOINT_SHA256 = "55d084aa0beb7d65614aecb9122edf7ad49c5799d370dbbd5dcf60b815c62de3"
 CHECKPOINT_ARCHIVE_PATH = Path("outputs/artifacts/model_checkpoints/fig4_twin/epoch=147-val_bps_overall=0.5702.ckpt")
+
+
+def default_checkpoint_path() -> Path:
+    if CHECKPOINT_ENV in os.environ:
+        return Path(os.environ[CHECKPOINT_ENV])
+    return STAGED_CHECKPOINT_PATH
 
 
 def parse_args() -> argparse.Namespace:
@@ -74,7 +75,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Also include the recovered model checkpoint in the archive.",
     )
-    parser.add_argument("--checkpoint-path", type=Path, default=DEFAULT_CHECKPOINT)
+    parser.add_argument("--checkpoint-path", type=Path, default=default_checkpoint_path())
     return parser.parse_args()
 
 
@@ -247,6 +248,13 @@ def write_tarball(tar_path: Path, rows: list[dict[str, Any]], manifest_bytes: by
                 add_bytes(tar, Path("outputs/figures/fig4/provenance/real_trace_source_asset_bundle_manifest.json"), manifest_bytes)
 
 
+def checksum_display_path(path: Path, root: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(root.resolve()))
+    except ValueError:
+        return str(path)
+
+
 def main() -> int:
     args = parse_args()
     source_root = Path(args.source_root).expanduser().resolve()
@@ -294,10 +302,8 @@ def main() -> int:
     manifest_path.write_bytes(manifest_bytes)
     write_tarball(tar_path, rows, manifest_bytes)
     checksum_lines = [
-        f"{sha256_file(tar_path)}  {tar_path.name}",
-        f"{sha256_file(manifest_path)}  {manifest_path.name}",
-        "",
-        "# Included source asset checksums",
+        f"{sha256_file(tar_path)}  {checksum_display_path(tar_path, source_root)}",
+        f"{sha256_file(manifest_path)}  {checksum_display_path(manifest_path, source_root)}",
     ]
     for row in rows:
         if bool(row.get("include")) and row.get("observed_sha256") is not None:

@@ -24,10 +24,10 @@ from run_real_trace_matrix import (  # noqa: E402
     DEFAULT_MCFARLAND_OUTPUT_CANDIDATES,
     DEFAULT_POPULATION_SPEC_DIR,
     DEFAULT_UNIT_TUNING_CSV,
-    MODEL_CHECKPOINT_PATH,
     ROOT,
     RR100_VERSION,
     RUN_STEM,
+    default_checkpoint_path,
 )
 
 
@@ -72,7 +72,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--atol", type=float, default=1e-5)
     parser.add_argument("--rtol", type=float, default=1e-5)
     parser.add_argument("--unit-tuning-csv", type=Path, default=DEFAULT_UNIT_TUNING_CSV)
-    parser.add_argument("--checkpoint-path", type=Path, default=MODEL_CHECKPOINT_PATH)
+    parser.add_argument("--checkpoint-path", type=Path, default=default_checkpoint_path())
     parser.add_argument("--dataset-configs", type=Path, default=DEFAULT_DATASET_CONFIGS)
     parser.add_argument("--population-spec-dir", type=Path, default=DEFAULT_POPULATION_SPEC_DIR)
     parser.add_argument("--mcfarland-outputs", type=Path, default=None)

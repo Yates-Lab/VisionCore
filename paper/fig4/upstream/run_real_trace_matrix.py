@@ -39,12 +39,8 @@ RR100_VERSION = (
     "medoidPosthocminRepcomplete0p45_movieMedoid"
 )
 MODEL_CHECKPOINT_FILENAME = "epoch=147-val_bps_overall=0.5702.ckpt"
-MODEL_CHECKPOINT_PATH = Path(
-    "/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset_120_long/"
-    "checkpoints/learned_resnet_none_convgru_gaussian_ddp_bs128_ds30_lr1e-3_wd1e-4_"
-    f"corelrscale.5_warmup5/{MODEL_CHECKPOINT_FILENAME}"
-)
 STAGED_MODEL_CHECKPOINT_PATH = ROOT / "outputs/artifacts/model_checkpoints/fig4_twin" / MODEL_CHECKPOINT_FILENAME
+MODEL_CHECKPOINT_PATH = STAGED_MODEL_CHECKPOINT_PATH
 MODEL_CHECKPOINT_SHA256 = "55d084aa0beb7d65614aecb9122edf7ad49c5799d370dbbd5dcf60b815c62de3"
 DATASET_CONFIGS_REV = "e6c85ae"
 DATASET_CONFIGS_MAIN_SHA256 = "c42906b90c340d64d35247baaa6b715e452d043dcff6439e02147aed6b7322d8"
@@ -172,9 +168,7 @@ class CommandPlan:
 def default_checkpoint_path() -> Path:
     if CHECKPOINT_ENV in os.environ:
         return Path(os.environ[CHECKPOINT_ENV])
-    if STAGED_MODEL_CHECKPOINT_PATH.exists():
-        return STAGED_MODEL_CHECKPOINT_PATH
-    return MODEL_CHECKPOINT_PATH
+    return STAGED_MODEL_CHECKPOINT_PATH
 
 
 def parse_args() -> argparse.Namespace:
@@ -729,6 +723,8 @@ def build_manifest(
             ),
         },
         "recovered_production_facts": {
+            "checkpoint_filename": MODEL_CHECKPOINT_FILENAME,
+            "checkpoint_sha256": MODEL_CHECKPOINT_SHA256,
             "candidate_rows_after_gates": 2140,
             "selected_reliable_contour_images": 100,
             "selected_strong_contour_images": 53,
