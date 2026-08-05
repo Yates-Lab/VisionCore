@@ -268,7 +268,11 @@ class ByDatasetBatchSampler(Sampler):
 
     def __init__(self, cat, name2idx, batch_size, contrast_scores=None,
                  warmup_steps=8000, shuffle=True, drop_last=True, seed=0):
-        super().__init__(cat)
+        # torch.utils.data.Sampler.__init__ no longer accepts a data_source
+        # argument (removed after deprecation; torch >= 2.6), so passing one
+        # falls through to object.__init__ and raises TypeError. The dataset is
+        # kept on self.cat below, which is all this sampler ever used it for.
+        super().__init__()
         self.cat = cat
         self.batch_size = int(batch_size)
         self.shuffle = bool(shuffle)
