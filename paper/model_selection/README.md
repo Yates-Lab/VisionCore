@@ -125,6 +125,9 @@ Built: `protocol.py`, `gen_configs.py`, `measure.py`, `probe_capacity.py`,
 | `subject_gap.py` | Whether the Allen/Logan held-out gap survives matching on unit difficulty. Coarsened exact matching, session-clustered bootstrap. |
 | `launch.py` | The Stage 0 run family. Sample-budgeted arms, protocol-stamped manifests. `--list` to see them. |
 | `regen_fig3_caches.py` | Rebuilds the fig3 inference caches after the spike-threshold change. |
+| `collect.py` | Pools the arms into one table. Refuses to mix protocol hashes, skips unmanifested directories by name, reports an unevaluated run as absent rather than zero. `--json`. |
+| `stability.py` | The ΔBPS floor from the baseline replicates, and a resolved / marginal / unresolved verdict per arm. |
+| `train_final.sh` | Trains the single pinned final model. Contains no training flags of its own; delegates to `launch.py FINAL`, which refuses to build until `FINAL_SETTINGS` is filled in. |
 
 Two premises from the original plan did not survive measurement: the twin
 population already covered fig2 (so no `sessions_v2/`, no retraining), and the
@@ -138,6 +141,23 @@ unreachable. Now verified to yield full single-session batches. The default
 (`homogeneous_batches=False`) path never constructs this sampler and is
 unchanged.
 
+Fixed in VisionCore, 2026-08-05: the same sampler **yielded the identical batch
+sequence every epoch**. It seeded on `self.seed + self._step`, and `_step` moves
+only via `set_step`, called only by `CurriculumCallback`, registered only under
+`--enable_curriculum` — which no arm passes. With `limit_train_batches=512` a run
+therefore trained on one epoch's 131,072 samples (~1.6% of the training set)
+repeated for its full duration. Found by watching arm E1b's validation BPS
+flatline; E1b was killed and voided. The seed now includes a per-pass epoch
+counter, leaving the first pass unchanged so seeded re-runs still reproduce.
+Regression tests: `tests/test_by_dataset_batch_sampler.py`, whose three
+defect-targeting cases were confirmed to fail against the unfixed sampler.
+
+Blast radius is one run. `_mk_loader` takes the distributed branch before the
+homogeneous one, so the DDP-trained paper model never touched this sampler, and
+the sampler was unreachable at all before the `data_source` fix above. The
+defect could only ever have reached a single-GPU homogeneous run, of which E1b
+was the first and only.
+
 Three-way split wiring is done: a `test_split` key switches `prepare_data` to
 the three-way splitter and `MultiDatasetDM` exposes `test_dataloader()`; absent
 the key the two-way path is byte-identical, verified by unit tests and by a
@@ -150,8 +170,19 @@ units, validated against the state_dict's own readout sizes); homogeneous
 batching trains real steps for the first time; `--ckpt_path` resume restores and
 continues. `train_multidataset.py` gained `--ckpt_path` (resume was absent, not
 merely unverified), `--seed`, and `--early_stopping/--no-early_stopping`; all
-three default to the previous behaviour. Note dataset loading costs ~19 min per
-launch, which is ~5 h across the 15 arms on top of training.
+three default to the previous behaviour. Dataset loading costs ~3 min per launch
+(measured 2026-08-05, warm page cache; an earlier ~19 min figure was ~6x too
+high). Nothing is shared between runs and evaluation pays it twice -- see
+`STAGE0B_NOTES.md`.
+
+`evaluate.py` pins the test-split pass to **cross-session batching for every
+arm** (`EVAL_HOMOGENEOUS_BATCHES = False`), whatever the arm was trained with.
+It previously inherited `homogeneous` from the run manifest, which would have
+scored a homogeneous arm on ~63% of the test split — `ByDatasetBatchSampler`
+draws with replacement across batches — while a cross-session arm was scored on
+100%, and the two differenced as if commensurable. Batch composition affects
+gradients, not a forward-only metric, so pinning it changes no arm's training.
+E1a's reported 0.6090 is unchanged, having trained cross-session already.
 
 `evaluate.py` scores a run on the metrics `protocol.py` declares. Two passes:
 the three-way **test split** on the fit conditions (built by the split wiring
@@ -165,4 +196,24 @@ same neurons Figure 2 reports on. Unit-tested in
 `tests/test_model_selection_evaluate.py`; the two GPU passes are pending their
 first end-to-end run.
 
-Not yet built: `collect.py`, `stability.py`, figure scripts, `train_final.sh`.
+The collection layer is built (2026-08-04). `collect.py` pools the runs and
+`stability.py` gives their deltas a scale, from the baseline replicate group it
+finds by *configuration signature* rather than by a hard-coded name list — that
+E1a, E2b and E3b are the same configuration is a consequence of `launch.py`'s
+defaults, and a consequence is a thing to detect, not to restate somewhere it
+can fall out of date. Neither is usable as a decision aid yet: with only E1a run
+there is one replicate, so `stability.py` reports no floor and names E2b and E3b
+as what is missing. Both are unit-tested in `tests/test_model_selection_collect.py`
+(21 tests) and both have been run against the real checkpoint root.
+
+`train_final.sh` carries no training flags. It delegates to `launch.py FINAL`,
+whose `FINAL_SETTINGS` is a dict of `None` placeholders that the sweep fills in;
+`resolve` refuses to build a command while any remain, and a test asserts the
+final model's flag set is identical to an arm's. The indirection is deliberate:
+`experiments/train_digital_twin_120_long.sh` kept its own copy of the flags,
+drifted from the checkpoint it supposedly produced, and left the paper model's
+real settings recorded nowhere — which is the reason this directory exists. A
+second shell script with a second copy of the flag list would rebuild that
+defect.
+
+Not yet built: figure scripts.

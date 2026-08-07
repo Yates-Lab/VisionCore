@@ -66,8 +66,38 @@ E1b ≈ E1a on validation BPS ⇒ adopt homogeneous batching for its throughput,
 which matters against Tier 1's ~570 GPU-h. E1b < E1a ⇒ cross-session stays, and
 sample-proportional weighting is shown to hurt.
 
-Homogeneous batching has been verified to *train* (2-epoch smoke, 2026-08-04),
-but E1b is its first full run.
+**E1b was run on 2026-08-05, found void, and must be run again.** Its
+validation BPS flatlined (epoch 7 → 11, 0.3508 → 0.3509) against E1a's
+0.418 → 0.465, which exposed a defect in `ByDatasetBatchSampler`:
+
+- `__iter__` seeded on `self.seed + self._step` (`training/samplers.py`);
+- `_step` advances only through `set_step`, whose sole caller is
+  `CurriculumCallback` (`training/callbacks.py:282`);
+- that callback is registered only under `--enable_curriculum`
+  (`train_multidataset.py:266`), which no arm passes.
+
+So `_step` stayed 0 and **every epoch yielded the identical batch sequence**.
+With `limit_train_batches=512`, E1b trained on the same 131,072 samples (~1.6%
+of the 8.16M-sample training set) 61 times over. It measured nothing about
+homogeneous batching, in either direction. The run was moved to
+`<CKPT_ROOT>/../model_selection_void/E1b_epoch_repeat_2026-08-05/`.
+
+Fixed by folding a per-pass epoch counter into the seed; the first pass is
+unchanged, so seeded re-runs still reproduce. Regression tests in
+`tests/test_by_dataset_batch_sampler.py` (9 tests); the three that target the
+defect were confirmed to fail against the unfixed sampler.
+
+**Nothing else is affected.** `_mk_loader` takes the distributed branch before
+the homogeneous one, so the DDP-trained paper model never used this sampler,
+and before commit `131292f` the sampler raised `TypeError` on construction and
+was unreachable. E1a used `--no-homogeneous_batches`, a plain shuffling
+DataLoader that reshuffles each epoch. No figure and no prior result is touched.
+
+**The lesson for the rest of the sweep:** the previous handoff recorded
+homogeneous batching as "verified to *train* (2-epoch smoke)". It does train —
+identical epochs are invisible unless batch indices are compared *across*
+epochs. "It ran" is not "it is doing the right thing", and a flat metric is a
+symptom worth chasing before it is worth interpreting.
 
 ### 2. The remaining arms
 
@@ -95,12 +125,30 @@ out-of-domain generalisation, and what Figures 3 and 4 rest on). Writes
 a capped shakedown possible in minutes. A capped run is a shakedown, never a
 reported number.
 
-### 4. Build the collection layer
+#### 4. Build the collection layer — DONE (2026-08-04)
 
-`collect.py` (pool runs, refuse to mix protocol hashes — `protocol.py` already
-has `assert_same_protocol`, and `evaluate.load_run_manifest` shows the pattern),
-`stability.py`, `train_final.sh`. Then finish `MODEL_CARD.md`, whose
-hyperparameter sections stay open until E2/E3/E4 report.
+`collect.py`, `stability.py` and `train_final.sh` are built, unit-tested
+(`tests/test_model_selection_collect.py`, 21 tests) and run against the real
+checkpoint root. See `README.md` for what each does. Two things to know:
+
+- `stability.py` reports **no floor** until E2b and E3b run — with one
+  replicate there is no spread, and it names the two arms that are missing
+  rather than printing a number that would be read as one.
+- `train_final.sh` holds no training flags; `launch.py FINAL` builds them with
+  the same `build_command` as the arms and refuses while `FINAL_SETTINGS` still
+  has `None` placeholders. Fill those in from the sweep, not by hand.
+
+Still to do here: finish `MODEL_CARD.md`, whose hyperparameter sections stay
+open until E2/E3/E4 report.
+
+### The box is shared — check for *sustained* idle, not a snapshot
+
+On 2026-08-04 both cards were occupied for hours by another user's inference
+shards. A single `nvidia-smi` is not enough to launch a multi-hour arm against:
+one sample showed GPU 1 at 0% util / 571 MiB while that job was merely between
+shards. Require a card to be clean — no compute process **and** util ≤ 5% — on
+every sample across ~10 minutes before launching, and reset the streak on any
+dirty sample.
 
 ## Settled — do not redo, do not relitigate
 
@@ -211,17 +259,34 @@ Two things worth carrying forward:
   generalisation, not just training-objective BPS.** That is the strongest
   argument yet for E4b, and for not locking Tier 1's per-run budget at 8M.
 
-Known inefficiency, not yet fixed: the evaluation inherits `homogeneous` from
-the run manifest, so a cross-session arm scores its test split as ~180,600
-eight-sample sub-forwards instead of 6,020 full 256-sample batches. Batch
-composition affects gradients, not a forward-only metric, so forcing
-`homogeneous_batches=True` for evaluation should be safe and several-fold
-faster. Verify any such change reproduces `test_split.bps_overall = 0.6090`.
+**Corrected 2026-08-05 — the optimisation proposed here was backwards.** The
+previous note observed that evaluation inherits `homogeneous` from the run
+manifest, so a cross-session arm scores its test split as ~180,600 eight-sample
+sub-forwards instead of 6,020 full 256-sample batches, and suggested forcing
+`homogeneous_batches=True` for evaluation as "safe and several-fold faster".
+
+The speed claim was right; the safety claim was wrong. `ByDatasetBatchSampler`
+picks each batch's session with `multinomial(..., replacement=True)` and redraws
+within the session per batch, so **iterating it covers only ~63% of the unique
+samples and scores some of them twice**. Forcing it on would have turned every
+arm's test BPS into a random subsample of the split — including E1a's.
+
+`evaluate.py` now pins evaluation to cross-session batching for every arm
+(`EVAL_HOMOGENEOUS_BATCHES = False`, `build_test_datamodule`), so all arms are
+scored over the same, complete data whatever they were trained with. The sampler
+is a training device, not a scoring device.
+
+E1a's existing `evaluation.json` is unaffected — it trained with
+`homogeneous=False`, so the inherited value already equalled the pinned one and
+`test_split.bps_overall = 0.6090` still stands. Homogeneous arms (E1b) would
+have been mis-scored had this not been caught, since their manifests say `true`.
 
 ## Budget, measured rather than estimated
 
 - E1a took **5 h 54 min**, not the estimated 4.6 h. The remaining 14 arms are
   therefore ~**85-90 h** serial on one GPU, not ~74 h.
-- **Dataset loading costs ~19 min per launch**, included in the above, and paid
-  again by every evaluation.
+- **Dataset loading costs ~3 min per launch** (measured 2026-08-05 on F1a:
+  3 min 05 s from process start to first training step, all 30 sessions). The
+  ~19 min previously recorded here was ~6x too high. It is paid again by every
+  evaluation -- twice, in fact; see `STAGE0B_NOTES.md`.
 - A full `evaluate.py` run is ~65 min (~40 min test split, ~25 min fixrsvp).
