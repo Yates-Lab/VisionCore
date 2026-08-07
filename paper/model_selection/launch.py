@@ -52,6 +52,7 @@ BASE_SEED = 101
 
 
 def _defaults(**over):
+    """Stage 0 (frozen) defaults: cross-session batching, adapter on, width 1.0."""
     d = dict(
         config=JOINT,
         model_config=f"experiments/model_configs/{MODEL_BASE}.yaml",
@@ -61,8 +62,42 @@ def _defaults(**over):
         core_lr_scale=1.0,
         wd=1e-5,
         homogeneous=False,
+        adapter=True,
         samples=SAMPLE_BUDGET,
         seed=BASE_SEED,
+    )
+    d.update(over)
+    return d
+
+
+# ---------------------------------------------------------------------------
+# Stage 0b defaults
+# ---------------------------------------------------------------------------
+# Two decisions carried over from Stage 0, both taken on evidence:
+#
+# * **Homogeneous batching.** E1b lost 0.023 test BPS to E1a but gained 0.050
+#   held-out fixrsvp CC_norm (16 of 17 sessions), the metric figures 3 and 4
+#   rest on, and it is 1.3x faster per step at small widths. The in-domain BPS
+#   loss may itself be a tuning artifact -- every Stage 0 lr and batch arm was
+#   run under cross-session batching -- which is what F2/F3 below test.
+# * **No adapter.** The `AffineAdapter` existed to reconcile datasets recorded
+#   at different spatial scales and is unnecessary now. Read from E1a's
+#   weights, it had largely learned its way back to the identity resample
+#   (mean scale 0.99 from an init of 0.693). See `gen_configs.strip_adapter`.
+#
+# Width 0.5 for screening: measured at 1.21 ms/sample against width 1.0's
+# 2.00, so an 8M-sample arm is ~2.7 h rather than ~5.5 h. Settings tuned here
+# must be confirmed at the width actually shipped -- the ladder spans 152x and
+# transfer is not guaranteed, which is what arm C1 exists for.
+STAGE0B_SEED = 201
+
+
+def _b_defaults(**over):
+    d = _defaults(
+        width=0.5,
+        homogeneous=True,
+        adapter=False,
+        seed=STAGE0B_SEED,
     )
     d.update(over)
     return d
@@ -79,7 +114,7 @@ def _defaults(**over):
 # gap is not distinguishable from zero once sessions are the resampling unit,
 # and largely explained by unit reliability. What remains untested is whether
 # joint training *interferes*, which single-subject controls measure directly.
-RUNS = {
+FROZEN_RUNS = {
     # E1 -- batch composition. This is also the subject-weighting manipulation:
     # homogeneous batching draws a session with p proportional to its size,
     # which is the only setting under which sample-count imbalance matters.
@@ -127,12 +162,120 @@ RUNS = {
 }
 
 
-def resolve(name):
-    if name not in RUNS:
-        raise SystemExit(f"unknown run {name!r}; try --list")
-    spec = dict(RUNS[name])
-    spec["name"] = name
+# ---------------------------------------------------------------------------
+# Stage 0b -- the live family
+# ---------------------------------------------------------------------------
+# Everything here is homogeneous, adapter-off, width 0.5. The Stage 0 arms above
+# are kept as FROZEN_RUNS so that E1a's and E1b's manifests stay resolvable and
+# their numbers stay interpretable, but they describe an architecture and a
+# batching mode we are no longer training: **they are not a baseline for
+# anything below.** The floor has to be rebuilt here, which is what F1a/F1b/F1c
+# are for. Until at least two of them finish, every F2/F3 delta is unreadable
+# and `stability.py` will say so rather than print a verdict.
+RUNS = {
+    # F0 -- the adapter control, added 2026-08-05 after F1a evaluated.
+    #
+    # Stage 0b adopted adapter-off without a dedicated arm, so F1a differs from
+    # E1b in *two* things (width 1.0 -> 0.5 and adapter on -> off) and neither
+    # is isolated. F1a came in at fixrsvp CC_norm 0.465 against E1b's 0.639 --
+    # a 27% drop, while test BPS fell only 8.7%. A loss concentrated in
+    # out-of-domain generalisation rather than in-domain fit is what removing a
+    # fixed sigma=1 pre-blur would look like, so it is worth one run to find
+    # out: -0.174 CC_norm dwarfs the +0.050 that motivated switching batching
+    # in the first place.
+    #
+    # Identical to F1a in every respect including seed 201; only the adapter
+    # differs. Not a replicate of anything -- `model_config` differs, so
+    # `config_signature` keeps it out of the F1 group.
+    "F0": _b_defaults(adapter=True,
+                      note="adapter ON control (w0.5, homog) -- vs F1a"),
 
+    # F1 -- baseline replicates. Three seeds at one configuration, to measure
+    # what two identical runs do. Note the caveat that carried over from Stage
+    # 0: `split_inds_by_trial*` re-seeds globally, so replicates differ in
+    # weight init and GPU nondeterminism but not in data order, and the floor
+    # they give is an underestimate of true run-to-run spread.
+    "F1a": _b_defaults(seed=201, note="baseline (homog, no adapter, w0.5); R1"),
+    "F1b": _b_defaults(seed=202, note="baseline replicate R2"),
+    "F1c": _b_defaults(seed=203, note="baseline replicate R3"),
+
+    # F2 -- effective batch, the knob that acts directly on the mechanism.
+    # Under homogeneous batching each micro-batch is one session, so
+    # accumulation sets how many sessions an optimizer step averages: the
+    # baseline's 1024 is 4 sessions, against cross-session's ~30. If E1b's BPS
+    # deficit is gradient variance, this is the arm that should close it, and
+    # 4096 (16 sessions) is the one to watch.
+    "F2a": _b_defaults(effective_batch=256, note="eff batch 256 (1 session/step)"),
+    "F2c": _b_defaults(effective_batch=4096, note="eff batch 4096 (16 sessions/step)"),
+
+    # F3 -- learning rate. Every Stage 0 lr arm ran under cross-session
+    # batching, so 1e-3 is tuned for a gradient this family no longer has.
+    "F3a": _b_defaults(lr=3e-4, note="lr 3e-4"),
+    "F3c": _b_defaults(lr=3e-3, note="lr 3e-3"),
+}
+
+
+# ---------------------------------------------------------------------------
+# The final model
+# ---------------------------------------------------------------------------
+# Stage 0 exists to fill this dict in. Until it is filled, `resolve` refuses to
+# build a command rather than quietly training the defaults, because "the
+# defaults were probably right" is how the paper checkpoint ended up with flags
+# recorded nowhere -- the defect this whole directory exists to remove.
+#
+# It lives here, beside the arms, rather than in `train_final.sh`, so that the
+# final model's flags are produced by the same `build_command` as every arm it
+# was selected against. A shell script with its own copy of the flag list is
+# exactly how `train_digital_twin_120_long.sh` drifted away from the checkpoint
+# it supposedly produced.
+FINAL_RUN = "FINAL"
+FINAL_SEED = 1
+FINAL_SETTINGS = {
+    "homogeneous": None,       # E1: cross-session vs one session per step
+    "effective_batch": None,   # E2
+    "lr": None,                # E3
+    "core_lr_scale": None,     # E3
+    "samples": None,           # E4: the per-run sample budget
+    "width": None,             # capacity; 1.0 reproduces the paper model
+}
+
+
+def unsettled_final():
+    """Which of the final model's settings the sweep has not yet decided."""
+    return [k for k, v in FINAL_SETTINGS.items() if v is None]
+
+
+def resolve_final():
+    missing = unsettled_final()
+    if missing:
+        raise SystemExit(
+            "The final model is not settled. Unset: " + ", ".join(missing) +
+            "\nFill FINAL_SETTINGS in launch.py from the sweep result "
+            "(collect.py / stability.py) before training the pinned model.")
+    spec = _defaults(seed=FINAL_SEED, note="final pinned model",
+                     **FINAL_SETTINGS)
+    spec["name"] = FINAL_RUN
+    return spec
+
+
+def resolve(name):
+    if name == FINAL_RUN:
+        return _finish(resolve_final())
+    table = RUNS if name in RUNS else FROZEN_RUNS
+    if name not in table:
+        raise SystemExit(f"unknown run {name!r}; try --list")
+    spec = dict(table[name])
+    spec["name"] = name
+    return _finish(spec)
+
+
+def _finish(spec):
+    """Derive accumulation, epoch count and model config from an arm's spec.
+
+    Shared by the declared arms and by the final model so that both are built
+    the same way; the final model must be trained by the same derivation as the
+    arms it was selected against.
+    """
     eff = spec.pop("effective_batch", EFFECTIVE_BATCH)
     bs = spec["batch_size"]
     spec["accumulate"] = max(1, eff // bs)
@@ -143,9 +286,25 @@ def resolve(name):
     spec["max_epochs"] = max(1, round(spec["samples"] / per_epoch))
     spec["samples_actual"] = spec["max_epochs"] * per_epoch
 
-    if spec["width"] != 1.0:
-        w = str(spec["width"]).replace(".", "p")
-        spec["model_config"] = f"paper/model_selection/configs/width{w}.yaml"
+    # Ask gen_configs for the name rather than rebuilding it here. The
+    # hand-rolled version was `str(width).replace(".", "p")`, which gives
+    # "2p0" for width 2.0 while gen_configs writes "width2" (`f"{2.0:g}"` is
+    # "2", so there is no "." to replace). C1 therefore pointed at a file that
+    # has never existed, and --dry-run could not tell: only the dataset config
+    # was checked for existence.
+    #
+    # Width 1.0 *with* the adapter keeps pointing at the unmodified
+    # experiments/ config, so the frozen arms reproduce byte-identically.
+    # Everything else resolves to a generated rung, with the architecture in
+    # the filename so a manifest states which one it trained.
+    from gen_configs import width_name
+
+    adapter = spec.get("adapter", True)
+    if not adapter or spec["width"] != 1.0:
+        suffix = "" if adapter else "_noadapter"
+        spec["model_config"] = (
+            f"paper/model_selection/configs/"
+            f"{width_name(spec['width'], suffix)}.yaml")
     return spec
 
 
@@ -153,6 +312,17 @@ def build_command(spec, gpu, resume=None):
     cfg = CONFIGS / spec["config"]
     if not cfg.exists():
         raise SystemExit(f"missing dataset config: {cfg}")
+
+    # Check the model config too. Only the dataset config was checked, so an
+    # arm pointing at a non-existent model config passed --dry-run and failed
+    # after the ~19 min dataset load -- which is how the width-name mismatch
+    # stayed hidden.
+    model_cfg = VISIONCORE_ROOT / spec["model_config"]
+    if not model_cfg.exists():
+        raise SystemExit(
+            f"missing model config: {model_cfg}\n"
+            f"Ladder rungs are written by gen_configs.py; run it first "
+            f"(add --no-adapter for the identity-adapter variant).")
 
     # train_multidataset.py appends --experiment_name to --checkpoint_dir, so
     # passing CKPT_ROOT (not CKPT_ROOT/name) lands checkpoints in the same
@@ -221,17 +391,47 @@ def main():
     ap.add_argument("--gpu", type=int, default=0)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--list", action="store_true")
+    ap.add_argument("--all", action="store_true",
+                    help="Also list the frozen Stage 0 arms")
     ap.add_argument("--resume", type=str, default=None,
                     help="Checkpoint to resume this arm from, e.g. its last.ckpt")
     args = ap.parse_args()
 
     if args.list or not args.run:
-        print(f"protocol {PROTOCOL_HASH}\n")
-        print(f"{'id':<6}{'width':>6}{'bs':>6}{'eff':>7}{'lr':>9}{'epochs':>8}"
-              f"{'Msamp':>7}{'seed':>6}  note")
-        for name in RUNS:
+        header = (f"{'id':<6}{'width':>6}{'bs':>6}{'eff':>7}{'lr':>9}"
+                  f"{'epochs':>8}{'Msamp':>7}{'seed':>6}  note")
+
+        def show(name):
             s = resolve(name)
             print(f"{name:<6}{s['width']:>6}{s['batch_size']:>6}"
+                  f"{s['effective_batch']:>7}{s['lr']:>9.0e}{s['max_epochs']:>8}"
+                  f"{s['samples_actual']/1e6:>7.1f}{s['seed']:>6}  {s['note']}")
+
+        print(f"protocol {PROTOCOL_HASH}\n")
+        print("Stage 0b -- live family (homogeneous, no adapter, width 0.5)")
+        print(header)
+        for name in RUNS:
+            show(name)
+
+        if args.all:
+            print("\nStage 0 -- FROZEN (cross-session, adapter on). Completed "
+                  "runs stay interpretable;\n  these are not a baseline for "
+                  "Stage 0b -- different architecture and batching.")
+            print(header)
+            for name in FROZEN_RUNS:
+                show(name)
+        else:
+            print(f"\n({len(FROZEN_RUNS)} frozen Stage 0 arms hidden; --all to "
+                  f"show)")
+
+        # The final model is not one of the arms; it is what the arms decide.
+        missing = unsettled_final()
+        if missing:
+            print(f"\n{FINAL_RUN}: unsettled ({', '.join(missing)}) -- "
+                  f"fill FINAL_SETTINGS from the sweep result")
+        else:
+            s = resolve(FINAL_RUN)
+            print(f"\n{FINAL_RUN:<6}{s['width']:>6}{s['batch_size']:>6}"
                   f"{s['effective_batch']:>7}{s['lr']:>9.0e}{s['max_epochs']:>8}"
                   f"{s['samples_actual']/1e6:>7.1f}{s['seed']:>6}  {s['note']}")
         return

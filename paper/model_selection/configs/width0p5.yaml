@@ -30,7 +30,6 @@ convnet:
     channels:
     - 32
     - 64
-    checkpointing: false
     stem_config:
       out_channels: 4
       conv_params:

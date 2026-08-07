@@ -101,10 +101,15 @@ def get_batch(batch_size: int, max_datasets: int, dset_dtype: str, device,
     return batch, dm
 
 
-def build_model(width: float, max_datasets: int, checkpointing: bool, device):
+def build_model(width: float, max_datasets: int, checkpointing: bool, device,
+                with_adapter: bool = True):
     from training.pl_modules import MultiDatasetModel
 
-    config_path = write_ladder(widths=[width])[width]
+    # The adapter blurs and grid-samples the raw stimulus, which is the largest
+    # tensor in the network, so whether it is present changes peak memory by
+    # more than its 90 parameters suggest. Probe the architecture that will
+    # actually be trained.
+    config_path = write_ladder(widths=[width], with_adapter=with_adapter)[width]
     model = MultiDatasetModel(
         model_cfg=str(config_path),
         cfg_dir=str(DATASET_CONFIG),
@@ -119,7 +124,8 @@ def build_model(width: float, max_datasets: int, checkpointing: bool, device):
     return model
 
 
-def probe_one(width, batch_size, checkpointing, batch, max_datasets, device):
+def probe_one(width, batch_size, checkpointing, batch, max_datasets, device,
+              with_adapter=True):
     """Measure one (width, batch_size, checkpointing) cell. Returns a dict."""
     row = {
         "width": width,
@@ -128,7 +134,8 @@ def probe_one(width, batch_size, checkpointing, batch, max_datasets, device):
     }
     model = None
     try:
-        model = build_model(width, max_datasets, checkpointing, device)
+        model = build_model(width, max_datasets, checkpointing, device,
+                            with_adapter=with_adapter)
         row.update(count_params(model))
         row.update(measure_step(model, batch, device))
         try:
@@ -162,6 +169,8 @@ def main():
                    help="One session per step (single large forward) instead of "
                         "~30 sequential sub-forwards. Changes training dynamics, "
                         "not just throughput.")
+    p.add_argument("--no-adapter", action="store_true",
+                   help="Probe the identity-adapter architecture")
     p.add_argument("--out", type=Path, default=OUT_PATH)
     args = p.parse_args()
 
@@ -193,9 +202,11 @@ def main():
             checkpointing = ckpt_flag == "on"
             for width in args.widths:
                 row = probe_one(width, batch_size, checkpointing, batch,
-                                args.max_datasets, device)
+                                args.max_datasets, device,
+                                with_adapter=not args.no_adapter)
                 row["batch_shapes"] = shapes
                 row["homogeneous_batches"] = args.homogeneous_batches
+                row["with_adapter"] = not args.no_adapter
                 rows.append(row)
 
                 tag = f"w={width:<4g} bs={batch_size:<4d} ckpt={ckpt_flag:<3s}"
