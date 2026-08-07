@@ -395,6 +395,39 @@ def score_fixrsvp(model, device, session_filter=None, n_splits=None):
     return results
 
 
+# Every arm's test split is scored with cross-session batching, whatever the
+# arm was *trained* with. This is a correctness requirement, not a preference.
+#
+# `ByDatasetBatchSampler` chooses each batch's session by `multinomial(...,
+# replacement=True)` and redraws within the session per batch, so iterating it
+# covers only ~63% of the unique samples and scores some of them twice. That is
+# a reasonable way to *train* and a wrong way to *score*: a homogeneous arm
+# would report BPS over a random 63% subsample while a cross-session arm
+# reported it over 100%, and the two numbers would be differenced against each
+# other as though they meant the same thing.
+#
+# Forcing it the other way -- which an earlier note proposed as a speed
+# optimisation -- would have silently turned every arm's test score into a
+# subsample. Batch composition affects gradients, not a forward-only metric, so
+# fixing it here changes no arm's training and makes all of them comparable.
+EVAL_HOMOGENEOUS_BATCHES = False
+
+
+def build_test_datamodule(spec, max_datasets=30):
+    """The datamodule used for the test-split pass, with batching pinned."""
+    from training.pl_modules import MultiDatasetDM
+
+    return MultiDatasetDM(
+        cfg_dir=str(HERE / "configs" / spec["config"]),
+        max_ds=max_datasets,
+        batch=spec["batch_size"],
+        workers=8,
+        steps_per_epoch=1,
+        dset_dtype="bfloat16",
+        homogeneous_batches=EVAL_HOMOGENEOUS_BATCHES,
+    )
+
+
 def load_run_manifest(run_dir):
     """Read a run's manifest, refusing one produced under another protocol.
 
@@ -493,17 +526,8 @@ def evaluate_run(run_dir, gpu=0, checkpoint=None, session_filter=None,
     }
 
     if not skip_test_split:
-        from training.pl_modules import MultiDatasetDM
         spec = manifest["spec"]
-        dm = MultiDatasetDM(
-            cfg_dir=str(HERE / "configs" / spec["config"]),
-            max_ds=max_datasets,
-            batch=spec["batch_size"],
-            workers=8,
-            steps_per_epoch=1,
-            dset_dtype="bfloat16",
-            homogeneous_batches=spec["homogeneous"],
-        )
+        dm = build_test_datamodule(spec, max_datasets=max_datasets)
         dm.setup("test")
         per_unit = score_test_split(model, dm, device)
         overall, per_ds = overall_bps(per_unit)
