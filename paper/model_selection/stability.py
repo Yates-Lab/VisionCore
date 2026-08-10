@@ -127,6 +127,38 @@ def missing_replicates(rows, baseline_run=BASELINE_RUN):
             and config_signature(resolve(name)) == signature]
 
 
+def independent_knobs(base_spec, spec):
+    """`spec_diff`, reduced to the knobs an experiment can set independently.
+
+    At accumulate 1 the micro-batch fixes the effective batch, and at a fixed
+    sample budget it fixes the epoch count too. `02_lr1e-3_bs128` therefore
+    differs from F2a in three `CONFIG_KEYS` but in only one *decision*, and
+    counting three would file the cleanest single-knob comparison in the sweep
+    as confounded and refuse it a verdict.
+
+    The reduction is `axes_for` -- the same derivation that builds the labels
+    -- applied to the experiment's own arms plus the baseline being compared
+    against. A knob the experiment never varies independently is not a knob
+    this comparison changed.
+    """
+    from collect import spec_diff
+    from experiments import axes_for, experiment_of
+
+    knobs = spec_diff(base_spec, spec)
+    experiment = experiment_of(spec)
+    if experiment is None or len(knobs) < 2:
+        return knobs
+
+    from launch import FROZEN_RUNS, RUNS, resolve
+
+    members = [resolve(n) for n in list(FROZEN_RUNS) + list(RUNS)]
+    members = [m for m in members if experiment_of(m) == experiment]
+    if not members:
+        return knobs
+    axes = axes_for(members + [base_spec])
+    return [k for k in knobs if k in axes] or knobs
+
+
 def analyse(rows, baseline_run=BASELINE_RUN):
     """Floors per metric, and a verdict for every single-knob arm.
 
@@ -148,7 +180,7 @@ def analyse(rows, baseline_run=BASELINE_RUN):
     for row in sorted(rows, key=lambda r: r["run"]):
         if row.get("is_baseline_replicate"):
             continue
-        knobs = spec_diff(base_spec, row["spec"]) if base else []
+        knobs = independent_knobs(base_spec, row["spec"]) if base else []
         single = len(knobs) == 1
         entry = {
             "run": row["run"],

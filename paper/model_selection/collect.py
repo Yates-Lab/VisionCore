@@ -57,6 +57,17 @@ BASELINE_RUN = "F1a"
 CONFIG_KEYS = (
     "config", "model_config", "width", "batch_size", "lr", "core_lr_scale",
     "wd", "homogeneous", "effective_batch", "accumulate", "max_epochs",
+    # `samples` is the knob experiment 03 sets; `max_epochs` is what `_finish`
+    # derives from it. Without it here, `spec_diff` can only name the
+    # consequence, and a verdict line read "max_epochs: 2x sample budget"
+    # while the run's own label said `s16M`. Adding it changes no replicate
+    # grouping: any two runs sharing `max_epochs` and `batch_size` share
+    # `samples` by construction.
+    "samples",
+    # Same reasoning as `samples`: experiment 04 sets the frontend width, and
+    # `model_config` is the file `_finish` derives from it. Without this,
+    # spec_diff could only name the config path.
+    "frontend_channels",
 )
 
 
@@ -299,11 +310,32 @@ def _fmt(value, spec="{:.4f}", dash="  --  "):
     return dash if value is None else spec.format(value)
 
 
-def format_table(rows, ref, group):
+def derived_labels():
+    """`{run: label}` for every declared arm, or `{}` if the table is absent.
+
+    Derived from the *declared* arms rather than from the pooled ones, so a
+    label does not change meaning depending on which runs happen to have
+    finished: `axes_for` reads the knobs that vary across an experiment, and
+    pooling a subset could collapse two axes that the full design separates.
+
+    Old runs predate the `experiment` field in their manifests, so the label
+    comes from the arm definition rather than from disk. That is the whole
+    retrofit -- no checkpoint directory is renamed and no manifest rewritten.
+    """
+    try:
+        from launch import FROZEN_RUNS, RUNS, resolve
+        from experiments import label_map
+    except Exception:
+        return {}
+    return label_map(resolve, sorted(set(FROZEN_RUNS) | set(RUNS)))
+
+
+def format_table(rows, ref, group, labels=None):
+    labels = derived_labels() if labels is None else labels
     lines = []
     lines.append(f"{'run':<6}{'status':>8}{'val_bps':>9}{'Δval':>8}"
                  f"{'test_bps':>10}{'Δtest':>8}{'ccnorm':>8}{'Δcc':>8}"
-                 f"{'r2':>8}{'hours':>7}  note")
+                 f"{'r2':>8}{'hours':>7}  config / note")
     for row in sorted(rows, key=lambda r: r["run"]):
         mark = "*" if row.get("is_baseline_replicate") else " "
         lines.append(
@@ -313,7 +345,8 @@ def format_table(rows, ref, group):
             f"{_fmt(row['ccnorm'], '{:.3f}'):>8}"
             f"{_fmt(row.get('d_ccnorm'), '{:+.3f}'):>8}"
             f"{_fmt(row['single_trial_r2'], '{:.4f}'):>8}"
-            f"{_fmt(row['hours'], '{:.1f}'):>7}  {row['note']}")
+            f"{_fmt(row['hours'], '{:.1f}'):>7}  "
+            f"{labels.get(row['run'], '')}  {row['note']}")
 
     lines.append("")
     if group:

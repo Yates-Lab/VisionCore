@@ -101,6 +101,37 @@ optimizer step is ~30 sequential sub-forwards of ~8 samples each. Width 0.25 is
 rungs are not cheap in wall-clock, and FLOPs rather than wall-clock is the correct
 x-axis for the capacity-scaling panel.
 
+## Naming
+
+`E1a`, `F3c` and "Stage 0b" carry no meaning, so reading a result table meant
+holding `launch.py`'s arm definitions in your head. From experiment 02 onward:
+
+- **Experiments** are `NN-slug` — `02-lr-batch-landscape` — declared in
+  `experiments.py` with their baseline. Notes live in `notes/NN-slug.md`.
+- **Runs** are `NN_<label>` — `02_lr3e-3_bs128` — where the label names every
+  knob the experiment varies, at that run's value.
+
+Two rules make the label derivable rather than declared:
+
+**Axes are detected, not listed.** An experiment's axes are the knobs that
+actually vary across its arms, minus any knob the others determine. Experiment
+02 varies `batch_size`, and effective batch, accumulation and epoch count all
+follow from it, so only `bs` appears; experiment 01 varies `effective_batch`
+directly with the micro-batch fixed, so `eb` appears there. Neither case is
+hard-coded — `axes_for` decides, the way `config_signature` detects replicate
+groups instead of restating them.
+
+**A label is complete over the axes, not over the differences.** Every axis
+appears in every label including at its baseline value: `02_lr3e-3_bs256`, not
+`02_lr3e-3`. Naming only the differing knobs makes a label relative to the
+baseline, so it changes meaning if the baseline moves.
+
+Runs from experiments 00 and 01 keep their `E`/`F` directory names — the ids
+are woven through the notes, the frozen arm definitions and the history, and
+renaming the frozen record buys readability in runs nobody will launch again.
+They get a *derived* label instead, so `collect.py` prints `F2a` as
+`lr1e-3_eb256_noadapter` with no directory renamed and no manifest rewritten.
+
 ## Staging
 
 See `VALIDATION_PLAN.md`. Three stages in separate sessions:

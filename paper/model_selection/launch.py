@@ -65,6 +65,7 @@ def _defaults(**over):
         adapter=True,
         samples=SAMPLE_BUDGET,
         seed=BASE_SEED,
+        experiment="00-batch-composition",
     )
     d.update(over)
     return d
@@ -98,8 +99,57 @@ def _b_defaults(**over):
         homogeneous=True,
         adapter=False,
         seed=STAGE0B_SEED,
+        experiment="01-adapter-and-optimizer",
     )
     d.update(over)
+    return d
+
+
+def _c_defaults(**over):
+    """Experiment 02 defaults: F2a's configuration, which is its baseline.
+
+    F2a (lr 1e-3, batch 256, accumulate 1) was experiment 01's best arm on
+    update count and is the point this sweep pushes outward from, so it is
+    reused as the baseline rather than re-run under a new name.
+
+    Effective batch is forced to the micro-batch, pinning accumulate at 1 for
+    every arm. `_finish` derives `accumulate = effective_batch // batch_size`,
+    so leaving effective batch at 256 while halving the micro-batch would give
+    accumulate 2 and hold the update count fixed -- exactly the manipulation
+    this experiment is trying to make.
+    """
+    d = _b_defaults(experiment="02-lr-batch-landscape")
+    d.update(over)
+    d["effective_batch"] = d["batch_size"]
+    return d
+
+
+def _d_defaults(**over):
+    """Experiment 03 defaults: the configuration experiment 02 selected.
+
+    lr 1e-3, batch 128, accumulate 1 -- `02_lr1e-3_bs128`, which is also this
+    experiment's baseline. Only the sample budget varies from here.
+    """
+    d = _c_defaults(lr=1e-3, batch_size=128,
+                    experiment="03-sample-budget")
+    d.update(over)
+    d["effective_batch"] = d["batch_size"]
+    return d
+
+
+def _e_defaults(**over):
+    """Experiment 04 defaults: the selected config, lifted to width 1.0.
+
+    lr 1e-3, batch 128, accumulate 1, 32M samples -- experiment 03's result --
+    at width 1.0 rather than 0.5. The frontend bottleneck binds harder as the
+    ladder climbs (1:32 at width 1.0 against 1:16 at 0.5), so width 0.5 is the
+    weakest place to test it, and the frontend-4 arm doubles as the capacity
+    ladder's first rung.
+    """
+    d = _d_defaults(width=1.0, samples=32_000_000,
+                    experiment="04-frontend-bottleneck")
+    d.update(over)
+    d["effective_batch"] = d["batch_size"]
     return d
 
 
@@ -212,6 +262,150 @@ RUNS = {
     # batching, so 1e-3 is tuned for a gradient this family no longer has.
     "F3a": _b_defaults(lr=3e-4, note="lr 3e-4"),
     "F3c": _b_defaults(lr=3e-3, note="lr 3e-3"),
+
+    # -----------------------------------------------------------------------
+    # Experiment 02 -- lr x batch size at accumulate 1, samples held at 8M.
+    # -----------------------------------------------------------------------
+    # Experiment 01 moved val BPS monotonically across 10x of lr (0.4297 /
+    # 0.5261 / 0.5589) and 16x of update count (0.4822 / 0.5261 / 0.5473),
+    # both still climbing at the aggressive end. Neither lever has turned
+    # over, so neither has been mapped -- only shown to point uphill.
+    #
+    # Both axes act on the same quantity: total optimization progress, or
+    # equivalently gradient noise scale. `bs128` halves the micro-batch at a
+    # fixed sample budget, which `_finish` turns into 122 epochs and 62,464
+    # optimizer steps against `bs256`'s 61 and 31,232 -- exactly twice the
+    # updates on identical data. That makes `lr1e-2_bs256` and `lr3e-3_bs128`
+    # each one notch more aggressive than `lr3e-3_bs256`, along the same axis.
+    # If they land together, the lr-to-batch *ratio* is the governing
+    # parameter and the two levers collapse into one for the width transfer;
+    # if they split, they are genuinely separate and the 2x2 was needed.
+    #
+    # Wall clock is not 3.3 h for the bs128 arms: twice the optimizer steps,
+    # twice the validation passes (30 against 15 at CHECK_VAL_EVERY = 4), and
+    # half the micro-batch on a width-0.5 model that may already underfill the
+    # card. Measured by `probe_capacity.py` before launch, not assumed.
+    "02_lr3e-3_bs256": _c_defaults(
+        lr=3e-3, batch_size=256,
+        note="composition arm: experiment 01's two winners together"),
+    "02_lr1e-2_bs256": _c_defaults(
+        lr=1e-2, batch_size=256,
+        note="lr pushed past 3e-3 at the baseline batch"),
+    "02_lr3e-3_bs128": _c_defaults(
+        lr=3e-3, batch_size=128,
+        note="update count doubled at the best known lr"),
+
+    # The decision arm, added 2026-08-06 after 02_lr3e-3_bs256 evaluated.
+    #
+    # lr is deliberately held at 1e-3 rather than tuned. Raising it to 3e-3
+    # gains +0.0328 val BPS at effective batch 1024 and loses 0.0245 at 256 --
+    # the optimum flips sign with the batch, so a tuned lr is an artifact of
+    # the batch it was tuned at and would not survive the transfer to a
+    # different width and batch. 1e-3 is the value the rest of the pipeline
+    # was built on.
+    #
+    # That leaves batch size as the only open knob, and this arm is the half
+    # of that choice never measured: F2a is lr 1e-3 at batch 256, and nothing
+    # has run lr 1e-3 at 128. The final selection is between these two, on
+    # in-domain val/test BPS only -- held-out fixrsvp CC_norm is a different
+    # dataset and a different task, and selecting on a metric that is then
+    # reported is circular.
+    "02_lr1e-3_bs128": _c_defaults(
+        lr=1e-3, batch_size=128,
+        note="decision arm: untuned lr at half batch -- vs F2a"),
+
+    # -----------------------------------------------------------------------
+    # Experiment 03 -- sample budget at the chosen configuration.
+    # -----------------------------------------------------------------------
+    # The chosen config is lr 1e-3, batch 128, accumulate 1: `02_lr1e-3_bs128`
+    # reached 0.5657 val BPS against F2a's 0.5473 at batch 256, +0.0184 or 2.3x
+    # the floor, and is the best width-0.5 result of the sweep.
+    #
+    # Every arm so far has run 8M samples against a 7,143,930-sample training
+    # set -- 1.12 passes. Nothing is near saturation and no arm has overfit:
+    # each one's best checkpoint sits at or beside its last epoch. 4x would be
+    # 4.5 passes, the first budget where overfitting is even plausible.
+    #
+    # The cosine horizon is `max_epochs`, so a longer budget also stretches the
+    # anneal. That is the right design -- a fixed horizon would leave lr at ~0
+    # for the extra epochs -- but it means these arms confound "more samples"
+    # with "slower schedule" and cannot separate them. Stated in the model
+    # card rather than discovered later.
+    "03_s16M": _d_defaults(samples=16_000_000, note="2x sample budget"),
+
+    # Gated on 2x improving by more than the replicate floor. ~14 h, the most
+    # expensive arm in the sweep, and pointless if 2x is already flat.
+    "03_s32M": _d_defaults(samples=32_000_000,
+                           note="GATED on 2x: 4x sample budget"),
+
+    # -----------------------------------------------------------------------
+    # Experiment 04 -- the temporal frontend bottleneck, at width 1.0.
+    # -----------------------------------------------------------------------
+    # The frontend is a learned temporal filter bank of `num_channels` kernels
+    # over a 16-frame window, and `scale_model_config` deliberately does not
+    # scale it: 4 is a biological prior -- midget and parasol, ON and OFF, the
+    # retinal channels an achromatic stimulus drives. A fixed set of retinal
+    # types should not grow with cortical capacity, so the invariance is
+    # intended, not an oversight.
+    #
+    # What has never been tested is whether the prior binds. Every temporal
+    # structure the model can represent passes through this basis, and for a
+    # paper about fixational eye movements the temporal dynamics are the
+    # phenomenon. Its width relative to the blocks also falls from 1:8 at
+    # width 0.25 to 1:128 at width 4.0, so a principled bottleneck still
+    # tightens up the ladder.
+    #
+    # Tested at width 1.0, not 0.5: the constraint binds harder there (1:32
+    # against 1:16), so a null at width 0.5 would license nothing higher up.
+    # `04_fe4` doubles as the capacity ladder's first rung, making the
+    # marginal cost of the comparison one run rather than two.
+    #
+    # 8 before 16: 8 is still readable as a relaxation of the retinal story --
+    # two temporal subtypes per class -- where 16 abandons it. 16 only if 8
+    # shows a large improvement.
+    #
+    # If 8 wins, the finding is that the retinal-bottleneck prior costs
+    # accuracy. That is a claim about the model's inductive bias and needs
+    # reporting as one, not a silent config change.
+    "04_fe4": _e_defaults(frontend_channels=4,
+                          note="frontend 4 (retinal prior); also ladder rung w1.0"),
+    "04_fe8": _e_defaults(frontend_channels=8,
+                          note="frontend 8 -- does the retinal prior bind?"),
+
+    # -----------------------------------------------------------------------
+    # Experiment 05 -- is the width-1.0 null an lr artifact?
+    # -----------------------------------------------------------------------
+    # `04_fe4` (width 1.0) reached 0.6059 against `03_s32M`'s (width 0.5)
+    # 0.6072 -- 3.7x the parameters for nothing, 0.16x the floor. Before that
+    # is read as capacity saturating, note that lr 1e-3 was selected at width
+    # 0.5, and experiment 02 already showed this lr optimum does not transport
+    # across regimes: it flipped sign between effective batch 1024 and 256.
+    #
+    # The validation curves say the same thing more directly. Width 1.0 leads
+    # early (+0.070 at epoch 7), crosses over near epoch 63, trails by ~0.02
+    # through mid-training, then converges to parity by the end. Under a
+    # cosine schedule that is what too-large a step size looks like: it helps
+    # while the surface is coarse, hurts once fine structure matters, and the
+    # damage vanishes as lr anneals to zero. A frontend throttle or saturated
+    # capacity would predict parity throughout, and neither explains a bigger
+    # model being *worse* mid-run.
+    #
+    # 5e-4 is the inverse-width halving for a doubled width. Experiment 01's
+    # 3e-4 arm collapsed (0.4297), but that ran at effective batch 1024 with
+    # 31,232 optimizer steps; this configuration takes 249,856. With 8x the
+    # updates a smaller step has room to work, and 3e-4 becomes the follow-up
+    # if 5e-4 helps.
+    "05_lr5e-4": _e_defaults(lr=5e-4, frontend_channels=4,
+                             experiment="05-lr-at-width-1",
+                             note="lr 5e-4 at width 1.0 -- vs 04_fe4"),
+
+    # Gated: launch only if BOTH single-notch arms above beat the baseline by
+    # more than the replicate floor. Two wins mean the ratio is still climbing
+    # and the corner is worth measuring; one failure localises the wall to
+    # that axis and makes the corner a foregone 3.3+ h.
+    "02_lr1e-2_bs128": _c_defaults(
+        lr=1e-2, batch_size=128,
+        note="GATED on both singles: most aggressive corner"),
 }
 
 
@@ -254,6 +448,9 @@ def resolve_final():
             "(collect.py / stability.py) before training the pinned model.")
     spec = _defaults(seed=FINAL_SEED, note="final pinned model",
                      **FINAL_SETTINGS)
+    # Not a member of any sweep: the final model is the thing the sweeps
+    # select, so it has no axes and no baseline to be differenced against.
+    spec["experiment"] = None
     spec["name"] = FINAL_RUN
     return spec
 
@@ -300,8 +497,14 @@ def _finish(spec):
     from gen_configs import width_name
 
     adapter = spec.get("adapter", True)
-    if not adapter or spec["width"] != 1.0:
+    frontend = spec.get("frontend_channels")
+    if not adapter or spec["width"] != 1.0 or frontend is not None:
         suffix = "" if adapter else "_noadapter"
+        # The frontend suffix must match `gen_configs.write_ladder`'s, or an
+        # arm points at a file that was never written. Both derive it from the
+        # same integer, and `build_command` checks the path exists.
+        if frontend is not None:
+            suffix += f"_fe{int(frontend)}"
         spec["model_config"] = (
             f"paper/model_selection/configs/"
             f"{width_name(spec['width'], suffix)}.yaml")
