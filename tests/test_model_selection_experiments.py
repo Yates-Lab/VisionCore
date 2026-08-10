@@ -41,9 +41,24 @@ def spec(**over):
     (1.0, "1"),
     (0.5, "0.5"),
     (2.0, "2"),
+    (5e-4, "5e-4"),
+    (2.5e-4, "2.5e-4"),          # one significant figure collided with 1.67e-4
+    (5e-4 / 3, "1.67e-4"),
 ])
 def test_numbers_render_the_way_they_are_read(value, expected):
     assert format_value("lr", value) == expected
+
+
+def test_rule_derived_learning_rates_do_not_collide():
+    """An inverse-width lr rule produces mantissas that one figure destroys.
+
+    5e-4/2 and 5e-4/3 both rendered "2e-4" under `f"{value:.0e}"`, so two
+    ladder rungs would have carried the same label -- and the label is the
+    run directory name.
+    """
+    rungs = [5e-4 / w for w in (1.0, 2.0, 3.0, 4.0)]
+    labels = [format_value("lr", lr) for lr in rungs]
+    assert len(set(labels)) == len(labels), labels
 
 
 def test_flags_render_as_states_not_booleans():
@@ -143,6 +158,21 @@ def test_a_fully_confounded_design_collapses_to_one_axis():
     specs = [spec(lr=3e-3, batch_size=128, effective_batch=128, max_epochs=122),
              spec(lr=1e-2, batch_size=256, effective_batch=256, max_epochs=61)]
     assert axes_for(specs) == ("lr",)
+
+
+def test_a_ladder_is_named_by_width_not_by_its_rule_derived_lr():
+    """When width fixes lr, the label must keep the knob that was set.
+
+    A capacity ladder gives every rung lr = anchor/width, so the two are in
+    exact correspondence and only one can survive elimination. Width is what
+    the experiment manipulates; lr is what the rule returns. Labelling the
+    rungs `lr2.5e-4` would describe the ladder by its side effect.
+    """
+    specs = [spec(width=w, lr=5e-4 / w, batch_size=128, effective_batch=128)
+             for w in (1.0, 2.0, 3.0)]
+    axes = axes_for(specs)
+    assert axes == ("width",)
+    assert [run_label(s, axes) for s in specs] == ["w1", "w2", "w3"]
 
 
 # ---------------------------------------------------------------------------

@@ -67,6 +67,12 @@ EXPERIMENTS = {
                    "the 4-channel retinal prior (midget/parasol x ON/OFF) "
                    "cost accuracy? 8 first; 16 only on a large gain.",
     },
+    "06-capacity-ladder": {
+        "baseline": "05_lr5e-4",
+        "summary": "Does capacity keep paying once every rung gets the lr an "
+                   "inverse-width rule prescribes (5e-4 / width, anchored at "
+                   "width 1.0)? Widths 2.0 and 3.0, serial.",
+    },
     "03-sample-budget": {
         "baseline": "02_lr1e-3_bs128",
         "summary": "Sample budget at the chosen batch and lr 1e-3. 8M is 1.12 "
@@ -122,8 +128,14 @@ def format_value(key, value):
         # Learning rates and weight decays are read as powers of ten, and
         # `f"{0.003:g}"` gives "0.003", which is harder to compare across arms
         # than "3e-3". Whole numbers (width 2.0) stay plain.
+        #
+        # Two significant figures, not one: an inverse-width lr rule produces
+        # 2.5e-4 and 1.67e-4, and at one figure *both* render "2e-4" -- two
+        # distinct runs with the same label. Trailing zeros are stripped so
+        # 1e-3 stays "1e-3" rather than becoming "1.00e-3".
         if value and (abs(value) <= 1e-2 or abs(value) >= 1e4):
-            mantissa, exponent = f"{value:.0e}".split("e")
+            mantissa, exponent = f"{value:.2e}".split("e")
+            mantissa = mantissa.rstrip("0").rstrip(".")
             return f"{mantissa}e{int(exponent)}"
         return f"{value:g}"
     if isinstance(value, str):
@@ -138,9 +150,16 @@ def format_value(key, value):
 # `max_epochs` all move with it; experiment 01 varies `effective_batch`
 # directly with the micro-batch fixed. Neither case is hard-coded -- the
 # redundancy test below decides, and it gets both right.
+#
+# `width` sits *after* `lr` for the same reason. A capacity ladder gives every
+# rung the lr an inverse-width rule prescribes, so width and lr are in exact
+# correspondence and only one can survive. Width is the knob being set and lr
+# is what the rule returns, so the ladder's labels should read `w2`, `w3` --
+# eliminating lr, not width. Width is constant within experiments 00-05, so it
+# is never a candidate there and this ordering changes nothing already run.
 ELIMINATION_ORDER = (
     "model_config", "config", "accumulate", "max_epochs", "effective_batch",
-    "width", "wd", "core_lr_scale", "batch_size", "lr", "homogeneous",
+    "wd", "core_lr_scale", "batch_size", "lr", "width", "homogeneous",
     "adapter",
 )
 

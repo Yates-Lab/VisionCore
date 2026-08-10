@@ -153,6 +153,34 @@ def _e_defaults(**over):
     return d
 
 
+# The inverse-width learning-rate rule, anchored at the one point where an lr
+# was actually measured against an alternative: width 1.0 wants 5e-4 (`05_lr5e-4`,
+# +0.0163 over 1e-3 at 2.0x the replicate floor). Width 0.5's selected 1e-3 is
+# on-rule too, so the two tuned points the sweep already has both sit on it --
+# which is a consistency check, not a validation, since neither was chosen by it.
+LR_ANCHOR_WIDTH = 1.0
+LR_ANCHOR = 5e-4
+
+
+def ladder_lr(width):
+    """The lr the inverse-width rule prescribes for a ladder rung."""
+    return LR_ANCHOR * LR_ANCHOR_WIDTH / width
+
+
+def _f_defaults(width, **over):
+    """Experiment 06 defaults: the selected config at a ladder rung.
+
+    Everything experiments 02-05 settled -- batch 128, accumulate 1, 32M
+    samples, frontend 4, homogeneous, adapter off -- with width and its
+    rule-derived lr as the only things that move.
+    """
+    d = _e_defaults(width=width, lr=ladder_lr(width), frontend_channels=4,
+                    experiment="06-capacity-ladder")
+    d.update(over)
+    d["effective_batch"] = d["batch_size"]
+    return d
+
+
 # ---------------------------------------------------------------------------
 # The arms
 # ---------------------------------------------------------------------------
@@ -398,6 +426,30 @@ RUNS = {
     "05_lr5e-4": _e_defaults(lr=5e-4, frontend_channels=4,
                              experiment="05-lr-at-width-1",
                              note="lr 5e-4 at width 1.0 -- vs 04_fe4"),
+
+    # -----------------------------------------------------------------------
+    # Experiment 06 -- the capacity ladder, each rung at its rule-derived lr
+    # -----------------------------------------------------------------------
+    # Experiment 05's finding makes this experiment's design mandatory: a
+    # ladder run at fixed lr produces a flat curve that is an *artifact*, which
+    # is exactly what happened at width 1.0 and was nearly read as capacity
+    # saturating. So every rung takes lr = 5e-4 / width.
+    #
+    # What this can and cannot conclude. Each rung moves two knobs against the
+    # last -- width and lr -- so a rising curve is unambiguous (capacity pays,
+    # under a rule that is at worst approximately right) but a *flat* one is
+    # not: capacity saturated, or the rule went wrong at that rung. Only a
+    # bracket run at one rung -- width 2.0 at 1.25e-4, half the rule's
+    # prescription -- separates those, and it is deliberately not queued here.
+    # It becomes worth its 35 h precisely when the curve goes flat, and
+    # premature at 35 h if the curve keeps climbing.
+    #
+    # Memory, from the capacity probe (4 datasets) scaled by the 1.5x measured
+    # at width 1.0 against a real 30-dataset run: ~25 GiB at width 2.0, ~37 at
+    # width 3.0, both inside 49. Width 4.0 projects to ~50 and is the rung that
+    # will force a batch-size change -- not these two.
+    "06_w2": _f_defaults(2.0, note="ladder rung width 2.0, lr 2.5e-4 (rule)"),
+    "06_w3": _f_defaults(3.0, note="ladder rung width 3.0, lr 1.67e-4 (rule)"),
 
     # Gated: launch only if BOTH single-notch arms above beat the baseline by
     # more than the replicate floor. Two wins mean the ratio is still climbing
