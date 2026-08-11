@@ -65,7 +65,9 @@ advantages the sweep gave up deliberately:
 - **80% of trials against 70%.** The three-way split costs ~14% of the training
   data by construction, to stop selection and reporting drawing on the same
   trials. That cost is the price of an unbiased selection procedure and is not
-  recoverable within the sweep.
+  recoverable within the sweep — but it *is* recoverable for the deliverable:
+  the final model will be retrained on train + val (85%), see
+  [final-model-training-split.md](final-model-training-split.md).
 - **~49M samples against 32M.**
 
 Budget and split are therefore confounded with configuration in this row.
