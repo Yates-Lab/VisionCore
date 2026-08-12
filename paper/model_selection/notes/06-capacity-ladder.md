@@ -101,8 +101,58 @@ and selects nothing — see the withdrawn recommendation in
 
 ## Results
 
-_Pending._
+| run | width | params | lr | val BPS | Δ vs w1.0 | hours | verdict |
+|---|---|---|---|---|---|---|---|
+| `05_lr5e-4` | 1.0 | 4.61M | 5e-4 | 0.6222 | — | 21.7 | baseline |
+| `06_w2` | 2.0 | 17.9M | 2.5e-4 | 0.6189 | **−0.0033** | 46.4 | **unresolved (null)** |
+| `06_w3` | 3.0 | 39.7M | 1.67e-4 | _running_ | | ~93 (proj.) | |
+
+3.9× the parameters returned −0.0033, 0.41× the floor. The run genuinely
+plateaued rather than being truncated: the top-3 retained checkpoints (epochs
+395, 419, 471) lie within 0.0003 of each other.
+
+**Cost ran 1.31× over the probe** (46.4 h against 35.3 projected), which is why
+width 3.0 is now projected at ~93 h rather than 71.
+
+### The crossover diagnostic points away from an lr artifact
+
+Validation curves against `05_lr5e-4` (deduped log frames, ~115 points each):
+
+| ~index | w2.0 | w1.0 | diff |
+|---|---|---|---|
+| 31 | 0.578 | 0.558 | **+0.020** |
+| 51 | 0.594 | 0.585 | +0.009 |
+| 81 | 0.618 | 0.601 | **+0.017** |
+| 101 | 0.605 | 0.609 | −0.004 |
+| 115 | 0.613 | 0.615 | −0.002 |
+
+Experiment 05's too-high-lr signature was an early lead followed by a *sustained
+mid-training deficit* (−0.021) that vanished as lr annealed. That deficit is
+absent here: width 2.0 leads or matches through most of training and converges
+to parity only at the end. The larger model uses its capacity early and arrives
+at the same place — which is the shape of a **data-limited** regime rather than
+a mistuned one, and points at the 32M sample budget rather than at lr.
+
+This is a discriminator, not proof. It is the same reasoning that correctly
+diagnosed experiment 05, applied to a curve that does not show the pattern.
+
+### Why width 3.0 ran despite the flat rung
+
+Recorded because the note above pre-registered the opposite default (bracket
+first). The decision, taken 2026-08-12 with the result in hand: two flat points
+make a weak curve, three points with a clear peak make an interpretable one, and
+a demonstrated **reversal** is much stronger evidence of saturation than a
+single null. That is a scientific argument about what the ladder needs to
+support its claim, not a rescue of a disappointing result.
+
+**The caveat it carries.** A monotone decline with width is also what a
+progressively over-correcting lr rule produces: if 5e-4/width falls faster than
+the true optimum does, the deficit grows at every rung, giving exactly the
+reversal shape. So a reversal will establish that **capacity under this rule
+does not pay** — the practically useful conclusion — while leaving "capacity has
+saturated" entangled with the rule. The bracket (width 2.0 at 1.25e-4) remains
+the only thing that separates them, and remains unrun.
 
 ## Takeaways
 
-_Pending._
+_Pending `06_w3`._
