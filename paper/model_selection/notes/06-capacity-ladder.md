@@ -153,6 +153,31 @@ does not pay** — the practically useful conclusion — while leaving "capacity
 saturated" entangled with the rule. The bracket (width 2.0 at 1.25e-4) remains
 the only thing that separates them, and remains unrun.
 
+## `06_w3` is paused, not abandoned
+
+Stopped 2026-08-13 09:5x at **epoch 119 of 488** (~24%, ~23 h in) to free GPU 1.
+Nothing is lost: `last.ckpt` was written at epoch 119 and `launch.py --resume`
+passes `--ckpt_path`, which restores the optimizer and the cosine scheduler
+alongside the weights.
+
+```bash
+uv run python paper/model_selection/launch.py 06_w3 --gpu 1 \
+  --resume /mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/model_selection/06_w3/last.ckpt
+```
+
+then `evaluate.py 06_w3 --gpu 1` as usual. Roughly **70 h remain**.
+
+**Why the resume must carry `--ckpt_path` rather than restart.** The cosine
+horizon is `max_epochs`, so a fresh start would anneal a second time over a new
+488 epochs — a different lr trajectory from the one `05_lr5e-4` and `06_w2` ran
+under, and the ladder comparison would silently stop being controlled. Resuming
+continues the original schedule. If the checkpoint is ever lost, the rung must
+be restarted from epoch 0, not patched.
+
+Best validation so far, for reference while it is paused: 0.5774 at epoch 111,
+against `05_lr5e-4`'s 0.6222 final — but at epoch 119 of 488 the lr has barely
+annealed, so this says nothing yet about the rung's outcome.
+
 ## Takeaways
 
 _Pending `06_w3`._
