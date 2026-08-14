@@ -26,7 +26,7 @@ def plot_panel_b(ax=None, data=None, example=None,
     w = example["psth_window"]
     ax.plot(t[w], example["robs_trace"][w], 'k', linewidth=1, label="Observed")
     ax.plot(t[w], example["rhat_trace"][w], color='tab:red',
-            linewidth=1, label="Twin")
+            linewidth=1, label="Model")
     ax.set_xlim(0, example["window_s"])
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("Rate (sp/s)")

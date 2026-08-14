@@ -175,9 +175,13 @@ class MultiDatasetDM(pl.LightningDataModule):
 
         # Prepare datasets
         self.train_dsets, self.val_dsets, self.name2idx = {}, {}, {}
+        # Only populated when the dataset configs declare a `test_split`. The
+        # figure 1-4 configs do not, so this stays empty on the default path.
+        self.test_dsets = {}
         for idx, (cfg, name) in enumerate(zip(self.cfgs, self.names)):
             print(f"Processing dataset {idx+1}/{len(self.cfgs)}: {name}")
             cfg["_dataset_name"] = name
+            want_test = cfg.get("test_split", None) is not None
 
             if self.dset_dtype == 'uint8':
                 # Path 1: uint8 storage (current behavior)
@@ -192,17 +196,27 @@ class MultiDatasetDM(pl.LightningDataModule):
                 # Remove pixelnorm from config
                 cfg, norm_removed = remove_pixel_norm(cfg)
 
-                tr, va, _ = prepare_data(cfg, strict=True)
+                if want_test:
+                    tr, va, te, _ = prepare_data(cfg, strict=True, return_test=True)
+                else:
+                    tr, va, _ = prepare_data(cfg, strict=True)
+                    te = None
 
                 # Wrap with Float32View for on-the-fly normalization
                 self.train_dsets[name] = Float32View(tr, norm_removed, float16=False)
                 self.val_dsets[name] = Float32View(va, norm_removed, float16=False)
+                if te is not None:
+                    self.test_dsets[name] = Float32View(te, norm_removed, float16=False)
 
             else:
                 # Path 2: bfloat16 or float32 storage (new behavior)
                 # Keep all transforms including pixelnorm
 
-                tr, va, _ = prepare_data(cfg, strict=True)
+                if want_test:
+                    tr, va, te, _ = prepare_data(cfg, strict=True, return_test=True)
+                else:
+                    tr, va, _ = prepare_data(cfg, strict=True)
+                    te = None
 
                 # Cast to requested dtype
                 dtype_map = {
@@ -213,10 +227,14 @@ class MultiDatasetDM(pl.LightningDataModule):
 
                 tr.cast(target_dtype, target_keys=['stim', 'robs', 'dfs', 'behavior'])
                 va.cast(target_dtype, target_keys=['stim', 'robs', 'dfs', 'behavior'])
+                if te is not None:
+                    te.cast(target_dtype, target_keys=['stim', 'robs', 'dfs', 'behavior'])
 
                 # Store directly without Float32View wrapper
                 self.train_dsets[name] = tr
                 self.val_dsets[name] = va
+                if te is not None:
+                    self.test_dsets[name] = te
 
             self.name2idx[name] = idx
 
@@ -425,4 +443,19 @@ class MultiDatasetDM(pl.LightningDataModule):
         limit_val_batches is set to a small fraction.
         """
         return self._mk_loader(self.val_dsets, shuffle=True)
+
+    def test_dataloader(self):
+        """Create the held-out test dataloader.
+
+        Only available when the dataset configs declare a `test_split`. Raises
+        rather than falling back to validation: reporting a selection split as
+        a test split is the bias the third split exists to remove.
+        """
+        if not getattr(self, 'test_dsets', None):
+            raise RuntimeError(
+                "No test datasets were built. Add a `test_split` key to the "
+                "dataset configs (the model-selection protocol declares 0.15) "
+                "and re-run setup(). Refusing to fall back to the validation "
+                "split, which would report selection data as a test score.")
+        return self._mk_loader(self.test_dsets, shuffle=True)
 

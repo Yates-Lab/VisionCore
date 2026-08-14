@@ -141,8 +141,8 @@ def _filter_subjects(data, omit=OMIT_SUBJECTS):
             for key in ("rho_uncorr", "rho_corr", "subject_per_pair"):
                 m[key] = np.asarray(m_dict[key])[pair_mask]
 
-            for key in ("rho_u_meanz_by_ds", "rho_c_meanz_by_ds",
-                        "rho_delta_meanz_by_ds", "subject_by_ds"):
+            for key in ("rho_u_mean_by_ds", "rho_c_mean_by_ds",
+                        "rho_delta_mean_by_ds", "subject_by_ds"):
                 m[key] = np.asarray(m_dict[key])[ds_mask]
             for key in ("Ctotal", "Cpsth", "Crate", "CnoiseU",
                         "CnoiseC", "Cfem"):
@@ -150,7 +150,7 @@ def _filter_subjects(data, omit=OMIT_SUBJECTS):
                     values = np.asarray(m_dict[key], dtype=object)
                     m[key] = values[ds_mask].tolist()
 
-            for key in ("shuff_rho_delta_meanz", "shuff_rho_c_meanz",
+            for key in ("shuff_rho_delta_mean", "shuff_rho_c_mean",
                         "shuff_rho_subject", "shuff_rho_session"):
                 if key in m_dict:
                     m[key] = np.asarray(m_dict[key])[shuff_mask]
@@ -388,13 +388,13 @@ def _plot_compact_cov_decomp(fig, subplot_spec, data, letter="D",
     top_titles = [
         "Total covariance",
         "Stimulus covariance",
-        "Classical residual",
+        "Uncorrected residual",
     ]
     bot_titles = [
         "Total covariance",
         "Stimulus covariance",
         "FEM component",
-        "Corrected residual",
+        "Residual",
     ]
     matrix_image = None
     for ax, mat, title in zip(

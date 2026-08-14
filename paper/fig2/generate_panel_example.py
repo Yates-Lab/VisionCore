@@ -472,9 +472,15 @@ def plot_unaccounted_variance_panel(ax, decomp=None, caption=True):
     # 1 -> 0, so "left" on screen is the large-Δe end.
     ax.text(0.99, Ctotal + 0.015 * y_hi, "Total variability",
             fontsize=7.5, ha="left", va="bottom")
-    # Internal-noise floor label (just above its line at mid-x).
-    ax.text(0.30, sigma_int + 0.012 * y_hi, "Internal variability",
+    # Residual floor label (just above its line at mid-x).
+    ax.text(0.30, sigma_int + 0.012 * y_hi, r"$\sigma^2_{\mathrm{res}}$",
             color="0.35", fontsize=7.5, ha="right", va="bottom")
+    # Uncorrected residual: the eye-blind asymptote. Labelled at the strict-
+    # threshold end (screen-right under the reversed axis), where the band
+    # between this line and the total is clear of the decomposition bar.
+    ax.text(0.02, U_naive + 0.015 * y_hi,
+            r"$\sigma^{2,\mathrm{unc}}_{\mathrm{res}}$",
+            fontsize=7.5, ha="right", va="bottom")
 
     # Decomposition bar at x = xa (the loose-threshold end, screen-left under
     # the reversed axis): FEM (internal floor -> eye-blind level) in blue,
@@ -512,7 +518,7 @@ def plot_unaccounted_variance_panel(ax, decomp=None, caption=True):
         # Take-home: descriptive phrase bottom-left, fraction equation
         # bottom-right (larger so it reads clearly).
         ax.text(0.02, 0.04,
-                "Fraction of consistent\nvariability obscured\nby eye movements",
+                "Fraction of\nconditional rate\nvariance obscured\nby eye movements",
                 transform=ax.transAxes, fontsize=7.0, ha="left", va="bottom")
         ax.text(0.99, 0.05,
                 r"$f_{\mathrm{FEM}} = \frac{\sigma^2_{\mathrm{FEM}}}"
@@ -523,7 +529,7 @@ def plot_unaccounted_variance_panel(ax, decomp=None, caption=True):
     ax.set_xlim(1.03, -0.05)
     ax.set_ylim(0.0, y_hi)
     ax.set_xlabel("Eye-trajectory mismatch threshold, Δe < x (°)")
-    ax.set_ylabel("Unaccounted-for variability (spk²)")
+    ax.set_ylabel("Residual variability (spk²)")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     return float(U[-1]), Ctotal

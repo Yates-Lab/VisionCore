@@ -115,7 +115,7 @@ def draw_raster_pair(ax, robs_rate, rhat_rate, *, window_s, vmin, vmax,
     ax.axvline(window_s, color="k", linewidth=0.8)
     ax.text(0.25, 1.02, "Observed", transform=ax.transAxes,
             ha="center", va="bottom", fontsize=label_fontsize)
-    ax.text(0.75, 1.02, "Twin", transform=ax.transAxes,
+    ax.text(0.75, 1.02, "Model", transform=ax.transAxes,
             ha="center", va="bottom", fontsize=label_fontsize)
     ax.set_xticks([])
     ax.set_yticks([])

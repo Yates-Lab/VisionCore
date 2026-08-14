@@ -482,7 +482,7 @@ if __name__ == "__main__":
             fs = b["fano_stats"][w]
             nc = b["nc_stats"][w]
             print(f"  [{mode}/{cond}] @25ms: Fano unc={fs['slope_unc']:.3f} "
-                  f"cor={fs['slope_cor']:.3f} | NC z_u={nc['z_u_mean']:.3f} "
-                  f"z_c={nc['z_c_mean']:.3f} | {b['n_sessions']} sessions")
+                  f"cor={fs['slope_cor']:.3f} | NC r_u={nc['r_u_mean']:.3f} "
+                  f"r_c={nc['r_c_mean']:.3f} | {b['n_sessions']} sessions")
     if args.fig2_ref:
         load_fig2_reference(refresh=args.refresh)

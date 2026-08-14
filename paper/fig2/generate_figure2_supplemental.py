@@ -138,14 +138,14 @@ def write_stats_report(data=None):
                 s = nc_stats[w]
                 print(f"\nWindow {w:.1f} ms ({s['n_pairs']} pairs, "
                       f"{s['n_ds']} datasets):")
-                print(f"  z_uncorr = {s['z_u_mean']:.4f} "
-                      f"[{s['z_u_ci'][0]:.4f}, {s['z_u_ci'][1]:.4f}]")
-                print(f"  z_corr   = {s['z_c_mean']:.4f} "
-                      f"[{s['z_c_ci'][0]:.4f}, {s['z_c_ci'][1]:.4f}]")
-                print(f"  delta_z  = {s['dz_mean']:.4f} "
-                      f"[{s['dz_ci'][0]:.4f}, {s['dz_ci'][1]:.4f}]")
+                print(f"  r_uncorr = {s['r_u_mean']:.4f} "
+                      f"[{s['r_u_ci'][0]:.4f}, {s['r_u_ci'][1]:.4f}]")
+                print(f"  r_corr   = {s['r_c_mean']:.4f} "
+                      f"[{s['r_c_ci'][0]:.4f}, {s['r_c_ci'][1]:.4f}]")
+                print(f"  delta_r  = {s['dr_mean']:.4f} "
+                      f"[{s['dr_ci'][0]:.4f}, {s['dr_ci'][1]:.4f}]")
                 print(f"  Wilcoxon p={s['p_wil']:.3g}, "
-                      f"empirical p={s['p_emp_dz']:.4f}")
+                      f"empirical p={s['p_emp_dr']:.4f}")
 
             print("\n" + "=" * 80)
             print("SUBSPACE STATISTICS")

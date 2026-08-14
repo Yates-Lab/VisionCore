@@ -29,7 +29,6 @@ convnet:
   type: resnet
   params:
     channels: [16, 32]
-    checkpointing: false
     stem_config:
       out_channels: 8
       conv_params:

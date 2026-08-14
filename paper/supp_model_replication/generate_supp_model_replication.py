@@ -140,7 +140,7 @@ def make_figure(n_shuffles=200, seed=100, refresh=False):
         fs, nc = data["fano_stats"][w], data["nc_stats"][w]
         tag = "empirical" if cond is None else cond
         print(f"[{tag:<10}] Fano: {fs['slope_unc']:.3f} -> {fs['slope_cor']:.3f} "
-              f"| NC: {np.tanh(nc['z_u_mean']):.3f} -> {np.tanh(nc['z_c_mean']):.3f}")
+              f"| NC: {nc['r_u_mean']:.3f} -> {nc['r_c_mean']:.3f}")
 
 
 if __name__ == "__main__":

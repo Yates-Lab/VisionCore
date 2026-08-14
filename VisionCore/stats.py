@@ -40,6 +40,24 @@ def bootstrap_mean_ci(x, nboot=5000, ci=0.95, seed=0):
     return float(x.mean()), (float(lo), float(hi))
 
 
+def bootstrap_median_ci(x, nboot=5000, ci=0.95, seed=0):
+    """
+    Bootstrap confidence interval for the median.
+
+    Returns: (median, (ci_lo, ci_hi))
+    """
+    x = np.asarray(x, dtype=float)
+    x = x[np.isfinite(x)]
+    if x.size == 0:
+        return np.nan, (np.nan, np.nan)
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, x.size, size=(nboot, x.size))
+    boot_medians = np.median(x[idx], axis=1)
+    alpha = (1 - ci) / 2
+    lo, hi = np.percentile(boot_medians, [100 * alpha, 100 * (1 - alpha)])
+    return float(np.median(x)), (float(lo), float(hi))
+
+
 def bootstrap_paired_diff_ci(a, b, nboot=5000, ci=0.95, seed=0):
     """
     Bootstrap CI for mean(a - b) using paired resampling.

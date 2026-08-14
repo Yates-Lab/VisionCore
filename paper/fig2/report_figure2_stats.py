@@ -8,7 +8,7 @@ text should be traceable to a line printed here.
 Panels:
     C  1 - alpha          FEM fraction of single-neuron rate variance
     E  Fano               single-neuron geometric-mean ratio + population slope
-    F  noise correlation  Fisher-z mean, uncorrected vs FEM-corrected
+    F  noise correlation  mean rho, uncorrected vs FEM-corrected
     G  participation ratio corrected residual vs stimulus vs FEM components
     I  subspace alignment  variance captured (both directions) + overlap_k1
 
@@ -86,7 +86,8 @@ def report_alpha(bundles):
         for w in windows:
             s = astats[w]
             line = (f"    {w:5.1f} ms: n={s['n']:4d}  "
-                    f"median={_fmt(s['median'])} IQR=[{_fmt(s['iqr'][0])}, "
+                    f"median={_fmt(s['median'])} 95%CI={_ci(s['median_ci'])} "
+                    f"IQR=[{_fmt(s['iqr'][0])}, "
                     f"{_fmt(s['iqr'][1])}]  mean={_fmt(s['mean'])} "
                     f"95%CI={_ci(s['ci'])}")
             if label == "pooled":
@@ -128,24 +129,22 @@ def report_fano(pooled):
 
 
 # --------------------------------------------------------------------------- #
-# Panel F: noise correlations (Fisher-z)
+# Panel F: noise correlations
 # --------------------------------------------------------------------------- #
 def report_noisecorr(pooled):
-    section("PANEL F  -  noise correlations  (Fisher-z, uncorrected vs FEM-corrected)")
+    section("PANEL F  -  noise correlations  (mean rho, uncorrected vs FEM-corrected)")
     windows = pooled["WINDOWS_MS"]
     ns = pooled["nc_stats"]
     for w in windows:
         s = ns[w]
-        rho_u = np.tanh(s["z_u_mean"])
-        rho_c = np.tanh(s["z_c_mean"])
         print(f"\n    {w:5.1f} ms: n_pairs={s['n_pairs']}  n_datasets={s['n_ds']}")
-        print(f"      mean rho (from z): {_fmt(rho_u, 4)} -> {_fmt(rho_c, 4)}")
-        print(f"      z_uncorr={_fmt(s['z_u_mean'], 4)} {_ci(s['z_u_ci'], 4)}  "
-              f"z_corr={_fmt(s['z_c_mean'], 4)} {_ci(s['z_c_ci'], 4)}")
-        print(f"      delta_z={_fmt(s['dz_mean'], 4)} {_ci(s['dz_ci'], 4)}  "
+        print(f"      mean rho: {_fmt(s['r_u_mean'], 4)} -> {_fmt(s['r_c_mean'], 4)}")
+        print(f"      r_uncorr={_fmt(s['r_u_mean'], 4)} {_ci(s['r_u_ci'], 4)}  "
+              f"r_corr={_fmt(s['r_c_mean'], 4)} {_ci(s['r_c_ci'], 4)}")
+        print(f"      delta_r={_fmt(s['dr_mean'], 4)} {_ci(s['dr_ci'], 4)}  "
               f"Wilcoxon p={_fmt(s['p_wil'], 5)}")
-        print(f"      shuffle-null delta_z 95%CI={_ci(s['null_dz_ci'], 4)}  "
-              f"p_emp={_fmt(s['p_emp_dz'], 5)} (n_shuff={s['n_shuff_dz']})")
+        print(f"      shuffle-null delta_r 95%CI={_ci(s['null_dr_ci'], 4)}  "
+              f"p_emp={_fmt(s['p_emp_dr'], 5)} (n_shuff={s['n_shuff_dr']})")
 
 
 # --------------------------------------------------------------------------- #

@@ -29,7 +29,6 @@ convnet:
   type: densenet
   params:
     channels: [64, 196]
-    checkpointing: false
     stem_config:
       out_channels: 8
       conv_params:

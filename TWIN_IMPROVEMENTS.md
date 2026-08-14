@@ -4,6 +4,16 @@ Running list of digital-twin fragilities and planned improvements. We append
 line items here as we hit them, then do a consolidated refactor + retraining
 run once there's time for another training cycle and polish.
 
+**Status as of 2026-08-04** (Stage 0 of `paper/model_selection/`):
+
+| Item | Status |
+|---|---|
+| 1. Readout-size drift | **Done.** `eval/load_twin.py` sizes readouts from the checkpoint's `state_dict` and names the drifting session; `MultiDatasetModel` now snapshots resolved cids into `hparams.dataset_cids`, so new checkpoints are self-contained. |
+| 2. `behavior=None` skips the modulator | **Done.** `models/modules/models.py::require_behavior` raises in both `core_forward` implementations. |
+| 3. Allen/Logan imbalance | **Resolved — premise refuted.** See below; do not implement balancing on this basis. |
+| 4. (twin, config, mcfarland) triple | Open, deferred to Tier 2. |
+| 5. fig2-superset population | **Resolved — invariant already held.** Fixed analysis-side instead; see below. |
+
 ---
 
 ## 1. Readout-size mismatch when loading a twin (config drift)
@@ -105,14 +115,48 @@ is a real ablation, not a neutral default.
 
 ## 3. Allen/Logan sample imbalance — equalize per-monkey weight
 
-The twin underperforms on Logan's data because training is dominated by Allen:
-there are simply far more samples/sessions from Allen than from Logan, so the
-shared core is pulled toward Allen's statistics.
+> **RESOLVED 2026-08-04 — the stated mechanism does not exist. Do not implement
+> per-subject balancing on this basis.** Evidence:
+> `paper/model_selection/data_census.py`, `paper/model_selection/subject_gap.py`.
 
-Planned fix: **sample evenly from the two monkeys** during training (balanced
-per-subject sampling / loss weighting) so Allen and Logan contribute equal
-weight, rather than weighting by raw sample count. Revisit on the next training
-run.
+The original claim was that "there are simply far more samples/sessions from
+Allen than from Logan". Measured over all 30 training sessions:
+
+| subject | sessions | units | train samples | session share | sample share | unit share |
+|---|---|---|---|---|---|---|
+| Allen | 14 | 1989 | 4,227,251 | 46.7% | **51.8%** | 71.3% |
+| Logan | 16 | 801 | 3,935,261 | 53.3% | **48.2%** | 28.7% |
+
+Sample counts are near-equal and Logan contributes *more* sessions. Only unit
+counts are lopsided, and unit count never enters the weighting: `MaskedLoss` is
+a masked mean over (samples x units) within a session, and `training_step`
+averages over the sessions present in the batch
+(`multidataset_model.py:473`). With `homogeneous_batches=False` (the default,
+and what trained the paper model) a 256-sample batch over 30 sessions contains
+essentially every session, so **each session carries equal weight per step**
+regardless of its size or unit count. Per unit, Logan is therefore already
+weighted ~2.5x more heavily than Allen. Equalizing subjects would slightly
+*reduce* Logan's weight.
+
+The held-out difference is real but not reliably nonzero: median CC_norm 0.653
+(Allen, 1255 units) vs 0.570 (Logan, 448), a gap of -0.083 whose
+session-clustered 95% CI is [-0.181, +0.041]. Logan's session medians span
+0.398-0.860, so between-session variance dominates. Logan's included cells are
+also harder: 10.3 vs 19.3 Hz median rate, split-half PSTH R^2 0.066 vs 0.178.
+Matching units on rate and reliability shrinks the CC_abs gap from -0.131
+[-0.214, -0.020] to **-0.016 [-0.091, +0.058]** — i.e. essentially all of the
+absolute deficit is population difficulty, not fit quality.
+
+One mechanism remains untested: whether joint training *interferes* with either
+subject. That is a training question a census cannot answer, so it is now
+Stage 0 arm E5 (`launch.py`), comparing Allen-only and Logan-only models
+against the joint model on the same sessions. A weighting change is warranted
+only if that shows negative transfer.
+
+Note the coupling: `ByDatasetBatchSampler` (i.e. `homogeneous_batches=True`)
+draws a session with p proportional to its size, which *would* make sample
+share the effective weight. Arm E1 therefore doubles as the subject-weighting
+manipulation.
 
 ---
 
@@ -163,6 +207,33 @@ the same drift class as item 1, one level up.
 ---
 
 ## 5. Standardize the twin's population to be a superset of the fig2 units
+
+> **RESOLVED 2026-08-04 — the invariant already held; no retraining needed.**
+>
+> `fig2_analyzed ⊆ twin_readout` is true *by construction*. Both populations are
+> built from the same per-session YAML `cids`: fig2's `_align_one_session`
+> (`paper/covariance_decomposition/data_loading.py:95`) calls `prepare_data` on
+> the session config, so its `neuron_mask` indexes cids-space, and it aligns
+> with `min_total_spikes=0`. The twin's readout is `len(cids)`. fig2 cannot
+> include a unit the twin has no readout for.
+>
+> The cells that went missing were lost to an *analysis* threshold, not a
+> training population: `paper/fig3/_fig3_data.py` filtered inference units at
+> `MIN_TOTAL_SPIKES = 200`. Under the current inclusion rules (rate > 2 Hz,
+> PSTH R^2 > 0.10, 10-unit session floor) that dropped 28 of fig2's 1022
+> analyzed cells (2.7%) — the figure quoted below (76 cells, 5.6%) predates the
+> R^2 > 0.10 threshold.
+>
+> The invariant is now asserted at load time by `eval/load_twin.py`.
+>
+> `MIN_TOTAL_SPIKES` in `_fig3_data.py` **stays at 200**. Lowering it to 0 was
+> tried on 2026-08-04 and reverted the same day: panel D scores every cell in a
+> session on one shared window set (`np.isfinite(robs).all(axis=2)`,
+> `_fig3_explainable_variance.py:98`), so admitting a cell that was isolated for
+> only part of a session deletes its absent bins for all of its neighbours. Ten
+> of 24 sessions lost base windows, 8 by more than a quarter, to recover 25
+> panel C cells. fig3 therefore reports its published numbers unchanged. See
+> `paper/model_selection/MODEL_CARD.md`.
 
 ### Motivation
 

@@ -13,6 +13,46 @@ import torch._dynamo as dynamo
 # Type aliases for clarity
 ConfigDict = Dict[str, Any]
 
+
+def require_behavior(modulator, behavior, where="core_forward"):
+    """Refuse to run a behavior-conditioned model without a behavior tensor.
+
+    A `concat` modulator widens the feature stack by `modulator_dim` channels,
+    and the recurrent layer is built for that width. Skipping the modulator
+    because `behavior` happens to be None therefore feeds the recurrent stack
+    the wrong channel count: a crash if you are lucky, silently wrong features
+    if you are not.
+
+    Parameters
+    ----------
+    modulator : nn.Module or None
+        The model's modulator. None (a `none`-modulator twin) always passes.
+    behavior : torch.Tensor or None
+        The behavior tensor for this forward pass.
+    where : str
+        Call site name, for the error message.
+
+    Raises
+    ------
+    ValueError
+        If the model has a modulator but no behavior was supplied.
+    """
+    if modulator is None or behavior is not None:
+        return
+
+    behavior_dim = getattr(modulator, "behavior_dim", None)
+    dim_hint = (f"shape (batch, {behavior_dim})" if behavior_dim is not None
+                else "the modulator's behavior_dim")
+    raise ValueError(
+        f"{where} received behavior=None on a model with a "
+        f"{type(modulator).__name__}. This model is behavior-conditioned: its "
+        f"recurrent stack is sized for the modulated feature width, so "
+        f"skipping the modulator would feed it the wrong channel count. Pass "
+        f"a tensor of {dim_hint}. Note that passing zeros is a deliberate "
+        f"ablation, not a neutral default -- for the current twin the behavior "
+        f"input is entirely eye-movement derived (eye velocity through a "
+        f"raised-cosine basis, plus raw eye position).")
+
 class ModularV1Model(nn.Module):
     """
     A modular V1 model architecture that allows easy swapping of components.
@@ -199,7 +239,8 @@ class ModularV1Model(nn.Module):
         feats = self.convnet(x)
 
         # Process through modulator
-        if self.modulator is not None and behavior is not None:
+        require_behavior(self.modulator, behavior, where="ModularV1Model.core_forward")
+        if self.modulator is not None:
             feats = self.modulator(feats, behavior)
 
         # Process through recurrent
@@ -440,7 +481,9 @@ class MultiDatasetV1Model(ModularV1Model):
         feats = self.convnet(feats)
 
         # Process through shared modulator
-        if self.modulator is not None and behavior is not None:
+        require_behavior(self.modulator, behavior,
+                         where="MultiDatasetModel.core_forward")
+        if self.modulator is not None:
             feats = self.modulator(feats, behavior)
 
         # Process through shared recurrent

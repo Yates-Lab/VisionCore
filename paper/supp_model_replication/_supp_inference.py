@@ -79,7 +79,6 @@ def run_inference(force=False):
     print(f"Loading model from: {CHECKPOINT_PATH}")
     model, model_info = load_model(checkpoint_path=CHECKPOINT_PATH, device=str(device))
     model.model.eval()
-    model.model.convnet.use_checkpointing = False
     print(f"Model loaded: {model_info['experiment']}, epoch {model_info['epoch']}")
     print(f"  fixation_radius={FIXATION_RADIUS} (fig2 frame), "
           f"min_total_spikes={MIN_TOTAL_SPIKES}, conditions={CONDS}")

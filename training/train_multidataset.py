@@ -96,7 +96,12 @@ def main():
     # Curriculum learning and batching
     p.add_argument("--enable_curriculum", action="store_true", default=False,
                    help="Enable curriculum learning (uses callback; works with ByDatasetBatchSampler on 1 GPU)")
-    p.add_argument("--homogeneous_batches", action="store_true", default=True,
+    # BooleanOptionalAction, not store_true: with store_true and default=True
+    # there was no way to switch this off, so the cross-session batching path
+    # (the one the paper model was trained under, via the DDP script) was
+    # unreachable from this script. Use --no-homogeneous_batches to disable.
+    p.add_argument("--homogeneous_batches", action=argparse.BooleanOptionalAction,
+                   default=True,
                    help="Yield one dataset per batch via ByDatasetBatchSampler (faster on 1 GPU)")
 
     # Pretrained models
@@ -120,6 +125,14 @@ def main():
                    help="GPU index to use (e.g., 0 or 1)")
     p.add_argument("--num_workers", type=int, default=16,
                    help="Number of dataloader workers")
+    # Validation cost control. This script previously hard-coded
+    # limit_val_batches=1.0, so one validation pass ran the entire validation
+    # set -- ~5900 batches, ~22 min, every epoch. That dominates any short run.
+    # Defaults here reproduce the old behaviour exactly.
+    p.add_argument("--limit_val_batches", type=float, default=1.0,
+                   help="Fraction of validation batches per validation pass")
+    p.add_argument("--check_val_every_n_epoch", type=int, default=1,
+                   help="Run validation every N epochs")
     p.add_argument("--steps_per_epoch", type=int, default=1000,
                    help="Number of training steps per epoch")
 
@@ -131,9 +144,30 @@ def main():
     p.add_argument("--checkpoint_dir", type=str, default="./checkpoints",
                    help="Directory for saving checkpoints")
 
+    p.add_argument("--ckpt_path", type=str, default=None,
+                   help="Checkpoint to resume from (restores optimizer, "
+                        "scheduler and epoch). Default None starts fresh.")
+    # Default None leaves the run unseeded, which is the historical behaviour.
+    # Note what this does and does not control: the trial splits re-seed the
+    # global RNG themselves inside `split_inds_by_trial*` (splitting.py), so
+    # they are fixed at SPLIT_SEED regardless of this flag, and so is the batch
+    # order that follows data preparation. Two runs differing only in --seed
+    # therefore differ in weight initialisation and GPU nondeterminism, not in
+    # which trials they see or the order they see them in.
+    p.add_argument("--seed", type=int, default=None,
+                   help="Seed for weight init (see note in source). None = unseeded.")
+
     # Early stopping
+    # Patience counts *validation calls*, not epochs, so with
+    # --check_val_every_n_epoch N the effective horizon is patience * N epochs.
+    # Sample-budgeted comparison runs want no early stopping at all: stopping
+    # mid-cosine leaves the learning rate un-annealed and the arms no longer
+    # compute-matched. Use --no-early_stopping for those.
+    p.add_argument("--early_stopping", action=argparse.BooleanOptionalAction,
+                   default=True,
+                   help="Enable early stopping on val_bps_overall")
     p.add_argument("--early_stopping_patience", type=int, default=10,
-                   help="Early stopping patience (epochs)")
+                   help="Early stopping patience (validation calls)")
     p.add_argument("--early_stopping_min_delta", type=float, default=0.0,
                    help="Minimum change to qualify as improvement")
 
@@ -148,6 +182,9 @@ def main():
                    help="Dataset index to evaluate during slow logging")
 
     args = p.parse_args()
+
+    if args.seed is not None:
+        pl.seed_everything(args.seed, workers=True)
 
     # ---------------------------------------------------------------------
     # Experiment name
@@ -211,16 +248,19 @@ def main():
         LearningRateMonitor(logging_interval="epoch"),
         # Epoch heartbeat
         EpochHeartbeat(metric_key="train_loss"),
-        # Early stopping
-        EarlyStopping(
-            monitor="val_bps_overall",
-            mode="max",
-            patience=args.early_stopping_patience,
-            min_delta=args.early_stopping_min_delta,
-            verbose=True,
-            check_on_train_epoch_end=False,
-        ),
     ]
+
+    if args.early_stopping:
+        callbacks.append(
+            EarlyStopping(
+                monitor="val_bps_overall",
+                mode="max",
+                patience=args.early_stopping_patience,
+                min_delta=args.early_stopping_min_delta,
+                verbose=True,
+                check_on_train_epoch_end=False,
+            )
+        )
 
     # Add curriculum callback if enabled (no‑op unless sampler supports set_step)
     if args.enable_curriculum:
@@ -255,7 +295,8 @@ def main():
         # Training duration
         max_epochs=args.max_epochs,
         limit_train_batches=args.steps_per_epoch,
-        limit_val_batches=1.0,
+        limit_val_batches=args.limit_val_batches,
+        check_val_every_n_epoch=args.check_val_every_n_epoch,
         num_sanity_val_steps=0,
 
         # Hardware
@@ -295,7 +336,7 @@ def main():
     # ---------------------------------------------------------------------
     # Train!
     # ---------------------------------------------------------------------
-    trainer.fit(model, datamodule=dm)
+    trainer.fit(model, datamodule=dm, ckpt_path=args.ckpt_path)
 
 
 if __name__ == "__main__":

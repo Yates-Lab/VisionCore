@@ -311,7 +311,6 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH):
     print(f"Loading model from: {CHECKPOINT_PATH}")
     model, model_info = load_model(checkpoint_path=CHECKPOINT_PATH, device=str(device))
     model.model.eval()
-    model.model.convnet.use_checkpointing = False
     print(f"Model loaded: {model_info['experiment']}, epoch {model_info['epoch']}")
 
     results = []

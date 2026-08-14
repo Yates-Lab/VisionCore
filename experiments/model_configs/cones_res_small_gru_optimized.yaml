@@ -43,7 +43,6 @@ convnet:
     final_activation: none
     channels: [8, 256, 128]  # ORIGINAL channel progression (kept!)
     dim: 3
-    checkpointing: false
     block_configs:
 
       # Stage 0: keep full res, no pooling

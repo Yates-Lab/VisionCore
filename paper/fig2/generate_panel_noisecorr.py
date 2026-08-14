@@ -5,7 +5,7 @@ Figure 2 noise correlation panels.
                       violins (uncorrected vs FEM-corrected) with the across-
                       dataset mean +/- SD marker, a shuffle-null band, and the
                       shuffle-null p-value. Main-figure Panel F.
-    plot_panel_c      mean Fisher-z noise correlation vs counting window, per
+    plot_panel_c      mean noise correlation vs counting window, per
                       subject. Window-robustness supplemental.
 """
 import numpy as np
@@ -20,7 +20,7 @@ def plot_nc_violin(ax=None, refresh=False, data=None, window_ms=25.0):
     """Single-window per-pair noise correlation (rho), matching panel E's
     grammar: grey violins of the per-pair distribution (uncorrected vs
     FEM-corrected) with the across-dataset mean noise correlation overlaid as
-    open->filled markers +/- SD (computed in Fisher-z, shown in rho), joined by
+    open->filled markers +/- SD, joined by
     a line. A grey shuffle-null band at the corrected marker shows where the
     corrected mean would fall under the principled delta-correlation shuffle,
     and the bracket carries stars + the explicit shuffle-null p-value."""
@@ -34,21 +34,20 @@ def plot_nc_violin(ax=None, refresh=False, data=None, window_ms=25.0):
     w = nearest_window(data["WINDOWS_MS"], window_ms)
     s = data["nc_stats"][w]
 
-    # Markers: across-dataset mean per-dataset mean correlation, in Fisher-z
-    # (the entity the shuffle null is defined on), back-transformed to rho.
-    # SD whiskers are likewise z -> tanh, hence asymmetric in rho.
-    zu, zc = s["z_u_mean"], s["z_c_mean"]
-    su, sc = s["z_u_sd"], s["z_c_sd"]
-    mean_u, mean_c = float(np.tanh(zu)), float(np.tanh(zc))
-    err_u = (float(np.tanh(zu - su)), float(np.tanh(zu + su)))
-    err_c = (float(np.tanh(zc - sc)), float(np.tanh(zc + sc)))
+    # Markers: across-dataset mean of the per-dataset mean correlation, with
+    # +/- SD whiskers across datasets.
+    ru, rc = s["r_u_mean"], s["r_c_mean"]
+    su, sc = s["r_u_sd"], s["r_c_sd"]
+    mean_u, mean_c = float(ru), float(rc)
+    err_u = (float(ru - su), float(ru + su))
+    err_c = (float(rc - sc), float(rc + sc))
 
     # Shuffle-null band (2.5-97.5%) for the corrected mean = uncorrected mean +
-    # null delta-z. The null is the across-session-mean delta-z under the
+    # null delta-r. The null is the across-session-mean delta-r under the
     # eye-trajectory shuffle (same aggregation level as the observed mean).
-    dz_lo, dz_hi = s["null_dz_ci"]
-    null_lo = float(np.tanh(zu + dz_lo))
-    null_hi = float(np.tanh(zu + dz_hi))
+    dr_lo, dr_hi = s["null_dr_ci"]
+    null_lo = float(ru + dr_lo)
+    null_hi = float(ru + dr_hi)
 
     pair_violin(
         ax,
@@ -56,7 +55,7 @@ def plot_nc_violin(ax=None, refresh=False, data=None, window_ms=25.0):
         np.asarray(s["rho_c"], dtype=float),
         mean_u=mean_u, mean_c=mean_c, err_u=err_u, err_c=err_c,
         null_lo=null_lo, null_hi=null_hi,
-        p=s["p_emp_dz"], n_shuff=s.get("n_shuff_dz"),
+        p=s["p_emp_dr"], n_shuff=s.get("n_shuff_dr"),
         ref=0.0, ylabel="Noise correlation (ρ)",
     )
     return fig, ax
@@ -93,7 +92,7 @@ def plot_panel_c(ax=None, refresh=False, data=None):
             means, lo, hi = [], [], []
             for m_dict in metrics:
                 ds_mask = np.array([s == subj for s in m_dict["subject_by_ds"]])
-                vals = m_dict[f"rho_{key}_meanz_by_ds"][ds_mask]
+                vals = m_dict[f"rho_{key}_mean_by_ds"][ds_mask]
                 if len(vals) > 0:
                     mn, ci = bootstrap_mean_ci(vals, nboot=5000, seed=0)
                     means.append(mn); lo.append(ci[0]); hi.append(ci[1])
@@ -124,7 +123,7 @@ def plot_panel_c(ax=None, refresh=False, data=None):
 
     ax.axhline(0, color="gray", linestyle=":", alpha=0.6)
     ax.set_xlabel("Counting window (ms)")
-    ax.set_ylabel("Noise correlations (mean Fisher z)")
+    ax.set_ylabel("Noise correlation (ρ)")
     ax.set_xticks(WINDOWS_MS)
     ax.set_xticklabels([f"{w:.0f}" for w in WINDOWS_MS])
     ax.spines["top"].set_visible(False)

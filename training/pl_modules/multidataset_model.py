@@ -141,6 +141,16 @@ class MultiDatasetModel(pl.LightningModule):
         for c, n in zip(self.cfgs, self.names):
             c["_dataset_name"] = n
 
+        # Snapshot the resolved cids into the checkpoint (TWIN_IMPROVEMENTS 1).
+        # Readout sizes are otherwise recoverable only by re-reading the
+        # session YAMLs at load time, so editing those YAMLs later silently
+        # breaks every checkpoint trained against them. With this, a checkpoint
+        # carries its own population and `eval.load_twin` can name a drifting
+        # session instead of dumping tensor-size mismatches.
+        self.hparams.dataset_cids = {
+            n: list(c.get('cids', [])) for c, n in zip(self.cfgs, self.names)
+        }
+
         # Build model using the loaded config
         base_model = build_model(self.model_config, self.cfgs)
 

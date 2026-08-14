@@ -16,7 +16,7 @@ import torch.nn.functional as F
 import numpy as np
 from .datasets import DictDataset, CombinedEmbeddedDataset
 from .filtering import get_valid_dfs
-from .splitting import split_inds_by_trial
+from .splitting import split_inds_by_trial, split_inds_by_trial_train_val_test
 from .transforms import make_pipeline
 from .datafilters import make_datafilter_pipeline
 from ..utils.general import ensure_tensor
@@ -25,7 +25,43 @@ from typing import Dict, Any, List, Tuple
 import yaml
 import copy
 
-def get_embedded_datasets(sess, types=None, keys_lags=None, train_val_split=None, cids=None, seed=1002, pre_func=None, **kwargs):
+def resolve_split_fractions(dataset_config):
+    """Read the split fractions out of a dataset config.
+
+    Returns ``(train_fraction, test_fraction)``, where ``test_fraction`` is
+    None whenever the config does not ask for a three-way split. A missing or
+    null ``test_split`` therefore keeps the historical two-way behaviour, which
+    the figure 1-4 checkpoints depend on.
+
+    Parameters
+    ----------
+    dataset_config : dict
+        Parsed dataset YAML. Uses `train_val_split` (train fraction) and the
+        optional `test_split` (test fraction); validation gets the remainder.
+
+    Returns
+    -------
+    train_fraction : float
+    test_fraction : float or None
+    """
+    train_fraction = dataset_config["train_val_split"]
+    test_fraction = dataset_config.get("test_split", None)
+
+    if test_fraction is None:
+        return train_fraction, None
+
+    if not (0.0 < test_fraction < 1.0):
+        raise ValueError(
+            f"test_split must lie in (0, 1), got {test_fraction!r}")
+    if train_fraction + test_fraction >= 1.0:
+        raise ValueError(
+            f"train_val_split ({train_fraction}) + test_split ({test_fraction}) "
+            f"leaves no validation trials; they must sum to less than 1.")
+
+    return train_fraction, test_fraction
+
+
+def get_embedded_datasets(sess, types=None, keys_lags=None, train_val_split=None, cids=None, seed=1002, pre_func=None, test_split=None, **kwargs):
     """
     Create train and validation datasets from multiple dataset types with time embedding.
 
@@ -51,6 +87,10 @@ def get_embedded_datasets(sess, types=None, keys_lags=None, train_val_split=None
         Random seed for reproducible train/validation splits, default=1002
     pre_func : callable, optional
         Function to apply to each dataset after loading
+    test_split : float, optional
+        Fraction of trials to hold out as a third, test split. When None
+        (default) the two-way splitter runs and only train/val are returned,
+        which is the path every existing checkpoint was trained under.
 
     Returns
     -------
@@ -58,6 +98,8 @@ def get_embedded_datasets(sess, types=None, keys_lags=None, train_val_split=None
         Combined dataset for training
     val_dset : CombinedEmbeddedDataset
         Combined dataset for validation
+    test_dset : CombinedEmbeddedDataset
+        Combined dataset for testing. Only returned when `test_split` is given.
     """
     # Determine maximum number of lags needed based on keys_lags
     n_lags = np.max([np.max(keys_lags[k]) for k in keys_lags])
@@ -98,9 +140,16 @@ def get_embedded_datasets(sess, types=None, keys_lags=None, train_val_split=None
         print(f'{types[iD]} dataset size: {len(dset_inds[iD])} / {len(dset)} ({len(dset_inds[iD])/len(dset)*100:.2f}%)')
 
     # Split indices into training and validation sets by trial
-    train_inds, val_inds = [], []
+    train_inds, val_inds, test_inds = [], [], []
     for iD, dset in enumerate(dsets):
-        train_inds_, val_inds_ = split_inds_by_trial(dset, dset_inds[iD], train_val_split, seed)
+        if test_split is None:
+            train_inds_, val_inds_ = split_inds_by_trial(dset, dset_inds[iD], train_val_split, seed)
+        else:
+            # Validation takes whatever the train and test fractions leave.
+            val_split = 1.0 - train_val_split - test_split
+            train_inds_, val_inds_, test_inds_ = split_inds_by_trial_train_val_test(
+                dset, dset_inds[iD], train_val_split, val_split, seed)
+            test_inds.append(test_inds_)
         train_inds.append(train_inds_)
         val_inds.append(val_inds_)
 
@@ -108,7 +157,10 @@ def get_embedded_datasets(sess, types=None, keys_lags=None, train_val_split=None
     train_dset = CombinedEmbeddedDataset(dsets, train_inds, keys_lags)
     val_dset = CombinedEmbeddedDataset(dsets, val_inds, keys_lags)
 
-    return train_dset, val_dset
+    if test_split is None:
+        return train_dset, val_dset
+
+    return train_dset, val_dset, CombinedEmbeddedDataset(dsets, test_inds, keys_lags)
 
 def get_gaborium_sta_ste(sess, n_lags, cids=None):
     """
@@ -350,7 +402,8 @@ def _create_nan_placeholder_dataset(reference_dset, dataset_name, sess, cids=Non
 # ──────────────────────────────────────────────────────────────────────────────
 # 4.  Prepare_data
 # ──────────────────────────────────────────────────────────────────────────────
-def prepare_data(dataset_config: Dict[str, Any], strict: bool = True):
+def prepare_data(dataset_config: Dict[str, Any], strict: bool = True,
+                 return_test: bool = False):
     """
     Extended prepare_data that supports `transforms:` and `datafilters:` blocks with preprocessing.
 
@@ -361,9 +414,15 @@ def prepare_data(dataset_config: Dict[str, Any], strict: bool = True):
     strict : bool, optional
         If True (default), raises an error if any dataset type is missing.
         If False, skips missing dataset types and continues with available ones.
+    return_test : bool, optional
+        If True, also return the held-out test split, which requires a
+        `test_split` key in the config. Default False keeps the three-value
+        return signature every existing caller unpacks.
+
     Returns
     -------
     train_dset, val_dset, dataset_config  (unchanged downstream interface)
+    train_dset, val_dset, test_dset, dataset_config  (when return_test=True)
     """
     # strict = True
     print("\nPreparing data (with preprocessing)…")
@@ -542,18 +601,29 @@ def prepare_data(dataset_config: Dict[str, Any], strict: bool = True):
     for dset in preprocessed_dsets:
         print(f"  {dset.metadata['name']}: {dset.covariates['stim'].shape}")
         
-    train_dset, val_dset = get_embedded_datasets(
+    train_fraction, test_fraction = resolve_split_fractions(dataset_config)
+    if return_test and test_fraction is None:
+        raise ValueError(
+            f"return_test=True requires a `test_split` key in the dataset "
+            f"config for session {sess_name!r}; found none. Add one (the "
+            f"model-selection protocol declares 0.15) or drop return_test.")
+
+    splits = get_embedded_datasets(
         sess,
         types            = preprocessed_dsets,           # pass in the preprocessed datasets
         keys_lags        = keys_lags,
-        train_val_split  = dataset_config["train_val_split"],
+        train_val_split  = train_fraction,
         cids             = dataset_config.get("cids", None),
         seed             = dataset_config.get("seed", 1002),
         pre_func         = lambda x: x,          # preprocessing already done
+        test_split       = test_fraction,
     )
+    train_dset, val_dset = splits[0], splits[1]
+    test_dset = splits[2] if test_fraction is not None else None
 
     print(f"Train size: {len(train_dset)} samples | "
-          f"Val size: {len(val_dset)} samples")
+          f"Val size: {len(val_dset)} samples"
+          + (f" | Test size: {len(test_dset)} samples" if test_dset is not None else ""))
 
     # IMPORTANT: pass behaviour feature dim back to model yaml --------------
     beh_keys = [v["expose_as"] for v in transform_specs.values()
@@ -562,6 +632,9 @@ def prepare_data(dataset_config: Dict[str, Any], strict: bool = True):
         # assume they were concatenated along last dim already
         sample = train_dset[0]["behavior"]
         dataset_config["behavior_dim"] = sample.shape[-1]
+
+    if return_test:
+        return train_dset, val_dset, test_dset, dataset_config
 
     return train_dset, val_dset, dataset_config
 
