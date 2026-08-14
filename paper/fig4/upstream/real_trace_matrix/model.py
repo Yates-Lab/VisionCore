@@ -102,6 +102,18 @@ def _embed_time_lags(movie: Any, *, n_lags: int, torch: Any) -> Any:
     return lagged
 
 
+def _scored_trace_ids(response_length: int, *, n_timepoints: int, trace_index: int) -> list[int]:
+    """Map lagged outputs to a trace, excluding the one pre-score burn-in output."""
+    if int(response_length) == int(n_timepoints):
+        return [int(trace_index)] * int(n_timepoints)
+    if int(response_length) == int(n_timepoints) + 1:
+        return [-1] + [int(trace_index)] * int(n_timepoints)
+    raise ValueError(
+        f"Twin response has {int(response_length)} frames for a {int(n_timepoints)}-sample trace; "
+        "expected T or T+1."
+    )
+
+
 def make_counterfactual_stim(
     full_stack: np.ndarray,
     eyepos: Any,
@@ -118,6 +130,31 @@ def make_counterfactual_stim(
     eye_movie = _shift_movie_with_eye(
         torch.from_numpy(full_stack[: eyepos.shape[0] + int(n_lags)]).float(),
         torch.cat([eye_norm[: int(n_lags)], eye_norm], dim=0),
+        out_size=out_size,
+        scale_factor=float(scale_factor),
+        torch=torch,
+    )
+    return _embed_time_lags(eye_movie, n_lags=int(n_lags), torch=torch)
+
+
+def make_counterfactual_stim_explicit_history(
+    full_stack: np.ndarray,
+    eyepos: Any,
+    *,
+    ppd: float = PPD,
+    scale_factor: float = 1.0,
+    n_lags: int = N_LAGS,
+    out_size: tuple[int, int] = OUT_SIZE,
+) -> Any:
+    """Embed a trace that already contains its complete causal model history."""
+    import torch
+
+    if int(eyepos.shape[0]) < int(n_lags):
+        raise ValueError(f"Explicit-history trace needs at least {int(n_lags)} frames.")
+    eye_norm = _eye_deg_to_norm(torch.fliplr(eyepos), ppd=float(ppd), img_size=full_stack.shape[1:3], torch=torch)
+    eye_movie = _shift_movie_with_eye(
+        torch.from_numpy(full_stack[: eyepos.shape[0]]).float(),
+        eye_norm,
         out_size=out_size,
         scale_factor=float(scale_factor),
         torch=torch,
@@ -327,6 +364,14 @@ class RealTraceMatrixScorer:
             "stimulus": {
                 "ppd": PPD,
                 "model_history_frames": N_LAGS,
+                "model_history_includes_current_frame": True,
+                "lag_history_policy": "explicit_preceding_history_for_rerun_with_legacy_prefix_replay_support",
+                "lag_history_note": (
+                    "Rerun traces contain 32 burn-in frames followed by 40 scored frames and use "
+                    "make_counterfactual_stim_explicit_history. Its first lagged output (current "
+                    "frame 31) is discarded; outputs with current frames 32..71 are scored. The "
+                    "prefix-seeded helper remains only for replaying historical 40-frame caches."
+                ),
                 "out_size": list(OUT_SIZE),
                 "trace_xy_convention": "input trace is [x_deg, y_deg]; scorer pre-flips for Ryan's helper convention",
             },
@@ -399,28 +444,43 @@ class RealTraceMatrixScorer:
                 frame_to_trace: list[int] = []
                 for local_idx, trace in enumerate(trace_chunk):
                     arr = np.asarray(trace, dtype=np.float32)
+                    explicit_history = arr.shape == (n_timepoints + N_LAGS, 2)
+                    legacy_replay = arr.shape == (n_timepoints, 2)
+                    if not explicit_history and not legacy_replay:
+                        raise ValueError(
+                            f"Trace has shape {arr.shape}; expected ({n_timepoints}, 2) for legacy replay or "
+                            f"({n_timepoints + N_LAGS}, 2) for explicit history."
+                        )
+                    stack_frames = arr.shape[0] if explicit_history else arr.shape[0] + N_LAGS
                     full_stack = np.broadcast_to(
                         image[None, :, :],
-                        (arr.shape[0] + N_LAGS + 1, *image.shape),
+                        (stack_frames, *image.shape),
                     ).copy()
                     eye = self.torch.from_numpy(_trace_xy_to_twin_helper_order(arr))
-                    stim = make_counterfactual_stim(
-                        full_stack,
-                        eye,
-                        ppd=PPD,
-                        scale_factor=1.0,
-                        n_lags=N_LAGS,
-                        out_size=OUT_SIZE,
-                    )
-                    length = int(stim.shape[0])
-                    if length == n_timepoints:
-                        trace_ids = [trace_start + local_idx] * length
-                    elif length == n_timepoints + 1:
-                        trace_ids = [-1] + [trace_start + local_idx] * n_timepoints
-                    else:
-                        raise ValueError(
-                            f"Twin response has {length} frames for a {n_timepoints}-sample trace; expected T or T+1."
+                    if explicit_history:
+                        stim = make_counterfactual_stim_explicit_history(
+                            full_stack,
+                            eye,
+                            ppd=PPD,
+                            scale_factor=1.0,
+                            n_lags=N_LAGS,
+                            out_size=OUT_SIZE,
                         )
+                    else:
+                        stim = make_counterfactual_stim(
+                            full_stack,
+                            eye,
+                            ppd=PPD,
+                            scale_factor=1.0,
+                            n_lags=N_LAGS,
+                            out_size=OUT_SIZE,
+                        )
+                    length = int(stim.shape[0])
+                    trace_ids = _scored_trace_ids(
+                        length,
+                        n_timepoints=n_timepoints,
+                        trace_index=trace_start + local_idx,
+                    )
                     frame_to_trace.extend(trace_ids)
                     stims.append((stim - 127.0) / 255.0)
 
