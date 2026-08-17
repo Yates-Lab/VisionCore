@@ -11,7 +11,11 @@ expecting the 0-spike population; see `MODEL_CARD.md`. The live caches are the
 200-spike ones, backed up as `*.pre_spikethresh.bak`; the 0-spike caches this
 script produced are kept as `*.spikethresh0.bak`.
 
-    uv run python paper/model_selection/regen_fig3_caches.py
+    FIG3_GPU=0 uv run python paper/model_selection/regen_fig3_caches.py
+
+``FIG3_GPU`` is optional.  Set it when another long-running analysis occupies
+one of the host GPUs; otherwise the DataYates helper chooses the least-used
+device automatically.
 """
 import sys
 import time

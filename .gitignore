@@ -15,6 +15,7 @@ __pycache__/
 .venv/
 logs/*
 outputs/
+wandb/
 plans/
 docs/plans/
 ray_results/

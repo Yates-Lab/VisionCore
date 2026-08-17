@@ -70,7 +70,7 @@ def test_model_validity_filters_windows_after_fixation_segment_selection():
 
 
 def _one_unit_case():
-    """One trial, one unit, six bins; the first bin supplies trajectory history."""
+    """One trial, one unit, six bins; the first three supply Figure 2 history."""
     robs = np.array([[[0.0], [1.0], [0.0], [2.0], [1.0], [3.0]]])
     eyepos = np.zeros(robs.shape[:2] + (2,))
     dfs = np.ones_like(robs)
@@ -84,7 +84,7 @@ def test_captured_variance_has_oracle_and_constant_references():
     )
 
     robs, eyepos, dfs = _one_unit_case()
-    var_y = np.var(robs[0, 1:, 0], ddof=1)
+    var_y = np.var(robs[0, 3:, 0], ddof=1)
 
     scored = compute_matched_captured_variance(
         robs,
@@ -97,7 +97,7 @@ def test_captured_variance_has_oracle_and_constant_references():
     fraction = explainable_fraction(scored["captured_variance"], [var_y])
 
     assert_allclose(scored["var_y"], [var_y])
-    assert_allclose(scored["n_windows"], [5])
+    assert_allclose(scored["n_windows"], [3])
     assert_allclose(scored["captured_variance"]["oracle"], [var_y])
     assert_allclose(scored["captured_variance"]["constant"], [0.0])
     assert_allclose(fraction["oracle"], [1.0])
@@ -111,7 +111,7 @@ def test_every_condition_is_scored_on_one_common_bin_set():
     robs, eyepos, dfs = _one_unit_case()
     partial = robs.copy()
     partial[0, 3, 0] = np.nan          # one condition cannot predict this bin
-    kept = np.array([1, 2, 4, 5])
+    kept = np.array([4, 5])
 
     scored = compute_matched_captured_variance(
         robs,
@@ -122,7 +122,7 @@ def test_every_condition_is_scored_on_one_common_bin_set():
         min_scored_windows=2,
     )
 
-    assert_allclose(scored["n_windows"], [4])
+    assert_allclose(scored["n_windows"], [2])
     assert_allclose(scored["var_y"], [np.var(robs[0, kept, 0], ddof=1)])
     # Both conditions are oracles on the bins that survive, so both capture all
     # of the common-mask Var(y) -- the conditions remain comparable.
@@ -144,10 +144,10 @@ def test_each_unit_keeps_its_own_model_valid_bins():
         min_segment_bins=2, min_scored_windows=2,
     )
 
-    assert scored["n_windows"].tolist() == [5, 4]
-    assert_allclose(scored["var_y"][0], np.var(robs[0, 1:, 0], ddof=1))
+    assert scored["n_windows"].tolist() == [3, 2]
+    assert_allclose(scored["var_y"][0], np.var(robs[0, 3:, 0], ddof=1))
     assert_allclose(
-        scored["var_y"][1], np.var(robs[0, [1, 2, 4, 5], 1], ddof=1)
+        scored["var_y"][1], np.var(robs[0, [4, 5], 1], ddof=1)
     )
 
 
@@ -162,7 +162,7 @@ def test_units_below_the_window_floor_are_undefined():
         min_segment_bins=2, min_scored_windows=6,
     )
 
-    assert scored["n_windows"].tolist() == [5]
+    assert scored["n_windows"].tolist() == [3]
     assert scored["n_units_below_floor"] == 1
     assert np.isnan(scored["var_y"][0])
     assert np.isnan(scored["captured_variance"]["oracle"][0])

@@ -37,6 +37,80 @@ from typing import List, Dict, Any, Tuple, Optional, Union
 import re
 
 
+def _canonical_dims(ndim: int, dims) -> tuple:
+    """Resolve negative dimensions and reject duplicates/out-of-range axes."""
+    if isinstance(dims, int):
+        dims = [dims]
+    raw = tuple(int(d) for d in dims)
+    if any(d < -ndim or d >= ndim for d in raw):
+        raise ValueError(f"Invalid dimensions {dims} for a {ndim}-D tensor")
+    resolved = tuple(d % ndim for d in raw)
+    if len(set(resolved)) != len(resolved):
+        raise ValueError(f"Regularizer dimensions must be unique, got {dims}")
+    return resolved
+
+
+def _laplacian_kernel(ndim: int, *, device, dtype) -> torch.Tensor:
+    """Discrete Laplacians used by the original NeuroVisKit regularizer."""
+    if ndim == 1:
+        kernel = torch.tensor([1.0, -2.0, 1.0], device=device, dtype=dtype)
+    elif ndim == 2:
+        kernel = torch.tensor(
+            [[0.25, 0.5, 0.25], [0.5, -3.0, 0.5], [0.25, 0.5, 0.25]],
+            device=device,
+            dtype=dtype,
+        )
+    elif ndim == 3:
+        kernel = torch.tensor(
+            [
+                [[2, 3, 2], [3, 6, 3], [2, 3, 2]],
+                [[3, 6, 3], [6, -88, 6], [3, 6, 3]],
+                [[2, 3, 2], [3, 6, 3], [2, 3, 2]],
+            ],
+            device=device,
+            dtype=dtype,
+        ) / 26.0
+    else:
+        raise ValueError("Laplacian regularization supports one to three dimensions")
+    return kernel.view(1, 1, *kernel.shape)
+
+
+def laplacian_penalty(
+    param: torch.Tensor,
+    dims,
+    *,
+    padding_mode: str = "constant",
+    reduction: str = "dekel",
+) -> torch.Tensor:
+    """Squared discrete-Laplacian penalty over selected tensor dimensions.
+
+    ``reduction='dekel'`` reproduces NeuroVisKit: sum over all unregularized
+    filter/channel maps, then average over the regularized support.  ``mean``
+    averages over every element and can be useful for size-invariant sweeps.
+    The calculation is kept in float32 under mixed precision.
+    """
+    target_dims = _canonical_dims(param.ndim, dims)
+    other_dims = tuple(d for d in range(param.ndim) if d not in target_dims)
+    x = param.float().permute(*other_dims, *target_dims)
+    spatial_shape = tuple(param.shape[d] for d in target_dims)
+    x = x.reshape(-1, 1, *spatial_shape)
+    kernel = _laplacian_kernel(len(target_dims), device=x.device, dtype=x.dtype)
+    padding = []
+    for size in reversed(kernel.shape[2:]):
+        half = size // 2
+        padding.extend((half, half))
+    x = F.pad(x, tuple(padding), mode=padding_mode)
+    conv = (F.conv1d, F.conv2d, F.conv3d)[len(target_dims) - 1]
+    curvature = conv(x, kernel).square()
+    if reduction == "dekel":
+        return curvature.sum(dim=(0, 1)).mean()
+    if reduction == "mean":
+        return curvature.mean()
+    if reduction == "sum":
+        return curvature.sum()
+    raise ValueError(f"Unknown Laplacian reduction {reduction!r}")
+
+
 @torch.no_grad()
 def adam_effective_lr(optimizer: torch.optim.Optimizer, param: torch.Tensor) -> Optional[torch.Tensor]:
     """
@@ -101,6 +175,12 @@ class Regularizer:
         self.lmbda = float(spec["lambda"])
         self.patterns = spec.get("apply_to", [])
         self.schedule = spec.get("schedule", {"kind": "constant"})
+        self.dims = spec.get("dims", None)
+        self.group_dims = spec.get("group_dims", None)
+        self.competition_dims = spec.get("competition_dims", [1])
+        self.padding_mode = spec.get("padding_mode", "constant")
+        self.reduction = spec.get("reduction", "dekel")
+        self.eps = float(spec.get("eps", 1e-6))
         
         # Cache tensors that match the patterns
         self.params = []
@@ -135,8 +215,19 @@ class Regularizer:
             # Split pattern on "/" for AND logic
             components = pattern.split("/")
             
-            # Check if ALL components are present in param_name
-            if all(comp in param_name for comp in components):
+            # A component prefixed with ^ is anchored to the beginning of the
+            # full parameter name.  Plain components retain the historical
+            # substring semantics.  The anchor matters now that
+            # `modulator.*` and `output_modulator.*` coexist: a plain
+            # "modulator" intentionally matches both, while "^modulator"
+            # selects only the inherited feature-space path.
+            def component_matches(component):
+                if component.startswith("^"):
+                    return param_name.startswith(component[1:])
+                return component in param_name
+
+            # Check if ALL components match the parameter name.
+            if all(component_matches(comp) for comp in components):
                 return True
                 
         return False
@@ -166,6 +257,13 @@ class Regularizer:
             start_epoch = self.schedule.get("start_epoch", 0)
             end_epoch = self.schedule.get("end_epoch", start_epoch)
             return start_epoch <= epoch <= end_epoch
+        elif kind == "ramp_then_constant":
+            # Unlike the legacy ``linear_ramp`` schedule, keep the full
+            # penalty active after the ramp.  This is useful when an initially
+            # large structural prior would otherwise dominate the predictive
+            # objective before useful features have formed.
+            start_epoch = self.schedule.get("start_epoch", 0)
+            return epoch >= start_epoch
         elif kind == "linear_decay":
             start_epoch = self.schedule.get("start_epoch", 0)
             return epoch >= start_epoch  # active from start_epoch onwards
@@ -191,11 +289,14 @@ class Regularizer:
             
         kind = self.schedule["kind"]
         
-        if kind == "linear_ramp":
+        if kind in {"linear_ramp", "ramp_then_constant"}:
             start_epoch = self.schedule.get("start_epoch", 0)
             end_epoch = self.schedule.get("end_epoch", start_epoch)
 
             if end_epoch <= start_epoch:
+                return self.lmbda
+
+            if epoch >= end_epoch:
                 return self.lmbda
 
             # Linear interpolation from 0 to lambda
@@ -239,7 +340,7 @@ class Regularizer:
             return torch.tensor(0.0, device=self.params[0].device if self.params else None)
 
         # Only apply loss penalties for these types
-        if self.kind not in {"l1", "l2", "group_lasso", "ortho"}:
+        if self.kind not in {"l1", "l2", "group_lasso", "ortho", "laplacian"}:
             return torch.tensor(0.0, device=self.params[0].device)
 
         if self.kind == "l1":
@@ -261,6 +362,19 @@ class Regularizer:
                 G = W_norm @ W_norm.T  # [num_filters, num_filters]
                 I = torch.eye(G.shape[0], device=G.device, dtype=G.dtype)
                 penalties.append((G - I).pow(2).sum())
+            return effective_lambda * torch.stack(penalties).sum()
+        elif self.kind == "laplacian":
+            if self.dims is None:
+                raise ValueError(f"Laplacian regularizer {self.name!r} requires dims")
+            penalties = [
+                laplacian_penalty(
+                    p,
+                    self.dims,
+                    padding_mode=self.padding_mode,
+                    reduction=self.reduction,
+                )
+                for p in self.params
+            ]
             return effective_lambda * torch.stack(penalties).sum()
         else:
             return torch.tensor(0.0, device=self.params[0].device)
@@ -287,6 +401,11 @@ class Regularizer:
             # Soft thresholding for L1 proximal operator
             # Use per-parameter Adam LR if optimizer provided, else scalar LR
             for param in self.params:
+                # In homogeneous multisession batches only one readout has a
+                # gradient.  Applying a proximal step to all other readouts
+                # would over-regularize each one by roughly N_sessions.
+                if optimizer is not None and param.grad is None:
+                    continue
                 if optimizer is not None:
                     eta = adam_effective_lr(optimizer, param)
                     if eta is not None:
@@ -314,6 +433,38 @@ class Regularizer:
             # Clamp parameters to have minimum value of lambda (for std parameters)
             for param in self.params:
                 param.data = torch.clamp(param.data, min=effective_lambda)
+
+        elif self.kind == "proximal_sparsity_dekel":
+            # Port of NeuroVisKit.proximalSparsityDekel.  Within each output
+            # filter, preserve the strongest input-channel group and apply
+            # increasingly strong elementwise shrinkage to weaker groups.
+            for param in self.params:
+                if optimizer is not None and param.grad is None:
+                    continue
+                if self.group_dims is None:
+                    norm = param.data.abs()
+                else:
+                    group_dims = _canonical_dims(param.ndim, self.group_dims)
+                    norm = torch.linalg.vector_norm(
+                        param.data, ord=2, dim=group_dims, keepdim=True
+                    )
+                competition_dims = _canonical_dims(param.ndim, self.competition_dims)
+                strongest = norm.amax(dim=competition_dims, keepdim=True)
+                relative_shrinkage = (strongest / (norm + self.eps) - 1.0).clamp_min(0.0)
+
+                # The historical operator used the optimizer group's scalar
+                # learning rate (not Adam's coordinate-wise effective rate).
+                param_lr = lr
+                if optimizer is not None:
+                    for group in optimizer.param_groups:
+                        if any(candidate is param for candidate in group["params"]):
+                            param_lr = float(group["lr"])
+                            break
+                threshold = effective_lambda * param_lr * relative_shrinkage
+                updated = torch.sign(param.data) * (
+                    param.data.abs() - threshold
+                ).clamp_min(0.0)
+                param.data.copy_(updated)
 
 
 def create_regularizers(model_config: Dict[str, Any], named_params: List[Tuple[str, torch.Tensor]]) -> List[Regularizer]:

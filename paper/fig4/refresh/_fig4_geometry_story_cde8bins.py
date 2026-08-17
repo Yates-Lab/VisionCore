@@ -53,12 +53,19 @@ from _fig4_trace_schematics import (
     load_dataset,
     ratio_delta_stats,
 )
+from paper.fig4.upstream.build_robust_unit_tuning import production_sf_mask
 
 
 OUT_STEM = "backimage_real_trace_geometry_reordered_story_figure_cell_baseline_sf075_coh020_cde8bins"
 SF_METRIC_COL = "sf_split_metric"
 LOW_SF_MAX_CPD = 0.50
 HIGH_SF_MIN_CPD = 0.75
+# Historical caches used absolute cuts on a coarse, partly sub-cycle SF grid.
+# Selected twins can instead carry cycle-valid relative groups in the unit
+# table.  Keep the historical behavior as the default for backwards
+# compatibility and require an explicit environment switch for production
+# selected-twin rerenders.
+SF_GROUP_MODE = os.environ.get("FIG4_SF_GROUP_MODE", "absolute_cpd")
 CONTOUR_COHERENCE_MIN = 0.20
 MIN_OSI = 0.05
 MATCH_MAX_DEG = 22.5
@@ -82,28 +89,30 @@ LOWER_MIN_POS = 45.0
 LOWER_MAX_POS = 180.0
 LOWER_TICKS = (0.0, 50.0, 65.0, 90.0, 120.0, 160.0)
 
+_LOW_SF_LABEL = "lower SF tertile" if SF_GROUP_MODE == "table_tertiles" else "SF < 0.50"
+_HIGH_SF_LABEL = "upper SF tertile" if SF_GROUP_MODE == "table_tertiles" else "SF >= 0.75"
 SF_GROUPS = {
     "low_lt0p5": {
-        "label": "SF < 0.50",
-        "title": "SF < 0.50",
+        "label": _LOW_SF_LABEL,
+        "title": _LOW_SF_LABEL,
         "color": "#0072B2",
     },
     "high_ge0p75": {
-        "label": "SF >= 0.75",
-        "title": "SF >= 0.75",
+        "label": _HIGH_SF_LABEL,
+        "title": _HIGH_SF_LABEL,
         "color": "#D55E00",
     },
 }
 B_PANEL_SPECS = [
-    ("low_lt0p5", "strong_contours_no_osi", "SF < 0.50\nall contour units"),
-    ("low_lt0p5", "contour_matched", "SF < 0.50\norientation-aligned"),
-    ("high_ge0p75", "strong_contours_no_osi", "SF >= 0.75\nall contour units"),
-    ("high_ge0p75", "contour_matched", "SF >= 0.75\norientation-aligned"),
+    ("low_lt0p5", "strong_contours_no_osi", f"{_LOW_SF_LABEL}\nall contour units"),
+    ("low_lt0p5", "contour_matched", f"{_LOW_SF_LABEL}\norientation-aligned"),
+    ("high_ge0p75", "strong_contours_no_osi", f"{_HIGH_SF_LABEL}\nall contour units"),
+    ("high_ge0p75", "contour_matched", f"{_HIGH_SF_LABEL}\norientation-aligned"),
 ]
 LOWER_PANEL_SPECS = [
-    ("contour_matched", "Aligned SF >= 0.75 units"),
-    ("contour_intermediate", "Oblique SF >= 0.75 units"),
-    ("contour_orthogonal", "Orthogonal SF >= 0.75 units"),
+    ("contour_matched", f"Aligned {_HIGH_SF_LABEL} units"),
+    ("contour_intermediate", f"Oblique {_HIGH_SF_LABEL} units"),
+    ("contour_orthogonal", f"Orthogonal {_HIGH_SF_LABEL} units"),
 ]
 COMPONENT_STYLES = {
     "across_path_arcmin": ("across-contour component path", "-", "o"),
@@ -135,12 +144,20 @@ def _population_values(pop: dict[str, Any]) -> dict[str, float]:
 
 
 def _sf_mask(unit: pd.DataFrame, sf_group: str) -> np.ndarray:
-    sf = pd.to_numeric(unit[SF_METRIC_COL], errors="coerce").to_numpy(dtype=float)
     if sf_group == "low_lt0p5":
-        return np.isfinite(sf) & (sf < LOW_SF_MAX_CPD)
-    if sf_group == "high_ge0p75":
-        return np.isfinite(sf) & (sf >= HIGH_SF_MIN_CPD)
-    raise ValueError(f"unknown SF group {sf_group!r}")
+        group = "low"
+    elif sf_group == "high_ge0p75":
+        group = "high"
+    else:
+        raise ValueError(f"unknown SF group {sf_group!r}")
+    return production_sf_mask(
+        unit,
+        group=group,
+        mode=SF_GROUP_MODE,
+        metric_column=SF_METRIC_COL,
+        low_max_cpd=LOW_SF_MAX_CPD,
+        high_min_cpd=HIGH_SF_MIN_CPD,
+    )
 
 
 def _selected_unit_images(
@@ -550,8 +567,15 @@ def _plot_figure(panel_b: pd.DataFrame, component: pd.DataFrame) -> plt.Figure:
         0.5,
         0.035,
         (
-            "B uses contour image windows (coherence >= 0.20), SF < 0.50 as low, and SF >= 0.75 as high; "
-            "units with 0.50 <= SF < 0.75 are excluded. C-E use SF >= 0.75, 8 wider component bins, and omit the full-trajectory curve."
+            (
+                "B uses contour image windows (coherence >= 0.20) and the cycle-valid lower/upper SF tertiles. "
+                "C-E use the upper SF tertile, 8 wider component bins, and omit the full-trajectory curve."
+            )
+            if SF_GROUP_MODE == "table_tertiles"
+            else (
+                "B uses contour image windows (coherence >= 0.20), SF < 0.50 as low, and SF >= 0.75 as high; "
+                "units with 0.50 <= SF < 0.75 are excluded. C-E use SF >= 0.75, 8 wider component bins, and omit the full-trajectory curve."
+            )
         ),
         ha="center",
         va="bottom",
@@ -605,10 +629,23 @@ def main() -> None:
                 "summary_json": json_path,
             },
             "selection": {
+                "sf_group_mode": SF_GROUP_MODE,
                 "sf_metric_col": SF_METRIC_COL,
-                "low_sf": f"{SF_METRIC_COL} < {LOW_SF_MAX_CPD}",
-                "high_sf": f"{SF_METRIC_COL} >= {HIGH_SF_MIN_CPD}",
-                "excluded_sf_band": f"{LOW_SF_MAX_CPD} <= {SF_METRIC_COL} < {HIGH_SF_MIN_CPD}",
+                "low_sf": (
+                    "unit.sf_group == low_sf"
+                    if SF_GROUP_MODE == "table_tertiles"
+                    else f"{SF_METRIC_COL} < {LOW_SF_MAX_CPD}"
+                ),
+                "high_sf": (
+                    "unit.sf_group == high_sf"
+                    if SF_GROUP_MODE == "table_tertiles"
+                    else f"{SF_METRIC_COL} >= {HIGH_SF_MIN_CPD}"
+                ),
+                "excluded_sf_band": (
+                    "unit.sf_group == middle_sf"
+                    if SF_GROUP_MODE == "table_tertiles"
+                    else f"{LOW_SF_MAX_CPD} <= {SF_METRIC_COL} < {HIGH_SF_MIN_CPD}"
+                ),
                 "contour_coherence_min": CONTOUR_COHERENCE_MIN,
                 "min_osi": MIN_OSI,
                 "match_max_deg": MATCH_MAX_DEG,

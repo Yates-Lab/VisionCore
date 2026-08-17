@@ -14,7 +14,11 @@ from typing import Dict, Any
 from .mlp import MLP
 from .recurrent import ConvGRU
 
-__all__ = ['ConcatModulator', 'FiLMModulator', 'ConvGRUModulator', 'BaseModulator', 'MODULATORS']
+__all__ = [
+    'ConcatModulator', 'FiLMModulator', 'MLPBehaviorModulator',
+    'MultiDatasetBehaviorOutputModulator', 'ConvGRUModulator',
+    'BaseModulator', 'MODULATORS'
+]
 
 
 class BaseModulator(nn.Module):
@@ -209,6 +213,288 @@ class FiLMModulator(BaseModulator):
         return scale * feats + shift
 
 
+class MLPBehaviorModulator(BaseModulator):
+    """Nonrecurrent behavior path for the Dekel feed-forward core.
+
+    The behavior MLP has two deliberately explicit effects:
+
+    1. ``additive_dim`` encoded behavior channels are broadcast over the
+       scaffold and concatenated for the neuron-specific readout.  Because a
+       Gaussian mask sums to one, these channels implement a conventional
+       neuron-specific additive behavioral drive.
+    2. An optional identity-initialized, bounded FiLM scale allows behavior to
+       change visual sensitivity without a recurrent hidden state.  The map
+       from the MLP bottleneck to visual channels is low-rank by construction.
+
+    Setting ``use_film: false`` leaves a purely additive behavior model.  Both
+    modes have stable stimulus Jacobians for a fixed behavior vector and are
+    available through the same backward-compatible modular model interface.
+    """
+
+    def _build_modulator(self):
+        self.feature_dim = self.config.get('feature_dim')
+        if self.feature_dim is None:
+            raise ValueError("feature_dim must be specified for mlp_behavior")
+
+        hidden_dims = list(self.config.get('hidden_dims', [64]))
+        self.additive_dim = int(self.config.get('additive_dim', 16))
+        # Existing checkpoints use the additive channels as the behavior
+        # bottleneck.  Keeping that default preserves their parameter names
+        # and shapes.  A separate encoded_dim permits a pure FiLM path
+        # (additive_dim=0) when neuron-specific additive drive is supplied by
+        # the post-readout behavior residual instead.
+        self.encoded_dim = int(
+            self.config.get('encoded_dim', self.additive_dim)
+        )
+        if self.additive_dim < 0:
+            raise ValueError("additive_dim must be non-negative")
+        if self.encoded_dim <= 0:
+            raise ValueError("encoded_dim must be positive")
+        self.use_film = bool(self.config.get('use_film', True))
+        self.film_max_gain = float(self.config.get('film_max_gain', 0.5))
+        self.film_bias = bool(self.config.get('film_bias', True))
+        input_norm = bool(self.config.get('input_norm', False))
+        self.input_norm = (
+            nn.LayerNorm(self.behavior_dim, elementwise_affine=False)
+            if input_norm else nn.Identity()
+        )
+
+        self.encoder = MLP(
+            input_dim=self.behavior_dim,
+            hidden_dims=hidden_dims,
+            output_dim=self.encoded_dim,
+            norm_type=self.config.get('norm_type', None),
+            act_type=self.config.get('activation', 'gelu'),
+            dropout=float(self.config.get('dropout', 0.0)),
+            bias=True,
+            residual=False,
+            output_activation=True,
+        )
+
+        if self.use_film:
+            self.scale_layer = nn.Linear(
+                self.encoded_dim, self.feature_dim, bias=self.film_bias
+            )
+            # Exact identity at initialization: the run begins as the
+            # vision-only Dekel core plus an additive behavioral branch.
+            nn.init.zeros_(self.scale_layer.weight)
+            if self.scale_layer.bias is not None:
+                nn.init.zeros_(self.scale_layer.bias)
+        else:
+            self.scale_layer = None
+
+        # Factory semantics: these channels are concatenated before readout.
+        self.out_dim = self.additive_dim
+
+    def forward(self, feats: torch.Tensor, beh: torch.Tensor) -> torch.Tensor:
+        if feats.ndim != 5:
+            raise ValueError(
+                f"MLPBehaviorModulator expects NCTHW features, got {tuple(feats.shape)}"
+            )
+        if beh.ndim == 3:
+            beh = beh.mean(dim=1)
+        if beh.ndim != 2 or beh.shape[1] != self.behavior_dim:
+            raise ValueError(
+                f"Expected behavior shape (batch, {self.behavior_dim}), "
+                f"got {tuple(beh.shape)}"
+            )
+
+        encoded = self.encoder(self.input_norm(beh))
+        if self.scale_layer is not None:
+            scale = self.film_max_gain * torch.tanh(self.scale_layer(encoded))
+            feats = feats * (1.0 + scale[:, :, None, None, None])
+
+        if self.additive_dim == 0:
+            return feats
+        # The default encoded_dim == additive_dim contract is intentionally
+        # strict.  If a future model needs distinct encoded and additive
+        # widths it should use an explicit learned projection rather than an
+        # implicit slice.
+        if encoded.shape[1] != self.additive_dim:
+            raise RuntimeError(
+                "encoded_dim must equal additive_dim when additive behavior "
+                "channels are enabled"
+            )
+        additive = encoded[:, :, None, None, None].expand(
+            -1, -1, feats.shape[2], feats.shape[3], feats.shape[4]
+        )
+        return torch.cat((feats, additive), dim=1)
+
+
+class MultiDatasetBehaviorOutputModulator(nn.Module):
+    """Low-rank, neuron-specific behavioral residual on pre-activation logits.
+
+    A shared MLP encodes behavior once, while small per-dataset projections
+    produce an additive offset and, optionally, a bounded multiplicative gain
+    for every recorded neuron.  The projections are initialized to exactly
+    zero, so adding this module to a pretrained model is an exact identity at
+    initialization::
+
+        z_out = (1 + g(behavior)) * z_visual + a(behavior)
+
+    This location is intentional.  It lets behavior explain neuron-specific
+    response variance without creating new spatial or temporal pathways in the
+    visual core.  For any fixed behavior vector the stimulus Jacobian is only
+    rescaled per neuron, so its spatiotemporal shape cannot become aliased.
+    """
+
+    def __init__(self, config: Dict[str, Any], n_units_per_dataset):
+        super().__init__()
+        self.config = dict(config)
+        self.behavior_dim = int(self.config.get('behavior_dim', 2))
+        self.bottleneck_dim = int(self.config.get('bottleneck_dim', 32))
+        self.use_gain = bool(self.config.get('use_gain', True))
+        self.max_gain = float(self.config.get('max_gain', 0.5))
+        self.dataset_adapter_dim = int(
+            self.config.get('dataset_adapter_dim', 0)
+        )
+        self.dataset_adapter_max_scale = float(
+            self.config.get('dataset_adapter_max_scale', 0.5)
+        )
+
+        if self.bottleneck_dim <= 0:
+            raise ValueError("bottleneck_dim must be positive")
+        if self.max_gain < 0:
+            raise ValueError("max_gain must be non-negative")
+        if self.dataset_adapter_dim < 0:
+            raise ValueError("dataset_adapter_dim must be non-negative")
+        if self.dataset_adapter_max_scale < 0:
+            raise ValueError(
+                "dataset_adapter_max_scale must be non-negative"
+            )
+
+        hidden_dims = list(self.config.get('hidden_dims', [64]))
+        input_norm = bool(self.config.get('input_norm', False))
+        self.input_norm = (
+            nn.LayerNorm(self.behavior_dim, elementwise_affine=False)
+            if input_norm else nn.Identity()
+        )
+        self.encoder = MLP(
+            input_dim=self.behavior_dim,
+            hidden_dims=hidden_dims,
+            output_dim=self.bottleneck_dim,
+            norm_type=self.config.get('norm_type', None),
+            act_type=self.config.get('activation', 'gelu'),
+            dropout=float(self.config.get('dropout', 0.0)),
+            bias=True,
+            residual=False,
+            output_activation=True,
+        )
+
+        unit_counts = [int(n) for n in n_units_per_dataset]
+        if not unit_counts or any(n <= 0 for n in unit_counts):
+            raise ValueError(
+                "n_units_per_dataset must contain a positive count for every dataset"
+            )
+        if self.dataset_adapter_dim:
+            self.dataset_adapters = nn.ModuleList(
+                nn.Sequential(
+                    nn.Linear(
+                        self.behavior_dim,
+                        self.dataset_adapter_dim,
+                    ),
+                    nn.GELU(),
+                    nn.Linear(
+                        self.dataset_adapter_dim,
+                        self.bottleneck_dim,
+                        bias=False,
+                    ),
+                )
+                for _ in unit_counts
+            )
+            # The adapter is a residual correction to the mature shared
+            # behavior basis.  A zero final projection makes a compatible
+            # warm start bitwise identical to the source checkpoint while
+            # retaining a gradient for the new session-specific parameters.
+            for adapter in self.dataset_adapters:
+                nn.init.zeros_(adapter[-1].weight)
+        else:
+            self.dataset_adapters = None
+        self.offset_layers = nn.ModuleList(
+            nn.Linear(self.bottleneck_dim, n_units) for n_units in unit_counts
+        )
+        self.gain_layers = (
+            nn.ModuleList(
+                nn.Linear(self.bottleneck_dim, n_units) for n_units in unit_counts
+            )
+            if self.use_gain else None
+        )
+        self.reset_residual_parameters()
+
+    def reset_residual_parameters(self):
+        """Make the complete residual an exact identity transformation."""
+        projections = list(self.offset_layers)
+        if self.gain_layers is not None:
+            projections += list(self.gain_layers)
+        for layer in projections:
+            nn.init.zeros_(layer.weight)
+            nn.init.zeros_(layer.bias)
+
+    def _encode_behavior(
+        self,
+        behavior: torch.Tensor,
+        dataset_idx: int,
+    ) -> torch.Tensor:
+        if behavior.ndim == 3:
+            behavior = behavior.mean(dim=1)
+        if behavior.ndim != 2 or behavior.shape[1] != self.behavior_dim:
+            raise ValueError(
+                f"Expected behavior shape (batch, {self.behavior_dim}), "
+                f"got {tuple(behavior.shape)}"
+            )
+        normalized = self.input_norm(behavior)
+        encoded = self.encoder(normalized)
+        if self.dataset_adapters is not None:
+            if not 0 <= dataset_idx < len(self.dataset_adapters):
+                raise IndexError(f"dataset_idx {dataset_idx} is out of range")
+            correction = self.dataset_adapters[dataset_idx](normalized)
+            encoded = encoded + self.dataset_adapter_max_scale * torch.tanh(
+                correction
+            )
+        return encoded
+
+    def forward(
+        self,
+        logits: torch.Tensor,
+        behavior: torch.Tensor,
+        dataset_idx: int,
+    ) -> torch.Tensor:
+        if logits.ndim != 2:
+            raise ValueError(
+                f"Expected readout logits with shape (batch, units), got {tuple(logits.shape)}"
+            )
+        dataset_idx = int(dataset_idx)
+        if not 0 <= dataset_idx < len(self.offset_layers):
+            raise IndexError(f"dataset_idx {dataset_idx} is out of range")
+        if logits.shape[1] != self.offset_layers[dataset_idx].out_features:
+            raise ValueError(
+                "Readout/output-modulator unit mismatch for dataset "
+                f"{dataset_idx}: got {logits.shape[1]}, expected "
+                f"{self.offset_layers[dataset_idx].out_features}"
+            )
+
+        gain, offset = self.gain_offset(behavior, dataset_idx)
+        return logits * (1.0 + gain) + offset
+
+    def gain_offset(
+        self,
+        behavior: torch.Tensor,
+        dataset_idx: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return the bounded gain and additive offset before applying them."""
+        dataset_idx = int(dataset_idx)
+        if not 0 <= dataset_idx < len(self.offset_layers):
+            raise IndexError(f"dataset_idx {dataset_idx} is out of range")
+        encoded = self._encode_behavior(behavior, dataset_idx)
+        offset = self.offset_layers[dataset_idx](encoded)
+        if self.gain_layers is None:
+            return torch.zeros_like(offset), offset
+        gain = self.max_gain * torch.tanh(
+            self.gain_layers[dataset_idx](encoded)
+        )
+        return gain, offset
+
+
 class ConvGRUModulator(BaseModulator):
     """
     ConvGRU modulator that processes features and behavior through a ConvGRU.
@@ -299,7 +585,6 @@ class ConvGRUModulator(BaseModulator):
 MODULATORS = {
     'concat': ConcatModulator,
     'film': FiLMModulator,
+    'mlp_behavior': MLPBehaviorModulator,
     'convgru': ConvGRUModulator,
 }
-
-

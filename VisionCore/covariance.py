@@ -61,6 +61,43 @@ def cov_to_corr(C, min_var=1e-3):
     return R
 
 
+def pava_nonincreasing(y, w, eps=1e-12):
+    """Weighted isotonic regression constrained to be non-increasing."""
+    y = np.asarray(y, dtype=np.float64)
+    w = np.asarray(w, dtype=np.float64)
+    if y.ndim != 1 or w.shape != y.shape:
+        raise ValueError("y and w must be one-dimensional arrays with equal shape")
+    if np.any(~np.isfinite(y)) or np.any(~np.isfinite(w)) or np.any(w < 0):
+        raise ValueError("y and w must be finite and weights must be non-negative")
+
+    means: list[float] = []
+    weights: list[float] = []
+    starts: list[int] = []
+    ends: list[int] = []
+    for index, (value, weight) in enumerate(zip(y, w)):
+        means.append(float(value))
+        weights.append(float(weight))
+        starts.append(index)
+        ends.append(index)
+        while len(means) >= 2 and means[-2] < means[-1]:
+            pooled_weight = weights[-2] + weights[-1]
+            pooled_mean = (
+                weights[-2] * means[-2] + weights[-1] * means[-1]
+            ) / (pooled_weight + eps)
+            means[-2] = pooled_mean
+            weights[-2] = pooled_weight
+            ends[-2] = ends[-1]
+            means.pop()
+            weights.pop()
+            starts.pop()
+            ends.pop()
+
+    fitted = np.empty_like(y)
+    for mean, start, end in zip(means, starts, ends):
+        fitted[start : end + 1] = mean
+    return fitted
+
+
 def get_upper_triangle(C):
     """Extract upper-triangle values (k=1 diagonal offset) from a square matrix."""
     rows, cols = np.triu_indices_from(C, k=1)
@@ -152,8 +189,32 @@ def _density_fn(E, kind):
         rv = multivariate_normal(mean=mu, cov=cov, allow_singular=True)
         return lambda X: rv.pdf(X)
     if kind == "kde":
-        kde = gaussian_kde(E.T)
-        return lambda X: kde(X.T)
+        # ``gaussian_kde`` requires a full-rank ambient covariance. Real and
+        # synthetic fixation trajectories can be effectively one-dimensional
+        # (for example, motion along a contour). Estimate density in the
+        # occupied subspace instead; the omitted orthogonal constant cancels in
+        # every importance-weight ratio used by the decomposition.
+        values = np.asarray(E, dtype=np.float64)
+        if values.ndim != 2:
+            raise ValueError(f"KDE samples must be a matrix, got {values.shape}")
+        center = values.mean(axis=0)
+        centered = values - center
+        _, singular_values, right = np.linalg.svd(centered, full_matrices=False)
+        if not singular_values.size or singular_values[0] <= 0:
+            return lambda X: np.ones(np.asarray(X).shape[0], dtype=np.float64)
+        tolerance = max(values.shape) * np.finfo(np.float64).eps * singular_values[0]
+        rank = int(np.sum(singular_values > tolerance))
+        if rank == 0:
+            return lambda X: np.ones(np.asarray(X).shape[0], dtype=np.float64)
+        basis = right[:rank].T
+        projected = centered @ basis
+        kde = gaussian_kde(projected.T)
+
+        def evaluate(X):
+            query = (np.asarray(X, dtype=np.float64) - center) @ basis
+            return kde(query.T)
+
+        return evaluate
     raise ValueError(f"unknown density kind: {kind!r}")
 
 
@@ -720,6 +781,28 @@ def decompose_trajectory(counts, trajectories, T_idx, target="full",
     Tr = trajectories[keep_mask]
     T = T_idx[keep_mask]
     n_cells = S.shape[1]
+
+    # It is possible for every time bin to fall below the minimum-trial
+    # threshold (notably in per-cell slices with cell-specific validity).  In
+    # that case there is no distribution to estimate.  Return the same
+    # structurally complete NaN result used for other non-estimable cases
+    # instead of passing an empty trajectory array to the geometric median/KDE.
+    if len(T) == 0:
+        nan_cov = np.full((n_cells, n_cells), np.nan, dtype=float)
+        nan_cell = np.full(n_cells, np.nan, dtype=float)
+        return {
+            "Ctotal": nan_cov.copy(),
+            "Cpsth": nan_cov.copy(),
+            "Crate": nan_cov.copy(),
+            "CnoiseC": nan_cov.copy(),
+            "noise_corr": nan_cov.copy(),
+            "fano": nan_cell.copy(),
+            "Erate": nan_cell.copy(),
+            "one_minus_alpha": nan_cell.copy(),
+            "n_time_bins": 0,
+            "n_samples": 0,
+            "n_close_pairs": 0,
+        }
 
     if reduction == "geometric_median":
         rho = _geometric_median(Tr)

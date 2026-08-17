@@ -400,7 +400,11 @@ def _draw_cube_block(ax, assets, front_center_2d, *, roi_quad_2d=None,
     y_bottom = float(cube_p2[:, 1].min()) - 0.05
     if draw_time:
         if time_label is None:
-            time_label = f"{cube.shape[0] / 120.0 * 1000.0:.0f} ms (120 Hz)"
+            model_rate = float(assets.arch.get("sampling_rate", 120))
+            time_label = (
+                f"{cube.shape[0] / model_rate * 1000.0:.0f} ms "
+                f"({model_rate:g} Hz)"
+            )
         p_front_bot = cube_p2[0] + np.array([0.0, -0.22])
         p_back_bot = cube_p2[4] + np.array([0.0, -0.22])
         ax.annotate("", xy=p_back_bot, xytext=p_front_bot,
@@ -546,9 +550,10 @@ def _draw_top_row(ax, assets, row_cy):
     cube_front_cx = train_max_x + MODEL_GROUP_GAP - back_off_2d[0]
     cube_front_cy = row_cy + 0.80
     train_cube = getattr(assets, "train_lag_cube", None)
-    # Time axis labelled with the lag-window duration (33 lags @ 120 Hz = 275 ms).
+    # Time axis labelled with the checkpoint's actual history duration.
     n_lags = train_cube.shape[0] if train_cube is not None else assets.lag_cube.shape[0]
-    dur_label = f"{n_lags / 120.0 * 1000.0:.0f} ms"
+    model_rate = float(assets.arch.get("sampling_rate", 120))
+    dur_label = f"{n_lags / model_rate * 1000.0:.0f} ms"
     cube_block = _draw_cube_block(
         ax, assets, (cube_front_cx, cube_front_cy),
         roi_quad_2d=nat_roi_quad, draw_header=False, draw_dims=True,
@@ -870,11 +875,21 @@ def _draw_architecture(ax, assets, *, x_start, gaps=None):
         g.update(gaps)
 
     arch = assets.arch
+    is_dekel = arch.get("model_family") == "dekel"
+    if is_dekel:
+        # The scaffold label is wider than the legacy ConvGRU label.
+        g["gru_to_readout"] += 0.85
     arch_kernels = arch["convnet_kernels"]
-    blk1_kt, blk1_kh, blk1_kw = arch_kernels[0]
-    blk2_kt, blk2_kh, blk2_kw = arch_kernels[1]
-    stem_kt, stem_kh, stem_kw = (1, 7, 7)
-    gru_kt, gru_kh, gru_kw = (1, arch["gru_kernel"], arch["gru_kernel"])
+    if is_dekel:
+        stem_kt, stem_kh, stem_kw = arch_kernels[0]
+        blk1_kt, blk1_kh, blk1_kw = arch_kernels[1]
+        blk2_kt, blk2_kh, blk2_kw = arch_kernels[2]
+        gru_kt, gru_kh, gru_kw = (1, 1, 1)
+    else:
+        blk1_kt, blk1_kh, blk1_kw = arch_kernels[0]
+        blk2_kt, blk2_kh, blk2_kw = arch_kernels[1]
+        stem_kt, stem_kh, stem_kw = (1, 7, 7)
+        gru_kt, gru_kh, gru_kw = (1, arch["gru_kernel"], arch["gru_kernel"])
 
     stage_records = []
     label_tops = []
@@ -892,8 +907,13 @@ def _draw_architecture(ax, assets, *, x_start, gaps=None):
         cols=1, kt=fe_kt, kh=fe_kh, kw=fe_kw, gap=FE_GAP, palette=PAL_FRONTEND,
         base_zorder=2.0, edge_width=0.45)
 
+    frontend_name = "Full-history filters" if is_dekel else "Frontend"
+    frontend_sub = (
+        f"{fe_n} ch · {arch['frontend_k']}×7×7"
+        if is_dekel else f"{fe_n} ch · k={arch['frontend_k']}"
+    )
     label_tops.append(_stage_label_top(
-        ax, fe_grid, name="Frontend", sub=f"{fe_n} ch · k={arch['frontend_k']}"))
+        ax, fe_grid, name=frontend_name, sub=frontend_sub))
     stage_records.append({"name": "frontend", "grid": fe_grid})
     x_cursor = _next_x(fe_grid, g["fe_to_stem"])
 
@@ -907,8 +927,10 @@ def _draw_architecture(ax, assets, *, x_start, gaps=None):
         ax, x_left=x_cursor, y0=stem_y0, z0=0.0, n_channels=8, rows=2, cols=4,
         kt=stem_kt_w, kh=stem_kh_w, kw=stem_kw_w, gap=GRID_GAP, palette=PAL_STEM,
         base_zorder=2.0, edge_width=0.25, hue_jitter=0.08)
+    stem_channels = int(2 * arch["convnet_channels"][0]) if is_dekel else 8
     label_tops.append(_stage_label_top(
-        ax, stem_grid, name="Stem", sub=f"{stem_kt}×{stem_kh}×{stem_kw} · 8 ch"))
+        ax, stem_grid, name="Spatial stage 1" if is_dekel else "Stem",
+        sub=f"{stem_kt}×{stem_kh}×{stem_kw} · {stem_channels} ch"))
     stage_records.append({"name": "stem", "grid": stem_grid})
     x_cursor = _next_x(stem_grid, g["stem_to_blk1"])
 
@@ -919,9 +941,10 @@ def _draw_architecture(ax, assets, *, x_start, gaps=None):
         ax, x_left=x_cursor, y0=blk1_y0, z0=0.0, n_channels=64, rows=8, cols=8,
         kt=blk1_kt * S_T, kh=blk1_kh * S_PIX, kw=blk1_kw * S_PIX, gap=GRID_GAP,
         palette=PAL_BLOCK1, base_zorder=2.0, edge_width=0.20, hue_jitter=0.10)
+    block1_channels = int(2 * arch["convnet_channels"][1]) if is_dekel else 64
     label_tops.append(_stage_label_top(
-        ax, blk1_grid, name="ResBlock 1",
-        sub=f"{blk1_kt}×{blk1_kh}×{blk1_kw} · 64 ch"))
+        ax, blk1_grid, name="Spatial stage 2" if is_dekel else "ResBlock 1",
+        sub=f"{blk1_kt}×{blk1_kh}×{blk1_kw} · {block1_channels} ch"))
     stage_records.append({"name": "block1", "grid": blk1_grid})
     x_cursor = _next_x(blk1_grid, g["blk1_to_blk2"])
 
@@ -932,9 +955,10 @@ def _draw_architecture(ax, assets, *, x_start, gaps=None):
         ax, x_left=x_cursor, y0=blk2_y0, z0=0.0, n_channels=128, rows=16, cols=8,
         kt=blk2_kt * S_T, kh=blk2_kh * S_PIX, kw=blk2_kw * S_PIX, gap=GRID_GAP,
         palette=PAL_BLOCK2, base_zorder=2.0, edge_width=0.18, hue_jitter=0.10)
+    block2_channels = int(2 * arch["convnet_channels"][2]) if is_dekel else 128
     label_tops.append(_stage_label_top(
-        ax, blk2_grid, name="ResBlock 2",
-        sub=f"{blk2_kt}×{blk2_kh}×{blk2_kw} · 128 ch"))
+        ax, blk2_grid, name="Spatial stage 3" if is_dekel else "ResBlock 2",
+        sub=f"{blk2_kt}×{blk2_kh}×{blk2_kw} · {block2_channels} ch"))
     stage_records.append({"name": "block2", "grid": blk2_grid})
     x_cursor = _next_x(blk2_grid, g["blk2_to_gru"])
 
@@ -949,14 +973,22 @@ def _draw_architecture(ax, assets, *, x_start, gaps=None):
     gru_loop_base = g_ymax - 0.10
     gru_loop_height = 0.37
     gru_loop_shift = gru_loop_height / 2.0 * 0.75
-    draw_recurrent_loop(ax, x0=g_xmin + gru_loop_shift, x1=g_xmax + gru_loop_shift,
-                        y_top=gru_loop_base, arc_height=gru_loop_height,
-                        color="#7e3f8a", lw=1.4, label=None, gap_frac=0.28)
-    gru_loop_top = gru_loop_base + gru_loop_height
-    label_tops.append(_stage_label_top(
-        ax, gru_grid, name="ConvGRU",
-        sub=f"{arch['gru_hidden']} ch · k={arch['gru_kernel']}",
-        y_top_override=gru_loop_top))
+    if is_dekel:
+        gru_loop_top = g_ymax
+        scaffold_size = int(arch.get("scaffold_size", 9))
+        label_tops.append(_stage_label_top(
+            ax, gru_grid, name="Multiscale scaffold",
+            sub=f"{arch['scaffold_channels']} ch · {scaffold_size}×{scaffold_size}",
+            y_top_override=gru_loop_top))
+    else:
+        draw_recurrent_loop(ax, x0=g_xmin + gru_loop_shift, x1=g_xmax + gru_loop_shift,
+                            y_top=gru_loop_base, arc_height=gru_loop_height,
+                            color="#7e3f8a", lw=1.4, label=None, gap_frac=0.28)
+        gru_loop_top = gru_loop_base + gru_loop_height
+        label_tops.append(_stage_label_top(
+            ax, gru_grid, name="ConvGRU",
+            sub=f"{arch['gru_hidden']} ch · k={arch['gru_kernel']}",
+            y_top_override=gru_loop_top))
     stage_records.append({"name": "gru", "grid": gru_grid})
     x_cursor = _next_x(gru_grid, g["gru_to_readout"])
 
@@ -1034,36 +1066,48 @@ def _draw_architecture(ax, assets, *, x_start, gaps=None):
     # ── Flow arrows ─────────────────────────────────────────────────────────
     arrows = _connect_stages(ax, stage_records[:-1])
     gru_anchor = _stage_right_anchor(stage_records[-2])
-    ax.annotate("", xy=(col_x_left - 0.04, gru_anchor[1]),
-                xytext=(gru_anchor[0] + 0.04, gru_anchor[1]),
+    final_arrow = {
+        "x_start": gru_anchor[0] + 0.04,
+        "x_end": col_x_left - 0.04,
+        "y": gru_anchor[1],
+    }
+    ax.annotate("", xy=(final_arrow["x_end"], final_arrow["y"]),
+                xytext=(final_arrow["x_start"], final_arrow["y"]),
                 arrowprops=dict(arrowstyle="->", lw=1.0, color="#333"),
                 zorder=4.8)
 
-    # Residual skips + downsample badge.
+    # Architecture-specific routing annotations.
     a_in1 = arrows["stem→block1"]
     a_out1 = arrows["block1→block2"]
-    x_fork1 = _arrow_frac(a_in1, 0.50)[0]
-    x_plus1 = _arrow_frac(a_out1, 1.0 / 5.0)[0]
-    draw_arrow_skip(ax, x_fork1, x_plus1, ARCH_CENTER_Y, depth=SKIP_DEPTH,
-                    corner_r=SKIP_CORNER_R, color=SKIP_COLOR, lw=SKIP_LW,
-                    zorder=4.7, y_end=ARCH_CENTER_Y - OP_MARKER_RADIUS)
-    draw_op_marker(ax, x_plus1, ARCH_CENTER_Y, color=SKIP_COLOR,
-                   radius=OP_MARKER_RADIUS, lw=0.9, zorder=12.0)
-    mx, my = _arrow_frac(a_out1, 0.50)
-    draw_pool_glyph(ax, mx, my)
-
     a_out2 = arrows["block2→gru"]
-    x_fork2 = _arrow_frac(a_out1, 0.75)[0]
-    x_plus2 = _arrow_frac(a_out2, 1.0 / 3.0)[0]
-    draw_arrow_skip(ax, x_fork2, x_plus2, ARCH_CENTER_Y, depth=SKIP_DEPTH,
-                    corner_r=SKIP_CORNER_R, color=SKIP_COLOR, lw=SKIP_LW,
-                    zorder=4.7, y_end=ARCH_CENTER_Y - OP_MARKER_RADIUS)
-    draw_op_marker(ax, x_plus2, ARCH_CENTER_Y, color=SKIP_COLOR,
-                   radius=OP_MARKER_RADIUS, lw=0.9, zorder=12.0)
+    if is_dekel:
+        for pool_arrow in (a_in1, a_out1):
+            mx, my = _arrow_frac(pool_arrow, 0.50)
+            draw_pool_glyph(ax, mx, my)
+        # The feed-forward Dekel twin injects behavior after the complete
+        # visual scaffold, immediately before its Gaussian readouts.
+        x_concat, y_concat = _arrow_frac(final_arrow, 0.50)
+    else:
+        x_fork1 = _arrow_frac(a_in1, 0.50)[0]
+        x_plus1 = _arrow_frac(a_out1, 1.0 / 5.0)[0]
+        draw_arrow_skip(ax, x_fork1, x_plus1, ARCH_CENTER_Y, depth=SKIP_DEPTH,
+                        corner_r=SKIP_CORNER_R, color=SKIP_COLOR, lw=SKIP_LW,
+                        zorder=4.7, y_end=ARCH_CENTER_Y - OP_MARKER_RADIUS)
+        draw_op_marker(ax, x_plus1, ARCH_CENTER_Y, color=SKIP_COLOR,
+                       radius=OP_MARKER_RADIUS, lw=0.9, zorder=12.0)
+        mx, my = _arrow_frac(a_out1, 0.50)
+        draw_pool_glyph(ax, mx, my)
 
-    # Concat marker on the blk2→gru arrow (behavior injected here). The box +
-    # vertical stub are intentionally NOT drawn — the trace bridge supplies it.
-    x_concat, y_concat = _arrow_frac(a_out2, 2.0 / 3.0)
+        x_fork2 = _arrow_frac(a_out1, 0.75)[0]
+        x_plus2 = _arrow_frac(a_out2, 1.0 / 3.0)[0]
+        draw_arrow_skip(ax, x_fork2, x_plus2, ARCH_CENTER_Y, depth=SKIP_DEPTH,
+                        corner_r=SKIP_CORNER_R, color=SKIP_COLOR, lw=SKIP_LW,
+                        zorder=4.7, y_end=ARCH_CENTER_Y - OP_MARKER_RADIUS)
+        draw_op_marker(ax, x_plus2, ARCH_CENTER_Y, color=SKIP_COLOR,
+                       radius=OP_MARKER_RADIUS, lw=0.9, zorder=12.0)
+        x_concat, y_concat = _arrow_frac(a_out2, 2.0 / 3.0)
+
+    # Behavior concatenation/FiLM marker. The trace bridge supplies its box.
     draw_op_marker(ax, x_concat, y_concat, color="#222", radius=OP_MARKER_RADIUS,
                    lw=1.0, zorder=12.5, symbol="||")
 
@@ -1077,8 +1121,9 @@ def _draw_architecture(ax, assets, *, x_start, gaps=None):
         elif "ro" in s:
             all_xs.extend([s["ro"]["x_left"], s["ro"]["x_right"]])
             all_ys.extend([s["ro"]["y_bottom"], s["ro"]["y_top"]])
-    all_ys.extend([col_y_bottom, y_title + 0.35, max(label_tops) + 0.35,
-                   ARCH_CENTER_Y - SKIP_DEPTH - 0.20])
+    all_ys.extend([col_y_bottom, y_title + 0.35, max(label_tops) + 0.35])
+    if not is_dekel:
+        all_ys.append(ARCH_CENTER_Y - SKIP_DEPTH - 0.20)
 
     return {
         "x_left": float(min(all_xs)),

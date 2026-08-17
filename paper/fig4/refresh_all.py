@@ -58,11 +58,18 @@ UPSTREAM_SCRIPT_DIR = RECOVERED_ROOT / "active_sensing_movie_information"
 FIG_SSI_SCRIPT_DIR = RECOVERED_ROOT / "fig_ssi"
 FIXSTATS_SCRIPT_DIR = RECOVERED_ROOT / "fixation_statistics_by_stimulus"
 
-# Upstream output trees the producers read. Neither is in this repo; both lived
-# in a collaborator's home directory. Named here so the preflight can say which
-# tree is missing rather than only which file.
-UPSTREAM_FIXSTATS = ROOT / "outputs" / "fixation_statistics_by_stimulus_all_sessions_after_review"
-UPSTREAM_MOVIE_INFO = ROOT / "outputs" / "active_sensing_movie_information"
+# Upstream output trees the producers read.  The recovered code and its output
+# tree may live outside this checkout; keep that source root independently
+# selectable so regeneration can write only into this task's scratch tree.
+UPSTREAM_DATA_ROOT = Path(os.environ.get("FIG4_SOURCE_ROOT", str(ROOT))).resolve()
+UPSTREAM_FIXSTATS = (
+    UPSTREAM_DATA_ROOT
+    / "outputs"
+    / "fixation_statistics_by_stimulus_all_sessions_after_review"
+)
+UPSTREAM_MOVIE_INFO = (
+    UPSTREAM_DATA_ROOT / "outputs" / "active_sensing_movie_information"
+)
 
 # The merged real-trace SSI matrix. `_fig4_paths` declares it deliberately
 # unstaged; every geometry-story producer reads it. These are the members
@@ -149,7 +156,7 @@ def _short(path: Path) -> str:
         return str(path)
 
 
-PANELS_V2 = ROOT / "outputs" / "fig" / "ssi_figure_v2" / "panels"
+PANELS_V2 = UPSTREAM_DATA_ROOT / "outputs" / "fig" / "ssi_figure_v2" / "panels"
 BRIDGE_OUT = _paths.FIG_DIR / "behavior_model_bridge"
 COLLECTIONS_OUT = _paths.FIG_DIR / "plot_collections"
 
@@ -161,7 +168,16 @@ CONTOUR_MOTION_WINDOWS_CSV = (
 )
 WINDOW_FEATURES_CSV = UPSTREAM_FIXSTATS / "window_features.csv"
 
-_BANK = _paths.TRACE_BANK_MERGED_DIR
+_DEFAULT_BANK = (
+    UPSTREAM_MOVIE_INFO
+    / "backimage_real_trace_ssi_matrix_large_contour_no_driftgate_ms200_n100x1000_v1"
+    / "merged"
+)
+# A selected-twin refresh must consume the matrix produced by that checkpoint,
+# not whichever historical bank happens to live under ``FIG4_SOURCE_ROOT``.
+# Keep the shipped location as the default while making the model-specific
+# boundary explicit and auditable for production rerenders.
+_BANK = Path(os.environ.get("FIG4_TRACE_BANK_DIR", str(_DEFAULT_BANK))).resolve()
 _BANK_INPUTS = tuple(_BANK / name for name in TRACE_BANK_MEMBERS)
 
 # Panel H's radius sweep. `summarize_backimage_patch_radius_sensitivity` reads
@@ -191,16 +207,37 @@ UNIT_MAPS_AXIS_RUN_DIR = (
     / "backimage_axis_conditioned_matched_static_percandidate_gpu1_n128_c4_k16_scales_0p5_1_2_bconsistent_v1"
 )
 UNIT_MAPS_RUN_DIR = UPSTREAM_MOVIE_INFO / "backimage_rr100_instantaneous_unit_maps_latest_v1"
+RECOVERED_UNIT_MAP_PRODUCER = (
+    UPSTREAM_SCRIPT_DIR / "plot_backimage_rr100_instantaneous_unit_maps.py"
+)
+SELECTED_TWIN_UNIT_MAP_WRAPPER = (
+    UPSTREAM_HELPER_DIR / "run_selected_twin_instantaneous_unit_maps.py"
+)
+RECOVERED_SCHEMATIC_MAP_PRODUCER = (
+    FIG_SSI_SCRIPT_DIR / "compute_schematic_rr100_final_maps.py"
+)
+SELECTED_TWIN_SCHEMATIC_MAP_WRAPPER = (
+    UPSTREAM_HELPER_DIR / "run_selected_twin_schematic_final_maps.py"
+)
+RECOVERED_FREQUENCY_TUNING_PRODUCER = (
+    UPSTREAM_SCRIPT_DIR / "run_backimage_rr100_frequency_tuning_probe.py"
+)
+SELECTED_TWIN_FREQUENCY_TUNING_WRAPPER = (
+    UPSTREAM_HELPER_DIR / "run_selected_twin_frequency_tuning_probe.py"
+)
 SF_TUNING_DIR = (
     UPSTREAM_MOVIE_INFO / "backimage_rr100_frequency_tuning_center_pixel_all_rr100_fast_nyquist_v1"
 )
 
 # The shard tree `merge_backimage_real_trace_ssi_matrix_shards.py` merges.
-SSI_SHARDS_DIR = (
+_DEFAULT_SSI_SHARDS_DIR = (
     UPSTREAM_MOVIE_INFO
     / "backimage_real_trace_ssi_matrix_large_contour_no_driftgate_ms200_n100x1000_v1"
     / "shards"
 )
+SSI_SHARDS_DIR = Path(
+    os.environ.get("FIG4_SSI_SHARDS_DIR", str(_DEFAULT_SSI_SHARDS_DIR))
+).resolve()
 
 # Dataset configs pinned to the revision whose per-session `cids` match the
 # checkpoint's readout shapes. Without this the twin model refuses to load:
@@ -219,11 +256,16 @@ STAGES: tuple[Stage, ...] = (
     # -- Tier 0: producers that exist nowhere ------------------------------
     Stage(
         key="instantaneous_unit_maps",
-        script=UPSTREAM_SCRIPT_DIR / "plot_backimage_rr100_instantaneous_unit_maps.py",
+        script=SELECTED_TWIN_UNIT_MAP_WRAPPER,
         upstream_name="plot_backimage_rr100_instantaneous_unit_maps.py",
         inputs=(
-            UNIT_MAPS_SOURCE_RUN_DIR / "cache" / "backimage_contour_axis_rr100_spatial_ssi_cache.npz",
-            UNIT_MAPS_AXIS_RUN_DIR,
+            RECOVERED_UNIT_MAP_PRODUCER,
+            _BANK / "image_feature_table.csv",
+            UPSTREAM_DATA_ROOT
+            / "outputs"
+            / "fig_ssi"
+            / "trace_provenance"
+            / "schematic_crop_real_backimage_trace_center40.csv",
         ),
         produces={
             # Real emitted filenames. The previous four names ("unit_maps.npz"
@@ -237,10 +279,12 @@ STAGES: tuple[Stage, ...] = (
         },
         note=(
             "RR100 movie run over the recordings; panel A/C instantaneous unit maps. "
-            "Needs the twin model, so it needs FIG4_DATASET_CONFIGS pinned (see "
-            "PINNED_DATASET_CONFIGS). Its --source-run-dir and --axis-run-dir come "
-            "from cache_identity_json inside the shipped fig4_unit_maps.npz, not from "
-            "the defaults in the script."
+            "The recovered production analysis runs through the selected-twin adapter; "
+            "FIG4_TWIN_CHECKPOINT, FIG4_DATASET_CONFIGS, and "
+            "FIG4_RR100_POPULATION_SPEC_DIR must be set. The wrapper reconstructs "
+            "the original displayed source row and trace from the retained, "
+            "model-independent schematic stimulus because the earlier axis-screen "
+            "selection cache was not preserved."
         ),
         out_dir_flag="--out-dir",
     ),
@@ -290,15 +334,25 @@ STAGES: tuple[Stage, ...] = (
         out_dir_flag="--out-dir",
     ),
     Stage(
+        key="frequency_tuning_probe",
+        script=SELECTED_TWIN_FREQUENCY_TUNING_WRAPPER,
+        upstream_name="run_backimage_rr100_frequency_tuning_probe.py",
+        inputs=(RECOVERED_FREQUENCY_TUNING_PRODUCER,),
+        needs=("instantaneous_unit_maps",),
+        note=(
+            "Runs the recovered production RR100 SF/TF grid with gratings generated "
+            "at the selected twin's native 240-Hz rate, then samples the trained "
+            "120-Hz supervision phase."
+        ),
+        out_dir_flag="--out-dir",
+        extra_args=("--source-dir", "{prev_out}", "--force"),
+    ),
+    Stage(
         key="sf_group_ssi_modulation",
         script=UPSTREAM_SCRIPT_DIR / "plot_backimage_rr100_sf_group_ssi_modulation.py",
         upstream_name="plot_backimage_rr100_sf_group_ssi_modulation.py",
-        inputs=(
-            SF_TUNING_DIR / "frequency_tuning_summary.csv",
-            SF_TUNING_DIR / "frequency_tuning_grouped.csv",
-            UNIT_MAPS_RUN_DIR / "displayed_movie_instantaneous_ssi_all_units.csv",
-        ),
-        needs=("instantaneous_unit_maps",),
+        inputs=(),
+        needs=("frequency_tuning_probe", "instantaneous_unit_maps"),
         produces={
             "dynamic_log_gaussian_marginal_sf_tuning_unit_groups.csv":
                 _paths.SF_TUNING_UNIT_GROUPS_CSV,
@@ -311,12 +365,32 @@ STAGES: tuple[Stage, ...] = (
             "record the formula, so the method is reconstructable from the cache if the script is not."
         ),
         out_dir_flag="--out-dir",
+        extra_args=(
+            "--tuning-dir",
+            "{prev_out}",
+            "--ssi-csv",
+            "{scratch}/instantaneous_unit_maps/displayed_movie_instantaneous_ssi_all_units.csv",
+            "--sf-metric",
+            "dynamic_log_gaussian_marginal",
+            "--low-sf-max-cpd",
+            "0.05",
+            "--high-sf-min-cpd",
+            "0.5",
+        ),
     ),
     Stage(
         key="schematic_final_maps",
-        script=FIG_SSI_SCRIPT_DIR / "compute_schematic_rr100_final_maps.py",
+        script=SELECTED_TWIN_SCHEMATIC_MAP_WRAPPER,
         upstream_name="compute_schematic_rr100_final_maps.py",
-        inputs=(UNIT_MAPS_RUN_DIR,),
+        inputs=(
+            RECOVERED_SCHEMATIC_MAP_PRODUCER,
+            _BANK / "image_feature_table.csv",
+            UPSTREAM_DATA_ROOT
+            / "outputs"
+            / "fig_ssi"
+            / "trace_provenance"
+            / "schematic_crop_real_backimage_trace_center40.csv",
+        ),
         produces={
             # Real emitted names/locations, md5-confirmed against the recovered
             # run dir. This stage emits only two of the three schematic caches;
@@ -324,12 +398,12 @@ STAGES: tuple[Stage, ...] = (
             "cache/schematic_rr100_final_maps.npz": _paths.SCHEMATIC_FINAL_MAPS_NPZ,
             "schematic_rr100_final_map_unit_metrics.csv": _paths.SCHEMATIC_FINAL_MAP_UNIT_METRICS_CSV,
         },
-        needs=("instantaneous_unit_maps",),
         note=(
-            "Reads only the instantaneous unit-maps run dir (its RUN_DIR), so it is the "
-            "shallowest stage that exercises the twin model end to end. Defaults to cuda:1."
+            "Runs the recovered production endpoint-map analysis with the selected "
+            "twin and retained model-independent schematic stimulus."
         ),
         out_dir_flag="--out-dir",
+        extra_args=("--force",),
     ),
     Stage(
         key="contour_schematic_trace",
@@ -735,7 +809,10 @@ def run(scratch: Path, only: set[str] | None, allow_in_place: bool) -> int:
                else [sys.executable, str(stage.script)])
         if stage.extra_args:
             prev_out = str(scratch / stage.needs[0]) if stage.needs else ""
-            cmd += [a.replace("{prev_out}", prev_out) for a in stage.extra_args]
+            cmd += [
+                a.replace("{prev_out}", prev_out).replace("{scratch}", str(scratch))
+                for a in stage.extra_args
+            ]
         if stage.out_dir_flag:
             cmd += [stage.out_dir_flag, str(out_dir)]
             effective_out = out_dir

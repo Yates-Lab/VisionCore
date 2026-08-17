@@ -3,7 +3,7 @@ PyTorch Lightning DataModule for multi-dataset training.
 """
 
 import time
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 import torch
 import pytorch_lightning as pl
@@ -76,7 +76,9 @@ class MultiDatasetDM(pl.LightningDataModule):
     def __init__(self, cfg_dir: str, max_ds: int, batch: int,
                  workers: int, steps_per_epoch: int, enable_curriculum: bool = False,
                  dset_dtype: str = 'uint8', homogeneous_batches: bool = False,
-                 persistent_workers: Optional[bool] = None, prefetch_factor: Optional[int] = None):
+                 persistent_workers: Optional[bool] = None, prefetch_factor: Optional[int] = None,
+                 supervision_phase_override: Optional[int] = None,
+                 dataset_names: Optional[List[str]] = None):
         super().__init__()
         self.cfg_dir = cfg_dir
         self.max_ds = max_ds
@@ -88,6 +90,8 @@ class MultiDatasetDM(pl.LightningDataModule):
         self.contrast_scores = None
         self.name2idx = None
         self.homogeneous_batches = bool(homogeneous_batches)
+        self.supervision_phase_override = supervision_phase_override
+        self.dataset_names = list(dataset_names) if dataset_names is not None else None
 
         # Loader performance knobs (sane defaults for single-GPU throughput)
         if persistent_workers is None:
@@ -127,7 +131,7 @@ class MultiDatasetDM(pl.LightningDataModule):
         # Transforms that are safe to use with uint8 storage
         # - pixelnorm: will be removed and applied on-the-fly during serving
         # - unsqueeze: just adds a dimension, doesn't modify data
-        ALLOWED_TRANSFORMS = {'pixelnorm', 'unsqueeze'}
+        ALLOWED_TRANSFORMS = {'pixelnorm', 'unsqueeze', 'center_crop'}
 
         transforms = cfg['transforms']
         for transform_key, transform_spec in transforms.items():
@@ -167,6 +171,40 @@ class MultiDatasetDM(pl.LightningDataModule):
         # cfg_dir should now point to a parent config file (e.g., multi_basic_120_backimage_all.yaml)
         self.cfgs = load_dataset_configs(self.cfg_dir)
 
+        # Optional targeted loading for evaluation/diagnostics.  Filtering here,
+        # before prepare_data, avoids materializing every preceding session.
+        if self.dataset_names is not None:
+            requested = set(self.dataset_names)
+            available = {cfg['session'] for cfg in self.cfgs}
+            missing = requested - available
+            if missing:
+                raise ValueError(
+                    f'dataset_names not found in config: {sorted(missing)}'
+                )
+            self.cfgs = [
+                cfg for cfg in self.cfgs if cfg['session'] in requested
+            ]
+
+        # Evaluation-only diagnostic: expose the interleaved native-rate phase
+        # without changing the checkpoint's training contract or config file.
+        if self.supervision_phase_override is not None:
+            phase = int(self.supervision_phase_override)
+            for cfg in self.cfgs:
+                supervision = cfg.get('supervision')
+                if not supervision:
+                    raise ValueError(
+                        'supervision_phase_override requires every dataset '
+                        'config to declare supervision'
+                    )
+                source_rate = int((cfg.get('sampling') or {}).get('source_rate', 120))
+                target_rate = int(supervision['target_rate'])
+                factor = source_rate // target_rate
+                if not 0 <= phase < factor:
+                    raise ValueError(
+                        f'supervision phase {phase} must be in [0, {factor})'
+                    )
+                supervision['phase'] = phase
+
         # Limit to max_ds datasets
         self.cfgs = self.cfgs[:self.max_ds]
 
@@ -188,8 +226,9 @@ class MultiDatasetDM(pl.LightningDataModule):
                 # Check for non-pixelnorm/unsqueeze transforms
                 if self._check_for_non_pixelnorm_transforms(cfg):
                     raise ValueError(
-                        f"Dataset '{name}' has transforms other than pixelnorm/unsqueeze, "
-                        f"but dset_dtype='uint8' only supports pixelnorm and unsqueeze. "
+                        f"Dataset '{name}' has transforms outside the uint8-safe set, "
+                        f"but dset_dtype='uint8' only supports pixelnorm, center_crop, "
+                        f"and unsqueeze. "
                         f"Use dset_dtype='bfloat16' or 'float32' to enable other transforms."
                     )
 
@@ -201,6 +240,18 @@ class MultiDatasetDM(pl.LightningDataModule):
                 else:
                     tr, va, _ = prepare_data(cfg, strict=True)
                     te = None
+
+                # Session files commonly store integer-valued pixels in a
+                # float32 tensor.  The uint8 mode historically wrapped those
+                # tensors without actually converting the backing storage,
+                # defeating its advertised 4x memory saving.  All split views
+                # share the same underlying DictDatasets, so casting through
+                # the training view converts train/val/test storage together.
+                if norm_removed:
+                    tr.cast(torch.uint8, target_keys=['stim'])
+                    va.cast(torch.uint8, target_keys=['stim'])
+                    if te is not None:
+                        te.cast(torch.uint8, target_keys=['stim'])
 
                 # Wrap with Float32View for on-the-fly normalization
                 self.train_dsets[name] = Float32View(tr, norm_removed, float16=False)
@@ -225,10 +276,14 @@ class MultiDatasetDM(pl.LightningDataModule):
                 }
                 target_dtype = dtype_map[self.dset_dtype]
 
-                tr.cast(target_dtype, target_keys=['stim', 'robs', 'dfs', 'behavior'])
-                va.cast(target_dtype, target_keys=['stim', 'robs', 'dfs', 'behavior'])
+                cast_keys = ['stim', 'robs', 'dfs', 'behavior']
+                underlying_dsets = getattr(tr, 'dsets', None)
+                if underlying_dsets and 'output_behavior' in underlying_dsets[0]:
+                    cast_keys.append('output_behavior')
+                tr.cast(target_dtype, target_keys=cast_keys)
+                va.cast(target_dtype, target_keys=cast_keys)
                 if te is not None:
-                    te.cast(target_dtype, target_keys=['stim', 'robs', 'dfs', 'behavior'])
+                    te.cast(target_dtype, target_keys=cast_keys)
 
                 # Store directly without Float32View wrapper
                 self.train_dsets[name] = tr
@@ -458,4 +513,3 @@ class MultiDatasetDM(pl.LightningDataModule):
                 "and re-run setup(). Refusing to fall back to the validation "
                 "split, which would report selection data as a test score.")
         return self._mk_loader(self.test_dsets, shuffle=True)
-

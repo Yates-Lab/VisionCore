@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import shlex
 import subprocess
@@ -28,12 +29,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 
 ROOT = Path(__file__).resolve().parents[3]
 FIG4_DIR = ROOT / "paper" / "fig4"
 UPSTREAM_DIR = FIG4_DIR / "upstream"
 
-RUN_STEM = "backimage_real_trace_ssi_matrix_large_contour_no_driftgate_ms200_n100x1000_history32_v2"
+RUN_STEM = "backimage_real_trace_ssi_matrix_large_contour_no_driftgate_ms200_n100x1000_v1"
 RR100_VERSION = (
     "V1-RR_MS_min_complete0p65_split0p75_pair0p60_anyfail_finalsplit0p75_"
     "medoidPosthocminRepcomplete0p45_movieMedoid"
@@ -64,7 +67,13 @@ DEFAULT_WINDOW_FEATURES_CSV = (
     ROOT / "outputs/fixation_statistics_by_stimulus_all_sessions_after_review/window_features.csv"
 )
 DEFAULT_PRODUCTION_OUT_ROOT = ROOT / "outputs/active_sensing_movie_information" / RUN_STEM
-DEFAULT_SMOKE_OUT_ROOT = ROOT / "outputs/figures/fig4/smoke/real_trace_matrix_history32_smoke"
+DEFAULT_SMOKE_OUT_ROOT = ROOT / "outputs/figures/fig4/smoke/real_trace_matrix_smoke"
+DEFAULT_PRODUCTION_240_OUT_ROOT = ROOT / (
+    "outputs/active_sensing_movie_information/"
+    "backimage_real_trace_ssi_matrix_native240_n100x1000_v1"
+)
+DEFAULT_SMOKE_240_OUT_ROOT = ROOT / "outputs/figures/fig4/smoke/real_trace_matrix_native240_smoke"
+DEFAULT_PILOT_240_OUT_ROOT = ROOT / "outputs/figures/fig4/pilots/real_trace_matrix_native240_pilot"
 DEFAULT_DATASET_CONFIGS = UPSTREAM_DIR / "dataset_configs" / "multi_basic_120_long.yaml"
 DEFAULT_POPULATION_SPEC_DIR = (
     ROOT / "outputs/redundancy_resolved_v1_twin/step1_activation_fingerprints"
@@ -91,8 +100,6 @@ PROFILES: dict[str, dict[str, Any]] = {
         "n_traces": 1000,
         "seed": 20260717,
         "n_timepoints": 40,
-        "history_burn_in_samples": 32,
-        "model_trace_samples": 72,
         "bin_seconds": 1.0 / 120.0,
         "patch_size_px": 540,
         "image_contrast_quantile": 0.75,
@@ -117,8 +124,6 @@ PROFILES: dict[str, dict[str, Any]] = {
         "n_traces": 2,
         "seed": 20260717,
         "n_timepoints": 40,
-        "history_burn_in_samples": 32,
-        "model_trace_samples": 72,
         "bin_seconds": 1.0 / 120.0,
         "patch_size_px": 540,
         "image_contrast_quantile": 0.75,
@@ -137,6 +142,92 @@ PROFILES: dict[str, dict[str, Any]] = {
         "skip_benchmark": True,
         "shards": ((0, 1),),
         "expected_runtime": "Tiny scorer smoke target; intended to test schemas, not values.",
+    },
+    "production240": {
+        "n_images": 100,
+        "n_traces": 1000,
+        "seed": 20260717,
+        # The retained eye traces remain on their measured 120-Hz grid.  The
+        # scorer endpoint-interpolates these 40 samples to 80 outputs only for
+        # a true native-240 checkpoint, preserving the 1/3-second interval.
+        "n_timepoints": 40,
+        "bin_seconds": 1.0 / 120.0,
+        "expected_model_output_rate_hz": 240,
+        "patch_size_px": 540,
+        "image_contrast_quantile": 0.75,
+        "image_min_orientation_coherence": 0.2,
+        "image_min_drift_anisotropy": 0.0,
+        "min_strong_contour_images": 40,
+        "strong_contour_orientation_coherence_min": 0.5,
+        "max_trace_path_length_arcmin": 350.0,
+        "trace_scale_metric": "rendered_path_length_arcmin",
+        "trace_sampling": "quantile",
+        "min_microsaccade_traces": 200,
+        "session_filter": "",
+        "device": "cuda:1",
+        "frame_batch_size": 16,
+        "trace_batch_size": 8,
+        "skip_benchmark": True,
+        "shards": ((0, 50), (50, 100)),
+        "expected_runtime": (
+            "Native-240 production replay; benchmark the selected checkpoint "
+            "before relying on the historical runtime estimate."
+        ),
+    },
+    "smoke240": {
+        "n_images": 1,
+        "n_traces": 2,
+        "seed": 20260717,
+        "n_timepoints": 40,
+        "bin_seconds": 1.0 / 120.0,
+        "expected_model_output_rate_hz": 240,
+        "patch_size_px": 540,
+        "image_contrast_quantile": 0.75,
+        "image_min_orientation_coherence": 0.2,
+        "image_min_drift_anisotropy": 0.0,
+        "min_strong_contour_images": 0,
+        "strong_contour_orientation_coherence_min": 0.5,
+        "max_trace_path_length_arcmin": 350.0,
+        "trace_scale_metric": "rendered_path_length_arcmin",
+        "trace_sampling": "quantile",
+        "min_microsaccade_traces": 0,
+        "session_filter": "Allen_2022-02-16",
+        "device": "cpu",
+        "frame_batch_size": 4,
+        "trace_batch_size": 1,
+        "skip_benchmark": True,
+        "shards": ((0, 1),),
+        "expected_runtime": "Native-240 schema smoke; intended to test contracts, not values.",
+    },
+    "pilot240": {
+        # Large enough to expose a population shift and image/trace
+        # heterogeneity, but still suitable while model training is active.
+        "n_images": 12,
+        "n_traces": 32,
+        "seed": 20260717,
+        "n_timepoints": 40,
+        "bin_seconds": 1.0 / 120.0,
+        "expected_model_output_rate_hz": 240,
+        "patch_size_px": 540,
+        "image_contrast_quantile": 0.75,
+        "image_min_orientation_coherence": 0.2,
+        "image_min_drift_anisotropy": 0.0,
+        "min_strong_contour_images": 0,
+        "strong_contour_orientation_coherence_min": 0.5,
+        "max_trace_path_length_arcmin": 350.0,
+        "trace_scale_metric": "rendered_path_length_arcmin",
+        "trace_sampling": "quantile",
+        "min_microsaccade_traces": 0,
+        "session_filter": "",
+        "device": "cuda:1",
+        "frame_batch_size": 16,
+        "trace_batch_size": 8,
+        "skip_benchmark": True,
+        "shards": ((0, 12),),
+        "expected_runtime": (
+            "Native-240 mechanism pilot: 384 image-trace movies plus 12 "
+            "stabilized controls; intended for direction/QC, not final CIs."
+        ),
     },
 }
 
@@ -441,8 +532,6 @@ def matrix_command(
         cli_value(profile["seed"]),
         "--n-timepoints",
         cli_value(profile["n_timepoints"]),
-        "--history-burn-in-samples",
-        cli_value(profile["history_burn_in_samples"]),
         "--bin-seconds",
         cli_value(profile["bin_seconds"]),
         "--patch-size-px",
@@ -517,7 +606,6 @@ def matrix_command(
             shard_dir / "trace_feature_table.csv",
             shard_dir / "unit_feature_table.csv",
             shard_dir / "trace_xy.npy",
-            shard_dir / "trace_xy_model.npy",
         ),
     )
 
@@ -562,7 +650,6 @@ def merge_command(
             merged_dir / "trace_feature_table.csv",
             merged_dir / "unit_feature_table.csv",
             merged_dir / "trace_xy.npy",
-            merged_dir / "trace_xy_model.npy",
         ),
     )
 
@@ -585,8 +672,6 @@ def baseline_command(
         RR100_VERSION,
         "--n-timepoints",
         cli_value(profile["n_timepoints"]),
-        "--history-burn-in-samples",
-        cli_value(profile["history_burn_in_samples"]),
         "--bin-seconds",
         cli_value(profile["bin_seconds"]),
         "--patch-size-px",
@@ -702,6 +787,108 @@ def input_checks(args: argparse.Namespace, *, hash_inputs: bool) -> list[dict[st
     ]
 
 
+def infer_temporal_contract(
+    dataset_configs: Path,
+    *,
+    source_trace_samples: int,
+    bin_seconds: float,
+) -> dict[str, Any]:
+    """Describe the scorer grid from the selected dataset contract.
+
+    Historical 120-Hz configs contain 33 listed lags but the recovered scorer
+    deliberately uses 32.  Mixed-rate configs declare an explicit supervision
+    grid and their lag count is authoritative.
+    """
+    config: dict[str, Any] = {}
+    try:
+        loaded = yaml.safe_load(Path(dataset_configs).read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            config = loaded
+    except (OSError, yaml.YAMLError):
+        config = {}
+
+    sampling = config.get("sampling") or {}
+    supervision = config.get("supervision") or {}
+    has_mixed_rate_contract = bool(supervision)
+    input_rate_hz = int(sampling.get("target_rate", 120))
+    output_rate_hz = int(
+        supervision.get("target_rate", round(1.0 / float(bin_seconds)))
+    )
+    if has_mixed_rate_contract:
+        stim_lags = (config.get("keys_lags") or {}).get("stim")
+        if isinstance(stim_lags, list) and stim_lags:
+            model_history_frames = int(len(stim_lags))
+        else:
+            model_history_frames = 60
+        temporal_factor = max(1, int(round(input_rate_hz / output_rate_hz)))
+        supervision_phase = int(supervision.get("phase", temporal_factor - 1))
+    elif int(input_rate_hz) == 240:
+        # A true native-rate model has no separate supervision stanza: both
+        # stimulus and target live on the declared sampling grid.  Its listed
+        # lag count is therefore authoritative, unlike the historical 120-Hz
+        # Figure-4 checkpoint's off-by-one dataset declaration.
+        stim_lags = (config.get("keys_lags") or {}).get("stim")
+        if isinstance(stim_lags, list) and stim_lags:
+            model_history_frames = int(len(stim_lags))
+        else:
+            model_history_frames = 60
+        output_rate_hz = input_rate_hz
+        temporal_factor = 1
+        supervision_phase = 0
+    else:
+        model_history_frames = 32
+        input_rate_hz = output_rate_hz
+        temporal_factor = 1
+        supervision_phase = 0
+
+    if not math.isfinite(float(bin_seconds)) or float(bin_seconds) <= 0.0:
+        raise ValueError(f"Trace bin_seconds must be positive, got {bin_seconds}.")
+    source_rate_hz = int(round(1.0 / float(bin_seconds)))
+    if not math.isclose(
+        float(bin_seconds), 1.0 / float(source_rate_hz), rel_tol=1e-6, abs_tol=1e-9
+    ):
+        raise ValueError(
+            f"Trace bin_seconds={bin_seconds} does not specify an integer sampling rate."
+        )
+    if output_rate_hz < source_rate_hz or output_rate_hz % source_rate_hz:
+        raise ValueError(
+            "Figure 4 replay requires model output rate to be an integer multiple "
+            f"of trace rate; got {source_rate_hz} -> {output_rate_hz} Hz."
+        )
+    if input_rate_hz < source_rate_hz or input_rate_hz % source_rate_hz:
+        raise ValueError(
+            "Figure 4 replay requires model input rate to be an integer multiple "
+            f"of trace rate; got {source_rate_hz} -> {input_rate_hz} Hz."
+        )
+    scored_per_source_sample = output_rate_hz // source_rate_hz
+    scored_trace_samples = int(source_trace_samples) * scored_per_source_sample
+    history_seconds = float(model_history_frames) / float(input_rate_hz)
+    interval_seconds = float(source_trace_samples) / float(source_rate_hz)
+    return {
+        "model_history_frames": model_history_frames,
+        "model_input_rate_hz": input_rate_hz,
+        "model_output_rate_hz": output_rate_hz,
+        "native_frames_per_scored_sample": temporal_factor,
+        "native_frames_per_source_trace_sample": input_rate_hz // source_rate_hz,
+        "scored_samples_per_source_trace_sample": scored_per_source_sample,
+        "supervision_phase": supervision_phase,
+        "model_history_seconds": history_seconds,
+        "source_trace_rate_hz": source_rate_hz,
+        "source_trace_samples": int(source_trace_samples),
+        "scored_trace_samples": scored_trace_samples,
+        "scored_bin_seconds": 1.0 / float(output_rate_hz),
+        "analysis_interval_seconds": interval_seconds,
+        "bin_seconds": float(bin_seconds),
+        "boundary": (
+            f"The twin consumes {model_history_frames} frames at {input_rate_hz} Hz "
+            f"({history_seconds * 1000.0:.1f} ms); the retained trace has "
+            f"{int(source_trace_samples)} samples at {source_rate_hz} Hz and is "
+            f"endpoint-interpolated to {scored_trace_samples} scored responses at "
+            f"{output_rate_hz} Hz over the same {interval_seconds * 1000.0:.1f}-ms interval."
+        ),
+    }
+
+
 def build_manifest(
     *,
     args: argparse.Namespace,
@@ -710,6 +897,20 @@ def build_manifest(
     shards: tuple[tuple[int, int], ...],
     commands: list[CommandPlan],
 ) -> dict[str, Any]:
+    temporal_contract = infer_temporal_contract(
+        Path(args.dataset_configs),
+        source_trace_samples=int(profile["n_timepoints"]),
+        bin_seconds=float(profile["bin_seconds"]),
+    )
+    expected_output_rate = profile.get("expected_model_output_rate_hz")
+    if expected_output_rate is not None and int(
+        temporal_contract["model_output_rate_hz"]
+    ) != int(expected_output_rate):
+        raise ValueError(
+            f"Profile {args.profile!r} requires a {int(expected_output_rate)}-Hz "
+            "model output contract, but --dataset-configs declares "
+            f"{temporal_contract['model_output_rate_hz']} Hz."
+        )
     return {
         "analysis": "fig4_backimage_real_trace_ssi_matrix_run_plan",
         "created_utc": datetime.now(timezone.utc).isoformat(),
@@ -723,27 +924,7 @@ def build_manifest(
             key: (list(value) if isinstance(value, tuple) else value)
             for key, value in profile.items()
         },
-        "temporal_contract": {
-            "model_history_frames": 32,
-            "model_history_includes_current_frame": True,
-            "history_burn_in_samples": int(profile["history_burn_in_samples"]),
-            "scored_trace_samples": int(profile["n_timepoints"]),
-            "model_trace_samples": int(profile["model_trace_samples"]),
-            "bin_seconds": float(profile["bin_seconds"]),
-            "current_history_policy": "explicit_preceding_history",
-            "scored_sample_lag_index_rule": (
-                "For scored sample s and lag channel l, with l=0 as the current frame, "
-                "the model-trace index is 32+s-l."
-            ),
-            "scored_model_current_frame_indices_0based": [32, 71],
-            "discarded_lagged_output_current_frame_index_0based": 31,
-            "boundary": (
-                "trace_xy_model contains 32 preceding history samples followed by the 40-sample "
-                "trace_xy scored interval. The 72-frame trace is embedded directly without prefix "
-                "seeding; only outputs whose current frames are 32..71 contribute to SSI. All "
-                "movement metrics, microsaccade labels, and path-bin variables use trace_xy only."
-            ),
-        },
+        "temporal_contract": temporal_contract,
         "recovered_production_facts": {
             "checkpoint_filename": MODEL_CHECKPOINT_FILENAME,
             "checkpoint_sha256": MODEL_CHECKPOINT_SHA256,
@@ -783,11 +964,17 @@ def build_manifest(
 def default_out_root(profile_name: str) -> Path:
     if profile_name == "smoke":
         return DEFAULT_SMOKE_OUT_ROOT
+    if profile_name == "production240":
+        return DEFAULT_PRODUCTION_240_OUT_ROOT
+    if profile_name == "smoke240":
+        return DEFAULT_SMOKE_240_OUT_ROOT
+    if profile_name == "pilot240":
+        return DEFAULT_PILOT_240_OUT_ROOT
     return DEFAULT_PRODUCTION_OUT_ROOT
 
 
 def default_plan_json(profile_name: str) -> Path:
-    return ROOT / "outputs/figures/fig4/provenance" / f"real_trace_matrix_history32_{profile_name}_plan.json"
+    return ROOT / "outputs/figures/fig4/provenance" / f"real_trace_matrix_{profile_name}_plan.json"
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
