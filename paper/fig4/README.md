@@ -144,6 +144,22 @@ sampling one image and two traces:
 uv run python paper/fig4/upstream/run_real_trace_matrix.py --profile smoke
 ```
 
+For a genuinely native-240-Hz checkpoint, use `smoke240`, `pilot240`, or
+`production240` and explicitly provide that checkpoint's dataset config. The
+retained BackImage eye traces are still measured on the historical 120-Hz
+grid: every profile center-crops the same 40 source samples (333 ms). The
+native-240 scorer endpoint-interpolates each trace to 80 model-output samples,
+holds the first and last positions at the boundaries, and integrates rates at
+1/240 s. It does **not** take 80 measured 120-Hz samples and relabel them as
+240 Hz. The launcher rejects a `*240` profile unless the dataset config
+declares a true 240-Hz output grid.
+
+```bash
+FIG4_TWIN_CHECKPOINT=/path/to/native240.ckpt \
+FIG4_DATASET_CONFIGS=paper/model_selection/configs/multi_240_long_split3_dekel35.yaml \
+uv run python paper/fig4/upstream/run_real_trace_matrix.py --profile smoke240
+```
+
 Execution uses in-repo scorer scripts by default. `--run-all` still refuses on a
 clean checkout until the source inputs and model/readout/RR100 artifacts are
 present:
@@ -153,6 +169,49 @@ FIG4_MCFARLAND_OUTPUTS=/path/to/mcfarland_outputs_mono.pkl \
 FIG4_RR100_POPULATION_SPEC_DIR=/path/to/step1_activation_fingerprints \
 uv run python paper/fig4/upstream/run_real_trace_matrix.py --run-all --force
 ```
+
+When refreshing the downstream production caches for a newly selected twin,
+point the refresh explicitly at that run's merged matrix and shard directory:
+
+```bash
+FIG4_TRACE_BANK_DIR=/path/to/selected_twin/merged \
+FIG4_SSI_SHARDS_DIR=/path/to/selected_twin/shards \
+uv run python paper/fig4/refresh_all.py
+```
+
+Both variables are optional and preserve the historical source-tree locations
+by default. Setting them prevents a selected-twin rerender from silently
+reading an older checkpoint's trace matrix from `FIG4_SOURCE_ROOT`.
+
+The matrix scorer reads `--unit-tuning-csv` only to annotate
+`unit_feature_table.csv`; it never changes movie scores. If the selected twin's
+SF/TF probe finishes after the expensive matrix, replace those annotations with
+`paper/fig4/upstream/replace_unit_feature_tuning.py`, supplying both the new and
+previous tuning CSVs. The utility removes the previous tuning schema, validates
+one-to-one unit coverage, and writes a hash-provenance sidecar.
+
+For native selected twins, first turn the cycle-valid robust tuning fit into a
+complete RR100 tuning table (including explicit inactive rows and orientation
+metadata measured from the same model):
+
+```bash
+uv run python paper/fig4/upstream/build_robust_unit_tuning.py \
+  --base-unit-table /path/to/merged/unit_feature_table.csv \
+  --robust-tuning-summary /path/to/robust/robust_tuning_summary.csv \
+  --grouped-tuning-csv /path/to/frequency_tuning_grouped.csv \
+  --out /path/to/cycle_valid_unit_tuning.csv
+```
+
+The cycle-valid grid has a different lower bound from the historical coarse
+grid, so its absolute 0.5/0.75-cpd cuts are not transferable. Run the selected-
+twin refresh and compositor with `FIG4_SF_GROUP_MODE=table_tertiles`; panels
+then use the stable lower and upper tertiles recorded in `unit.sf_group` while
+the default `absolute_cpd` mode continues to reproduce historical caches.
+The native controlled-motion dose-response analysis follows the same rule by
+default: `analyze_native_controlled_scaling.py` forms lower/middle/higher
+tertiles from each unit's cycle-valid weighted-center SF. Its optional
+`--sf-group-mode censoring` switch exists only for reproducing the older
+boundary-censored versus resolved diagnostic.
 
 To stage those assets from a VisionCore-style data tree without importing any
 code from it:

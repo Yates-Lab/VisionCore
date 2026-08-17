@@ -25,6 +25,24 @@ MATRIX_FILES = (
     "population_ssi.npy",
 )
 
+PROVENANCE_PATHS = (
+    ("rr100_version",),
+    ("bin_seconds",),
+    ("n_timepoints",),
+    ("patch_size_px",),
+    ("source_csv",),
+    ("unit_tuning_csv",),
+    ("trace_time_contract",),
+    ("model_provenance", "model", "checkpoint_sha256"),
+    ("model_provenance", "model", "dataset_configs_sha256"),
+    ("model_provenance", "rr100_population_spec_json_sha256"),
+    ("model_provenance", "rr100_population_spec_npz_sha256"),
+    ("model_provenance", "stimulus", "model_history_frames"),
+    ("model_provenance", "stimulus", "model_input_rate_hz"),
+    ("model_provenance", "stimulus", "model_output_rate_hz"),
+    ("model_provenance", "stimulus", "supervision_phase"),
+)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -54,6 +72,31 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
 
 def load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def nested_value(payload: dict[str, Any], path: tuple[str, ...]) -> Any:
+    value: Any = payload
+    for key in path:
+        if not isinstance(value, dict) or key not in value:
+            raise ValueError(f"Shard summary lacks required provenance {'.'.join(path)}")
+        value = value[key]
+    return value
+
+
+def assert_matching_provenance(summaries: list[dict[str, Any]]) -> dict[str, Any]:
+    reference: dict[str, Any] = {}
+    first = summaries[0]
+    for path in PROVENANCE_PATHS:
+        expected = nested_value(first, path)
+        for shard_index, summary in enumerate(summaries[1:], start=1):
+            observed = nested_value(summary, path)
+            if observed != expected:
+                raise ValueError(
+                    f"Shard {shard_index} provenance differs at {'.'.join(path)}: "
+                    f"{observed!r} versus {expected!r}."
+                )
+        reference[".".join(path)] = expected
+    return reference
 
 
 def require_member(shard_dir: Path, name: str) -> Path:
@@ -160,6 +203,7 @@ def main() -> None:
             raise FileNotFoundError(f"Shard directory not found: {shard_dir}")
 
     summaries = [load_json(require_member(path, "summary.json")) for path in shard_dirs]
+    common_provenance = assert_matching_provenance(summaries)
     image_table, trace_table, unit_table, trace_xy = load_reference_tables(shard_dirs)
     n_images = int(image_table.shape[0])
     n_traces = int(trace_table.shape[0])
@@ -188,11 +232,28 @@ def main() -> None:
         raise ValueError(f"Merged movie table has {merged_movie.shape[0]} rows; expected {n_movies}.")
     if merged_movie["movie_index"].astype(int).nunique() != n_movies:
         raise ValueError("Merged movie table does not cover every movie_index exactly once.")
+    movie_index = merged_movie["movie_index"].astype(int).to_numpy()
+    if not np.array_equal(movie_index, np.arange(n_movies, dtype=int)):
+        raise ValueError("Merged movie rows are not in exact contiguous movie_index order.")
+    expected_image = movie_index // n_traces
+    expected_trace = movie_index % n_traces
+    if not np.array_equal(merged_movie["image_index"].astype(int), expected_image):
+        raise ValueError("Merged image_index is inconsistent with image-major movie_index.")
+    if not np.array_equal(merged_movie["trace_index"].astype(int), expected_trace):
+        raise ValueError("Merged trace_index is inconsistent with image-major movie_index.")
 
     for name, values in arrays.items():
         if not filled[name].all():
             missing = np.flatnonzero(~filled[name])[:5].astype(int).tolist()
             raise ValueError(f"{name} has unfilled movie rows after merge, starting with {missing}.")
+        expected_shape = (n_movies,) if name == "population_ssi.npy" else (n_movies, n_units)
+        if values.shape != expected_shape:
+            raise ValueError(f"{name} has shape {values.shape}; expected {expected_shape}.")
+        if not np.all(np.isfinite(values)):
+            count = int(values.size - np.count_nonzero(np.isfinite(values)))
+            raise ValueError(f"{name} contains {count} non-finite entries.")
+        if np.any(values < 0):
+            raise ValueError(f"{name} contains negative entries (minimum {values.min():g}).")
         np.save(out_dir / name, values)
 
     image_table.to_csv(out_dir / "image_feature_table.csv", index=False)
@@ -214,6 +275,13 @@ def main() -> None:
         "n_traces": n_traces,
         "n_units": n_units,
         "n_movies": n_movies,
+        "validated_common_provenance": common_provenance,
+        "integrity_checks": {
+            "complete_image_major_movie_index": True,
+            "matrix_shapes_match_coordinates": True,
+            "all_matrix_entries_finite": True,
+            "all_matrix_entries_nonnegative": True,
+        },
         "shard_summaries": summaries,
         "outputs": {name.removesuffix(".npy"): out_dir / name for name in MATRIX_FILES}
         | {

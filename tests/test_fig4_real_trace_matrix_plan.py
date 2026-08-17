@@ -106,6 +106,29 @@ def test_refresh_graph_declares_recovered_trace_bank_metadata_stage():
     }
 
 
+def test_refresh_graph_routes_model_dependent_maps_and_tuning_through_selected_twin_adapters():
+    refresh_all = _load_refresh_all_module()
+    stages = {stage.key: stage for stage in refresh_all.STAGES}
+
+    assert stages["instantaneous_unit_maps"].script.name == (
+        "run_selected_twin_instantaneous_unit_maps.py"
+    )
+    assert stages["schematic_final_maps"].script.name == (
+        "run_selected_twin_schematic_final_maps.py"
+    )
+    tuning = stages["frequency_tuning_probe"]
+    assert tuning.script.name == "run_selected_twin_frequency_tuning_probe.py"
+    assert tuning.needs == ("instantaneous_unit_maps",)
+    assert tuning.extra_args == ("--source-dir", "{prev_out}", "--force")
+
+    groups = stages["sf_group_ssi_modulation"]
+    assert groups.needs == ("frequency_tuning_probe", "instantaneous_unit_maps")
+    assert "{scratch}/instantaneous_unit_maps/" in " ".join(groups.extra_args)
+    assert "dynamic_log_gaussian_marginal" in groups.extra_args
+    assert groups.extra_args[groups.extra_args.index("--low-sf-max-cpd") + 1] == "0.05"
+    assert groups.extra_args[groups.extra_args.index("--high-sf-min-cpd") + 1] == "0.5"
+
+
 def test_production_plan_records_recovered_deep_matrix_contract(tmp_path):
     manifest = _run_plan(tmp_path, "production")
 
@@ -175,6 +198,93 @@ def test_production_plan_records_recovered_deep_matrix_contract(tmp_path):
         "d599fb0718faa363520a91b8f0819edafbff74ec501899b590e4061fef557f08"
     )
     assert checks["mcfarland_outputs"]["required_for"] == ["score_shard", "stabilized_baseline"]
+
+
+def test_selected_mixed_rate_plan_records_240hz_sixty_frame_history(tmp_path):
+    dataset_configs = tmp_path / "selected_mixed_rate.yaml"
+    dataset_configs.write_text(
+        "sampling: {source_rate: 240, target_rate: 240}\n"
+        "supervision: {target_rate: 120, phase: 1}\n"
+        "keys_lags:\n"
+        "  stim: [" + ", ".join(str(value) for value in range(60)) + "]\n",
+        encoding="utf-8",
+    )
+    checkpoint = tmp_path / "selected.ckpt"
+    checkpoint.write_bytes(b"plan-only checkpoint placeholder")
+
+    manifest = _run_plan(
+        tmp_path,
+        "production",
+        "--dataset-configs",
+        str(dataset_configs),
+        "--checkpoint-path",
+        str(checkpoint),
+    )
+
+    contract = manifest["temporal_contract"]
+    assert contract["model_history_frames"] == 60
+    assert contract["model_input_rate_hz"] == 240
+    assert contract["model_output_rate_hz"] == 120
+    assert contract["native_frames_per_scored_sample"] == 2
+    assert contract["supervision_phase"] == 1
+    assert contract["model_history_seconds"] == 0.25
+
+
+def test_native240_plan_resamples_retained_120hz_trace_without_changing_duration(tmp_path):
+    dataset_configs = tmp_path / "selected_native240.yaml"
+    dataset_configs.write_text(
+        "sampling: {source_rate: 240, target_rate: 240}\n"
+        "keys_lags:\n"
+        "  stim: [" + ", ".join(str(value) for value in range(60)) + "]\n",
+        encoding="utf-8",
+    )
+    checkpoint = tmp_path / "selected.ckpt"
+    checkpoint.write_bytes(b"plan-only checkpoint placeholder")
+
+    manifest = _run_plan(
+        tmp_path,
+        "production240",
+        "--dataset-configs",
+        str(dataset_configs),
+        "--checkpoint-path",
+        str(checkpoint),
+    )
+
+    contract = manifest["temporal_contract"]
+    assert contract["model_input_rate_hz"] == 240
+    assert contract["model_output_rate_hz"] == 240
+    assert contract["source_trace_rate_hz"] == 120
+    assert contract["source_trace_samples"] == 40
+    assert contract["scored_trace_samples"] == 80
+    assert contract["native_frames_per_source_trace_sample"] == 2
+    assert contract["scored_samples_per_source_trace_sample"] == 2
+    assert contract["analysis_interval_seconds"] == 40 / 120
+    assert contract["scored_bin_seconds"] == 1 / 240
+
+    score = next(cmd for cmd in manifest["commands"] if cmd["stage"] == "score_shard")
+    assert _arg_after(score["argv"], "--n-timepoints") == "40"
+    assert _arg_after(score["argv"], "--bin-seconds") == str(1 / 120)
+
+
+def test_native240_profile_rejects_a_120hz_checkpoint_contract(tmp_path):
+    plan_json = tmp_path / "invalid_native240_plan.json"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(LAUNCHER),
+            "--profile",
+            "production240",
+            "--plan-json",
+            str(plan_json),
+            "--no-print-commands",
+        ],
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "requires a 240-Hz model output contract" in result.stderr
 
 
 def test_smoke_plan_is_tiny_and_schema_compatible(tmp_path):

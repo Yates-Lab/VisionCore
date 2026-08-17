@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -61,10 +62,12 @@ FIG4_DIR = ROOT / "paper" / "fig4"
 # out -- ~4,000 lines of trace-bank analysis imported to obtain nine numbers.
 # They are recorded here instead, and the scripts they came from are still
 # named in the provenance below.
+_SF_GROUP_MODE = os.environ.get("FIG4_SF_GROUP_MODE", "absolute_cpd")
 SELECTION = {
+    "sf_group_mode": _SF_GROUP_MODE,
     "sf_metric_col": "sf_split_metric",
-    "low_sf_max_cpd": 0.5,
-    "high_sf_min_cpd": 0.5,
+    "low_sf_max_cpd": 0.5 if _SF_GROUP_MODE == "absolute_cpd" else None,
+    "high_sf_min_cpd": 0.5 if _SF_GROUP_MODE == "absolute_cpd" else None,
     "contour_coherence_min": 0.2,
     "min_osi": 0.05,
     "match_max_deg": 15.0,

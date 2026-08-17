@@ -538,6 +538,12 @@ class CombinedEmbeddedDataset(torch.utils.data.Dataset):
         for key in target_keys:
             if protect_keys is not None and key in protect_keys:
                 continue
-            # Only update dtype if the original was floating point (matching DictDataset.cast behavior)
-            if self.keys_dtypes[key].is_floating_point and torch.can_cast(self.keys_dtypes[key], dtype):
+            # Match DictDataset.cast: every floating-point backing tensor is
+            # explicitly converted, including float -> uint8 storage.  The
+            # prior torch.can_cast guard left this metadata as float32 even
+            # after the backing stimulus became uint8, causing assignment
+            # failures during temporal embedding.
+            if self.keys_dtypes[key].is_floating_point:
                 self.keys_dtypes[key] = dtype
+
+        return self

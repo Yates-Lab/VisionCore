@@ -1,0 +1,123 @@
+# Dekel-style feed-forward multisession core with explicit nonrecurrent behavior.
+# 60 native-rate frames at 240 Hz are collapsed by the first convolution.
+model_type: v1multi
+sampling_rate: 240
+initial_input_channels: 1
+
+adapter:
+  # Match both the historical teacher and the 05_lr5e-4 comparison model:
+  # the already-centered 35 x 35 crop enters the vision core unchanged.
+  type: none
+  params: {}
+
+frontend:
+  type: none
+  params: {}
+
+convnet:
+  type: dekel
+  params:
+    temporal_support: 60
+    temporal_channels: 8
+    spatial_channels: [48, 48, 48]
+    spatial_kernels: [15, 11, 9]
+    norm_groups: [8, 16, 12, 8]
+    input_size: [35, 35]
+    scaffold_size: 9
+    scaffold_mode: nearest
+    pool_norm: 5
+    strict_input_size: true
+
+modulator:
+  type: mlp_behavior
+  params:
+    behavior_dim: 42
+    hidden_dims: [64]
+    additive_dim: 16
+    activation: gelu
+    dropout: 0.0
+    input_norm: false
+    use_film: true
+    film_max_gain: 0.5
+
+recurrent:
+  type: none
+  params: {}
+
+readout:
+  type: gaussian
+  params:
+    n_units: 8  # overwritten from each session config
+    bias: true
+    initial_std: 0.5
+    initial_mean_scale: 0.1
+
+output_activation: softplus
+
+regularization:
+  # The historical teacher used spatial Laplacians only.  At 240 Hz we add a
+  # weaker temporal second-derivative penalty to the 60-frame first layer.
+  - name: first_layer_spatial_smoothness
+    type: laplacian
+    lambda: 1.0e-3
+    apply_to: ["convnet/temporal_conv/conv/weight"]
+    dims: [-2, -1]
+    padding_mode: constant
+    reduction: dekel
+    schedule: {kind: constant}
+  - name: first_layer_temporal_smoothness
+    type: laplacian
+    lambda: 1.0e-4
+    apply_to: ["convnet/temporal_conv/conv/weight"]
+    dims: [-3]
+    padding_mode: constant
+    reduction: dekel
+    schedule: {kind: constant}
+  - name: hidden_spatial_smoothness
+    type: laplacian
+    lambda: 1.0e-3
+    apply_to:
+      - "stage1_conv/conv.weight"
+      - "stage2_conv/conv.weight"
+      - "stage3_conv/conv.weight"
+    dims: [-2, -1]
+    padding_mode: constant
+    reduction: dekel
+    schedule: {kind: constant}
+  - name: hidden_competitive_sparsity
+    type: proximal_sparsity_dekel
+    lambda: 1.0e-4
+    apply_to:
+      - "stage1_conv/conv.weight"
+      - "stage2_conv/conv.weight"
+      - "stage3_conv/conv.weight"
+    group_dims: [-2, -1]
+    competition_dims: [1]
+    schedule: {kind: constant}
+  - name: readout_competitive_sparsity
+    type: proximal_sparsity_dekel
+    lambda: 1.0e-2
+    apply_to: ["readouts/features/weight"]
+    group_dims: [-2, -1]
+    competition_dims: [1]
+    schedule: {kind: constant}
+  - name: gaussian_width
+    type: l2
+    lambda: 1.0e-5
+    apply_to: ["readouts/std"]
+    schedule: {kind: constant}
+  - name: gaussian_width_floor
+    type: proximal_clamp_min
+    lambda: 1.0e-3
+    apply_to: ["readouts/std"]
+    schedule: {kind: constant}
+  - name: behavior_mlp_weight
+    type: l2
+    lambda: 1.0e-5
+    apply_to: ["modulator/weight"]
+    schedule: {kind: constant}
+  - name: exclude_readout_means_from_wd
+    type: l2
+    lambda: 0.0
+    apply_to: ["readouts/mean"]
+    schedule: {kind: constant}

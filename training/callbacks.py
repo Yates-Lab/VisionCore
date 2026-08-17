@@ -392,6 +392,20 @@ class ModelLoggingCallback(pl.Callback):
                         log_dict['kernels/stem'] = wandb.Image(fig)
                         plt.close(fig)
 
+            # Dekel full-history first layer.  Its temporal convolution is
+            # part of the core (not the generic frontend), so log dedicated
+            # time/frequency and spatial summaries when available.
+            if hasattr(model, 'convnet') and hasattr(model.convnet, 'plot_temporal_filters'):
+                fig = model.convnet.plot_temporal_filters(
+                    sampling_rate=getattr(model, 'sampling_rate', 240)
+                )
+                log_dict['kernels/dekel_temporal'] = wandb.Image(fig)
+                plt.close(fig)
+            if hasattr(model, 'convnet') and hasattr(model.convnet, 'plot_first_layer_spatial_filters'):
+                fig = model.convnet.plot_first_layer_spatial_filters()
+                log_dict['kernels/dekel_first_layer_spatial'] = wandb.Image(fig)
+                plt.close(fig)
+
             # 3. Layer kernels
             if hasattr(model, 'convnet') and hasattr(model.convnet, 'layers'):
                 for i, layer in enumerate(model.convnet.layers):
@@ -642,4 +656,3 @@ class ModelLoggingCallback(pl.Callback):
                 pl_module.train()
 
         print(f"[Epoch {epoch}] Slow logging complete.\n", flush=True)
-

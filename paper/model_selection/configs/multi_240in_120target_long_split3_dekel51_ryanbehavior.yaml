@@ -1,0 +1,68 @@
+# Native 240-Hz retinal movies with 120-Hz count supervision and Ryan's exact
+# 120-Hz behavior preprocessing grid.  This is the 51-pixel counterpart of the
+# M26 dataset contract; only the centered retinal aperture changes.
+types: [backimage, gaborium, gratings]
+session_dir: ../../../experiments/dataset_configs/sessions
+sessions: [
+  Allen_2022-02-16, Allen_2022-02-18, Allen_2022-02-24, Allen_2022-03-02,
+  Allen_2022-03-04, Allen_2022-03-30, Allen_2022-04-01, Allen_2022-04-06,
+  Allen_2022-04-08, Allen_2022-04-13, Allen_2022-04-15, Allen_2022-06-01,
+  Allen_2022-06-10, Allen_2022-08-05,
+  Logan_2019-12-20, Logan_2019-12-23, Logan_2019-12-24, Logan_2019-12-26,
+  Logan_2019-12-30, Logan_2019-12-31, Logan_2020-01-06, Logan_2020-01-07,
+  Logan_2020-01-09, Logan_2020-01-10, Logan_2020-01-15, Logan_2020-02-28,
+  Logan_2020-02-29, Logan_2020-03-02, Logan_2020-03-04, Logan_2020-03-06]
+
+sampling: {source_rate: 240, target_rate: 240}
+supervision: {target_rate: 120, phase: 1}
+
+keys_lags:
+  robs: 0
+  stim: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59]
+  behavior: 0
+  dfs: 0
+
+transforms:
+  stim:
+    source: stim
+    ops:
+      - center_crop: {size: 51}
+      - pixelnorm: {}
+      - unsqueeze: 1
+    expose_as: stim
+  eye_vel:
+    source: eyepos
+    ops:
+      - resampled_pipeline:
+          factor: 2
+          reduction: mean
+          ops:
+            - diff: {axis: 0}
+            - maxnorm: {}
+            - symlog: {}
+            - temporal_basis:
+                num_delta_funcs: 0
+                num_cosine_funcs: 10
+                history_bins: 50
+                causal: false
+                log_spacing: false
+                peak_range_ms: [30, 200]
+                normalize: true
+            - splitrelu: {split_dim: 1, trainable_gain: false}
+    expose_as: behavior
+    concatenate: true
+  eye_pos:
+    source: eyepos
+    ops:
+      - resampled_pipeline: {factor: 2, reduction: mean, ops: []}
+    expose_as: behavior
+    concatenate: true
+
+datafilters:
+  dfs:
+    ops: [{valid_nlags: {n_lags: 59}}, {missing_pct: {threshold: 45}}]
+    expose_as: dfs
+
+train_val_split: 0.70
+test_split: 0.15
+seed: 1002

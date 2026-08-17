@@ -26,6 +26,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
@@ -36,7 +37,13 @@ from scipy.stats import wilcoxon
 
 from VisionCore.paths import VISIONCORE_ROOT
 
-from _fig3_data import FIG_DIR, configure_matplotlib, _load_fig2_included_sessions
+from _fig3_data import (
+    CHECKPOINT_PATH,
+    DATASET_CONFIGS_PATH,
+    FIG_DIR,
+    configure_matplotlib,
+    _load_fig2_included_sessions,
+)
 from _fig3_ablation_data import CACHE_PATH as ABLATION_CACHE_PATH
 from _fig3_ablation_data import load_ablation_data
 from _fig3_femfraction import compute_femfraction_data, CONDITIONS as FEM_CONDITIONS
@@ -229,6 +236,27 @@ def _plot_ccnorm_violins(ax, abl):
     print(f"Panel C — ccnorm (N={m.sum()}): intact med={intact_med:.3f}, "
           f"zeroed med={np.median(ga):.3f} (Δ={d_z:+.3f}, p={p_z:.2e}), "
           f"stabilized med={np.median(gs):.3f} (Δ={d_s:+.3f}, p={p_s:.2e})")
+    return {
+        "n_units": int(m.sum()),
+        "n_sessions": int(len(np.unique(np.asarray(abl["sessions"])[m]))),
+        "medians": {
+            "intact": intact_med,
+            "zeroed": float(np.median(ga)),
+            "stabilized": float(np.median(gs)),
+        },
+        "contrasts": {
+            "zeroed_vs_intact": {
+                "median_difference": d_z,
+                "percent_of_intact_median": float(pct_z),
+                "wilcoxon_p": float(p_z),
+            },
+            "stabilized_vs_intact": {
+                "median_difference": d_s,
+                "percent_of_intact_median": float(pct_s),
+                "wilcoxon_p": float(p_s),
+            },
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -675,6 +703,20 @@ def _plot_femfraction(ax, femdata, *, margin=TOST_MARGIN):
                     handlelength=1.3, handletextpad=0.5, labelspacing=0.35,
                     borderaxespad=0.2)
     leg.set_zorder(7)
+    return {
+        "n_empirical_in_unit_interval": int(e.size),
+        "medians": med,
+        "equivalence_margin": float(margin),
+        "tost": {
+            key: {"p": float(tost[key][0]), "equivalent": bool(tost[key][1])}
+            for key, _label, _color in conds
+        },
+        "stabilized_vs_empirical": {
+            "n": int(d_stab.size),
+            "median_empirical_minus_model": float(np.median(d_stab)),
+            "wilcoxon_p": float(p_stab),
+        },
+    }
 
 
 def _restrict_femdata_to_floor(femdata, included):
@@ -713,11 +755,106 @@ def _load_ablation_cache():
     return load_ablation_data(recompute=False)
 
 
-def _write_sidecars(out_dir, manifest: dict):
-    caption = """Figure 3. A retinal-input digital twin captures FEM-linked V1 response variability.
+def _caption_p(value):
+    value = float(value)
+    if not np.isfinite(value):
+        return "p=n/a"
+    if value < 0.001:
+        return f"p={value:.1e}"
+    return f"p={value:.3f}"
 
-(A) The twin was trained on gaze-contingent gratings, Gabors, and natural images and evaluated on the held-out fixated flashed-image dataset. (B) The convolutional-recurrent twin receives a moving retinal stimulus and separate extraretinal eye-position and eye-velocity inputs. The retinal-only condition zeroes the extraretinal inputs. The stabilized-retina condition retains them but freezes the retinal input for every trial at one session-global gaze centroid. (C) Held-out trial-averaged prediction across 984 cells from 19 sessions. The full and retinal-only twins had median ccnorm values of 0.664 and 0.643 (paired delta -0.014, 2%; Wilcoxon p=1.6e-44). Stabilization reduced the median to 0.504 (delta -0.143, 21%; p=1.2e-136). (D) Single-trial prediction as a fraction of Figure 2's explainable rate variance. Captured count variance, Var(Y)-Var(Y-Yhat), was measured on Figure 2-matched, model-valid bins and divided by each cell's diag(Sigma_rate). Across 972 cells, the trial average, full, retinal-only, and stabilized medians were 0.157, 0.269, 0.246, and 0.042. The full twin exceeded the trial average (delta +0.106, +67% of the trial-average median; session-level Wilcoxon p=0.032); retinal-only prediction did not differ from full (delta -0.014, p=0.35); and stabilization reduced the full score by 72% (delta -0.193, p=3.8e-6). Values above one were retained because the denominator is an estimate rather than a hard bound. (E) FEM modulation fraction, f_FEM (=1-alpha), for the neurons and each twin condition. The empirical, full, retinal-only, and stabilized medians were 0.652, 0.618, 0.631, and 0.196. Paired TOST with a +/-0.1 margin supported equivalence for the full and retinal-only twins (p<1e-29) but not the stabilized twin. The empirical and stabilized estimates differed by a paired median of 0.402 (Wilcoxon p=3.8e-93). Boxes in C and D show the interquartile range with 10th-90th percentile whiskers; triangles in E mark medians.
-"""
+
+def _build_caption(manifest: dict) -> str:
+    model = manifest.get("model", {})
+    family = model.get("family", "unknown")
+    if family == "dekel":
+        architecture = "nonrecurrent, anti-aliased Dekel convolutional twin"
+    else:
+        architecture = "convolutional-recurrent twin"
+    parts = [
+        "Figure 3. A retinal-input digital twin captures FEM-linked V1 response variability.",
+        "(A) The twin was trained on gaze-contingent gratings, Gabors, and natural "
+        "images and evaluated on the held-out fixated flashed-image dataset. "
+        f"(B) The {architecture} receives a moving retinal stimulus and separate "
+        "extraretinal eye-position and eye-velocity inputs. The retinal-only "
+        "condition zeroes the extraretinal inputs; the stabilized-retina condition "
+        "retains them but freezes the retinal input at one session-global gaze centroid.",
+    ]
+    c = manifest.get("panel_c_stats")
+    if c:
+        med = c["medians"]
+        dz = c["contrasts"]["zeroed_vs_intact"]
+        ds = c["contrasts"]["stabilized_vs_intact"]
+        parts.append(
+            f"(C) Held-out trial-averaged prediction across {c['n_units']} cells "
+            f"from {c['n_sessions']} sessions. Median ccnorm was {med['intact']:.3f} "
+            f"for the full twin, {med['zeroed']:.3f} retinal-only "
+            f"(median Δ={dz['median_difference']:+.3f}; "
+            f"{_caption_p(dz['wilcoxon_p'])}), and {med['stabilized']:.3f} after "
+            f"retinal stabilization (Δ={ds['median_difference']:+.3f}; "
+            f"{_caption_p(ds['wilcoxon_p'])})."
+        )
+    d = manifest.get("panel_d_stats")
+    if d:
+        med = {key: value["median"] for key, value in d["conditions"].items()}
+        parts.append(
+            "(D) Single-trial prediction was measured as captured count variance, "
+            "Var(Y)-Var(Y-Yhat), on Figure 2-matched model-valid bins, divided by "
+            "each cell's diag(Sigma_rate). "
+            f"Across {d['n_units']} cells, median fractions for the trial average, "
+            f"full, retinal-only, and stabilized predictions were {med['psth']:.3f}, "
+            f"{med['intact']:.3f}, {med['zeroed']:.3f}, and "
+            f"{med['stabilized']:.3f}, respectively. Values above one were retained "
+            "because the denominator is estimated rather than a hard bound."
+        )
+    e = manifest.get("panel_e_stats")
+    if e:
+        med = e["medians"]
+        condition_labels = {
+            "intact": "full",
+            "zeroed": "retinal-only",
+            "stabilized": "stabilized",
+        }
+        equivalent = [
+            condition_labels.get(key, key)
+            for key, result in e["tost"].items()
+            if result["equivalent"]
+        ]
+        not_equivalent = [
+            condition_labels.get(key, key)
+            for key, result in e["tost"].items()
+            if not result["equivalent"]
+        ]
+
+        def condition_phrase(labels):
+            if not labels:
+                return "no model prediction"
+            joined = (
+                labels[0]
+                if len(labels) == 1
+                else " and ".join(labels)
+                if len(labels) == 2
+                else f"{', '.join(labels[:-1])}, and {labels[-1]}"
+            )
+            noun = "prediction" if len(labels) == 1 else "predictions"
+            return f"the {joined} {noun}"
+
+        parts.append(
+            "(E) FEM modulation fraction, f_FEM (=1-alpha), had empirical, full, "
+            f"retinal-only, and stabilized medians of {med['emp']:.3f}, "
+            f"{med['intact']:.3f}, {med['zeroed']:.3f}, and "
+            f"{med['stabilized']:.3f}. Paired TOST with a "
+            f"±{e['equivalence_margin']:.2g} margin classified "
+            f"{condition_phrase(equivalent)} as equivalent to the empirical "
+            f"distribution and {condition_phrase(not_equivalent)} as not equivalent. "
+            "Boxes in C and D show the interquartile range with 10th–90th "
+            "percentile whiskers; triangles in E mark medians."
+        )
+    return "\n\n".join(parts) + "\n"
+
+
+def _write_sidecars(out_dir, manifest: dict):
+    caption = _build_caption(manifest)
     (out_dir / "figure3_caption.md").write_text(caption, encoding="utf-8")
 
     readme = """# Figure 3
@@ -798,16 +935,19 @@ def compose(*, recompute: bool = False, out_dir=FIG_DIR, dpi: int = 300):
     ax_d = fig.add_subplot(gs_mid[0, 2])
     ax_e = fig.add_subplot(gs_mid[0, 3])
 
+    panel_c_stats = None
     panel_d_stats = None
+    panel_e_stats = None
     if abl is not None:
-        _plot_ccnorm_violins(ax_c, abl)
+        panel_c_stats = _plot_ccnorm_violins(ax_c, abl)
         panel_d_stats = _plot_explainable_variance_boxes(ax_d, abl)
         # Panel E on the same fig2 session floor as C/D (>=10 analyzed units).
         included = _load_fig2_included_sessions()
         femdata = {c: _restrict_femdata_to_floor(
-                       compute_femfraction_data(condition=c), included)
+                       compute_femfraction_data(condition=c, refresh=recompute),
+                       included)
                    for c in FEM_CONDITIONS}
-        _plot_femfraction(ax_e, femdata)
+        panel_e_stats = _plot_femfraction(ax_e, femdata)
     else:
         for a in (ax_c, ax_d, ax_e):
             _plot_missing_cache(a)
@@ -836,7 +976,19 @@ def compose(*, recompute: bool = False, out_dir=FIG_DIR, dpi: int = 300):
             "E": "FEM modulation fraction (f_FEM = 1-alpha): neuron distribution "
                  "vs each within-model twin condition, paired TOST equivalence test",
         },
+        "model": {
+            "checkpoint_path": str(CHECKPOINT_PATH),
+            "checkpoint_sha256": hashlib.sha256(
+                Path(CHECKPOINT_PATH).read_bytes()
+            ).hexdigest(),
+            "dataset_configs_path": str(DATASET_CONFIGS_PATH),
+            "family": assets.arch.get("model_family", "unknown"),
+            "sampling_rate_hz": assets.arch.get("sampling_rate"),
+            "history_frames": assets.arch.get("frontend_k"),
+        },
+        "panel_c_stats": panel_c_stats,
         "panel_d_stats": panel_d_stats,
+        "panel_e_stats": panel_e_stats,
     }
     _write_sidecars(out_dir, manifest)
     return fig, manifest

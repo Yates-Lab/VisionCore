@@ -376,6 +376,13 @@ def run_model(model, batch, dataset_idx):
             output = model.model(None, dataset_idx, batch.get('behavior'))
         elif hasattr(model.model, 'spike_history'):
             output = model.model(batch['stim'], dataset_idx, batch.get('behavior', None), batch.get('history', None))
+        elif 'output_behavior' in batch:
+            output = model.model(
+                batch['stim'],
+                dataset_idx,
+                batch.get('behavior'),
+                output_behavior=batch.get('output_behavior'),
+            )
         else:
             output = model.model(batch['stim'], dataset_idx, batch.get('behavior'))
         # output = model.model(batch['stim'], dataset_idx, batch.get('behavior'))
@@ -709,14 +716,28 @@ def ccnorm_split_half_variable_trials(
     ccnorm : (K,)
     (optionally) ccabs : (K,), ccmax : (K,), cchalf_mean : (K,), cchalf_n : (K,)
     """
-    R = np.asarray(R, float)
-    P = np.asarray(P, float)
+    # Work on private copies: masking below must never modify cached trial
+    # tensors owned by the caller.
+    R = np.array(R, dtype=float, copy=True)
+    P = np.array(P, dtype=float, copy=True)
+    if R.shape != P.shape:
+        raise ValueError(f"R and P must have one shape; got {R.shape} and {P.shape}")
     N, T, K = R.shape
 
     if D is None:
         D = ~np.isnan(R)
     else:
-        D = np.asarray(D, bool)
+        D = np.asarray(D)
+        if D.shape != R.shape:
+            raise ValueError(
+                f"D must match R/P shape {R.shape}; received {D.shape}"
+            )
+        # Numeric data filters often contain NaNs outside the analysis frame.
+        # A direct astype(bool) is unsafe because bool(np.nan) is True.
+        if D.dtype == np.bool_:
+            D = D.copy()
+        else:
+            D = np.isfinite(D) & (D != 0)
 
     D = D & ~np.isnan(R)
         

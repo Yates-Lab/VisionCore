@@ -1,0 +1,119 @@
+# Capacity-matched anti-aliased Dekel model with the historical structural
+# priors scaled for width, then halved. This tests the accuracy/smoothness
+# midpoint suggested by the full-strength prior ramp.
+model_type: v1multi
+sampling_rate: 240
+initial_input_channels: 1
+
+adapter: {type: none, params: {}}
+frontend: {type: none, params: {}}
+
+convnet:
+  type: dekel
+  params:
+    temporal_support: 60
+    temporal_channels: 14
+    spatial_channels: [84, 84, 84]
+    spatial_kernels: [15, 11, 9]
+    norm_groups: [14, 28, 21, 14]
+    input_size: [35, 35]
+    scaffold_size: 9
+    scaffold_mode: nearest
+    pool_norm: 5
+    strict_input_size: true
+    frequency_mask:
+      temporal: true
+      stem_spatial: true
+      hidden_spatial: false
+      window: hann
+      fft_pad: 2
+
+modulator:
+  type: mlp_behavior
+  params:
+    behavior_dim: 42
+    hidden_dims: [128]
+    additive_dim: 64
+    activation: gelu
+    dropout: 0.0
+    input_norm: false
+    use_film: true
+    film_max_gain: 0.5
+
+recurrent: {type: none, params: {}}
+
+readout:
+  type: gaussian
+  params:
+    n_units: 8
+    bias: true
+    initial_std: 0.5
+    initial_mean_scale: 0.1
+
+output_activation: softplus
+
+regularization:
+  - name: first_layer_spatial_smoothness
+    type: laplacian
+    lambda: 1.4285e-4
+    apply_to: ["convnet/temporal_conv/conv/weight"]
+    dims: [-2, -1]
+    padding_mode: constant
+    reduction: dekel
+    schedule: {kind: ramp_then_constant, start_epoch: 4, end_epoch: 20}
+  - name: first_layer_temporal_smoothness
+    type: laplacian
+    lambda: 5.0e-5
+    apply_to: ["convnet/temporal_conv/conv/weight"]
+    dims: [-3]
+    padding_mode: constant
+    reduction: dekel
+    schedule: {kind: ramp_then_constant, start_epoch: 4, end_epoch: 20}
+  - name: hidden_spatial_smoothness
+    type: laplacian
+    lambda: 4.0815e-5
+    apply_to:
+      - "stage1_conv/conv.weight"
+      - "stage2_conv/conv.weight"
+      - "stage3_conv/conv.weight"
+    dims: [-2, -1]
+    padding_mode: constant
+    reduction: dekel
+    schedule: {kind: ramp_then_constant, start_epoch: 4, end_epoch: 20}
+  - name: hidden_competitive_sparsity
+    type: proximal_sparsity_dekel
+    lambda: 1.5e-5
+    apply_to:
+      - "stage1_conv/conv.weight"
+      - "stage2_conv/conv.weight"
+      - "stage3_conv/conv.weight"
+    group_dims: [-2, -1]
+    competition_dims: [1]
+    schedule: {kind: ramp_then_constant, start_epoch: 4, end_epoch: 20}
+  - name: readout_competitive_sparsity
+    type: proximal_sparsity_dekel
+    lambda: 1.5e-3
+    apply_to: ["readouts/features/weight"]
+    group_dims: [-2, -1]
+    competition_dims: [1]
+    schedule: {kind: ramp_then_constant, start_epoch: 4, end_epoch: 20}
+  - name: gaussian_width
+    type: l2
+    lambda: 1.0e-5
+    apply_to: ["readouts/std"]
+    schedule: {kind: constant}
+  - name: gaussian_width_floor
+    type: proximal_clamp_min
+    lambda: 0.5
+    apply_to: ["readouts/std"]
+    schedule: {kind: constant}
+  - name: behavior_mlp_weight
+    type: l2
+    lambda: 1.0e-5
+    apply_to: ["modulator/weight"]
+    schedule: {kind: constant}
+  - name: exclude_readout_means_from_wd
+    type: l2
+    lambda: 0.0
+    apply_to: ["readouts/mean"]
+    schedule: {kind: constant}

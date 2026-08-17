@@ -316,8 +316,26 @@ class ByDatasetBatchSampler(Sampler):
         # Internal step counter for curriculum; updated by CurriculumCallback via set_step
         self._step = 0
 
+        # Passes completed. The seed must advance between epochs on its own:
+        # `_step` only moves when CurriculumCallback is registered, which
+        # `train_multidataset.py` does solely under --enable_curriculum, so
+        # without this counter every epoch re-drew the identical batch
+        # sequence. Combined with limit_train_batches that meant a run saw one
+        # epoch's worth of samples repeated for its whole duration.
+        self._epoch = 0
+
     def set_step(self, step: int):
         self._step = int(step)
+
+    def set_epoch(self, epoch: int):
+        """Synchronize the deterministic draw counter with trainer epoch.
+
+        Lightning restores ``current_epoch`` but does not checkpoint this
+        custom batch sampler.  Calling this at each train-epoch boundary makes
+        a resumed run draw exactly the epoch it would have drawn without an
+        interruption, while preserving epoch-zero behavior for fresh runs.
+        """
+        self._epoch = int(epoch)
 
     def _alpha(self) -> float:
         # Blend coefficient from 0.5 to 1.0 across warmup_steps
@@ -326,9 +344,19 @@ class ByDatasetBatchSampler(Sampler):
         return 0.5 + 0.5 * (float(self._step) / float(self.warmup_steps))
 
     def __iter__(self):
-        # RNG for reproducibility across epochs (no epoch hook here; simple seed)
+        # Deterministic given (seed, step, epoch), but *different every epoch*.
+        # A DataLoader re-enters __iter__ once per epoch, so seeding on
+        # `self.seed + self._step` alone made every epoch identical whenever
+        # `_step` was frozen at 0 -- which is the default, since only
+        # CurriculumCallback advances it and that is registered only under
+        # --enable_curriculum. The epoch term makes a fresh draw the default
+        # while leaving the curriculum path's step-dependence intact.
+        #
+        # The first pass is unchanged (epoch 0), so a single-epoch run is
+        # bitwise what it was before.
         g = torch.Generator()
-        g.manual_seed(self.seed + self._step)
+        g.manual_seed(self.seed + self._step + 1_000_003 * self._epoch)
+        self._epoch += 1
 
         # Choose dataset order for this epoch (size-proportional or uniform when not shuffle)
         dataset_indices = torch.arange(len(self._ranges))

@@ -1,0 +1,154 @@
+# M59: retain the complete M56 twin exactly and add one zero-initialized,
+# localized component on each of its two smooth visual feature banks.  Both
+# cores, both mature readouts, and both behavior paths remain unchanged.
+model_type: v1multi
+sampling_rate: 240
+initial_input_channels: 1
+
+adapter: {type: none, params: {}}
+frontend: {type: none, params: {}}
+
+convnet:
+  type: dekel
+  params:
+    temporal_support: 60
+    temporal_channels: 14
+    spatial_channels: [84, 84, 84]
+    spatial_kernels: [15, 11, 9]
+    norm_groups: [14, 28, 21, 14]
+    input_size: [35, 35]
+    scaffold_size: 9
+    scaffold_mode: nearest
+    pool_norm: 5
+    strict_input_size: true
+    frequency_mask:
+      temporal: true
+      stem_spatial: true
+      hidden_spatial: false
+      window: hann
+      fft_pad: 2
+
+auxiliary_visual:
+  type: dekel
+  params:
+    core:
+      temporal_support: 60
+      temporal_channels: 4
+      spatial_channels: [24, 24, 24]
+      spatial_kernels: [15, 11, 9]
+      norm_groups: [4, 8, 6, 4]
+      input_size: [35, 35]
+      scaffold_size: 9
+      scaffold_mode: nearest
+      pool_norm: 5
+      strict_input_size: true
+      frequency_mask:
+        temporal: true
+        stem_spatial: true
+        hidden_spatial: false
+        window: hann
+        fft_pad: 2
+    readout:
+      feature_mode: independent
+      max_mean_delta: 2.0
+      initial_std_scale: 1.0
+      min_std_scale: 0.5
+      max_std_scale: 2.0
+
+modulator:
+  type: mlp_behavior
+  params:
+    behavior_dim: 42
+    hidden_dims: [128]
+    additive_dim: 64
+    activation: gelu
+    dropout: 0.0
+    input_norm: false
+    use_film: true
+    film_max_gain: 0.5
+
+recurrent: {type: none, params: {}}
+
+readout:
+  type: gaussian
+  params:
+    n_units: 8
+    bias: true
+    initial_std: 0.5
+    initial_mean_scale: 0.1
+
+# Broad main-core component: best suited to displaced fields and surrounds.
+residual_readout:
+  type: residual_gaussian
+  params:
+    input_scope: visual
+    feature_mode: independent
+    max_mean_delta: 3.0
+    initial_std_scale: 1.5
+    min_std_scale: 0.75
+    max_std_scale: 3.0
+
+# Independent component on the lower-capacity auxiliary smooth core.  Its
+# geometry is separately bounded relative to the mature base Gaussian.
+auxiliary_residual_readout:
+  type: residual_gaussian
+  params:
+    input_scope: auxiliary_visual
+    feature_mode: independent
+    max_mean_delta: 3.0
+    initial_std_scale: 1.5
+    min_std_scale: 0.75
+    max_std_scale: 3.0
+
+output_modulator:
+  type: mlp_behavior_residual
+  params:
+    behavior_dim: 42
+    hidden_dims: [64]
+    bottleneck_dim: 32
+    activation: gelu
+    dropout: 0.0
+    input_norm: false
+    use_gain: true
+    max_gain: 0.5
+
+output_activation: softplus
+
+regularization:
+  - name: base_gaussian_width_floor
+    type: proximal_clamp_min
+    lambda: 0.5
+    apply_to: ["^readouts/std"]
+    schedule: {kind: constant}
+  - name: exclude_base_readout_geometry_from_wd
+    type: l2
+    lambda: 0.0
+    apply_to: ["^readouts/mean", "^readouts/std"]
+    schedule: {kind: constant}
+  - name: auxiliary_first_layer_spatial_smoothness
+    type: laplacian
+    lambda: 1.0e-3
+    apply_to: ["^auxiliary_convnet/temporal_conv/conv/weight"]
+    dims: [-2, -1]
+    padding_mode: constant
+    reduction: dekel
+    schedule: {kind: ramp_then_constant, start_epoch: 2, end_epoch: 20}
+  - name: auxiliary_first_layer_temporal_smoothness
+    type: laplacian
+    lambda: 1.0e-4
+    apply_to: ["^auxiliary_convnet/temporal_conv/conv/weight"]
+    dims: [-3]
+    padding_mode: constant
+    reduction: dekel
+    schedule: {kind: ramp_then_constant, start_epoch: 2, end_epoch: 20}
+  - name: auxiliary_hidden_spatial_smoothness
+    type: laplacian
+    lambda: 1.0e-3
+    apply_to:
+      - "^auxiliary_convnet/stage1_conv/conv/weight"
+      - "^auxiliary_convnet/stage2_conv/conv/weight"
+      - "^auxiliary_convnet/stage3_conv/conv/weight"
+    dims: [-2, -1]
+    padding_mode: constant
+    reduction: dekel
+    schedule: {kind: ramp_then_constant, start_epoch: 2, end_epoch: 20}

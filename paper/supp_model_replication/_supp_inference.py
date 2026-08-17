@@ -31,11 +31,16 @@ Affine-rescales each condition's rhat to the observed counts (as the fig3 cache
 does) so Poisson(rhat) has the right scale.
 
 Usage:
-    uv run python paper/supp_model_replication/_supp_inference.py [--force]
+    FIG3_GPU=0 uv run python paper/supp_model_replication/_supp_inference.py [--force]
+
+``FIG3_GPU`` is optional; it pins the physical GPU when another production
+analysis is running concurrently.
 """
 from __future__ import annotations
 
+import os
 import sys
+from pathlib import Path
 
 import numpy as np
 import dill
@@ -47,24 +52,141 @@ sys.path.insert(0, str(VISIONCORE_ROOT / "paper" / "fig3"))
 sys.path.insert(0, str(VISIONCORE_ROOT / "paper" / "covariance_decomposition"))
 from _fig3_data import (  # noqa: E402
     CHECKPOINT_PATH, VALID_TIME_BINS, MIN_FIX_DUR, subject_from_session, SUBJECTS,
+    analysis_endpoint_mask_and_psth, analysis_endpoint_block_mean,
+    align_native_trial_arrays_to_reference,
 )
 from _fig3_ablation_data import (  # noqa: E402
     CONDS, STIM_CONDS, build_behavior_modifiers, build_stabilized_stim,
 )
-from data_loading import FIXATION_RADIUS  # noqa: E402  (0.5, fig2's value)
+from data_loading import (  # noqa: E402  (0.5, fig2's exact frame)
+    FIXATION_RADIUS,
+    load_cache as load_aligned_cache,
+)
 
 # Conditions cache (intact/zeroed/stabilized). The legacy single-condition cache
 # ``supp_twin_fig2frame.pkl`` (intact only) is kept as a fallback in _supp_data.
 SUPP_INFERENCE_CONDITIONS_CACHE = CACHE_DIR / "supp_twin_fig2frame_conditions.pkl"
+SUPP_INFERENCE_SCHEMA = 2     # native-240 endpoints aligned to exact Figure-2 frame
 MIN_TOTAL_SPIKES = 0          # match fig2's align_fixrsvp_trials (all units)
 MIN_GOOD_TRIALS = 10
 
 
-def run_inference(force=False):
-    if SUPP_INFERENCE_CONDITIONS_CACHE.exists() and not force:
-        print(f"Loading supp inference cache from {SUPP_INFERENCE_CONDITIONS_CACHE}")
-        with open(SUPP_INFERENCE_CONDITIONS_CACHE, "rb") as f:
-            return dill.load(f)
+def _positive_affine_fallback(torch, robs, rhat, dfs, eps=1e-8):
+    """Stable nonnegative affine fit for a single degenerate rate column.
+
+    The production calibrator optimizes Poisson likelihood with LBFGS.  A unit
+    with no spikes, no valid samples, or an effectively constant prediction can
+    make that joint optimization non-finite even though the other units are
+    perfectly well behaved.  These units contribute no useful covariance
+    signal, so use a finite constrained least-squares calibration for them.
+    """
+    valid = (dfs > 0.5) & torch.isfinite(robs) & torch.isfinite(rhat)
+    x = torch.where(valid, torch.clamp(rhat, min=0), torch.zeros_like(rhat))
+    y = torch.where(valid, torch.clamp(robs, min=0), torch.zeros_like(robs))
+    n_valid = int(valid.sum().item())
+    if n_valid == 0:
+        return torch.full_like(rhat, eps)
+
+    xv = x[valid]
+    yv = y[valid]
+    x_mean = xv.mean()
+    y_mean = yv.mean()
+    x_centered = xv - x_mean
+    denom = torch.sum(x_centered.square())
+    if float(denom) > eps:
+        gain = torch.clamp(
+            torch.sum(x_centered * (yv - y_mean)) / denom, min=0
+        )
+    else:
+        gain = torch.zeros((), dtype=rhat.dtype, device=rhat.device)
+    offset = torch.clamp(y_mean - gain * x_mean, min=eps)
+    return torch.clamp(gain * x + offset, min=eps)
+
+
+def _rescale_affine_safely(torch, rescale_rhat, robs, rhat, dfs):
+    """Preserve production calibration while isolating degenerate neurons.
+
+    First attempt the exact vectorized Figure-3 rescaling.  If one neuron makes
+    LBFGS fail, bisect the columns so every regular neuron still receives that
+    exact calibration; only irreducible one-column failures use the stable
+    positive-affine fallback above.
+    """
+    if not (robs.shape == rhat.shape == dfs.shape) or robs.ndim != 2:
+        raise ValueError("robs, rhat, and dfs must have the same T x N shape")
+
+    output = torch.empty_like(rhat)
+    fallback_columns = []
+
+    def fit_columns(columns):
+        if columns.numel() == 0:
+            return
+        valid_count = (dfs[:, columns] > 0.5).sum(dim=0)
+        if columns.numel() == 1 and int(valid_count[0].item()) == 0:
+            j = int(columns[0].item())
+            output[:, j] = _positive_affine_fallback(
+                torch, robs[:, j], rhat[:, j], dfs[:, j]
+            )
+            fallback_columns.append(j)
+            return
+        try:
+            rr, _ = rescale_rhat(
+                robs[:, columns], rhat[:, columns], dfs[:, columns], mode="affine"
+            )
+            if not torch.isfinite(rr).all():
+                raise FloatingPointError("calibrated rates contain non-finite values")
+            output[:, columns] = rr
+        except (FloatingPointError, RuntimeError, ValueError):
+            if columns.numel() == 1:
+                j = int(columns[0].item())
+                output[:, j] = _positive_affine_fallback(
+                    torch, robs[:, j], rhat[:, j], dfs[:, j]
+                )
+                fallback_columns.append(j)
+                return
+            midpoint = columns.numel() // 2
+            fit_columns(columns[:midpoint])
+            fit_columns(columns[midpoint:])
+
+    fit_columns(torch.arange(rhat.shape[1], device=rhat.device))
+    return output, fallback_columns
+
+
+def run_inference(
+    force=False,
+    session_filter=None,
+    cache_path=SUPP_INFERENCE_CONDITIONS_CACHE,
+):
+    """Run Figure-2-frame inference, optionally as an off-cache session smoke."""
+    cache_path = Path(cache_path)
+    if cache_path.exists() and not force and session_filter is None:
+        print(f"Loading supp inference cache from {cache_path}")
+        with open(cache_path, "rb") as f:
+            cached = dill.load(f)
+        cached_checkpoints = {
+            str(row.get("checkpoint_path"))
+            for row in cached
+            if isinstance(row, dict) and row.get("checkpoint_path")
+        }
+        cached_schemas = {
+            row.get("alignment_schema")
+            for row in cached
+            if isinstance(row, dict)
+        }
+        if cached_schemas != {SUPP_INFERENCE_SCHEMA}:
+            raise ValueError(
+                f"{cache_path} has alignment schema "
+                f"{sorted(cached_schemas, key=lambda value: str(value))}, but "
+                f"schema {SUPP_INFERENCE_SCHEMA} is required. Re-run with --force."
+            )
+        if os.environ.get("FIG3_TWIN_CHECKPOINT") and cached_checkpoints != {
+            str(CHECKPOINT_PATH)
+        }:
+            raise ValueError(
+                f"{SUPP_INFERENCE_CONDITIONS_CACHE} has checkpoint provenance "
+                f"{sorted(cached_checkpoints) or ['missing']}, but the selected "
+                f"checkpoint is {CHECKPOINT_PATH}. Re-run with --force."
+            )
+        return cached
 
     import torch
     from tqdm import tqdm
@@ -75,19 +197,24 @@ def run_inference(force=False):
     if str(VISIONCORE_ROOT) not in sys.path:
         sys.path.insert(0, str(VISIONCORE_ROOT))
 
-    device = get_free_device()
+    device = get_free_device(os.environ.get("FIG3_GPU"))
     print(f"Loading model from: {CHECKPOINT_PATH}")
     model, model_info = load_model(checkpoint_path=CHECKPOINT_PATH, device=str(device))
     model.model.eval()
     print(f"Model loaded: {model_info['experiment']}, epoch {model_info['epoch']}")
     print(f"  fixation_radius={FIXATION_RADIUS} (fig2 frame), "
           f"min_total_spikes={MIN_TOTAL_SPIKES}, conditions={CONDS}")
+    aligned_reference = {
+        row["session"]: row for row in load_aligned_cache()
+    }
 
     session_results = []
     for dataset_idx in range(len(model.names)):
         session_name = model.names[dataset_idx]
         subject = subject_from_session(session_name)
         if subject not in SUBJECTS:
+            continue
+        if session_filter is not None and session_name not in session_filter:
             continue
         print(f"\n--- {session_name} ({subject}) "
               f"[{dataset_idx + 1}/{len(model.names)}] ---")
@@ -111,16 +238,24 @@ def run_inference(force=False):
 
         trial_inds = np.asarray(dset.covariates['trial_inds']).ravel()
         psth_inds_flat = np.asarray(dset.covariates['psth_inds']).ravel()
+        analysis_endpoints, psth_inds_analysis = analysis_endpoint_mask_and_psth(
+            dataset_config, psth_inds_flat, trial_inds
+        )
         robs_flat = np.asarray(dset['robs'])
         eyepos_flat = np.asarray(dset['eyepos'])
+        eyepos_analysis = analysis_endpoint_block_mean(
+            dataset_config, eyepos_flat, analysis_endpoints
+        )
 
         trials = np.unique(trial_inds)
         NT = len(trials)
         NC = robs_flat.shape[1]
-        T = int(psth_inds_flat.max()) + 1
+        T = int(psth_inds_analysis[analysis_endpoints].max()) + 1
 
         # fig2 frame: fixation < 0.5 deg from the origin.
-        fixation = np.hypot(eyepos_flat[:, 0], eyepos_flat[:, 1]) < FIXATION_RADIUS
+        fixation = np.hypot(
+            eyepos_analysis[:, 0], eyepos_analysis[:, 1]
+        ) < FIXATION_RADIUS
         stim_lags = np.array(dataset_config['keys_lags']['stim'])
 
         beh_mod = build_behavior_modifiers()
@@ -147,7 +282,17 @@ def run_inference(force=False):
         rhat = {c: np.full((NT, T, NC), np.nan) for c in CONDS}
 
         for itrial in tqdm(range(NT), desc=f"  Inference {session_name}"):
-            ix = (trial_inds == trials[itrial]) & fixation
+            ix_obs = (trial_inds == trials[itrial]) & fixation & analysis_endpoints
+            if not np.any(ix_obs):
+                continue
+            t_obs = psth_inds_analysis[ix_obs].astype(int)
+            fix_dur[itrial] = len(t_obs)
+            robs[itrial, t_obs] = robs_flat[ix_obs]
+            dfs[itrial, t_obs] = np.asarray(dset['dfs'][ix_obs])
+            eyepos[itrial, t_obs] = eyepos_analysis[ix_obs]
+
+            ix = ix_obs.copy()
+            ix[: int(stim_lags.max(initial=0))] = False
             if not np.any(ix):
                 continue
             stim_indices = np.where(ix)[0]
@@ -155,19 +300,34 @@ def run_inference(force=False):
             stim = dset['stim'][stim_lag_indices].permute(0, 2, 1, 3, 4)
             stim_stab = stab_stim[stim_lag_indices].permute(0, 2, 1, 3, 4)
             behavior0 = dset['behavior'][ix]
-            t_inds = psth_inds_flat[ix].astype(int)
-            fix_dur[itrial] = len(t_inds)
-            robs[itrial, t_inds] = robs_flat[ix]
-            dfs[itrial, t_inds] = np.asarray(dset['dfs'][ix])
-            eyepos[itrial, t_inds] = eyepos_flat[ix]
+            output_behavior0 = (
+                dset['output_behavior'][ix]
+                if 'output_behavior' in dset
+                else None
+            )
+            t_inds = psth_inds_analysis[ix].astype(int)
             for c in CONDS:
                 if c in STIM_CONDS:            # replace stim, keep behavior intact
                     batch = {'stim': stim_stab, 'behavior': behavior0}
+                    if output_behavior0 is not None:
+                        batch['output_behavior'] = output_behavior0
                 else:                          # keep stored stim, modify behavior
                     behavior = (behavior0 if beh_mod[c] is None
                                 else beh_mod[c](behavior0, itrial))
                     batch = {'stim': stim, 'behavior': behavior}
-                out = run_model(model, batch, dataset_idx=dataset_idx)
+                    if output_behavior0 is not None:
+                        output_behavior = (
+                            output_behavior0
+                            if beh_mod[c] is None
+                            else beh_mod[c](output_behavior0, itrial)
+                        )
+                        batch['output_behavior'] = output_behavior
+                with torch.autocast(
+                    device_type="cuda",
+                    dtype=torch.bfloat16,
+                    enabled=torch.cuda.is_available(),
+                ):
+                    out = run_model(model, batch, dataset_idx=dataset_idx)
                 rhat[c][itrial, t_inds] = out['rhat'].detach().cpu().numpy()
             if itrial % 16 == 0:
                 torch.cuda.empty_cache()
@@ -183,15 +343,34 @@ def run_inference(force=False):
         eyepos = eyepos[good_trials][:, iix]
         rhat = {c: r[good_trials][:, iix] for c, r in rhat.items()}
 
-        neuron_mask = np.where(np.nansum(robs, axis=(0, 1)) > MIN_TOTAL_SPIKES)[0]
-        if len(neuron_mask) < 3:
-            print(f"  Skipping: only {len(neuron_mask)} neurons pass spike threshold")
-            continue
-
-        robs_used = robs[:, :, neuron_mask]
-        dfs_used = dfs[:, :, neuron_mask]
-        rhat_used = {c: r[:, :, neuron_mask] for c, r in rhat.items()}
-        valid_mask = np.isfinite(eyepos).all(axis=-1)
+        if dataset_config.get("supervision"):
+            if session_name not in aligned_reference:
+                print(f"  Skipping: {session_name} is absent from Figure-2 frame")
+                continue
+            reference = aligned_reference[session_name]
+            robs_used, rhat_used, dfs_used, neuron_mask = (
+                align_native_trial_arrays_to_reference(
+                    robs,
+                    rhat,
+                    reference,
+                    robs_key="robs",
+                    dfs_key=None,
+                    label=f"{session_name} Figure-2 frame",
+                )
+            )
+            eyepos = np.asarray(reference["eyepos"]).copy()
+            valid_mask = np.asarray(reference["valid_mask"], dtype=bool).copy()
+        else:
+            neuron_mask = np.where(
+                np.nansum(robs, axis=(0, 1)) > MIN_TOTAL_SPIKES
+            )[0]
+            if len(neuron_mask) < 3:
+                print(f"  Skipping: only {len(neuron_mask)} neurons pass spike threshold")
+                continue
+            robs_used = robs[:, :, neuron_mask]
+            dfs_used = dfs[:, :, neuron_mask]
+            rhat_used = {c: r[:, :, neuron_mask] for c, r in rhat.items()}
+            valid_mask = np.isfinite(eyepos).all(axis=-1)
         n_trials, n_time, n_neurons = robs_used.shape
 
         # Affine-rescale each condition's model rates to observed counts (as the
@@ -200,10 +379,14 @@ def run_inference(force=False):
         dfs_flat = dfs_used.reshape(n_trials * n_time, n_neurons)
         for c in CONDS:
             rhat_flat = rhat_used[c].reshape(n_trials * n_time, n_neurons)
-            rr, _ = rescale_rhat(
+            rr, fallback_columns = _rescale_affine_safely(
+                torch, rescale_rhat,
                 torch.from_numpy(robs_flat_used), torch.from_numpy(rhat_flat),
-                torch.from_numpy(dfs_flat), mode='affine',
+                torch.from_numpy(dfs_flat),
             )
+            if fallback_columns:
+                print(f"  {c}: stable calibration fallback for "
+                      f"{len(fallback_columns)}/{n_neurons} degenerate neurons")
             rhat_used[c] = rr.reshape(n_trials, n_time, n_neurons).cpu().numpy()
 
         print(f"  {n_trials} trials, {n_time} bins, {n_neurons} neurons "
@@ -211,6 +394,8 @@ def run_inference(force=False):
         session_results.append({
             "session": session_name,
             "subject": subject,
+            "alignment_schema": SUPP_INFERENCE_SCHEMA,
+            "checkpoint_path": str(CHECKPOINT_PATH),
             "neuron_mask": neuron_mask,
             "n_neurons": n_neurons,
             "robs_used": robs_used,
@@ -221,10 +406,10 @@ def run_inference(force=False):
         })
 
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    with open(SUPP_INFERENCE_CONDITIONS_CACHE, "wb") as f:
+    with open(cache_path, "wb") as f:
         dill.dump(session_results, f)
     print(f"\nCached {len(session_results)} sessions to "
-          f"{SUPP_INFERENCE_CONDITIONS_CACHE}")
+          f"{cache_path}")
     return session_results
 
 

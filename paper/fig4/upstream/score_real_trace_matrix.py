@@ -400,6 +400,20 @@ def main() -> int:
         device=str(args.device),
         mcfarland_outputs=Path(args.mcfarland_outputs) if args.mcfarland_outputs is not None else None,
     )
+    if not np.isfinite(float(args.bin_seconds)) or float(args.bin_seconds) <= 0.0:
+        raise ValueError(
+            f"Trace bin_seconds must be positive, got {args.bin_seconds}."
+        )
+    source_trace_rate_hz = int(round(1.0 / float(args.bin_seconds)))
+    if scorer.output_rate_hz < source_trace_rate_hz or (
+        scorer.output_rate_hz % source_trace_rate_hz
+    ):
+        raise ValueError(
+            "Selected twin output rate must be an integer multiple of the retained "
+            f"trace rate; got {source_trace_rate_hz} -> {scorer.output_rate_hz} Hz."
+        )
+    scored_samples_per_source = scorer.output_rate_hz // source_trace_rate_hz
+    scored_timepoints = int(args.n_timepoints) * scored_samples_per_source
     write_unit_feature_table(
         out_dir / "unit_feature_table.csv",
         scorer.rr_unit_rows,
@@ -432,6 +446,24 @@ def main() -> int:
         "rr100_version": str(args.rr100_version),
         "n_timepoints": int(args.n_timepoints),
         "bin_seconds": float(args.bin_seconds),
+        "trace_time_contract": {
+            "source_trace_rate_hz": source_trace_rate_hz,
+            "source_trace_samples": int(args.n_timepoints),
+            "model_output_rate_hz": int(scorer.output_rate_hz),
+            "scored_samples_per_source_trace_sample": int(
+                scored_samples_per_source
+            ),
+            "scored_trace_samples": scored_timepoints,
+            "scored_bin_seconds": 1.0 / float(scorer.output_rate_hz),
+            "analysis_interval_seconds": (
+                float(args.n_timepoints) / float(source_trace_rate_hz)
+            ),
+            "resampling": (
+                "endpoint-anchored linear interpolation with held boundaries"
+                if scored_samples_per_source > 1
+                else "none"
+            ),
+        },
         "patch_size_px": int(args.patch_size_px),
         "source_filter": selection["source_filter"],
         "image_sampling": selection["image_sampling"],
@@ -465,7 +497,8 @@ def main() -> int:
         "contract": (
             "Rows are image-major image x trace movies. SSI is corrected time-resolved spatial SSI "
             "from full twin rate maps after applying the RR100 population view. Traces are unscaled "
-            "center-cropped native real BackImage snippets."
+            "center-cropped real BackImage snippets on their retained source grid; native-rate "
+            "twins receive endpoint-anchored interpolation without changing the physical interval."
         ),
     }
     write_json(out_dir / "summary.json", payload)

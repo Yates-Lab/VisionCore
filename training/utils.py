@@ -88,9 +88,12 @@ class Float32View(Dataset):
         # Cast responses
         it["robs"] = it["robs"].to(dtype)
         
-        # Cast behavior if present
-        if "behavior" in it:
-            it["behavior"] = it["behavior"].to(dtype)
+        # Cast behavior covariates if present.  ``output_behavior`` is an
+        # optional separately preprocessed tensor for the neuron-specific
+        # output residual; ordinary datasets expose only ``behavior``.
+        for key in ("behavior", "output_behavior"):
+            if key in it:
+                it[key] = it[key].to(dtype)
             
         return it
 
@@ -139,4 +142,3 @@ def group_collate(batch):
     
     # Collate each group separately
     return [_dc.default_collate(group_samples) for group_samples in groups.values()]
-

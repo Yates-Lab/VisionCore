@@ -73,6 +73,18 @@ def test_pava_all_equal():
     assert_allclose(yhat, [3.0, 3.0, 3.0])
 
 
+def test_kde_density_handles_one_dimensional_eye_trajectory():
+    """Contour-aligned motion is estimated in its occupied subspace."""
+    from VisionCore.covariance import _density_fn
+
+    x = np.linspace(-0.3, 0.3, 101)
+    eye = np.column_stack((x, np.zeros_like(x)))
+    density = _density_fn(eye, "kde")(eye)
+    assert density.shape == (eye.shape[0],)
+    assert np.isfinite(density).all()
+    assert (density > 0).all()
+
+
 # --- project_to_psd (covariance version) ---
 
 def test_project_to_psd_psd_unchanged():
@@ -126,6 +138,31 @@ def test_extract_valid_segments_none():
     mask[0, 0:3] = True
     segs = extract_valid_segments(mask, min_len_bins=5)
     assert len(segs) == 0
+
+
+# --- decompose_trajectory ---
+
+def test_decompose_trajectory_no_eligible_time_bins_returns_nan_result():
+    """Cell-specific sparse slices should be non-estimable, not exceptional."""
+    from VisionCore.covariance import decompose_trajectory
+
+    counts = np.ones((4, 2), dtype=float)
+    trajectories = np.zeros((4, 3, 2), dtype=float)
+    time_bins = np.arange(4)
+    out = decompose_trajectory(
+        counts,
+        trajectories,
+        time_bins,
+        min_trials_per_time_bin=2,
+    )
+
+    assert out["n_time_bins"] == 0
+    assert out["n_samples"] == 0
+    assert out["n_close_pairs"] == 0
+    assert out["Ctotal"].shape == (2, 2)
+    assert out["one_minus_alpha"].shape == (2,)
+    assert np.isnan(out["Ctotal"]).all()
+    assert np.isnan(out["one_minus_alpha"]).all()
 
 
 # --- rate_variance_components (analytic ANOVA decomposition of model rates) ---

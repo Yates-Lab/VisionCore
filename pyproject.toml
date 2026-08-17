@@ -42,6 +42,9 @@ data = [
     "DataYatesV1 @ git+https://github.com/Yates-Lab/DataYatesV1",
     "DataRowleyV1V2 @ git+https://github.com/Yates-Lab/DataRowleyV1V2",
 ]
+test = [
+    "pytest>=8",
+]
 
 # loggabor and slip import these packages during setup.py execution but don't declare them as build dependencies
 [tool.uv.extra-build-dependencies]
