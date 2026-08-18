@@ -74,7 +74,7 @@ def main() -> None:
     # legible in the desktop preview.
     n_pairs = 2
     n_rows = int(np.ceil(n_channels / n_pairs))
-    fig = plt.figure(figsize=(15.2, 2.20 * n_rows + 1.15), constrained_layout=False)
+    fig = plt.figure(figsize=(15.2, 2.65 * n_rows + 1.45), constrained_layout=False)
     grid = fig.add_gridspec(
         n_rows,
         4,
@@ -82,9 +82,9 @@ def main() -> None:
         left=0.045,
         right=0.985,
         bottom=0.055,
-        top=0.915,
+        top=0.81,
         wspace=0.27,
-        hspace=0.72,
+        hspace=0.62,
     )
 
     records = []
@@ -203,14 +203,14 @@ def main() -> None:
     fig.suptitle(
         f"{args.model_label} first-layer spatiotemporal kernels",
         x=0.045,
-        y=0.982,
+        y=0.975,
         ha="left",
         fontsize=17,
         fontweight="bold",
     )
     fig.text(
         0.045,
-        0.947,
+        0.925,
         "Exact effective 60 × 7 × 7 weights · spatial slice chosen by maximum RMS across space · each channel normalized independently",
         ha="left",
         va="top",
@@ -223,8 +223,8 @@ def main() -> None:
             Line2D([0], [0], color=negative_color, marker="s", markerfacecolor="none", label="temporal trace at spatial trough"),
             Line2D([0], [0], color="#888888", linestyle=":", label="peak-energy lag"),
         ],
-        loc="upper right",
-        bbox_to_anchor=(0.985, 0.985),
+        loc="upper left",
+        bbox_to_anchor=(0.045, 0.885),
         ncol=3,
         frameon=False,
         fontsize=9.2,
