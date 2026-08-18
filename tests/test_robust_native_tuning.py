@@ -1,4 +1,5 @@
 import json
+from argparse import Namespace
 
 import numpy as np
 import pandas as pd
@@ -12,6 +13,7 @@ from paper.fig4.spatiotemporal_tuning.robust_native_tuning import (
 from paper.fig4.spatiotemporal_tuning.run_native_periodic_tuning import (
     periodic_histories,
     periodic_response_metrics,
+    probe_grid,
 )
 from paper.fig4.spatiotemporal_tuning.compute_native_rucci_overlap import (
     native_kinematic_occupancy,
@@ -53,6 +55,31 @@ def test_recommended_grid_removes_subcycle_bins_for_native_35px_crop() -> None:
     assert np.max(np.diff(np.log2(grid["spatial_cpd"]))) <= 0.5 + 1e-12
     assert grid["minimum_pixels_per_spatial_cycle"] > 2.0
     assert len(grid["spatial_cpd"]) >= 5
+
+
+def test_dense_probe_grid_is_log_spaced_and_guarded_from_nyquist() -> None:
+    args = Namespace(
+        grid_mode="dense",
+        dense_n_spatial=25,
+        dense_n_temporal=33,
+        dense_n_orientations=8,
+        dense_min_spatial_cpd=None,
+        dense_max_spatial_cpd=12.0,
+        dense_min_temporal_hz=1.0,
+        dense_max_temporal_hz=96.0,
+    )
+    contract = {"input_size": 151, "input_rate_hz": 240}
+
+    grid = probe_grid(contract, args)
+
+    assert grid["grid_mode"] == "dense"
+    assert len(grid["spatial_cpd"]) == 25
+    assert len(grid["dynamic_temporal_hz"]) == 33
+    assert len(grid["orientation_deg"]) == 8
+    np.testing.assert_allclose(np.diff(np.log(grid["spatial_cpd"])), np.diff(np.log(grid["spatial_cpd"]))[0])
+    np.testing.assert_allclose(np.diff(np.log(grid["dynamic_temporal_hz"])), np.diff(np.log(grid["dynamic_temporal_hz"]))[0])
+    assert grid["spatial_cpd"][-1] < 0.9 * grid["spatial_nyquist_cpd"]
+    assert grid["dynamic_temporal_hz"][-1] <= 0.8 * grid["temporal_nyquist_hz"]
 
 
 def test_log_gaussian_fit_recovers_interior_continuous_peak() -> None:

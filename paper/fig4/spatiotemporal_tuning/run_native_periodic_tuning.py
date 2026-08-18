@@ -66,10 +66,94 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--contrast", type=float, default=0.25)
     parser.add_argument("--n-phases", type=int, default=32)
+    parser.add_argument(
+        "--grid-mode",
+        choices=("recommended", "dense"),
+        default="recommended",
+        help=(
+            "Use the historical approximately half-octave audit grid or a "
+            "dense log-spaced grid intended for smooth publication surfaces."
+        ),
+    )
+    parser.add_argument("--dense-n-spatial", type=int, default=25)
+    parser.add_argument("--dense-n-temporal", type=int, default=33)
+    parser.add_argument("--dense-n-orientations", type=int, default=8)
+    parser.add_argument("--dense-min-spatial-cpd", type=float, default=None)
+    parser.add_argument("--dense-max-spatial-cpd", type=float, default=12.0)
+    parser.add_argument("--dense-min-temporal-hz", type=float, default=1.0)
+    parser.add_argument("--dense-max-temporal-hz", type=float, default=96.0)
     parser.add_argument("--max-units", type=int, default=None, help="Explicit smoke-test limit")
     parser.add_argument("--max-conditions", type=int, default=None, help="Explicit smoke-test limit")
     parser.add_argument("--out-dir", type=Path, required=True)
     return parser.parse_args()
+
+
+def probe_grid(contract: dict, args: argparse.Namespace) -> dict:
+    """Return the requested SF/TF/orientation grid with explicit Nyquist guards."""
+    recommended = recommended_native_grid(
+        image_size=contract["input_size"],
+        frame_rate_hz=contract["input_rate_hz"],
+    )
+    if args.grid_mode == "recommended":
+        return {**recommended, "grid_mode": "recommended"}
+
+    if args.dense_n_spatial < 9 or args.dense_n_temporal < 12:
+        raise ValueError("dense tuning requires at least 9 SF and 12 TF samples")
+    if args.dense_n_orientations < 4:
+        raise ValueError("dense tuning requires at least four orientations")
+    if args.dense_min_temporal_hz <= 0:
+        raise ValueError("dense-min-temporal-hz must be positive")
+
+    spatial_nyquist = 0.5 * float(recommended["ppd"])
+    temporal_nyquist = 0.5 * float(contract["input_rate_hz"])
+    spatial_min = (
+        float(args.dense_min_spatial_cpd)
+        if args.dense_min_spatial_cpd is not None
+        else float(recommended["spatial_cpd"][0])
+    )
+    spatial_max = float(args.dense_max_spatial_cpd)
+    temporal_min = float(args.dense_min_temporal_hz)
+    temporal_max = float(args.dense_max_temporal_hz)
+    if not 0 < spatial_min < spatial_max < 0.9 * spatial_nyquist:
+        raise ValueError(
+            "dense SF limits must be positive, increasing, and remain below "
+            f"90% of spatial Nyquist ({spatial_nyquist:.3f} cpd)"
+        )
+    if not 0 < temporal_min < temporal_max <= 0.8 * temporal_nyquist:
+        raise ValueError(
+            "dense TF limits must be positive, increasing, and remain at or below "
+            f"80% of temporal Nyquist ({temporal_nyquist:.3f} Hz)"
+        )
+
+    spatial = np.geomspace(spatial_min, spatial_max, int(args.dense_n_spatial))
+    temporal = np.geomspace(
+        temporal_min, temporal_max, int(args.dense_n_temporal)
+    )
+    orientations = np.linspace(
+        0.0, 180.0, int(args.dense_n_orientations), endpoint=False
+    )
+    return {
+        **recommended,
+        "grid_mode": "dense",
+        "spatial_cpd": spatial,
+        "temporal_hz": np.concatenate(([0.0], temporal)),
+        "dynamic_temporal_hz": temporal,
+        "orientation_deg": orientations,
+        "minimum_cycles_across_aperture": float(
+            spatial_min * recommended["fov_deg"]
+        ),
+        "minimum_pixels_per_spatial_cycle": float(
+            recommended["ppd"] / spatial_max
+        ),
+        "minimum_frames_per_temporal_cycle": float(
+            contract["input_rate_hz"] / temporal_max
+        ),
+        "spatial_grid_anchor": (
+            "dense log grid beginning at one cycle across the model aperture"
+            if args.dense_min_spatial_cpd is None
+            else "explicit dense log grid"
+        ),
+    }
 
 
 def dataset_contract(path: Path) -> dict:
@@ -235,10 +319,7 @@ def main() -> None:
         raise ValueError("unit table must contain consecutive RR100 unit indices")
     if args.max_units is not None:
         units = units.iloc[: int(args.max_units)].copy()
-    grid = recommended_native_grid(
-        image_size=contract["input_size"],
-        frame_rate_hz=contract["input_rate_hz"],
-    )
+    grid = probe_grid(contract, args)
     phases = np.linspace(0.0, 2.0 * np.pi, int(args.n_phases), endpoint=False)
     (
         encoding_model,
@@ -313,9 +394,11 @@ def main() -> None:
         "inactive_rr100_units": population_adaptation["inactive_units"],
         "n_conditions_scored": int(len(conditions)),
         "n_conditions_in_complete_grid": int(total_grid_conditions),
-        "complete_grid": bool(
-            len(units) == 100 and len(conditions) == total_grid_conditions
-        ),
+        # Two canonical RR100 entries are unavailable in this checkpoint and
+        # are recorded explicitly above. Grid completeness describes whether
+        # every requested condition was scored for every active unit.
+        "complete_grid": bool(len(conditions) == total_grid_conditions),
+        "complete_canonical_population": bool(len(units) == 100),
         "response_definition": (
             "steady periodic histories sampled at uniform endpoint phases; "
             "response_amp_rms is RMS phase modulation and f1_amplitude is the "
