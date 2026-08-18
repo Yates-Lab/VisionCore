@@ -27,15 +27,12 @@ if str(UPSTREAM_DIR) not in sys.path:
     sys.path.insert(0, str(UPSTREAM_DIR))
 
 from real_trace_matrix.core import (
-    build_native_snippet_trace_bank,
     score_matrix,
-    score_stabilized_images,
     speed_threshold_mad,
     trace_hash,
     trace_items_from_table_and_array,
     trace_scale_metrics,
 )
-from real_trace_matrix.model import _scored_trace_ids, make_counterfactual_stim_explicit_history
 import build_trace_bank_metadata as trace_bank_metadata_builder
 import build_real_trace_source_asset_bundle as source_asset_bundle
 import run_real_trace_matrix as real_trace_launcher
@@ -109,18 +106,36 @@ def test_refresh_graph_declares_recovered_trace_bank_metadata_stage():
     }
 
 
+def test_refresh_graph_routes_model_dependent_maps_and_tuning_through_selected_twin_adapters():
+    refresh_all = _load_refresh_all_module()
+    stages = {stage.key: stage for stage in refresh_all.STAGES}
+
+    assert stages["instantaneous_unit_maps"].script.name == (
+        "run_selected_twin_instantaneous_unit_maps.py"
+    )
+    assert stages["schematic_final_maps"].script.name == (
+        "run_selected_twin_schematic_final_maps.py"
+    )
+    tuning = stages["frequency_tuning_probe"]
+    assert tuning.script.name == "run_selected_twin_frequency_tuning_probe.py"
+    assert tuning.needs == ("instantaneous_unit_maps",)
+    assert tuning.extra_args == ("--source-dir", "{prev_out}", "--force")
+
+    groups = stages["sf_group_ssi_modulation"]
+    assert groups.needs == ("frequency_tuning_probe", "instantaneous_unit_maps")
+    assert "{scratch}/instantaneous_unit_maps/" in " ".join(groups.extra_args)
+    assert "dynamic_log_gaussian_marginal" in groups.extra_args
+    assert groups.extra_args[groups.extra_args.index("--low-sf-max-cpd") + 1] == "0.05"
+    assert groups.extra_args[groups.extra_args.index("--high-sf-min-cpd") + 1] == "0.5"
+
+
 def test_production_plan_records_recovered_deep_matrix_contract(tmp_path):
     manifest = _run_plan(tmp_path, "production")
 
     assert manifest["profile"] == "production"
     assert manifest["rr100_version"] == RR100_VERSION
     assert manifest["temporal_contract"]["model_history_frames"] == 32
-    assert manifest["temporal_contract"]["model_history_includes_current_frame"] is True
-    assert manifest["temporal_contract"]["history_burn_in_samples"] == 32
     assert manifest["temporal_contract"]["scored_trace_samples"] == 40
-    assert manifest["temporal_contract"]["model_trace_samples"] == 72
-    assert manifest["temporal_contract"]["current_history_policy"] == "explicit_preceding_history"
-    assert manifest["temporal_contract"]["scored_model_current_frame_indices_0based"] == [32, 71]
     assert manifest["selected_shards"] == ["images_000_050", "images_050_100"]
 
     score_commands = [cmd for cmd in manifest["commands"] if cmd["stage"] == "score_shard"]
@@ -133,7 +148,6 @@ def test_production_plan_records_recovered_deep_matrix_contract(tmp_path):
     assert _arg_after(first, "--n-traces") == "1000"
     assert _arg_after(first, "--seed") == "20260717"
     assert _arg_after(first, "--n-timepoints") == "40"
-    assert _arg_after(first, "--history-burn-in-samples") == "32"
     assert _arg_after(first, "--bin-seconds") == "0.008333333333333333"
     assert _arg_after(first, "--patch-size-px") == "540"
     assert _arg_after(first, "--image-contrast-quantile") == "0.75"
@@ -156,8 +170,6 @@ def test_production_plan_records_recovered_deep_matrix_contract(tmp_path):
     assert _arg_after(second, "--image-shard-start") == "50"
     assert _arg_after(second, "--image-shard-stop") == "100"
     assert "--skip-benchmark" in first
-    assert "--force" not in first
-    assert manifest["out_root"].endswith("_history32_v2")
 
     serialized_commands = json.dumps([cmd["argv"] for cmd in manifest["commands"]])
     assert "/home/declan/VisionCore/" not in serialized_commands
@@ -186,6 +198,93 @@ def test_production_plan_records_recovered_deep_matrix_contract(tmp_path):
         "d599fb0718faa363520a91b8f0819edafbff74ec501899b590e4061fef557f08"
     )
     assert checks["mcfarland_outputs"]["required_for"] == ["score_shard", "stabilized_baseline"]
+
+
+def test_selected_mixed_rate_plan_records_240hz_sixty_frame_history(tmp_path):
+    dataset_configs = tmp_path / "selected_mixed_rate.yaml"
+    dataset_configs.write_text(
+        "sampling: {source_rate: 240, target_rate: 240}\n"
+        "supervision: {target_rate: 120, phase: 1}\n"
+        "keys_lags:\n"
+        "  stim: [" + ", ".join(str(value) for value in range(60)) + "]\n",
+        encoding="utf-8",
+    )
+    checkpoint = tmp_path / "selected.ckpt"
+    checkpoint.write_bytes(b"plan-only checkpoint placeholder")
+
+    manifest = _run_plan(
+        tmp_path,
+        "production",
+        "--dataset-configs",
+        str(dataset_configs),
+        "--checkpoint-path",
+        str(checkpoint),
+    )
+
+    contract = manifest["temporal_contract"]
+    assert contract["model_history_frames"] == 60
+    assert contract["model_input_rate_hz"] == 240
+    assert contract["model_output_rate_hz"] == 120
+    assert contract["native_frames_per_scored_sample"] == 2
+    assert contract["supervision_phase"] == 1
+    assert contract["model_history_seconds"] == 0.25
+
+
+def test_native240_plan_resamples_retained_120hz_trace_without_changing_duration(tmp_path):
+    dataset_configs = tmp_path / "selected_native240.yaml"
+    dataset_configs.write_text(
+        "sampling: {source_rate: 240, target_rate: 240}\n"
+        "keys_lags:\n"
+        "  stim: [" + ", ".join(str(value) for value in range(60)) + "]\n",
+        encoding="utf-8",
+    )
+    checkpoint = tmp_path / "selected.ckpt"
+    checkpoint.write_bytes(b"plan-only checkpoint placeholder")
+
+    manifest = _run_plan(
+        tmp_path,
+        "production240",
+        "--dataset-configs",
+        str(dataset_configs),
+        "--checkpoint-path",
+        str(checkpoint),
+    )
+
+    contract = manifest["temporal_contract"]
+    assert contract["model_input_rate_hz"] == 240
+    assert contract["model_output_rate_hz"] == 240
+    assert contract["source_trace_rate_hz"] == 120
+    assert contract["source_trace_samples"] == 40
+    assert contract["scored_trace_samples"] == 80
+    assert contract["native_frames_per_source_trace_sample"] == 2
+    assert contract["scored_samples_per_source_trace_sample"] == 2
+    assert contract["analysis_interval_seconds"] == 40 / 120
+    assert contract["scored_bin_seconds"] == 1 / 240
+
+    score = next(cmd for cmd in manifest["commands"] if cmd["stage"] == "score_shard")
+    assert _arg_after(score["argv"], "--n-timepoints") == "40"
+    assert _arg_after(score["argv"], "--bin-seconds") == str(1 / 120)
+
+
+def test_native240_profile_rejects_a_120hz_checkpoint_contract(tmp_path):
+    plan_json = tmp_path / "invalid_native240_plan.json"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(LAUNCHER),
+            "--profile",
+            "production240",
+            "--plan-json",
+            str(plan_json),
+            "--no-print-commands",
+        ],
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "requires a 240-Hz model output contract" in result.stderr
 
 
 def test_smoke_plan_is_tiny_and_schema_compatible(tmp_path):
@@ -232,73 +331,6 @@ def test_trace_metric_helpers_preserve_historical_trace_bank_contract():
     assert np.isclose(metrics["rendered_rms_radius_arcmin"], np.sqrt(5.25) * 60.0)
     assert metrics["rendered_duration_s"] == 2.0
     assert "rendered_position_high_freq_power_fraction_15_60hz" in metrics
-
-
-def test_trace_bank_prepends_history_without_contaminating_scored_metrics():
-    eyepos = np.zeros((128, 2), dtype=np.float64)
-    eyepos[12:44, 0] = np.where(np.arange(32) % 2 == 0, -100.0, 100.0)
-    eyepos[44:84, 0] = np.linspace(0.0, 0.039, 40)
-    rows = pd.DataFrame(
-        {
-            "source_row": [7],
-            "session": ["Allen_2022-02-16"],
-            "trial_idx": [3],
-            "global_start": [0],
-            "global_stop": [128],
-            "duration_s": [127.0 / 120.0],
-        }
-    )
-
-    bank, metadata = build_native_snippet_trace_bank(
-        rows,
-        {"Allen_2022-02-16": eyepos},
-        40,
-        dt=1.0 / 120.0,
-        microsaccade_speed_threshold_dps=None,
-        microsaccade_threshold_z=6.0,
-        microsaccade_pad_frames=1,
-        history_burn_in_samples=32,
-    )
-
-    assert len(bank) == 1
-    item = bank[0]
-    expected_scored = eyepos[44:84] - eyepos[44:84].mean(axis=0, keepdims=True)
-    expected_model = eyepos[12:84] - eyepos[44:84].mean(axis=0, keepdims=True)
-    np.testing.assert_allclose(item["trace"], expected_scored.astype(np.float32))
-    np.testing.assert_allclose(item["model_trace"], expected_model.astype(np.float32))
-    assert item["snippet_global_start"] == 44
-    assert item["snippet_global_stop"] == 84
-    assert item["model_trace_global_start"] == 12
-    assert item["model_trace_global_stop"] == 84
-    assert item["rendered_path_length_arcmin"] < 3.0
-    assert np.isclose(
-        item["rendered_path_length_arcmin"],
-        trace_scale_metrics(item["trace"], dt=1.0 / 120.0, prefix="rendered_")["rendered_path_length_arcmin"],
-    )
-    assert metadata["history_burn_in_samples"] == 32
-    assert metadata["scored_trace_samples"] == 40
-    assert metadata["model_trace_samples"] == 72
-
-
-def test_explicit_history_scoring_drops_only_current_frame_31_output():
-    assert _scored_trace_ids(41, n_timepoints=40, trace_index=9) == [-1] + [9] * 40
-
-
-def test_explicit_history_embedding_uses_the_given_frames_without_prefix_seeding():
-    import torch
-
-    full_stack = np.stack([np.full((3, 3), value, dtype=np.float32) for value in range(5)])
-    eye = torch.zeros((5, 2), dtype=torch.float32)
-    stim = make_counterfactual_stim_explicit_history(
-        full_stack,
-        eye,
-        ppd=1.0,
-        n_lags=3,
-        out_size=(3, 3),
-    )
-
-    assert tuple(stim.shape) == (3, 1, 3, 3, 3)
-    np.testing.assert_allclose(stim[:, 0, :, 1, 1].numpy(), [[2, 1, 0], [3, 2, 1], [4, 3, 2]])
 
 
 def test_checkpoint_defaults_prefer_env_then_staged(monkeypatch, tmp_path):
@@ -457,43 +489,6 @@ class _FakeScorer:
         return base, base + 100.0, base + 200.0, np.arange(len(traces), dtype=np.float32) + 10.0
 
 
-class _StabilizedTraceShapeScorer:
-    n_units = 1
-
-    def score_traces_for_patch(self, patch, traces, **kwargs):
-        assert len(traces) == 1
-        assert traces[0].shape == (72, 2)
-        assert np.count_nonzero(traces[0]) == 0
-        return (
-            np.zeros((1, 1), dtype=np.float32),
-            np.zeros((1, 1), dtype=np.float32),
-            np.zeros((1, 1), dtype=np.float32),
-            np.zeros((1,), dtype=np.float32),
-        )
-
-
-def test_stabilized_baseline_uses_72_frame_model_trace_and_scores_40(tmp_path):
-    images = pd.DataFrame(
-        {"image_index": [0], "source_row": [1], "session": ["s"], "trial_idx": [2]}
-    )
-
-    def fake_patch_loader(row, *, canvas_cache, patch_size_px):
-        return np.zeros((4, 4), dtype=np.float32), {}
-
-    _, _, _, _, rows, _ = score_stabilized_images(
-        scorer=_StabilizedTraceShapeScorer(),
-        images=images,
-        frame_batch_size=5,
-        n_timepoints=40,
-        history_burn_in_samples=32,
-        bin_seconds=1.0 / 120.0,
-        patch_size_px=4,
-        patch_loader=fake_patch_loader,
-    )
-
-    assert rows[0]["n_timepoints"] == 40
-
-
 def test_score_matrix_writes_schema_with_fake_scorer(tmp_path):
     image_rows = pd.DataFrame(
         {
@@ -507,7 +502,6 @@ def test_score_matrix_writes_schema_with_fake_scorer(tmp_path):
     trace_items = [
         {
             "trace": np.zeros((4, 2), dtype=np.float32),
-            "model_trace": np.vstack([np.full((2, 2), 50.0, dtype=np.float32), np.zeros((4, 2), dtype=np.float32)]),
             "source_row": 20,
             "session": "Allen_2022-02-16",
             "trial_idx": 7,
@@ -515,7 +509,6 @@ def test_score_matrix_writes_schema_with_fake_scorer(tmp_path):
         },
         {
             "trace": np.ones((4, 2), dtype=np.float32),
-            "model_trace": np.vstack([np.full((2, 2), -50.0, dtype=np.float32), np.ones((4, 2), dtype=np.float32)]),
             "source_row": 21,
             "session": "Allen_2022-02-16",
             "trial_idx": 8,
@@ -544,8 +537,6 @@ def test_score_matrix_writes_schema_with_fake_scorer(tmp_path):
     assert np.load(tmp_path / "ssi_matrix.npy").shape == (4, 3)
     assert np.load(tmp_path / "expected_spikes_matrix.npy").shape == (4, 3)
     assert np.load(tmp_path / "population_ssi.npy").tolist() == [10.0, 11.0, 10.0, 11.0]
-    assert np.load(tmp_path / "trace_xy.npy").shape == (2, 4, 2)
-    assert np.load(tmp_path / "trace_xy_model.npy").shape == (2, 6, 2)
     movies = pd.read_csv(tmp_path / "movie_feature_table.csv")
     assert movies["movie_index"].tolist() == [0, 1, 2, 3]
     assert movies["image_source_row"].tolist() == [10, 10, 11, 11]
@@ -812,10 +803,39 @@ def _write_shard(path: Path, *, movie_indices: list[int], matrix_offset: float) 
     trace_table.to_csv(path / "trace_feature_table.csv", index=False)
     unit_table.to_csv(path / "unit_feature_table.csv", index=False)
     movie_table.to_csv(path / "movie_feature_table.csv", index=False)
-    (path / "summary.json").write_text('{"analysis": "synthetic"}\n', encoding="utf-8")
+    summary = {
+        "analysis": "synthetic",
+        "rr100_version": "synthetic-v1",
+        "bin_seconds": 1 / 120,
+        "n_timepoints": 3,
+        "patch_size_px": 35,
+        "source_csv": "synthetic.csv",
+        "unit_tuning_csv": "synthetic_tuning.csv",
+        "trace_time_contract": {
+            "source_trace_rate_hz": 120,
+            "source_trace_samples": 3,
+            "model_output_rate_hz": 120,
+            "scored_trace_samples": 3,
+        },
+        "model_provenance": {
+            "model": {
+                "checkpoint_sha256": "checkpoint-hash",
+                "dataset_configs_sha256": "dataset-hash",
+            },
+            "rr100_population_spec_json_sha256": "population-json-hash",
+            "rr100_population_spec_npz_sha256": "population-npz-hash",
+            "stimulus": {
+                "model_history_frames": 60,
+                "model_input_rate_hz": 240,
+                "model_output_rate_hz": 120,
+                "supervision_phase": 1,
+            },
+        },
+    }
+    (path / "summary.json").write_text(
+        json.dumps(summary) + "\n", encoding="utf-8"
+    )
     np.save(path / "trace_xy.npy", np.arange(18, dtype=np.float32).reshape(3, 3, 2))
-    scored = np.load(path / "trace_xy.npy")
-    np.save(path / "trace_xy_model.npy", np.concatenate([np.zeros((3, 2, 2), dtype=np.float32), scored], axis=1))
     base = np.arange(len(movie_indices) * 2, dtype=np.float32).reshape(len(movie_indices), 2)
     for name in ("ssi_matrix.npy", "expected_spikes_matrix.npy", "mean_rate_matrix.npy"):
         np.save(path / name, base + matrix_offset)
@@ -850,5 +870,3 @@ def test_merge_real_trace_shards_reconstructs_movie_index_order(tmp_path):
     assert summary["n_images"] == 2
     assert summary["n_traces"] == 3
     assert summary["n_movies"] == 6
-    assert np.load(out_dir / "trace_xy.npy").shape == (3, 3, 2)
-    assert np.load(out_dir / "trace_xy_model.npy").shape == (3, 5, 2)

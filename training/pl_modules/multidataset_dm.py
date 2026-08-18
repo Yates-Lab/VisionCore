@@ -127,7 +127,7 @@ class MultiDatasetDM(pl.LightningDataModule):
         # Transforms that are safe to use with uint8 storage
         # - pixelnorm: will be removed and applied on-the-fly during serving
         # - unsqueeze: just adds a dimension, doesn't modify data
-        ALLOWED_TRANSFORMS = {'pixelnorm', 'unsqueeze'}
+        ALLOWED_TRANSFORMS = {'pixelnorm', 'center_crop', 'unsqueeze'}
 
         transforms = cfg['transforms']
         for transform_key, transform_spec in transforms.items():
@@ -185,11 +185,12 @@ class MultiDatasetDM(pl.LightningDataModule):
 
             if self.dset_dtype == 'uint8':
                 # Path 1: uint8 storage (current behavior)
-                # Check for non-pixelnorm/unsqueeze transforms
+                # Center-cropping is dtype preserving and safe before the
+                # on-the-fly pixel normalization.
                 if self._check_for_non_pixelnorm_transforms(cfg):
                     raise ValueError(
-                        f"Dataset '{name}' has transforms other than pixelnorm/unsqueeze, "
-                        f"but dset_dtype='uint8' only supports pixelnorm and unsqueeze. "
+                        f"Dataset '{name}' has transforms outside pixelnorm/center_crop/unsqueeze, "
+                        f"but dset_dtype='uint8' only supports those operations. "
                         f"Use dset_dtype='bfloat16' or 'float32' to enable other transforms."
                     )
 
@@ -201,6 +202,14 @@ class MultiDatasetDM(pl.LightningDataModule):
                 else:
                     tr, va, _ = prepare_data(cfg, strict=True)
                     te = None
+
+                # Session files may store integer-valued pixels as float32.
+                # Convert the shared backing tensors so uint8 mode actually
+                # receives its intended memory reduction.
+                tr.cast(torch.uint8, target_keys=['stim'])
+                va.cast(torch.uint8, target_keys=['stim'])
+                if te is not None:
+                    te.cast(torch.uint8, target_keys=['stim'])
 
                 # Wrap with Float32View for on-the-fly normalization
                 self.train_dsets[name] = Float32View(tr, norm_removed, float16=False)
@@ -458,4 +467,3 @@ class MultiDatasetDM(pl.LightningDataModule):
                 "and re-run setup(). Refusing to fall back to the validation "
                 "split, which would report selection data as a test score.")
         return self._mk_loader(self.test_dsets, shuffle=True)
-

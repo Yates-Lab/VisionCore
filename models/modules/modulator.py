@@ -209,6 +209,100 @@ class FiLMModulator(BaseModulator):
         return scale * feats + shift
 
 
+class MLPBehaviorModulator(BaseModulator):
+    """Compact nonrecurrent behavior path used by the feed-forward M77 core.
+
+    Encoded behavior both rescales the final visual feature channels through a
+    bounded FiLM gain and supplies spatially constant additive channels to the
+    neuron-specific readout.  It is identity-initialized on the visual path.
+    """
+
+    def _build_modulator(self):
+        self.feature_dim = self.config.get('feature_dim')
+        if self.feature_dim is None:
+            raise ValueError("feature_dim must be specified for mlp_behavior")
+
+        # An SO(2) core stores each steerable field as a contiguous block of
+        # real Fourier coefficients.  A separate FiLM gain for each coefficient
+        # would destroy the rotation representation.  When a field size is
+        # supplied by the core, learn one behavior gain per complete field and
+        # repeat it across that field's coefficients.
+        self.modulation_field_size = int(
+            self.config.get('modulation_field_size', 1)
+        )
+        if self.modulation_field_size < 1:
+            raise ValueError("modulation_field_size must be positive")
+        if self.feature_dim % self.modulation_field_size:
+            raise ValueError(
+                f"feature_dim ({self.feature_dim}) must be divisible by "
+                f"modulation_field_size ({self.modulation_field_size})"
+            )
+        self.modulation_fields = self.feature_dim // self.modulation_field_size
+
+        hidden_dims = list(self.config.get('hidden_dims', [64]))
+        self.additive_dim = int(self.config.get('additive_dim', 16))
+        self.encoded_dim = int(self.config.get('encoded_dim', self.additive_dim))
+        if self.additive_dim < 0:
+            raise ValueError("additive_dim must be non-negative")
+        if self.encoded_dim <= 0:
+            raise ValueError("encoded_dim must be positive")
+
+        self.use_film = bool(self.config.get('use_film', True))
+        self.film_max_gain = float(self.config.get('film_max_gain', 0.5))
+        input_norm = bool(self.config.get('input_norm', False))
+        self.input_norm = (
+            nn.LayerNorm(self.behavior_dim, elementwise_affine=False)
+            if input_norm else nn.Identity()
+        )
+        self.encoder = MLP(
+            input_dim=self.behavior_dim,
+            hidden_dims=hidden_dims,
+            output_dim=self.encoded_dim,
+            norm_type=self.config.get('norm_type', None),
+            act_type=self.config.get('activation', 'gelu'),
+            dropout=float(self.config.get('dropout', 0.0)),
+            bias=True,
+            residual=False,
+            output_activation=True,
+        )
+        if self.use_film:
+            self.scale_layer = nn.Linear(self.encoded_dim, self.modulation_fields)
+            nn.init.zeros_(self.scale_layer.weight)
+            nn.init.zeros_(self.scale_layer.bias)
+        else:
+            self.scale_layer = None
+        self.out_dim = self.additive_dim
+
+    def forward(self, feats: torch.Tensor, beh: torch.Tensor) -> torch.Tensor:
+        if feats.ndim != 5:
+            raise ValueError(
+                f"MLPBehaviorModulator expects NCTHW features, got {tuple(feats.shape)}"
+            )
+        if beh.ndim == 3:
+            beh = beh.mean(dim=1)
+        if beh.ndim != 2 or beh.shape[1] != self.behavior_dim:
+            raise ValueError(
+                f"Expected behavior shape (batch, {self.behavior_dim}), got {tuple(beh.shape)}"
+            )
+
+        encoded = self.encoder(self.input_norm(beh))
+        if self.scale_layer is not None:
+            scale = self.film_max_gain * torch.tanh(self.scale_layer(encoded))
+            scale = scale.repeat_interleave(self.modulation_field_size, dim=1)
+            feats = feats * (1.0 + scale[:, :, None, None, None])
+
+        if self.additive_dim == 0:
+            return feats
+        if encoded.shape[1] != self.additive_dim:
+            raise RuntimeError(
+                "encoded_dim must equal additive_dim when additive behavior channels are enabled"
+            )
+        additive = encoded[:, :, None, None, None].expand(
+            -1, -1, feats.shape[2], feats.shape[3], feats.shape[4]
+        )
+        return torch.cat((feats, additive), dim=1)
+
+
 class ConvGRUModulator(BaseModulator):
     """
     ConvGRU modulator that processes features and behavior through a ConvGRU.
@@ -299,7 +393,6 @@ class ConvGRUModulator(BaseModulator):
 MODULATORS = {
     'concat': ConcatModulator,
     'film': FiLMModulator,
+    'mlp_behavior': MLPBehaviorModulator,
     'convgru': ConvGRUModulator,
 }
-
-

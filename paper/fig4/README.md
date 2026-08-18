@@ -144,6 +144,22 @@ sampling one image and two traces:
 uv run python paper/fig4/upstream/run_real_trace_matrix.py --profile smoke
 ```
 
+For a genuinely native-240-Hz checkpoint, use `smoke240`, `pilot240`, or
+`production240` and explicitly provide that checkpoint's dataset config. The
+retained BackImage eye traces are still measured on the historical 120-Hz
+grid: every profile center-crops the same 40 source samples (333 ms). The
+native-240 scorer endpoint-interpolates each trace to 80 model-output samples,
+holds the first and last positions at the boundaries, and integrates rates at
+1/240 s. It does **not** take 80 measured 120-Hz samples and relabel them as
+240 Hz. The launcher rejects a `*240` profile unless the dataset config
+declares a true 240-Hz output grid.
+
+```bash
+FIG4_TWIN_CHECKPOINT=/path/to/native240.ckpt \
+FIG4_DATASET_CONFIGS=paper/model_selection/configs/multi_240_long_split3_dekel35.yaml \
+uv run python paper/fig4/upstream/run_real_trace_matrix.py --profile smoke240
+```
+
 Execution uses in-repo scorer scripts by default. `--run-all` still refuses on a
 clean checkout until the source inputs and model/readout/RR100 artifacts are
 present:
@@ -153,6 +169,49 @@ FIG4_MCFARLAND_OUTPUTS=/path/to/mcfarland_outputs_mono.pkl \
 FIG4_RR100_POPULATION_SPEC_DIR=/path/to/step1_activation_fingerprints \
 uv run python paper/fig4/upstream/run_real_trace_matrix.py --run-all --force
 ```
+
+When refreshing the downstream production caches for a newly selected twin,
+point the refresh explicitly at that run's merged matrix and shard directory:
+
+```bash
+FIG4_TRACE_BANK_DIR=/path/to/selected_twin/merged \
+FIG4_SSI_SHARDS_DIR=/path/to/selected_twin/shards \
+uv run python paper/fig4/refresh_all.py
+```
+
+Both variables are optional and preserve the historical source-tree locations
+by default. Setting them prevents a selected-twin rerender from silently
+reading an older checkpoint's trace matrix from `FIG4_SOURCE_ROOT`.
+
+The matrix scorer reads `--unit-tuning-csv` only to annotate
+`unit_feature_table.csv`; it never changes movie scores. If the selected twin's
+SF/TF probe finishes after the expensive matrix, replace those annotations with
+`paper/fig4/upstream/replace_unit_feature_tuning.py`, supplying both the new and
+previous tuning CSVs. The utility removes the previous tuning schema, validates
+one-to-one unit coverage, and writes a hash-provenance sidecar.
+
+For native selected twins, first turn the cycle-valid robust tuning fit into a
+complete RR100 tuning table (including explicit inactive rows and orientation
+metadata measured from the same model):
+
+```bash
+uv run python paper/fig4/upstream/build_robust_unit_tuning.py \
+  --base-unit-table /path/to/merged/unit_feature_table.csv \
+  --robust-tuning-summary /path/to/robust/robust_tuning_summary.csv \
+  --grouped-tuning-csv /path/to/frequency_tuning_grouped.csv \
+  --out /path/to/cycle_valid_unit_tuning.csv
+```
+
+The cycle-valid grid has a different lower bound from the historical coarse
+grid, so its absolute 0.5/0.75-cpd cuts are not transferable. Run the selected-
+twin refresh and compositor with `FIG4_SF_GROUP_MODE=table_tertiles`; panels
+then use the stable lower and upper tertiles recorded in `unit.sf_group` while
+the default `absolute_cpd` mode continues to reproduce historical caches.
+The native controlled-motion dose-response analysis follows the same rule by
+default: `analyze_native_controlled_scaling.py` forms lower/middle/higher
+tertiles from each unit's cycle-valid weighted-center SF. Its optional
+`--sf-group-mode censoring` switch exists only for reproducing the older
+boundary-censored versus resolved diagnostic.
 
 To stage those assets from a VisionCore-style data tree without importing any
 code from it:
@@ -228,26 +287,6 @@ A one-image/full-trace-bank production shard (`--only-shard 0:1`) then diffed
 cleanly against the old merged cache at `atol=1e-5, rtol=1e-5`, with zero
 array differences for SSI, expected spikes, mean rate, and population SSI.
 The full 100-image production matrix still needs the normal two long shard runs.
-
-### Temporal burn-in contract for the refreshed matrix
-
-Each refreshed image x trace movie contains 72 native FEM samples at 120 Hz:
-32 explicit history samples followed by the historical central 40 scored
-samples. For a 128-sample source window these are source samples `12:84` and
-`44:84`, respectively. The 72-frame trace is embedded directly, without the
-historical `trace[:32] + trace` prefix seeding.
-
-Embedding 32 lags from 72 frames produces 41 outputs. The first output, whose
-current frame is model-trace frame 31, is discarded. SSI, expected spikes, and
-mean rate accumulate only outputs 1--40, whose current frames are 32--71. With
-0-based scored sample `s` and lag channel `l` (`l=0` is current), the model-trace
-index is therefore `32 + s - l`.
-
-`trace_xy.npy` remains the 40-sample scored trace consumed by downstream Figure
-4 path, RMS, microsaccade, and binning analyses. `trace_xy_model.npy` stores the
-72-frame burn-in-plus-scored model input. The trace-bank builder computes all
-movement features and sampling strata from the scored array only. Stabilized
-baselines use a 72-frame zero-motion input and the identical 40-output mask.
 
 To audit the clean scorer against a historical matrix cache without resampling
 images or traces, replay the selected tables and `trace_xy.npy` from that cache.

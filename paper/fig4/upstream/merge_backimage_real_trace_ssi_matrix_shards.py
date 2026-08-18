@@ -25,6 +25,24 @@ MATRIX_FILES = (
     "population_ssi.npy",
 )
 
+PROVENANCE_PATHS = (
+    ("rr100_version",),
+    ("bin_seconds",),
+    ("n_timepoints",),
+    ("patch_size_px",),
+    ("source_csv",),
+    ("unit_tuning_csv",),
+    ("trace_time_contract",),
+    ("model_provenance", "model", "checkpoint_sha256"),
+    ("model_provenance", "model", "dataset_configs_sha256"),
+    ("model_provenance", "rr100_population_spec_json_sha256"),
+    ("model_provenance", "rr100_population_spec_npz_sha256"),
+    ("model_provenance", "stimulus", "model_history_frames"),
+    ("model_provenance", "stimulus", "model_input_rate_hz"),
+    ("model_provenance", "stimulus", "model_output_rate_hz"),
+    ("model_provenance", "stimulus", "supervision_phase"),
+)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -56,6 +74,31 @@ def load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def nested_value(payload: dict[str, Any], path: tuple[str, ...]) -> Any:
+    value: Any = payload
+    for key in path:
+        if not isinstance(value, dict) or key not in value:
+            raise ValueError(f"Shard summary lacks required provenance {'.'.join(path)}")
+        value = value[key]
+    return value
+
+
+def assert_matching_provenance(summaries: list[dict[str, Any]]) -> dict[str, Any]:
+    reference: dict[str, Any] = {}
+    first = summaries[0]
+    for path in PROVENANCE_PATHS:
+        expected = nested_value(first, path)
+        for shard_index, summary in enumerate(summaries[1:], start=1):
+            observed = nested_value(summary, path)
+            if observed != expected:
+                raise ValueError(
+                    f"Shard {shard_index} provenance differs at {'.'.join(path)}: "
+                    f"{observed!r} versus {expected!r}."
+                )
+        reference[".".join(path)] = expected
+    return reference
+
+
 def require_member(shard_dir: Path, name: str) -> Path:
     path = shard_dir / name
     if not path.exists():
@@ -72,21 +115,12 @@ def assert_same_table(first: pd.DataFrame, other: pd.DataFrame, *, name: str) ->
         raise ValueError(f"{name} differs across shards.")
 
 
-def load_reference_tables(
-    shard_dirs: list[Path],
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, np.ndarray, np.ndarray]:
+def load_reference_tables(shard_dirs: list[Path]) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, np.ndarray]:
     first = shard_dirs[0]
     image_table = pd.read_csv(require_member(first, "image_feature_table.csv"))
     trace_table = pd.read_csv(require_member(first, "trace_feature_table.csv"))
     unit_table = pd.read_csv(require_member(first, "unit_feature_table.csv"))
     trace_xy = np.load(require_member(first, "trace_xy.npy"))
-    trace_xy_model = np.load(require_member(first, "trace_xy_model.npy"))
-    if trace_xy.ndim != 3 or trace_xy.shape[2] != 2:
-        raise ValueError("trace_xy.npy has an incompatible shape.")
-    if trace_xy_model.ndim != 3 or trace_xy_model.shape[0] != trace_xy.shape[0] or trace_xy_model.shape[2] != 2:
-        raise ValueError("trace_xy_model.npy has an incompatible shape.")
-    if not np.array_equal(trace_xy_model[:, -trace_xy.shape[1] :], trace_xy):
-        raise ValueError("trace_xy.npy must equal the trailing scored interval of trace_xy_model.npy.")
 
     for shard_dir in shard_dirs[1:]:
         assert_same_table(
@@ -107,11 +141,8 @@ def load_reference_tables(
         other_xy = np.load(require_member(shard_dir, "trace_xy.npy"))
         if trace_xy.shape != other_xy.shape or not np.array_equal(trace_xy, other_xy):
             raise ValueError("trace_xy.npy differs across shards.")
-        other_xy_model = np.load(require_member(shard_dir, "trace_xy_model.npy"))
-        if trace_xy_model.shape != other_xy_model.shape or not np.array_equal(trace_xy_model, other_xy_model):
-            raise ValueError("trace_xy_model.npy differs across shards.")
 
-    return image_table, trace_table, unit_table, trace_xy, trace_xy_model
+    return image_table, trace_table, unit_table, trace_xy
 
 
 def allocate_arrays(shard_dir: Path, *, n_movies: int) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
@@ -172,7 +203,8 @@ def main() -> None:
             raise FileNotFoundError(f"Shard directory not found: {shard_dir}")
 
     summaries = [load_json(require_member(path, "summary.json")) for path in shard_dirs]
-    image_table, trace_table, unit_table, trace_xy, trace_xy_model = load_reference_tables(shard_dirs)
+    common_provenance = assert_matching_provenance(summaries)
+    image_table, trace_table, unit_table, trace_xy = load_reference_tables(shard_dirs)
     n_images = int(image_table.shape[0])
     n_traces = int(trace_table.shape[0])
     n_units = int(unit_table.shape[0])
@@ -200,11 +232,28 @@ def main() -> None:
         raise ValueError(f"Merged movie table has {merged_movie.shape[0]} rows; expected {n_movies}.")
     if merged_movie["movie_index"].astype(int).nunique() != n_movies:
         raise ValueError("Merged movie table does not cover every movie_index exactly once.")
+    movie_index = merged_movie["movie_index"].astype(int).to_numpy()
+    if not np.array_equal(movie_index, np.arange(n_movies, dtype=int)):
+        raise ValueError("Merged movie rows are not in exact contiguous movie_index order.")
+    expected_image = movie_index // n_traces
+    expected_trace = movie_index % n_traces
+    if not np.array_equal(merged_movie["image_index"].astype(int), expected_image):
+        raise ValueError("Merged image_index is inconsistent with image-major movie_index.")
+    if not np.array_equal(merged_movie["trace_index"].astype(int), expected_trace):
+        raise ValueError("Merged trace_index is inconsistent with image-major movie_index.")
 
     for name, values in arrays.items():
         if not filled[name].all():
             missing = np.flatnonzero(~filled[name])[:5].astype(int).tolist()
             raise ValueError(f"{name} has unfilled movie rows after merge, starting with {missing}.")
+        expected_shape = (n_movies,) if name == "population_ssi.npy" else (n_movies, n_units)
+        if values.shape != expected_shape:
+            raise ValueError(f"{name} has shape {values.shape}; expected {expected_shape}.")
+        if not np.all(np.isfinite(values)):
+            count = int(values.size - np.count_nonzero(np.isfinite(values)))
+            raise ValueError(f"{name} contains {count} non-finite entries.")
+        if np.any(values < 0):
+            raise ValueError(f"{name} contains negative entries (minimum {values.min():g}).")
         np.save(out_dir / name, values)
 
     image_table.to_csv(out_dir / "image_feature_table.csv", index=False)
@@ -212,7 +261,6 @@ def main() -> None:
     unit_table.to_csv(out_dir / "unit_feature_table.csv", index=False)
     merged_movie.to_csv(out_dir / "movie_feature_table.csv", index=False)
     np.save(out_dir / "trace_xy.npy", trace_xy)
-    np.save(out_dir / "trace_xy_model.npy", trace_xy_model)
     if (shard_dirs[0] / "trace_bank_metric_summary.csv").exists():
         pd.read_csv(shard_dirs[0] / "trace_bank_metric_summary.csv").to_csv(
             out_dir / "trace_bank_metric_summary.csv",
@@ -227,6 +275,13 @@ def main() -> None:
         "n_traces": n_traces,
         "n_units": n_units,
         "n_movies": n_movies,
+        "validated_common_provenance": common_provenance,
+        "integrity_checks": {
+            "complete_image_major_movie_index": True,
+            "matrix_shapes_match_coordinates": True,
+            "all_matrix_entries_finite": True,
+            "all_matrix_entries_nonnegative": True,
+        },
         "shard_summaries": summaries,
         "outputs": {name.removesuffix(".npy"): out_dir / name for name in MATRIX_FILES}
         | {
@@ -235,7 +290,6 @@ def main() -> None:
             "trace_feature_table": out_dir / "trace_feature_table.csv",
             "unit_feature_table": out_dir / "unit_feature_table.csv",
             "trace_xy": out_dir / "trace_xy.npy",
-            "trace_xy_model": out_dir / "trace_xy_model.npy",
         },
     }
     write_json(out_dir / "summary.json", summary)

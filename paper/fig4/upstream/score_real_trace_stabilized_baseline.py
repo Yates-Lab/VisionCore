@@ -25,7 +25,7 @@ from real_trace_matrix.model import RealTraceMatrixScorer
 
 
 ROOT = Path(__file__).resolve().parents[3]
-RUN_STEM = "backimage_real_trace_ssi_matrix_large_contour_no_driftgate_ms200_n100x1000_history32_v2"
+RUN_STEM = "backimage_real_trace_ssi_matrix_large_contour_no_driftgate_ms200_n100x1000_v1"
 RR100_VERSION = (
     "V1-RR_MS_min_complete0p65_split0p75_pair0p60_anyfail_finalsplit0p75_"
     "medoidPosthocminRepcomplete0p45_movieMedoid"
@@ -77,7 +77,6 @@ def parse_args() -> argparse.Namespace:
         default=Path(DEFAULT_MCFARLAND_OUTPUTS) if DEFAULT_MCFARLAND_OUTPUTS else None,
     )
     parser.add_argument("--n-timepoints", type=int, default=40)
-    parser.add_argument("--history-burn-in-samples", type=int, default=32)
     parser.add_argument("--bin-seconds", type=float, default=1.0 / 120.0)
     parser.add_argument("--patch-size-px", type=int, default=540)
     parser.add_argument("--device", type=str, default="cuda:0")
@@ -118,9 +117,6 @@ def main() -> int:
 
     summary_defaults = read_merged_summary_defaults(matrix_dir)
     n_timepoints = int(summary_defaults.get("n_timepoints", args.n_timepoints))
-    history_burn_in_samples = int(
-        summary_defaults.get("history_burn_in_samples", args.history_burn_in_samples)
-    )
     bin_seconds = float(summary_defaults.get("bin_seconds", args.bin_seconds))
     patch_size_px = int(summary_defaults.get("patch_size_px", args.patch_size_px))
     rr100_version = str(summary_defaults.get("rr100_version", args.rr100_version))
@@ -154,7 +150,6 @@ def main() -> int:
         n_timepoints=n_timepoints,
         bin_seconds=bin_seconds,
         patch_size_px=patch_size_px,
-        history_burn_in_samples=history_burn_in_samples,
     )
     np.save(out_dir / OUTPUT_FILES["ssi"], ssi)
     np.save(out_dir / OUTPUT_FILES["expected"], expected)
@@ -170,9 +165,6 @@ def main() -> int:
         "n_images": int(images.shape[0]),
         "n_units": int(scorer.n_units),
         "n_timepoints": n_timepoints,
-        "history_burn_in_samples": history_burn_in_samples,
-        "scored_trace_samples": n_timepoints,
-        "model_trace_samples": history_burn_in_samples + n_timepoints,
         "bin_seconds": bin_seconds,
         "patch_size_px": patch_size_px,
         "device": str(args.device),

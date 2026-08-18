@@ -35,12 +35,19 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 def _configure_story() -> None:
     story.MATCH_MAX_DEG = MATCH_MAX_DEG
     story.HIGH_SF_MIN_CPD = HIGH_SF_MIN_CPD
-    high_sf_label = f"SF >= {HIGH_SF_MIN_CPD:.2f}"
+    if story.SF_GROUP_MODE == "table_tertiles":
+        low_sf_label = "lower SF tertile"
+        high_sf_label = "upper SF tertile"
+    else:
+        low_sf_label = "SF < 0.50"
+        high_sf_label = f"SF >= {HIGH_SF_MIN_CPD:.2f}"
     story.SF_GROUPS["high_ge0p75"]["label"] = high_sf_label
     story.SF_GROUPS["high_ge0p75"]["title"] = high_sf_label
+    story.SF_GROUPS["low_lt0p5"]["label"] = low_sf_label
+    story.SF_GROUPS["low_lt0p5"]["title"] = low_sf_label
     story.B_PANEL_SPECS = [
-        ("low_lt0p5", "strong_contours_no_osi", "SF < 0.50\nall contour units"),
-        ("low_lt0p5", "contour_matched", "SF < 0.50\nunit-contour match <= 15 deg"),
+        ("low_lt0p5", "strong_contours_no_osi", f"{low_sf_label}\nall contour units"),
+        ("low_lt0p5", "contour_matched", f"{low_sf_label}\nunit-contour match <= 15 deg"),
         ("high_ge0p75", "strong_contours_no_osi", f"{high_sf_label}\nall contour units"),
         ("high_ge0p75", "contour_matched", f"{high_sf_label}\nunit-contour match <= 15 deg"),
     ]
@@ -118,14 +125,19 @@ def _plot_panel_b(panel_b: pd.DataFrame) -> plt.Figure:
         loc="lower center",
         bbox_to_anchor=(0.52, -0.02),
     )
+    sf_description = (
+        "SF groups: cycle-valid lower/upper tertiles. "
+        if story.SF_GROUP_MODE == "table_tertiles"
+        else f"Low SF: {story.SF_METRIC_COL} < {story.LOW_SF_MAX_CPD:.2f}; "
+        f"high SF: {story.SF_METRIC_COL} >= {HIGH_SF_MIN_CPD:.2f}. "
+    )
     fig.text(
         0.5,
         -0.085,
         (
             f"Contour windows: coherence >= {story.CONTOUR_COHERENCE_MIN:.2f}. "
-            f"Low SF: {story.SF_METRIC_COL} < {story.LOW_SF_MAX_CPD:.2f}; "
-            f"high SF: {story.SF_METRIC_COL} >= {HIGH_SF_MIN_CPD:.2f}. "
-            "Only the orientation-aligned columns use the 15 deg unit-contour match threshold."
+            f"{sf_description}Only the orientation-aligned columns use the "
+            "15 deg unit-contour match threshold."
         ),
         ha="center",
         va="bottom",
@@ -153,7 +165,12 @@ def _plot_high_sf_matched(panel_b: pd.DataFrame) -> plt.Figure:
     n_units = int(frame["n_selected_units"].iloc[0]) if not frame.empty else 0
     n_pairs = int(frame["n_selected_unit_image_pairs"].iloc[0]) if not frame.empty else 0
     ax.set_title(
-        f"Panel B: SF >= {HIGH_SF_MIN_CPD:.2f}, unit-contour match <= 15 deg\n{n_units} units, {n_pairs} pairs",
+        (
+            "Panel B: upper SF tertile, unit-contour match <= 15 deg"
+            if story.SF_GROUP_MODE == "table_tertiles"
+            else f"Panel B: SF >= {HIGH_SF_MIN_CPD:.2f}, unit-contour match <= 15 deg"
+        )
+        + f"\n{n_units} units, {n_pairs} pairs",
         fontsize=11.5,
         pad=7,
         color=color,
@@ -207,9 +224,18 @@ def main() -> None:
                 "summary_json": summary_json,
             },
             "selection": {
+                "sf_group_mode": story.SF_GROUP_MODE,
                 "sf_metric_col": story.SF_METRIC_COL,
-                "low_sf": f"{story.SF_METRIC_COL} < {story.LOW_SF_MAX_CPD}",
-                "high_sf": f"{story.SF_METRIC_COL} >= {HIGH_SF_MIN_CPD}",
+                "low_sf": (
+                    "unit.sf_group == low_sf"
+                    if story.SF_GROUP_MODE == "table_tertiles"
+                    else f"{story.SF_METRIC_COL} < {story.LOW_SF_MAX_CPD}"
+                ),
+                "high_sf": (
+                    "unit.sf_group == high_sf"
+                    if story.SF_GROUP_MODE == "table_tertiles"
+                    else f"{story.SF_METRIC_COL} >= {HIGH_SF_MIN_CPD}"
+                ),
                 "contour_coherence_min": story.CONTOUR_COHERENCE_MIN,
                 "min_osi": story.MIN_OSI,
                 "match_max_deg": MATCH_MAX_DEG,

@@ -7,8 +7,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 
-from mcfarland_sim import get_fixrsvp_stack, eye_deg_to_norm, shift_movie_with_eye
-
 def embed_time_lags(movie, n_lags=32):
     """
     Embed time lags into a movie tensor.
@@ -84,6 +82,18 @@ class PopulationReadout(nn.Module):
 
         return out
     
+def _output_cids_used(output, n_output_rows):
+    """Return the cell identity associated with each McFarland result row."""
+    for key in ("cids_used", "cids"):
+        values = np.asarray(output.get(key, []))
+        if values.ndim == 1 and values.size == int(n_output_rows):
+            return values.astype(np.int64, copy=False)
+    raise ValueError(
+        f"McFarland output {output.get('sess', '<unknown>')!r} has "
+        f"{n_output_rows} ccnorm rows but no equally sized cids_used/cids array."
+    )
+
+
 def get_spatial_readout(model, outputs, return_unit_rows=False):
     """
     Combine readouts from multiple datasets into a single readout.
@@ -91,54 +101,79 @@ def get_spatial_readout(model, outputs, return_unit_rows=False):
     If return_unit_rows=True, also return per-channel provenance rows derived
     from the same session matching and ccnorm filter used to build the readout.
     """
-    sessions = [outputs[i]['sess'] for i in range(len(outputs))]
-
+    sessions = [output['sess'] for output in outputs]
+    if len(set(sessions)) != len(sessions):
+        raise ValueError("McFarland outputs contain duplicate session names.")
     model_dataset_idx = [i for i, name in enumerate(model.names) if name in sessions]
-    cids2use = [np.where(outputs[sessions.index(model.names[i])]['ccnorm']['ccnorm']>.5)[0] for i in model_dataset_idx]
-
-    # make single readout
-
+    readout_mask_size = int(getattr(model.model.convnet, "scaffold_size", 14))
     feat_weights = []
     biases = []
     space_weights = []
     unit_rows = []
     channel = 0
-    for i in range(len(model_dataset_idx)):
-        model_readout_idx = model_dataset_idx[i]
+    for model_readout_idx in model_dataset_idx:
         session = model.names[model_readout_idx]
         output_index = sessions.index(session)
         all_ccnorm = np.asarray(outputs[output_index]['ccnorm']['ccnorm'], dtype=np.float32)
+        output_cids = _output_cids_used(outputs[output_index], all_ccnorm.size)
+        selected_output_rows = np.flatnonzero(all_ccnorm > .5)
+
+        model_cids = np.asarray(
+            model.cfgs[model_readout_idx].get("cids", []), dtype=np.int64
+        )
+        if model_cids.ndim != 1 or np.unique(model_cids).size != model_cids.size:
+            raise ValueError(f"Dataset cids for {session!r} must be unique and 1-D.")
+        model_row_by_cid = {
+            int(cid): int(row) for row, cid in enumerate(model_cids)
+        }
 
         readout = model.model.readouts[model_readout_idx]
         feat_weight = readout.features.weight.detach().cpu()
         bias = readout.bias.detach().cpu()
-        space_weight = readout.compute_gaussian_mask(14, 14, model.device).detach().cpu()
+        space_weight = readout.compute_gaussian_mask(
+            readout_mask_size, readout_mask_size, model.device
+        ).detach().cpu()
+        if feat_weight.shape[0] != model_cids.size:
+            raise ValueError(
+                f"Readout for {session!r} has {feat_weight.shape[0]} rows but "
+                f"its config has {model_cids.size} cids."
+            )
 
-        feat_weight = feat_weight[cids2use[i]]
-        bias = bias[cids2use[i]]
-        space_weight = space_weight[cids2use[i]]
-
-        feat_weights.append(feat_weight)
-        biases.append(bias)
-        space_weights.append(space_weight)
-        for source_unit_index in cids2use[i]:
+        for source_output_row in selected_output_rows:
+            source_cid = int(output_cids[source_output_row])
+            model_readout_row = model_row_by_cid.get(source_cid)
+            available = model_readout_row is not None
+            if available:
+                row = int(model_readout_row)
+                feat_weights.append(feat_weight[row : row + 1])
+                biases.append(bias[row : row + 1])
+                space_weights.append(space_weight[row : row + 1])
+            else:
+                # Preserve the canonical Figure-4 channel coordinate system.
+                feat_weights.append(torch.zeros_like(feat_weight[:1]))
+                biases.append(torch.full_like(bias[:1], -50.0))
+                space_weights.append(torch.zeros_like(space_weight[:1]))
             unit_rows.append(
                 {
                     "channel": int(channel),
                     "session": str(session),
-                    "source_unit_index": int(source_unit_index),
-                    "ccnorm": float(all_ccnorm[source_unit_index]),
+                    "source_unit_index": int(source_output_row),
+                    "source_output_row": int(source_output_row),
+                    "source_cid": source_cid,
+                    "model_readout_row": model_readout_row,
+                    "available": bool(available),
+                    "ccnorm": float(all_ccnorm[source_output_row]),
                     "model_readout_index": int(model_readout_idx),
                     "mcfarland_output_index": int(output_index),
                 }
             )
             channel += 1
 
+    if not feat_weights:
+        raise ValueError("No overlapping sessions produced spatial readout channels.")
     feat_weights = torch.cat(feat_weights, dim=0)
     biases = torch.cat(biases, dim=0)
     space_weights = torch.cat(space_weights, dim=0)
-
-    # print(feat_weights.shape, biases.shape, space_weights.shape)
     readout = PopulationReadout(feat_weights, biases, space_weights)
     if return_unit_rows:
         return readout, unit_rows
@@ -150,7 +185,12 @@ def compute_rate_map(model, readout, stim, behavior=None):
     ``behavior`` (N, n_vars) is required for behavior-conditioned twins
     (e.g. concat/FiLM modulators); leave it None for none-modulator twins.
     """
-    x = model.model.core_forward(stim, behavior)
+    spatial_forward = getattr(model.model, "core_forward_spatial_map", None)
+    x = (
+        spatial_forward(stim, behavior)
+        if spatial_forward is not None
+        else model.model.core_forward(stim, behavior)
+    )
     y_batch = readout(x[:,:,-1])
 
     return model.model.activation(y_batch)
@@ -246,6 +286,8 @@ def make_stimulus_stack(type='fixrsvp', frame=None, frames_per_im=6, num_frames=
         num_frames: number of frames to generate (if frame is None)
     """
 
+    from mcfarland_sim import get_fixrsvp_stack
+
     if type == 'fixrsvp':
         full_stack = get_fixrsvp_stack(frames_per_im=frames_per_im, prefix='im')
     elif type == 'face':
@@ -276,6 +318,8 @@ def make_counterfactual_stim(full_stack, eyepos,
         n_lags: number of time lags to use
         out_size: (H, W) size of output stimulus
     '''
+
+    from mcfarland_sim import eye_deg_to_norm, shift_movie_with_eye
 
     eye_norm = eye_deg_to_norm(torch.fliplr(eyepos), ppd, full_stack.shape[1:3])
 

@@ -169,6 +169,11 @@ class ModularV1Model(nn.Module):
         modulator_type = modulator_config['type']
         modulator_params = modulator_config['params']
         modulator_params['feature_dim'] = current_channels
+        modulation_field_size = getattr(
+            self.convnet, 'modulation_field_size', None
+        )
+        if modulation_field_size is not None:
+            modulator_params['modulation_field_size'] = modulation_field_size
         self.modulator, modulator_dim = create_modulator(
             modulator_type=modulator_type,
             **modulator_params
@@ -189,7 +194,7 @@ class ModularV1Model(nn.Module):
             # For concat modulators, add the modulator output channels
             # For FiLM modulators, channel count stays the same
             modulator_type = modulator_config.get('type', 'none')
-            if modulator_type == 'concat':
+            if modulator_type in ['concat', 'mlp_behavior']:
                 current_channels += modulator_dim
             else:
                 pass
@@ -386,6 +391,11 @@ class MultiDatasetV1Model(ModularV1Model):
         else:
             modulator_params = {}
         modulator_params['feature_dim'] = convnet_output_channels
+        modulation_field_size = getattr(
+            self.convnet, 'modulation_field_size', None
+        )
+        if modulation_field_size is not None:
+            modulator_params['modulation_field_size'] = modulation_field_size
         self.modulator, modulator_dim = create_modulator(
             modulator_type=modulator_type,
             **modulator_params
@@ -395,7 +405,7 @@ class MultiDatasetV1Model(ModularV1Model):
         # Calculate channels after modulation
         current_channels = convnet_output_channels
         if self.modulator is not None and modulator_dim > 0:
-            if modulator_type == 'concat':
+            if modulator_type in ['concat', 'mlp_behavior']:
                 current_channels += modulator_dim
             elif modulator_type in ['film', 'stn']:
                 # FiLM and STN don't change channel count
@@ -490,8 +500,32 @@ class MultiDatasetV1Model(ModularV1Model):
         x_recurrent = self.recurrent(feats)
 
         return x_recurrent
+
+    def core_forward_spatial_map(self, stimulus=None, behavior=None):
+        """Run a translation-preserving core path for large-field analyses."""
+        feats = self.frontend(stimulus)
+        spatial_forward = getattr(self.convnet, "forward_spatial_map", None)
+        feats = (
+            spatial_forward(feats)
+            if spatial_forward is not None
+            else self.convnet(feats)
+        )
+        require_behavior(
+            self.modulator,
+            behavior,
+            where="MultiDatasetModel.core_forward_spatial_map",
+        )
+        if self.modulator is not None:
+            feats = self.modulator(feats, behavior)
+        return self.recurrent(feats)
     
-    def forward(self, stimulus=None, dataset_idx: int = 0, behavior=None, history=None):
+    def forward(
+        self,
+        stimulus=None,
+        dataset_idx: int = 0,
+        behavior=None,
+        history=None,
+    ):
         """
         Forward pass through the model for a specific dataset.
 

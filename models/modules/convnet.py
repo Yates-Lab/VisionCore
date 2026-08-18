@@ -6,7 +6,9 @@ from .common import chomp
 from .conv_blocks import ConvBlock, ResBlock
 from .norm_act_pool import get_activation_layer
 
-__all__ = ['BaseConvNet', 'VanillaCNN', 'ResNet', 'DenseNet']
+__all__ = ['BaseConvNet', 'VanillaCNN', 'ResNet', 'DenseNet', 'DekelCore']
+
+from .dekel import DekelCore
 
 def chomp_causal_spatial(tensor_to_crop: torch.Tensor, reference_tensor: torch.Tensor) -> torch.Tensor:
     """
@@ -273,10 +275,19 @@ class DenseNet(BaseConvNet):
         return self._final_out_channels
 
 
+def _build_so2_dekel(config):
+    # Keep escnn optional for all existing models and analysis environments.
+    from .dekel_so2 import SO2DekelCore
+
+    return SO2DekelCore(config)
+
+
 CONVNETS = {'vanilla': VanillaCNN,
             'cnn': VanillaCNN,
             'resnet': ResNet,
-            'densenet': DenseNet}  # ViViT handled separately in factory due to lazy import
+            'densenet': DenseNet,
+            'dekel': DekelCore,
+            'dekel_so2': _build_so2_dekel}  # ViViT handled separately in factory due to lazy import
 
 def build_model(config: Dict[str, Any]) -> nn.Module:
     """Builds a CNN model based on config."""
@@ -284,4 +295,6 @@ def build_model(config: Dict[str, Any]) -> nn.Module:
     if model_type in ['vanilla', 'cnn']: return VanillaCNN(config)
     if model_type == 'resnet': return ResNet(config)
     if model_type == 'densenet': return DenseNet(config)
+    if model_type == 'dekel': return DekelCore(config)
+    if model_type == 'dekel_so2': return _build_so2_dekel(config)
     raise ValueError(f"Unknown model type: '{model_type}'.")

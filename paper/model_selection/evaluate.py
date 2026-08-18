@@ -244,8 +244,12 @@ def score_test_split(model, datamodule, device):
                 ds_idx = int(b["dataset_idx"][0])
                 with torch.autocast(device_type="cuda", dtype=torch.bfloat16,
                                     enabled=use_autocast):
-                    rhat = model(b["stim"], b["dataset_idx"][0],
-                                 b.get("behavior"), b.get("history"))
+                    rhat = model(
+                        b["stim"],
+                        b["dataset_idx"][0],
+                        b.get("behavior"),
+                        b.get("history"),
+                    )
                 rhat = rhat.float()
                 # Matches `_step`: an identity activation means the model was
                 # trained with log_input=True and emits log-rates.
@@ -355,25 +359,55 @@ def score_fixrsvp(model, device, session_filter=None, n_splits=None):
         dfs = dfs[good][:, keep_bins]
         n_kept_trials, n_kept_time = robs.shape[:2]
 
+        # One finite, data-only support for affine fitting and every metric.
+        # Numeric NaN filters must never be passed through as truthy weights.
+        support = np.isfinite(robs) & np.isfinite(dfs) & (dfs != 0)
+        missing_prediction = support & ~np.isfinite(rhat)
+        if missing_prediction.any():
+            raise RuntimeError(
+                f"{session_name}: {int(missing_prediction.sum())} predictions "
+                "missing on Figure-3 support"
+            )
+
         # Affine-rescale predictions to the observed counts, as the figures do.
         rescaled, _ = rescale_rhat(
             torch.from_numpy(robs.reshape(-1, n_units)),
             torch.from_numpy(rhat.reshape(-1, n_units)),
-            torch.from_numpy(dfs.reshape(-1, n_units)),
+            torch.from_numpy(
+                support.astype(np.float32).reshape(-1, n_units)
+            ),
             mode="affine",
         )
         rhat = rescaled.reshape(n_kept_trials, n_kept_time, n_units).cpu().numpy()
 
-        # CC_norm averaged over two split-half seeds, dropping unstable cells --
-        # the fig3 convention.
-        cc1, _, _, _, _ = ccnorm_split_half_variable_trials(
-            robs, rhat, dfs, n_splits=n_splits, return_components=True, rng=42)
-        cc2, _, ccmax, _, _ = ccnorm_split_half_variable_trials(
-            robs, rhat, dfs, n_splits=n_splits, return_components=True, rng=43)
-        ccnorm = 0.5 * (np.asarray(cc1) + np.asarray(cc2))
-        ccnorm[(np.asarray(cc1) - np.asarray(cc2)) ** 2 > 0.01] = np.nan
+        # CCnorm uses one explicit, model-independent support.  Average the
+        # numerator and data-only ceiling separately so the exact identity
+        # CCnorm = CCabs / CCmax is retained.  The stability exclusion is also
+        # data-only; gating on two CCnorm estimates can retain different units
+        # for different models even when their observations are identical.
+        missing_prediction = support & ~np.isfinite(rhat)
+        if missing_prediction.any():
+            raise RuntimeError(
+                f"{session_name}: {int(missing_prediction.sum())} predictions "
+                "missing on Figure-3 CCnorm support"
+            )
+        _, ccabs1, ccmax1, _, _ = ccnorm_split_half_variable_trials(
+            robs, rhat, support,
+            n_splits=n_splits, return_components=True, rng=42,
+        )
+        _, ccabs2, ccmax2, _, _ = ccnorm_split_half_variable_trials(
+            robs, rhat, support,
+            n_splits=n_splits, return_components=True, rng=43,
+        )
+        if not np.allclose(ccabs1, ccabs2, rtol=0, atol=1e-12, equal_nan=True):
+            raise AssertionError("CCabs changed across data-only split-half seeds")
+        ccabs = 0.5 * (np.asarray(ccabs1) + np.asarray(ccabs2))
+        ccmax = 0.5 * (np.asarray(ccmax1) + np.asarray(ccmax2))
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ccnorm = ccabs / ccmax
+        ccnorm[(np.asarray(ccmax1) - np.asarray(ccmax2)) ** 2 > 0.01] = np.nan
 
-        bps = bps_per_unit(rhat, robs, dfs)
+        bps = bps_per_unit(rhat, robs, support)
 
         results.append({
             "session": session_name,
@@ -381,8 +415,9 @@ def score_fixrsvp(model, device, session_filter=None, n_splits=None):
             "n_trials": int(n_kept_trials),
             "total_spikes": np.nansum(robs, axis=(0, 1)),
             "ccnorm": np.asarray(ccnorm, dtype=float),
+            "ccabs": np.asarray(ccabs, dtype=float),
             "ccmax": np.asarray(ccmax, dtype=float),
-            "single_trial_r2": single_trial_r2(rhat, robs, dfs),
+            "single_trial_r2": single_trial_r2(rhat, robs, support),
             "bps": bps,
         })
         cc_med = nanmedian_or_none(results[-1]["ccnorm"])

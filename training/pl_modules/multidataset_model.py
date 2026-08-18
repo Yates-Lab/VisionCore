@@ -747,4 +747,3 @@ class MultiDatasetModel(pl.LightningModule):
                 reg.prox(epoch, lr, optimizer=optimizer)
 
         return loss
-

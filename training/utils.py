@@ -139,4 +139,3 @@ def group_collate(batch):
     
     # Collate each group separately
     return [_dc.default_collate(group_samples) for group_samples in groups.values()]
-

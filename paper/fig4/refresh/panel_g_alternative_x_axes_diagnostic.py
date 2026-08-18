@@ -41,11 +41,25 @@ from _fig4_trace_schematics import (
     finite_ratio,
     ratio_delta_stats,
 )
+from paper.fig4.upstream.build_robust_unit_tuning import production_sf_mask
 
 
 OUT_DIR = ROOT / "outputs" / "fig" / "ssi_figure_v2" / "panels"
 OUT_STEM = "panel_g_alternative_x_axes_diagnostic"
 SF_MIN_CPD = 0.50
+SF_GROUP_MODE = os.environ.get("FIG4_SF_GROUP_MODE", "absolute_cpd")
+_HIGH_TITLE = "Upper-SF-Tertile" if SF_GROUP_MODE == "table_tertiles" else "High-SF"
+_LOW_TITLE = "Lower-SF-Tertile" if SF_GROUP_MODE == "table_tertiles" else "Low-SF"
+_HIGH_SUBTITLE = (
+    "cycle-valid upper SF tertile"
+    if SF_GROUP_MODE == "table_tertiles"
+    else "SF >=0.5"
+)
+_LOW_SUBTITLE = (
+    "cycle-valid lower SF tertile"
+    if SF_GROUP_MODE == "table_tertiles"
+    else "SF <0.5"
+)
 CONTOUR_COHERENCE_MIN = 0.20
 MIN_OSI = 0.05
 MATCH_MAX_DEG = 15.0
@@ -103,40 +117,40 @@ COMPONENT_SPECS = (
 POPULATION_SPECS = (
     {
         "key": "high_sf_all",
-        "title": "All High-SF Units",
-        "subtitle": "SF >=0.5; contour coherence >=0.2; no orientation relation filter",
+        "title": f"All {_HIGH_TITLE} Units",
+        "subtitle": f"{_HIGH_SUBTITLE}; contour coherence >=0.2; no orientation relation filter",
         "sf_group": "high",
         "relation": "all",
         "requires_orientation_tuning": False,
     },
     {
         "key": "high_sf_aligned",
-        "title": "Aligned High-SF Units",
-        "subtitle": "SF >=0.5; unit-contour <=15 deg",
+        "title": f"Aligned {_HIGH_TITLE} Units",
+        "subtitle": f"{_HIGH_SUBTITLE}; unit-contour <=15 deg",
         "sf_group": "high",
         "relation": "aligned",
         "requires_orientation_tuning": True,
     },
     {
         "key": "high_sf_oblique",
-        "title": "Oblique High-SF Units",
-        "subtitle": "SF >=0.5; unit-contour 15-67.5 deg",
+        "title": f"Oblique {_HIGH_TITLE} Units",
+        "subtitle": f"{_HIGH_SUBTITLE}; unit-contour 15-67.5 deg",
         "sf_group": "high",
         "relation": "oblique",
         "requires_orientation_tuning": True,
     },
     {
         "key": "high_sf_orthogonal",
-        "title": "Orthogonal High-SF Units",
-        "subtitle": "SF >=0.5; unit-contour >=67.5 deg",
+        "title": f"Orthogonal {_HIGH_TITLE} Units",
+        "subtitle": f"{_HIGH_SUBTITLE}; unit-contour >=67.5 deg",
         "sf_group": "high",
         "relation": "orthogonal",
         "requires_orientation_tuning": True,
     },
     {
         "key": "low_sf_all",
-        "title": "All Low-SF Units",
-        "subtitle": "SF <0.5; contour coherence >=0.2; no orientation relation filter",
+        "title": f"All {_LOW_TITLE} Units",
+        "subtitle": f"{_LOW_SUBTITLE}; contour coherence >=0.2; no orientation relation filter",
         "sf_group": "low",
         "relation": "all",
         "requires_orientation_tuning": False,
@@ -234,7 +248,6 @@ def _selected_unit_images_for_population(
 ) -> dict[int, np.ndarray]:
     unit = data["unit"]
     image = data["image"]
-    sf = pd.to_numeric(unit[panel_c.SF_METRIC_COL], errors="coerce").to_numpy(dtype=float)
     pref = pd.to_numeric(unit["prior_preferred_orientation_deg"], errors="coerce").to_numpy(dtype=float)
     osi = pd.to_numeric(unit["prior_orientation_selectivity_index"], errors="coerce").to_numpy(dtype=float)
     unit_index = unit["unit_index"].astype(int).to_numpy()
@@ -248,16 +261,16 @@ def _selected_unit_images_for_population(
     relation = str(population["relation"])
     requires_orientation_tuning = bool(population["requires_orientation_tuning"])
     selected: dict[int, np.ndarray] = {}
+    keep_units = production_sf_mask(
+        unit,
+        group=sf_group,
+        mode=SF_GROUP_MODE,
+        metric_column=panel_c.SF_METRIC_COL,
+        low_max_cpd=SF_MIN_CPD,
+        high_min_cpd=SF_MIN_CPD,
+    )
     for idx, unit_id in enumerate(unit_index):
-        if not math.isfinite(float(sf[idx])):
-            continue
-        if sf_group == "high":
-            keep_unit = float(sf[idx]) >= SF_MIN_CPD
-        elif sf_group == "low":
-            keep_unit = float(sf[idx]) < SF_MIN_CPD
-        else:
-            raise ValueError(f"Unknown sf_group {sf_group!r}")
-        if not keep_unit:
+        if not keep_units[idx]:
             continue
 
         if requires_orientation_tuning:
@@ -716,7 +729,8 @@ def build(out_dir: Path = OUT_DIR) -> dict[str, Path]:
         {
             "analysis": OUT_STEM,
             "selection": {
-                "sf_min_cpd": SF_MIN_CPD,
+                "sf_group_mode": SF_GROUP_MODE,
+                "sf_min_cpd": SF_MIN_CPD if SF_GROUP_MODE == "absolute_cpd" else None,
                 "contour_coherence_min": CONTOUR_COHERENCE_MIN,
                 "min_osi": MIN_OSI,
                 "match_max_deg": MATCH_MAX_DEG,
