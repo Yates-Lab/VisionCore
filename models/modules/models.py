@@ -169,6 +169,11 @@ class ModularV1Model(nn.Module):
         modulator_type = modulator_config['type']
         modulator_params = modulator_config['params']
         modulator_params['feature_dim'] = current_channels
+        modulation_field_size = getattr(
+            self.convnet, 'modulation_field_size', None
+        )
+        if modulation_field_size is not None:
+            modulator_params['modulation_field_size'] = modulation_field_size
         self.modulator, modulator_dim = create_modulator(
             modulator_type=modulator_type,
             **modulator_params
@@ -386,6 +391,11 @@ class MultiDatasetV1Model(ModularV1Model):
         else:
             modulator_params = {}
         modulator_params['feature_dim'] = convnet_output_channels
+        modulation_field_size = getattr(
+            self.convnet, 'modulation_field_size', None
+        )
+        if modulation_field_size is not None:
+            modulator_params['modulation_field_size'] = modulation_field_size
         self.modulator, modulator_dim = create_modulator(
             modulator_type=modulator_type,
             **modulator_params

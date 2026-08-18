@@ -88,6 +88,35 @@ conda run --no-capture-output -n yatesfv python training/train_multidataset.py \
   --log_dataset_idx 9
 ```
 
+## Eight-filter SO(2) spatial-suffix pilot
+
+This follow-up keeps M77's ordinary full-history `Conv3d`, now with eight
+unconstrained 60 x 7 x 7 spatiotemporal filters. Time disappears there exactly
+as it does in M77. The sign-split maps then enter three continuous-SO(2)
+equivariant spatial stages with the same 15/11/9 supports, pooling locations,
+multiscale scaffold, behavior pathway, Gaussian readouts, and native-240
+Poisson supervision. The continuous group uses `N=-1`, angular bandlimit
+`maximum_frequency=3`, and 16 orientation samples inside Fourier
+nonlinearities.
+
+The spatial suffix contains eight steerable fields per stage. Each field has
+seven real Fourier coordinates, so the stage widths are 56 before and 112
+after the equivariant sign split, versus M77's 84 and 168. Behavior FiLM uses
+one gain per complete steerable field. The configured first-layer spatial
+Laplacian is `2.5e-4`; temporal and stem-spatial frequency masks remain active.
+
+Use the shared native-240 training command above with:
+
+```bash
+CONFIG=dekel_m77_8temporal_so2m3_lessreg_mlp_behavior.yaml
+RUN=D240M81c_dekel_native240_8temporal_so2m3_spatialsmooth2p5e4_s201
+```
+
+`escnn==1.0.11` is pinned by the `equivariant` project extra. The ordinary
+stem means the complete movie-to-rate model is not asserted to be rotation
+equivariant; the spatial suffix is. A grid-exact quarter-turn contract test is
+required to pass before launching the run.
+
 ## FixRSVP and Figure 3
 
 The evaluator scores native 240-Hz predictions and exact adjacent-bin sums on

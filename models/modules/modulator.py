@@ -222,6 +222,23 @@ class MLPBehaviorModulator(BaseModulator):
         if self.feature_dim is None:
             raise ValueError("feature_dim must be specified for mlp_behavior")
 
+        # An SO(2) core stores each steerable field as a contiguous block of
+        # real Fourier coefficients.  A separate FiLM gain for each coefficient
+        # would destroy the rotation representation.  When a field size is
+        # supplied by the core, learn one behavior gain per complete field and
+        # repeat it across that field's coefficients.
+        self.modulation_field_size = int(
+            self.config.get('modulation_field_size', 1)
+        )
+        if self.modulation_field_size < 1:
+            raise ValueError("modulation_field_size must be positive")
+        if self.feature_dim % self.modulation_field_size:
+            raise ValueError(
+                f"feature_dim ({self.feature_dim}) must be divisible by "
+                f"modulation_field_size ({self.modulation_field_size})"
+            )
+        self.modulation_fields = self.feature_dim // self.modulation_field_size
+
         hidden_dims = list(self.config.get('hidden_dims', [64]))
         self.additive_dim = int(self.config.get('additive_dim', 16))
         self.encoded_dim = int(self.config.get('encoded_dim', self.additive_dim))
@@ -249,7 +266,7 @@ class MLPBehaviorModulator(BaseModulator):
             output_activation=True,
         )
         if self.use_film:
-            self.scale_layer = nn.Linear(self.encoded_dim, self.feature_dim)
+            self.scale_layer = nn.Linear(self.encoded_dim, self.modulation_fields)
             nn.init.zeros_(self.scale_layer.weight)
             nn.init.zeros_(self.scale_layer.bias)
         else:
@@ -271,6 +288,7 @@ class MLPBehaviorModulator(BaseModulator):
         encoded = self.encoder(self.input_norm(beh))
         if self.scale_layer is not None:
             scale = self.film_max_gain * torch.tanh(self.scale_layer(encoded))
+            scale = scale.repeat_interleave(self.modulation_field_size, dim=1)
             feats = feats * (1.0 + scale[:, :, None, None, None])
 
         if self.additive_dim == 0:
