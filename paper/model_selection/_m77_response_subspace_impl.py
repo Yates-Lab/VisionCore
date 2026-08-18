@@ -4,8 +4,8 @@
 The analysis evaluates RR100 units at the centre of M77's 35-pixel crop.  A
 frozen selection CSV can be supplied so Twin and M77 are compared on exactly
 the same biological units.  The fitted object is a local explanation of each
-teacher model, so response fidelity and gradient-energy rank can be compared
-despite the teachers' different native temporal and spatial lattices.
+encoding model, so response fidelity and gradient-energy rank can be compared
+despite the models' different native temporal and spatial lattices.
 """
 
 from __future__ import annotations
@@ -281,7 +281,7 @@ def generate_movie_batch(
 
 
 @dataclass
-class M77Teacher:
+class M77EncodingModel:
     model: object
     device: str
 
@@ -337,7 +337,7 @@ def canonical_rr100_rows(model, outputs: list[dict]) -> list[dict]:
 
 
 def build_m77_rr100_readout(
-    teacher: M77Teacher,
+    encoding_model: M77EncodingModel,
     population_view,
     canonical_rows: list[dict],
     rr_unit_indices: np.ndarray,
@@ -361,9 +361,9 @@ def build_m77_rr100_readout(
     for rr_unit in rr_unit_indices:
         row = canonical_rows[int(selected_all[int(rr_unit)])]
         model_index = int(row["model_readout_index"])
-        session_readout = teacher.model.model.readouts[model_index]
+        session_readout = encoding_model.model.model.readouts[model_index]
         configured_cids = list(
-            map(int, teacher.model.model.dataset_configs[model_index].get("cids", []))
+            map(int, encoding_model.model.model.dataset_configs[model_index].get("cids", []))
         )
         try:
             local_index = configured_cids.index(int(row["source_cid"]))
@@ -376,7 +376,7 @@ def build_m77_rr100_readout(
             session_readout.compute_gaussian_mask(
                 SCAFFOLD_SIZE,
                 SCAFFOLD_SIZE,
-                torch.device(teacher.device),
+                torch.device(encoding_model.device),
             )[local_index].detach().clone()
         )
     if missing:
@@ -388,10 +388,10 @@ def build_m77_rr100_readout(
         torch.stack(feature_weights),
         torch.stack(biases),
         torch.stack(masks),
-    ).to(teacher.device).eval()
+    ).to(encoding_model.device).eval()
 
 
-def load_teacher(args: argparse.Namespace, selection: pd.DataFrame):
+def load_encoding_model(args: argparse.Namespace, selection: pd.DataFrame):
     model, _ = load_pinned_multidataset_model(
         checkpoint_path=args.checkpoint,
         dataset_configs=args.dataset_config,
@@ -403,38 +403,38 @@ def load_teacher(args: argparse.Namespace, selection: pd.DataFrame):
         spec_dir=DEFAULT_POPULATION_SPEC_DIR,
         version_name=RR100_VERSION,
     )
-    teacher = M77Teacher(model=model, device=args.device)
+    encoding_model = M77EncodingModel(model=model, device=args.device)
     readout = build_m77_rr100_readout(
-        teacher,
+        encoding_model,
         population_view,
         canonical_rr100_rows(model, outputs),
         selection.unit_index.to_numpy(int),
     )
     with torch.no_grad():
         movie = generate_movie_batch(1, seed=args.seed - 1, device=args.device)
-        behavior = teacher.zero_behavior(1, movie.dtype)
-        core = teacher.model.model.core_forward(movie, behavior)
+        behavior = encoding_model.zero_behavior(1, movie.dtype)
+        core = encoding_model.model.model.core_forward(movie, behavior)
         if tuple(core.shape[-3:]) != (1, SCAFFOLD_SIZE, SCAFFOLD_SIZE):
             raise RuntimeError(f"Unexpected M77 core shape {tuple(core.shape)}")
         output = readout(core[:, :, -1])
         if tuple(output.shape) != (1, len(selection), 1, 1):
             raise RuntimeError(f"Unexpected RR100 readout shape {tuple(output.shape)}")
-    return teacher, readout
+    return encoding_model, readout
 
 
 def preactivation(
-    teacher: M77Teacher,
+    encoding_model: M77EncodingModel,
     readout: DirectPopulationReadout,
     movie: torch.Tensor,
 ) -> torch.Tensor:
-    behavior = teacher.zero_behavior(len(movie), movie.dtype)
-    core = teacher.model.model.core_forward(movie, behavior)
+    behavior = encoding_model.zero_behavior(len(movie), movie.dtype)
+    core = encoding_model.model.model.core_forward(movie, behavior)
     return readout(core[:, :, -1])[:, :, 0, 0]
 
 
 def make_bank(
     args: argparse.Namespace,
-    teacher: M77Teacher,
+    encoding_model: M77EncodingModel,
     readout: DirectPopulationReadout,
     selection: pd.DataFrame,
 ) -> None:
@@ -465,7 +465,7 @@ def make_bank(
             movie = generate_movie_batch(stop - start, seed=split_seed + start, device=args.device)
             with torch.no_grad():
                 features[start:stop] = movies_to_dct(movie).cpu().numpy().astype(np.float16)
-                target[start:stop] = preactivation(teacher, readout, movie).cpu().numpy()
+                target[start:stop] = preactivation(encoding_model, readout, movie).cpu().numpy()
             if start == 0 or stop == count or stop % 64 == 0:
                 print(f"bank {split}: {stop}/{count}", flush=True)
         features.flush(); target.flush()
@@ -479,7 +479,7 @@ def make_bank(
 
 def measure_gradients(
     args: argparse.Namespace,
-    teacher: M77Teacher,
+    encoding_model: M77EncodingModel,
     readout: DirectPopulationReadout,
     selection: pd.DataFrame,
 ) -> Path:
@@ -498,7 +498,7 @@ def measure_gradients(
         stop = min(start + args.movie_batch_size, count)
         movie = generate_movie_batch(stop - start, seed=args.seed + start, device=args.device)
         movie.requires_grad_(True)
-        z = preactivation(teacher, readout, movie)
+        z = preactivation(encoding_model, readout, movie)
         for unit in range(len(selection)):
             gradient = torch.autograd.grad(
                 z[:, unit].sum(),
@@ -799,10 +799,10 @@ def main() -> int:
             f"model ({quadratic_design_columns(max(ranks))} coefficients); "
             f"require at least {required_train} training contexts"
         )
-    teacher, readout = load_teacher(args, selection)
-    make_bank(args, teacher, readout, selection)
-    gradient_path = measure_gradients(args, teacher, readout, selection)
-    del readout, teacher
+    encoding_model, readout = load_encoding_model(args, selection)
+    make_bank(args, encoding_model, readout, selection)
+    gradient_path = measure_gradients(args, encoding_model, readout, selection)
+    del readout, encoding_model
     if args.device.startswith("cuda"):
         torch.cuda.empty_cache()
     scaling = np.load(args.output_dir / "bank/feature_scaling.npz")

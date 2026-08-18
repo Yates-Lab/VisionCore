@@ -1,6 +1,6 @@
 """Dekel-style feed-forward spatiotemporal vision core.
 
-This module ports the inductive biases of the 2022 single-session teacher used
+This module ports the inductive biases of the 2022 single-session model used
 for the successful response-subspace analysis:
 
 * one full-history 3-D convolution that removes the temporal axis;
@@ -214,7 +214,7 @@ class HammingConv2d(nn.Module):
 class SignPairNormReLU(nn.Module):
     """Configurable sign-paired divisive normalization followed by ReLU.
 
-    "groupnorm" is the exact single-session-teacher operation.  "lrn" and
+    "groupnorm" is the exact historical single-session operation.  "lrn" and
     "groupnorm_lrn" provide matched post-split controls.  The
     "groupnorm_lrn_presplit" mode reproduces the ordering in Dekel's
     historical LocalResponseBatchNorm experiments.
@@ -305,7 +305,7 @@ class SignPairNormReLU(nn.Module):
 class DekelCore(nn.Module):
     """Feed-forward full-history CNN with a multiscale feature scaffold.
 
-    Parameters mirror the exact teacher by default.  Doubling
+    Parameters mirror the historical single-session model by default. Doubling
     ``temporal_channels`` and each ``spatial_channels`` value reproduces the
     width of Dekel's later multisession variant without changing its topology.
 

@@ -273,18 +273,7 @@ def _exact_jacobian(
             .requires_grad_(True)
         )
         behavior = dset["behavior"][raw_indices].float().to(device)
-        output_behavior = (
-            dset["output_behavior"][raw_indices].float().to(device)
-            if "output_behavior" in dset
-            else None
-        )
-        output = model(
-            stimulus,
-            dataset_idx,
-            behavior,
-            None,
-            output_behavior,
-        )
+        output = model(stimulus, dataset_idx, behavior, None)
         if unit_index >= output.shape[1]:
             raise IndexError(f"Unit {unit_index} is outside {output.shape[1]} outputs")
         if model.log_input:
@@ -330,12 +319,7 @@ def _exact_jacobian(
         np.concatenate([endpoints[:, 0], endpoints[:, 1]]), dtype=torch.long
     )
     behavior = dset["behavior"][raw_indices].float().to(device)
-    output_behavior = (
-        dset["output_behavior"][raw_indices].float().to(device)
-        if "output_behavior" in dset
-        else None
-    )
-    output = model(stimulus, dataset_idx, behavior, None, output_behavior)
+    output = model(stimulus, dataset_idx, behavior, None)
     if unit_index >= output.shape[1]:
         raise IndexError(f"Unit {unit_index} is outside {output.shape[1]} outputs")
     native_rate = (

@@ -41,7 +41,7 @@ from paper.fig4.upstream.run_real_trace_matrix import (
     RR100_VERSION,
 )
 from paper.model_selection._m77_response_subspace_impl import (
-    M77Teacher,
+    M77EncodingModel,
     build_m77_rr100_readout,
     canonical_rr100_rows,
 )
@@ -157,7 +157,7 @@ def periodic_response_metrics(phases_rad: np.ndarray, rates: np.ndarray) -> dict
 
 @torch.no_grad()
 def score_histories(
-    teacher: M77Teacher,
+    encoding_model: M77EncodingModel,
     readout,
     histories: torch.Tensor,
     batch_size: int,
@@ -165,10 +165,10 @@ def score_histories(
     values = []
     for start in range(0, len(histories), int(batch_size)):
         movie = histories[start : start + int(batch_size)]
-        behavior = teacher.zero_behavior(len(movie), movie.dtype)
-        core = teacher.model.model.core_forward(movie, behavior)
+        behavior = encoding_model.zero_behavior(len(movie), movie.dtype)
+        core = encoding_model.model.model.core_forward(movie, behavior)
         preactivation = readout(core[:, :, -1])[:, :, 0, 0]
-        activation = getattr(teacher.model.model, "activation", None)
+        activation = getattr(encoding_model.model.model, "activation", None)
         rate = activation(preactivation) if activation is not None else F.softplus(preactivation)
         values.append(rate.float().cpu().numpy())
     return np.concatenate(values)
@@ -205,15 +205,15 @@ def load_rr100(args: argparse.Namespace, units: pd.DataFrame):
     ].reset_index(drop=True)
     if units.empty:
         raise RuntimeError("Population adaptation left no active RR100 units")
-    teacher = M77Teacher(model=model, device=args.device)
+    encoding_model = M77EncodingModel(model=model, device=args.device)
     readout = build_m77_rr100_readout(
-        teacher,
+        encoding_model,
         population_view,
         canonical_rows,
         units.unit_index.to_numpy(dtype=int),
     )
     return (
-        teacher,
+        encoding_model,
         readout,
         model_info,
         resolved_mcfarland,
@@ -241,7 +241,7 @@ def main() -> None:
     )
     phases = np.linspace(0.0, 2.0 * np.pi, int(args.n_phases), endpoint=False)
     (
-        teacher,
+        encoding_model,
         readout,
         model_info,
         resolved_mcfarland,
@@ -272,7 +272,7 @@ def main() -> None:
             contrast=args.contrast,
             device=args.device,
         )
-        rates = score_histories(teacher, readout, histories, args.batch_size)
+        rates = score_histories(encoding_model, readout, histories, args.batch_size)
         metrics = periodic_response_metrics(phases, rates)
         for unit_row, unit in units.iterrows():
             rows.append(

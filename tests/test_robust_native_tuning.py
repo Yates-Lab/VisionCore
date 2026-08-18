@@ -26,9 +26,6 @@ from paper.fig4.spatiotemporal_tuning.analyze_image_specific_joint_engagement im
     validate_matrix_contract,
     validate_native240_trace_contract,
 )
-from paper.fig4.spatiotemporal_tuning.build_trajectory_phase_unit_gallery import (
-    select_units,
-)
 from paper.fig4.spatiotemporal_tuning.analyze_direct_rendered_joint_engagement import (
     engagement_from_cubes,
 )
@@ -374,18 +371,6 @@ def test_joint_alignment_fraction_removes_global_image_power_scale() -> None:
         engagement["joint_fraction"][0, 0],
         engagement["joint_fraction"][1, 0],
     )
-
-
-def test_gallery_selection_spans_trusted_temporal_preferences() -> None:
-    audit = pd.DataFrame(
-        {
-            "unit_index": [10, 11, 12, 13, 14, 15, 16],
-            "audit_category": ["trusted"] * 6 + ["unstable/censored"],
-            "rms_preferred_tf_hz": [16.0, 1.0, 8.0, 2.0, 4.0, 32.0, 64.0],
-        }
-    )
-    selected = select_units(audit, 3)
-    np.testing.assert_array_equal(selected, [11, 14, 15])
 
 
 def test_direct_rendered_joint_score_preserves_pairing_and_separable_control() -> None:

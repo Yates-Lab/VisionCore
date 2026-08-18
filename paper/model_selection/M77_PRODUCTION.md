@@ -36,7 +36,6 @@ conda run -n yatesfv python training/train_multidataset.py \
   --accumulate_grad_batches 1 \
   --steps_per_epoch 512 \
   --gradient_clip_val 10.0 \
-  --gradient_clip_algorithm norm \
   --precision bf16-mixed \
   --dset_dtype uint8 \
   --num_workers 16 \
@@ -52,6 +51,40 @@ conda run -n yatesfv python training/train_multidataset.py \
   --enable_logging \
   --fast_log_interval 5 \
   --slow_log_interval 10000 \
+  --log_dataset_idx 9
+```
+
+## Four-filter spatial-smoothness ablation
+
+The streamlined follow-up changes only the first-layer filter count and its
+spatial Laplacian coefficient. Both arms retain native 240-Hz spike
+supervision, the 42-variable behavior path, frequency masks, GroupNorm then
+LRN, the 84/84/84 spatial core, Gaussian readouts, and M77's training schedule.
+They minimize Poisson NLL plus AdamW weight decay and the configured positive
+regularization penalties; neither arm loads a checkpoint or distillation target.
+
+| label | `RUN` | `CONFIG` | first-layer spatial Laplacian | `GPU` |
+|---|---|---|---:|---:|
+| M79 | `D240M79c_dekel_native240_4temporal_spatialsmooth5e4_gnlrnalpha0p1_s201` | `dekel_m77_4temporal_spatialsmooth_low_mlp_behavior.yaml` | `5e-4` | 0 |
+| M80 | `D240M80c_dekel_native240_4temporal_spatialsmooth1e3_gnlrnalpha0p1_s201` | `dekel_m77_4temporal_spatialsmooth_high_mlp_behavior.yaml` | `1e-3` | 1 |
+
+Set `CONFIG`, `RUN`, and `GPU` from one row, then use the shared command:
+
+```bash
+conda run --no-capture-output -n yatesfv python training/train_multidataset.py \
+  --model_config "experiments/model_configs/$CONFIG" \
+  --dataset_configs_path paper/model_selection/configs/multi_240_long_split3_dekel35.yaml \
+  --max_datasets 30 --batch_size 128 \
+  --learning_rate 0.0005 --core_lr_scale 1.0 --weight_decay 1e-5 \
+  --lr_scheduler cosine_warmup --warmup_epochs 2 --max_epochs 488 \
+  --accumulate_grad_batches 1 --steps_per_epoch 512 \
+  --gradient_clip_val 10.0 --precision bf16-mixed --dset_dtype uint8 \
+  --num_workers 16 --limit_val_batches 0.1 --check_val_every_n_epoch 4 \
+  --seed 201 --gpu "$GPU" \
+  --checkpoint_dir /mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/dekel240 \
+  --project_name model_selection --experiment_name "$RUN" \
+  --no-early_stopping --homogeneous_batches \
+  --enable_logging --fast_log_interval 5 --slow_log_interval 10000 \
   --log_dataset_idx 9
 ```
 
@@ -147,7 +180,7 @@ censored.
 
 ## Paired Twin-versus-M77 subspaces
 
-Reuse the Twin analysis's frozen unit selection so both teachers are evaluated
+Reuse the Twin analysis's frozen unit selection so both models are evaluated
 on the same RR100 units:
 
 ```bash
@@ -166,6 +199,6 @@ conda run -n yatesfv python \
 ```
 
 The supplement compares response fidelity and cumulative Jacobian energy
-within each teacher and shows native physical basis filters. It deliberately
+within each model and shows native physical basis filters. It deliberately
 does not compute principal angles between the incompatible native feature
 grids.

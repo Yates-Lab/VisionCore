@@ -73,7 +73,7 @@ frequency tertiles of 32 lower, 34 middle, and 32 upper units; two inactive
 channels remain explicit.
 
 On the exact 12-unit panel frozen by the Twin response-subspace analysis and
-with 128 gradient contexts for each teacher, M77's rank-8 model captures 0.4257
+with 128 gradient contexts for each model, M77's rank-8 model captures 0.4257
 of median Jacobian energy and explains median held-out response R2 0.3366
 (minimum 0.1780). Rank 16 captures 0.5698 of median Jacobian energy and
 explains median response R2 0.3138. The paired basis atlas shows markedly

@@ -29,11 +29,7 @@ def _adamw_param_groups_named(named_params, wd, excluded_names, core_keys=("fron
         # and not in your custom excluded set from YAML regs
         apply_wd = (n not in excluded_names) and n.endswith(".weight") and (p.ndim > 1)
 
-        # The post-readout behavior residual is a dataset head even though its
-        # name contains "modulator".  Treating it as visual core would silently
-        # give it the reduced core LR during restricted joint refinement.
-        is_output_head = "output_modulator" in n
-        is_core = (not is_output_head) and any(k in n for k in core_keys)
+        is_core = any(k in n for k in core_keys)
 
         if is_core:
             (core_wd if apply_wd else core_no).append(p)
@@ -76,19 +72,6 @@ class MultiDatasetModel(pl.LightningModule):
         Path to checkpoint with pretrained vision components
     freeze_vision : bool, optional
         Whether to freeze pretrained vision components (default: False)
-    pretrained_scope : {"vision", "compatible", "complete"}, optional
-        ``vision`` preserves the legacy adapter/frontend/convnet warm start.
-        ``compatible`` loads every matching model tensor except a newly added
-        output modulator. ``complete`` also loads an existing output modulator
-        for joint-refinement branches. Both full-model modes verify the saved
-        neuron identities (default: ``vision``).
-    freeze_pretrained : bool, optional
-        Freeze every parameter loaded from the selected pretrained scope. This
-        is useful for identity-preserving residual fits (default: False).
-    trainable_parameter_patterns : str, optional
-        Comma-separated substrings. When provided, freeze every model parameter
-        except names matching at least one substring. This persists selective
-        unfreezing across checkpoint reconstruction.
     compile_model : bool, optional
         Whether to use torch.compile for model (default: False)
         
@@ -123,12 +106,7 @@ class MultiDatasetModel(pl.LightningModule):
     def __init__(self, model_cfg: str, cfg_dir: str, lr: float, wd: float,
                  max_ds: int, pretrained_checkpoint: str = None,
                  freeze_vision: bool = False, compile_model: bool = False,
-                 model_config_dict: dict = None,
-                 pretrained_scope: str = "vision",
-                 freeze_pretrained: bool = False,
-                 trainable_parameter_patterns: str = None,
-                 pretrained_exclude_prefixes: str = None,
-                 pretrained_shape_adaptation: str = "none"):
+                 model_config_dict: dict = None):
         super().__init__()
 
         from models.config_loader import load_dataset_configs, load_config
@@ -203,26 +181,9 @@ class MultiDatasetModel(pl.LightningModule):
 
         self.model = base_model
 
-        # Populated by `_load_pretrained_components`.  Readout biases loaded
-        # from a checkpoint must not be overwritten in `on_fit_start`.
-        self._pretrained_parameter_names = set()
-        self._pretrained_readout_indices = set()
-
-        # Load pretrained components if specified.  The default scope is the
-        # historical vision-only path, so existing commands retain their old
-        # semantics.
+        # Load pretrained vision components if specified
         if pretrained_checkpoint is not None:
-            self._load_pretrained_components(
-                pretrained_checkpoint,
-                freeze_vision=freeze_vision,
-                pretrained_scope=pretrained_scope,
-                freeze_pretrained=freeze_pretrained,
-                exclude_prefixes=pretrained_exclude_prefixes,
-                shape_adaptation=pretrained_shape_adaptation,
-            )
-
-        if trainable_parameter_patterns:
-            self._set_trainable_parameter_patterns(trainable_parameter_patterns)
+            self._load_pretrained_components(pretrained_checkpoint, freeze_vision)
 
         # Initialize regularization system
         named_params = list(self.model.named_parameters())
@@ -246,15 +207,7 @@ class MultiDatasetModel(pl.LightningModule):
             subj = name.split("_")[0]
             self._subject_ds.setdefault(subj, []).append(i)
 
-    def _load_pretrained_components(
-        self,
-        pretrained_checkpoint: str,
-        freeze_vision: bool = False,
-        pretrained_scope: str = "vision",
-        freeze_pretrained: bool = False,
-        exclude_prefixes: str = None,
-        shape_adaptation: str = "none",
-    ):
+    def _load_pretrained_components(self, pretrained_checkpoint: str, freeze_vision: bool = False):
         """
         Load pretrained vision components from a checkpoint.
         
@@ -264,43 +217,13 @@ class MultiDatasetModel(pl.LightningModule):
             Path to checkpoint file
         freeze_vision : bool, optional
             Whether to freeze loaded parameters (default: False)
-        pretrained_scope : {"vision", "compatible"}, optional
-            Components to load. ``compatible`` loads the complete existing
-            model while leaving a new output modulator at its initialization.
-        freeze_pretrained : bool, optional
-            Freeze all parameters loaded from the selected scope.
             
         Returns
         -------
         int
             Number of parameters loaded
         """
-        if pretrained_scope not in {"vision", "compatible", "complete"}:
-            raise ValueError(
-                "pretrained_scope must be 'vision', 'compatible', or "
-                "'complete', got "
-                f"{pretrained_scope!r}"
-            )
-        if shape_adaptation not in {
-            "none",
-            "trim_readout_features",
-            "scale_gaussian_readout",
-        }:
-            raise ValueError(
-                "shape_adaptation must be 'none', 'trim_readout_features', or "
-                f"'scale_gaussian_readout', got {shape_adaptation!r}"
-            )
-        if isinstance(exclude_prefixes, str):
-            exclude_prefixes = tuple(
-                part.strip() for part in exclude_prefixes.split(',')
-                if part.strip()
-            )
-        else:
-            exclude_prefixes = tuple(exclude_prefixes or ())
-        print(
-            f"Loading pretrained components from: {pretrained_checkpoint} "
-            f"(scope={pretrained_scope})"
-        )
+        print(f"Loading pretrained components from: {pretrained_checkpoint}")
 
         # Load the pretrained checkpoint
         checkpoint = torch.load(pretrained_checkpoint, map_location='cpu', weights_only=False)
@@ -309,273 +232,60 @@ class MultiDatasetModel(pl.LightningModule):
         else:
             pretrained_state_dict = checkpoint
 
-        # Lightning prefixes the wrapped model with `model.`; torch.compile
-        # inserts `_orig_mod.` after it.  Normalize both variants to the keys
-        # used by `self.model.state_dict()`.
-        normalized_state = {}
-        for key, value in pretrained_state_dict.items():
-            if key.startswith('model._orig_mod.'):
-                key = key[len('model._orig_mod.'):]
-            elif key.startswith('model.'):
-                key = key[len('model.'):]
-            normalized_state[key] = value
+        # Check for torch.compile key mismatch and fix if needed
+        state_dict_keys = list(pretrained_state_dict.keys())
+        has_orig_mod_prefix = any(key.startswith('model._orig_mod.') for key in state_dict_keys)
 
-        target_state = self.model.state_dict()
-        vision_prefixes = ('adapters', 'frontend', 'convnet')
-        output_prefix = 'output_modulator'
-
-        if pretrained_scope in {"compatible", "complete"}:
-            # A full warm start is only scientifically valid if every dataset
-            # still refers to the same neurons in the same order.
-            saved_hparams = checkpoint.get('hyper_parameters', {}) or {}
-            saved_cids = saved_hparams.get('dataset_cids')
-            if saved_cids is not None:
-                current_cids = {
-                    name: list(cfg.get('cids', []))
-                    for name, cfg in zip(self.names, self.cfgs)
-                }
-                cid_errors = [
-                    name for name, cids in current_cids.items()
-                    if name not in saved_cids or list(saved_cids[name]) != cids
-                ]
-                if cid_errors:
-                    raise ValueError(
-                        "Compatible checkpoint load refused because dataset "
-                        "neuron identities/order changed for: "
-                        + ", ".join(cid_errors[:5])
-                    )
-            else:
-                print(
-                    "⚠ Checkpoint predates saved dataset_cids; compatible load "
-                    "can verify tensor shapes but not neuron identities"
-                )
-
-            expected_keys = set(target_state)
-            if pretrained_scope == "compatible":
-                expected_keys = {
-                    key for key in expected_keys
-                    if not key.startswith(output_prefix)
-                }
-        else:
-            expected_keys = {
-                key for key in target_state
-                if key.startswith(vision_prefixes)
-            }
-        if exclude_prefixes:
-            expected_keys = {
-                key for key in expected_keys
-                if not key.startswith(exclude_prefixes)
-            }
-
-        selected_state = {}
-        shape_errors = []
-        adapted_shapes = []
-        for key in expected_keys:
-            if key not in normalized_state:
-                continue
-            source = normalized_state[key]
-            target = target_state[key]
-            if tuple(source.shape) != tuple(target.shape):
-                can_trim_readout = (
-                    shape_adaptation == "trim_readout_features"
-                    and key.startswith("readouts.")
-                    and key.endswith(".features.weight")
-                    and source.ndim == target.ndim == 4
-                    and source.shape[0] == target.shape[0]
-                    and source.shape[1] >= target.shape[1]
-                    and tuple(source.shape[2:]) == tuple(target.shape[2:])
-                )
-                if can_trim_readout:
-                    selected_state[key] = source[:, : target.shape[1]].clone()
-                    adapted_shapes.append(
-                        (key, tuple(source.shape), tuple(target.shape))
-                    )
+        if has_orig_mod_prefix:
+            print("   Detected torch.compile checkpoint - fixing key mismatch...")
+            # Fix the state dict keys by removing model._orig_mod. prefix
+            fixed_state_dict = {}
+            for key, value in pretrained_state_dict.items():
+                if key.startswith('model._orig_mod.'):
+                    # Remove the model._orig_mod. prefix
+                    new_key = key[len('model._orig_mod.'):]
+                    fixed_state_dict[new_key] = value
                 else:
-                    shape_errors.append((key, tuple(source.shape), tuple(target.shape)))
-            else:
-                selected_state[key] = source
+                    fixed_state_dict[key] = value
+            pretrained_state_dict = fixed_state_dict
 
-        if shape_adaptation == "scale_gaussian_readout":
-            saved_hparams = checkpoint.get('hyper_parameters', {}) or {}
-            source_model_config = (
-                saved_hparams.get('model_config_dict')
-                or saved_hparams.get('model_config')
-                or {}
-            )
-            target_model_config = getattr(self, 'model_config', {}) or {}
+        # Filter to vision components (everything except modulator and readouts)
+        vision_prefixes = ['model.adapters', 'model.frontend', 'model.convnet']
+        vision_state_dict = {}
+        for key, value in pretrained_state_dict.items():
+            if any(key.startswith(prefix) for prefix in vision_prefixes):
+                vision_state_dict[key] = value
 
-            def scaffold_hw(config):
-                value = (
-                    (config.get('convnet') or {})
-                    .get('params', {})
-                    .get('scaffold_size')
-                )
-                if isinstance(value, int):
-                    return (value, value)
-                if isinstance(value, (list, tuple)) and len(value) == 2:
-                    return tuple(int(v) for v in value)
-                return None
+        # Load the vision components
+        missing_keys, unexpected_keys = self.model.load_state_dict(vision_state_dict, strict=False)
 
-            source_hw = scaffold_hw(source_model_config)
-            target_hw = scaffold_hw(target_model_config)
-            if source_hw is None or target_hw is None:
-                raise ValueError(
-                    "scale_gaussian_readout requires source and target "
-                    "convnet.params.scaffold_size metadata"
-                )
-            if any(value <= 1 for value in (*source_hw, *target_hw)):
-                raise ValueError(
-                    "scale_gaussian_readout requires scaffold dimensions > 1"
-                )
-            scale_yx = torch.tensor(
-                [
-                    (target_hw[0] - 1) / (source_hw[0] - 1),
-                    (target_hw[1] - 1) / (source_hw[1] - 1),
-                ],
-                dtype=torch.float32,
-            )
-            scaled_readout_tensors = []
-            for key, value in tuple(selected_state.items()):
-                if (
-                    key.startswith('readouts.')
-                    and (key.endswith('.mean') or key.endswith('.std'))
-                    and value.ndim == 2
-                    and value.shape[-1] == 2
-                ):
-                    selected_state[key] = value.clone() * scale_yx.to(
-                        dtype=value.dtype
-                    )
-                    scaled_readout_tensors.append(key)
-            if not scaled_readout_tensors:
-                raise ValueError(
-                    "scale_gaussian_readout found no Gaussian mean/std tensors"
-                )
-            adapted_shapes.extend(
-                (key, source_hw, target_hw) for key in scaled_readout_tensors
-            )
+        # Filter missing keys to only show vision components that should have been loaded
+        relevant_missing = [k for k in missing_keys if any(k.startswith(prefix) for prefix in vision_prefixes)]
 
-        missing_expected = sorted(expected_keys.difference(selected_state))
-        if shape_errors or missing_expected:
-            details = []
-            if shape_errors:
-                details.append(f"shape mismatches: {shape_errors[:5]}")
-            if missing_expected:
-                details.append(f"missing keys: {missing_expected[:5]}")
-            raise RuntimeError(
-                f"Cannot perform {pretrained_scope} checkpoint load; "
-                + "; ".join(details)
-            )
+        print(f"✓ Loaded {len(vision_state_dict)} pretrained vision parameters")
+        if relevant_missing:
+            print(f"⚠ Missing {len(relevant_missing)} expected vision parameters")
+            print(f"   Missing keys: {relevant_missing[:5]}...")  # Show first 5 missing keys
 
-        self.model.load_state_dict(selected_state, strict=False)
-        self._pretrained_parameter_names = {
-            name for name, _ in self.model.named_parameters()
-            if name in selected_state
-        }
-        self._pretrained_readout_indices = {
-            int(name.split('.')[1])
-            for name in selected_state
-            if name.startswith('readouts.') and name.split('.')[1].isdigit()
-        }
-
+        # Show breakdown by component
         component_counts = {}
-        for key in selected_state:
-            component = key.split('.', 1)[0]
-            component_counts[component] = component_counts.get(component, 0) + 1
-        print(f"✓ Loaded {len(selected_state)} pretrained tensors")
+        for key in vision_state_dict.keys():
+            for prefix in vision_prefixes:
+                if key.startswith(prefix):
+                    component_counts[prefix] = component_counts.get(prefix, 0) + 1
+                    break
         print(f"   Breakdown: {component_counts}")
-        if exclude_prefixes:
-            print(f"   Excluded prefixes: {exclude_prefixes}")
-        if adapted_shapes:
-            print(
-                "   Applied explicit readout shape/coordinate adaptations: "
-                f"{adapted_shapes[:5]}"
-            )
 
-        frozen_names = set()
-        if freeze_pretrained:
-            frozen_names.update(self._pretrained_parameter_names)
+        # Optionally freeze vision components
         if freeze_vision:
-            frozen_names.update(
-                name for name in self._pretrained_parameter_names
-                if name.startswith(vision_prefixes)
-            )
-        for name, param in self.model.named_parameters():
-            if name in frozen_names:
-                param.requires_grad = False
-        if frozen_names:
-            print(f"✓ Froze {len(frozen_names)} loaded parameter tensors")
+            frozen_count = 0
+            for name, param in self.model.named_parameters():
+                if any(name.startswith(prefix.replace('model.', '')) for prefix in vision_prefixes):
+                    param.requires_grad = False
+                    frozen_count += 1
+            print(f"✓ Froze {frozen_count} vision parameters")
 
-        return len(selected_state)
-
-    def _set_trainable_parameter_patterns(self, patterns):
-        """Freeze everything except explicitly named parameter families."""
-        if isinstance(patterns, str):
-            patterns = [part.strip() for part in patterns.split(',')]
-        patterns = tuple(part for part in patterns if part)
-        if not patterns:
-            raise ValueError("trainable_parameter_patterns contained no patterns")
-
-        trainable_names = []
-        for name, parameter in self.model.named_parameters():
-            parameter.requires_grad = any(pattern in name for pattern in patterns)
-            if parameter.requires_grad:
-                trainable_names.append(name)
-        if not trainable_names:
-            raise ValueError(
-                "trainable_parameter_patterns matched no model parameters: "
-                f"{patterns}"
-            )
-        print(
-            f"✓ Selectively unfroze {len(trainable_names)} parameter tensors "
-            f"matching {patterns}"
-        )
-        return trainable_names
-
-    def load_distilled_output_modulator(self, artifact_path: str):
-        """Load a standalone behavior-residual artifact with CID checks.
-
-        The artifact is used only to initialize the optional second output
-        head.  Subsequent Lightning checkpoints contain those tensors in their
-        ordinary state_dict and are therefore self-contained.
-        """
-        module = getattr(self.model, 'distilled_output_modulator', None)
-        if module is None:
-            raise ValueError(
-                "A distilled behavior artifact was supplied, but the model "
-                "config has no distilled_output_modulator"
-            )
-        artifact = torch.load(artifact_path, map_location='cpu', weights_only=False)
-        saved_names = list(artifact.get('dataset_names') or ())
-        if saved_names != self.names:
-            raise ValueError(
-                "Distilled behavior dataset order differs from the student: "
-                f"artifact={saved_names[:3]}, student={self.names[:3]}"
-            )
-        saved_cids = artifact.get('cids_by_session') or {}
-        cid_errors = [
-            name for name, cfg in zip(self.names, self.cfgs)
-            if list(saved_cids.get(name, ())) != list(cfg.get('cids', ()))
-        ]
-        if cid_errors:
-            raise ValueError(
-                "Distilled behavior neuron identities/order changed for: "
-                + ", ".join(cid_errors[:5])
-            )
-        configured = dict(
-            (self.model_config.get('distilled_output_modulator') or {})
-            .get('params') or {}
-        )
-        if dict(artifact.get('config') or {}) != configured:
-            raise ValueError(
-                "Distilled behavior artifact config does not match the "
-                "student distilled_output_modulator config"
-            )
-        module.load_state_dict(artifact['state_dict'], strict=True)
-        print(
-            f"✓ Loaded distilled output behavior head from {artifact_path} "
-            f"for {len(self.names)} datasets"
-        )
-        return len(artifact['state_dict'])
+        return len(vision_state_dict)
 
     def _compute_auxiliary_loss(self):
         """
@@ -613,10 +323,6 @@ class MultiDatasetModel(pl.LightningModule):
         if self.global_rank == 0:
             print("Initializing readout biases from empirical firing rates...")
         for idx, name in enumerate(self.names):
-            if idx in self._pretrained_readout_indices:
-                if self.global_rank == 0:
-                    print(f"  {name}: preserving pretrained readout bias")
-                continue
             if name not in dm.train_dsets:
                 continue
 
@@ -666,43 +372,14 @@ class MultiDatasetModel(pl.LightningModule):
                     print(f"  {name}: bias range [{bias.min():.3f}, {bias.max():.3f}], "
                           f"mean_rate range [{mean_rate.min():.4f}, {mean_rate.max():.4f}]")
 
-    @staticmethod
-    def _sync_loader_sampler_epoch(loader, epoch):
-        """Set epoch on custom samplers, including lists of validation loaders."""
-        if isinstance(loader, (list, tuple)):
-            for child in loader:
-                MultiDatasetModel._sync_loader_sampler_epoch(child, epoch)
-            return
-        for sampler in (
-            getattr(loader, "sampler", None),
-            getattr(loader, "batch_sampler", None),
-        ):
-            if hasattr(sampler, "set_epoch"):
-                sampler.set_epoch(epoch)
-
     def on_train_epoch_start(self):
         """Set up for training epoch."""
         super().on_train_epoch_start()
-        # Custom homogeneous batch samplers are recreated when a checkpoint is
-        # resumed, so their internal counter is not restored by Lightning.
-        # Pinning it to the restored trainer epoch prevents epochs 0..N from
-        # being replayed after an epoch-N checkpoint.  This is a no-op for
-        # ordinary samplers and for a fresh epoch-zero run.
-        self._sync_loader_sampler_epoch(
-            self.trainer.train_dataloader, self.current_epoch
-        )
         optimizer = self.optimizers()
         # if isinstance(optimizer, AdamWScheduleFree):
         #     optimizer.train()
 
-    def forward(
-        self,
-        stim,
-        ds_idx,
-        beh=None,
-        history=None,
-        output_beh=None,
-    ):
+    def forward(self, stim, ds_idx, beh=None, history=None):
         """
         Forward pass through the model.
 
@@ -724,21 +401,9 @@ class MultiDatasetModel(pl.LightningModule):
         """
         # Check if this is a modulator-only model (no vision processing)
         if self.is_modulator_only:
-            y = self.model(
-                stimulus=None,
-                dataset_idx=ds_idx,
-                behavior=beh,
-                history=history,
-                output_behavior=output_beh,
-            )
+            y = self.model(stimulus=None, dataset_idx=ds_idx, behavior=beh, history=history)
         else:
-            y = self.model(
-                stimulus=stim,
-                dataset_idx=ds_idx,
-                behavior=beh,
-                history=history,
-                output_behavior=output_beh,
-            )
+            y = self.model(stimulus=stim, dataset_idx=ds_idx, behavior=beh, history=history)
         return torch.clamp(y, min=-20 if self.log_input else 1e-8)
 
     def _step(self, batch_list, tag: str):
@@ -774,13 +439,7 @@ class MultiDatasetModel(pl.LightningModule):
             with torch.no_grad() if tag == "val" else contextlib.nullcontext():
                 # Pass stimulus or None based on model type
                 stimulus = None if self.is_modulator_only else b["stim"]
-                rhat = self(
-                    stimulus,
-                    b["dataset_idx"][0],
-                    b.get("behavior"),
-                    b.get("history"),
-                    b.get("output_behavior"),
-                )
+                rhat = self(stimulus, b["dataset_idx"][0], b.get("behavior"), b.get("history"))
 
             batch_loss = {
                 'rhat': rhat.float(),
@@ -885,14 +544,7 @@ class MultiDatasetModel(pl.LightningModule):
         self._step(bl_list, "val")
 
     def on_validation_epoch_start(self):
-        """Synchronize validation sampling and reset validation accumulators."""
-        super().on_validation_epoch_start()
-        # Keep shuffled partial-validation draws tied to the actual trainer
-        # epoch across checkpoint resumes.  This belongs in the same hook as
-        # the aggregator reset; a second definition would silently override it.
-        self._sync_loader_sampler_epoch(
-            self.trainer.val_dataloaders, self.current_epoch
-        )
+        """Reset BPS aggregators at the start of validation."""
         for agg in self.bps_aggs:
             agg.reset()
         for v in self.val_losses_by_ds.values():
@@ -1085,18 +737,13 @@ class MultiDatasetModel(pl.LightningModule):
         # Standard optimizer step
         loss = optimizer_closure()
         optimizer.step()
-
-        # Apply each proximal operator exactly once.  Parameter-specific
-        # learning rates are resolved inside Regularizer.prox from the
-        # optimizer groups; the previous nested loop repeated a proximal
-        # update once per optimizer group (clamps happened to be idempotent).
-        # This deliberately happens before zero_grad: multisession proximal
-        # sparsity must be able to identify the readout used by this batch and
-        # leave inactive sessions untouched.
-        fallback_lr = max(float(group["lr"]) for group in optimizer.param_groups)
-        for reg in self.reg_terms:
-            reg.prox(epoch, fallback_lr, optimizer=optimizer)
-
         optimizer.zero_grad()
+
+        # Apply proximal updates for regularization
+        # Pass optimizer for Adam-aware per-parameter learning rates
+        for group in optimizer.param_groups:
+            lr = group["lr"]
+            for reg in self.reg_terms:
+                reg.prox(epoch, lr, optimizer=optimizer)
 
         return loss

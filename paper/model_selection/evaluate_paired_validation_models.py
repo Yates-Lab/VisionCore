@@ -242,20 +242,14 @@ def _predict_positions(model, dataset, dataset_idx, positions, device, batch_siz
             stimulus = batch["stim"].to(device)
             behavior = batch.get("behavior")
             history = batch.get("history")
-            output_behavior = batch.get("output_behavior")
             behavior = behavior.to(device) if behavior is not None else None
             history = history.to(device) if history is not None else None
-            output_behavior = (
-                output_behavior.to(device) if output_behavior is not None else None
-            )
             with torch.autocast(
                 device_type=device.type,
                 dtype=torch.bfloat16,
                 enabled=device.type == "cuda",
             ):
-                prediction = model(
-                    stimulus, dataset_idx, behavior, history, output_behavior
-                )
+                prediction = model(stimulus, dataset_idx, behavior, history)
             predictions.append(_positive_prediction(model, prediction.float()).cpu())
             observations.append(batch["robs"].float().cpu())
             filters.append(batch["dfs"].float().cpu())
@@ -273,20 +267,14 @@ def _predict_native_pairs(model, dataset, dataset_idx, pairs, device, batch_pair
             stimulus = batch["stim"].to(device)
             behavior = batch.get("behavior")
             history = batch.get("history")
-            output_behavior = batch.get("output_behavior")
             behavior = behavior.to(device) if behavior is not None else None
             history = history.to(device) if history is not None else None
-            output_behavior = (
-                output_behavior.to(device) if output_behavior is not None else None
-            )
             with torch.autocast(
                 device_type=device.type,
                 dtype=torch.bfloat16,
                 enabled=device.type == "cuda",
             ):
-                prediction = model(
-                    stimulus, dataset_idx, behavior, history, output_behavior
-                )
+                prediction = model(stimulus, dataset_idx, behavior, history)
             prediction = _positive_prediction(model, prediction.float())
             predictions.append(prediction.reshape(n_pairs, 2, -1).sum(dim=1).cpu())
             observations.append(

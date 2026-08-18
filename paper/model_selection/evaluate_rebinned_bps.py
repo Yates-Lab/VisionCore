@@ -71,9 +71,6 @@ def _predict_pairs(model, dataset, dataset_idx, pair_positions, device, batch_pa
             history = batch.get("history")
             if history is not None:
                 history = history.to(device)
-            output_behavior = batch.get("output_behavior")
-            if output_behavior is not None:
-                output_behavior = output_behavior.to(device)
             with torch.autocast(
                 device_type=device.type,
                 dtype=torch.bfloat16,
@@ -84,7 +81,6 @@ def _predict_pairs(model, dataset, dataset_idx, pair_positions, device, batch_pa
                     dataset_idx,
                     behavior,
                     history,
-                    output_behavior,
                 )
             n_pairs = pair.shape[0]
             predictions.append(prediction.float().reshape(n_pairs, 2, -1).sum(dim=1).cpu())

@@ -81,9 +81,6 @@ def main():
                    help="Maximum number of training epochs")
     p.add_argument("--gradient_clip_val", type=float, default=1.0,
                    help="Gradient clipping value")
-    p.add_argument("--gradient_clip_algorithm", type=str, default="norm",
-                   choices=["norm", "value"],
-                   help="Clip gradient norm (existing default) or each value")
     p.add_argument("--accumulate_grad_batches", type=int, default=1,
                    help="Number of batches to accumulate gradients")
 
@@ -110,26 +107,8 @@ def main():
     # Pretrained models
     p.add_argument("--pretrained_checkpoint", type=str, default=None,
                    help="Path to pretrained checkpoint for vision components")
-    p.add_argument("--pretrained_scope", type=str, default="vision",
-                   choices=["vision", "compatible", "complete"],
-                   help="Load legacy vision components or every compatible existing model tensor")
     p.add_argument("--freeze_vision", action="store_true", default=False,
                    help="Freeze pretrained vision components")
-    p.add_argument("--freeze_pretrained", action="store_true", default=False,
-                   help="Freeze every tensor loaded from the selected pretrained scope")
-    p.add_argument("--trainable_parameter_patterns", type=str, default=None,
-                   help="Comma-separated name substrings; freeze all model parameters except matches")
-    p.add_argument("--pretrained_exclude_prefixes", type=str, default=None,
-                   help="Comma-separated model prefixes intentionally reinitialized during a warm start")
-    p.add_argument("--pretrained_shape_adaptation", type=str, default="none",
-                   choices=[
-                       "none",
-                       "trim_readout_features",
-                       "scale_gaussian_readout",
-                   ],
-                   help="Explicit shape adapter for scientifically defined successor models")
-    p.add_argument("--distilled_output_modulator_checkpoint", type=str, default=None,
-                   help="Standalone Ryan behavior-residual artifact used to initialize the optional second output head")
 
     # Model compilation
     p.add_argument("--compile", action="store_true", default=False,
@@ -240,17 +219,8 @@ def main():
         max_ds=args.max_datasets,
         pretrained_checkpoint=args.pretrained_checkpoint,
         freeze_vision=args.freeze_vision,
-        pretrained_scope=args.pretrained_scope,
-        freeze_pretrained=args.freeze_pretrained,
-        trainable_parameter_patterns=args.trainable_parameter_patterns,
-        pretrained_exclude_prefixes=args.pretrained_exclude_prefixes,
-        pretrained_shape_adaptation=args.pretrained_shape_adaptation,
         compile_model=args.compile
     )
-    if args.distilled_output_modulator_checkpoint is not None:
-        model.load_distilled_output_modulator(
-            args.distilled_output_modulator_checkpoint
-        )
 
     # Pass additional hyperparameters to model
     model.hparams.core_lr_scale = args.core_lr_scale
@@ -337,7 +307,6 @@ def main():
 
         # Optimization
         gradient_clip_val=args.gradient_clip_val,
-        gradient_clip_algorithm=args.gradient_clip_algorithm,
         accumulate_grad_batches=args.accumulate_grad_batches,
 
         # Logging and callbacks
@@ -361,10 +330,7 @@ def main():
     print(f"Num training batches: {trainer.num_training_batches}")
     print(f"Curriculum learning: {args.enable_curriculum}")
     print(f"Pretrained checkpoint: {args.pretrained_checkpoint or 'None'}")
-    print(f"Pretrained scope: {args.pretrained_scope}")
     print(f"Freeze vision: {args.freeze_vision}")
-    print(f"Freeze pretrained: {args.freeze_pretrained}")
-    print(f"Trainable parameter patterns: {args.trainable_parameter_patterns or 'all'}")
     print("=" * 60, flush=True)
 
     # ---------------------------------------------------------------------

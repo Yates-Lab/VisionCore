@@ -154,13 +154,7 @@ def _make_pixelnorm(cfg, dataset_config=None):
 
 @_register("center_crop")
 def _make_center_crop(cfg, dataset_config=None):
-    """Crop the final two (spatial) dimensions around their center.
-
-    This operates directly on the stored stimulus before temporal embedding,
-    so a 51 -> 35 crop reduces both host-memory traffic and accelerator
-    activation memory.  It is dtype preserving and therefore safe on the
-    uint8 data path.
-    """
+    """Crop the final two dimensions before temporal embedding."""
     size = cfg if isinstance(cfg, int) else cfg.get("size", 35)
     if isinstance(size, int):
         target_h = target_w = size
@@ -170,8 +164,6 @@ def _make_center_crop(cfg, dataset_config=None):
         target_h, target_w = (int(size[0]), int(size[1]))
 
     def center_crop(x: torch.Tensor):
-        if x.ndim < 2:
-            raise ValueError(f"center_crop requires at least 2 dimensions, got {x.ndim}")
         height, width = x.shape[-2:]
         if target_h > height or target_w > width:
             raise ValueError(
@@ -191,71 +183,6 @@ def _make_diff(cfg, dataset_config=None):
         prepend = x.index_select(axis, torch.tensor([0], device=x.device))
         return torch.diff(x, dim=axis, prepend=prepend)
     return diff
-
-
-@_register("resampled_pipeline")
-def _make_resampled_pipeline(cfg, dataset_config=None):
-    """Apply a transform pipeline on a lower-rate temporal grid.
-
-    The first dimension is divided into non-overlapping windows, reduced on
-    that grid, transformed, and then repeated back onto the original grid.
-    This is useful when a native-rate visual model must retain behavior
-    covariates from an established lower-rate preprocessing contract.  In
-    particular, the Figure-3 twin first averages eye position from 240 to
-    120 Hz *before* computing velocity and its temporal basis.
-
-    Only endpoint values are scientifically meaningful when this transform is
-    paired with endpoint supervision.  Repetition gives every native sample a
-    well-defined value and preserves the DictDataset length contract.
-    """
-    if not isinstance(cfg, dict):
-        raise ValueError("resampled_pipeline requires a configuration mapping")
-    factor = int(cfg.get("factor", 2))
-    reduction = str(cfg.get("reduction", "mean"))
-    inner_ops = cfg.get("ops", [])
-    if factor < 1:
-        raise ValueError(f"resampled_pipeline factor must be positive, got {factor}")
-    if reduction not in {"mean", "first", "last"}:
-        raise ValueError(
-            "resampled_pipeline reduction must be 'mean', 'first', or 'last', "
-            f"got {reduction!r}"
-        )
-    inner = make_pipeline(inner_ops, dataset_config)
-
-    def resampled_pipeline(x: torch.Tensor):
-        if x.ndim < 1:
-            raise ValueError("resampled_pipeline requires a temporal first dimension")
-        original_length = int(x.shape[0])
-        if factor == 1:
-            return inner(x)
-
-        complete_length = (original_length // factor) * factor
-        if complete_length == 0:
-            raise ValueError(
-                f"Cannot resample temporal length {original_length} by factor {factor}"
-            )
-        windows = x[:complete_length].reshape(
-            complete_length // factor, factor, *x.shape[1:]
-        )
-        if reduction == "mean":
-            pooled = windows.float().mean(dim=1).to(dtype=x.dtype)
-        elif reduction == "first":
-            pooled = windows[:, 0]
-        else:
-            pooled = windows[:, -1]
-
-        transformed = inner(pooled)
-        restored = transformed.repeat_interleave(factor, dim=0)
-        if restored.shape[0] < original_length:
-            # Match average-pool's floor convention on complete windows while
-            # giving a trailing partial window the last available covariate.
-            pad = restored[-1:].expand(
-                original_length - restored.shape[0], *restored.shape[1:]
-            )
-            restored = torch.cat([restored, pad], dim=0)
-        return restored[:original_length]
-
-    return resampled_pipeline
 
 @_register("mul")
 def _make_mul(cfg, dataset_config=None):

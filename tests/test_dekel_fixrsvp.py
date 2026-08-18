@@ -232,22 +232,21 @@ def test_representative_examples_cover_typical_and_model_advantage_cases():
     assert len({row[3] for row in chosen}) == 4
 
 
-def test_predict_endpoints_uses_lightning_output_behavior_contract():
+def test_predict_endpoints_uses_spike_trained_behavior_contract():
     class RecordingModel(torch.nn.Module):
         def __init__(self):
             super().__init__()
             self.log_input = False
             self.received = None
 
-        def forward(self, stim, dataset_idx, behavior=None, history=None, output_beh=None):
-            self.received = (stim, dataset_idx, behavior, history, output_beh)
+        def forward(self, stim, dataset_idx, behavior=None, history=None):
+            self.received = (stim, dataset_idx, behavior, history)
             return torch.ones(stim.shape[0], 1)
 
     model = RecordingModel()
     dset = {
         "stim": torch.arange(6 * 4, dtype=torch.float32).reshape(6, 1, 2, 2),
         "behavior": torch.arange(6 * 3, dtype=torch.float32).reshape(6, 3),
-        "output_behavior": torch.arange(6 * 2, dtype=torch.float32).reshape(6, 2),
     }
     indices = np.array([2, 4], dtype=np.int64)
     prediction = _predict_endpoints(
@@ -261,9 +260,8 @@ def test_predict_endpoints_uses_lightning_output_behavior_contract():
     )
 
     assert prediction.shape == (2, 1)
-    stim, dataset_idx, behavior, history, output_behavior = model.received
+    stim, dataset_idx, behavior, history = model.received
     assert stim.shape == (2, 1, 2, 2, 2)
     assert dataset_idx == 3
     assert history is None
     torch.testing.assert_close(behavior, dset["behavior"][indices])
-    torch.testing.assert_close(output_behavior, dset["output_behavior"][indices])

@@ -376,13 +376,6 @@ def run_model(model, batch, dataset_idx):
             output = model.model(None, dataset_idx, batch.get('behavior'))
         elif hasattr(model.model, 'spike_history'):
             output = model.model(batch['stim'], dataset_idx, batch.get('behavior', None), batch.get('history', None))
-        elif 'output_behavior' in batch:
-            output = model.model(
-                batch['stim'],
-                dataset_idx,
-                batch.get('behavior'),
-                output_behavior=batch.get('output_behavior'),
-            )
         else:
             output = model.model(batch['stim'], dataset_idx, batch.get('behavior'))
         # output = model.model(batch['stim'], dataset_idx, batch.get('behavior'))
@@ -729,11 +722,9 @@ def ccnorm_split_half_variable_trials(
     else:
         D = np.asarray(D)
         if D.shape != R.shape:
-            raise ValueError(
-                f"D must match R/P shape {R.shape}; received {D.shape}"
-            )
-        # Numeric data filters often contain NaNs outside the analysis frame.
-        # A direct astype(bool) is unsafe because bool(np.nan) is True.
+            raise ValueError(f"D must match R/P shape {R.shape}; received {D.shape}")
+        # Numeric data filters can contain NaNs. Casting them directly to bool
+        # is unsafe because bool(np.nan) is True.
         if D.dtype == np.bool_:
             D = D.copy()
         else:

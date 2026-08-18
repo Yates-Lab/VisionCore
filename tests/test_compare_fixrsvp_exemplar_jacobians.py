@@ -38,7 +38,7 @@ def test_aligned_observation_sums_native_pair_counts():
 class _SumModel(torch.nn.Module):
     log_input = False
 
-    def forward(self, stimulus, dataset_idx, behavior, history, output_behavior):
+    def forward(self, stimulus, dataset_idx, behavior, history):
         return stimulus.sum(dim=(1, 2, 3, 4), keepdim=False)[:, None] + 1.0
 
 

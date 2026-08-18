@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Render the paired Twin-versus-M77 response-subspace supplement.
 
-The two teachers have different native stimulus lattices (Twin: 120 Hz,
+The two models have different native stimulus lattices (Twin: 120 Hz,
 32x25x25 local support; M77: 240 Hz, 60x35x35 support).  We therefore compare
 the same frozen biological units using coordinate-invariant quantities:
 held-out response fidelity versus rank and cumulative Jacobian energy versus
@@ -168,7 +168,7 @@ def load_twin_energy(directory: Path) -> np.ndarray:
     candidates = sorted(directory.glob("rank*_active_gradient_spectrum.npz"))
     if not candidates:
         raise FileNotFoundError(f"No Twin active-gradient spectrum in {directory}")
-    # All rank fits store the same teacher-gradient spectrum. Prefer the file
+    # All rank fits store the same model-gradient spectrum. Prefer the file
     # with the largest fitted rank and verify its cached cumulative values.
     def fitted_rank(path: Path) -> int:
         return int(path.name.split("_", 1)[0].removeprefix("rank"))
@@ -497,7 +497,7 @@ def main() -> int:
         "models": ["Twin", "M77"],
         "comparison_contract": (
             "same frozen RR100 units; fidelity and cumulative Jacobian energy are "
-            "compared within each teacher; native filters are displayed without "
+            "compared within each model; native filters are displayed without "
             "cross-grid principal angles"
         ),
         "native_lattices": {

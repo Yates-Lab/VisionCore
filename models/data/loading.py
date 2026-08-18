@@ -305,64 +305,6 @@ def downsample_continuous(x: torch.Tensor, factor: int) -> torch.Tensor:
         return x_pooled_flat.view(T_new, *non_temporal_shape)
 
 
-def causal_supervision_bin(
-    value: torch.Tensor,
-    factor: int,
-    reduction: str,
-    trial_inds: torch.Tensor | None = None,
-) -> torch.Tensor:
-    """Aggregate causal windows without changing the native time axis.
-
-    Values for a factor-two target at endpoint ``t`` are formed from
-    ``[t-1, t]``.  Keeping the original length lets stimulus histories remain
-    embedded at the native frame rate; a separate phase subsample selects one
-    endpoint per non-overlapping supervision bin.
-    """
-    if factor < 1:
-        raise ValueError(f"supervision factor must be positive, got {factor}")
-    if factor == 1:
-        return value
-    if value.shape[0] < factor:
-        raise ValueError(
-            f"Cannot bin {value.shape[0]} samples with factor {factor}"
-        )
-    windows = value.unfold(0, factor, 1)
-    if reduction == "sum":
-        reduced = windows.sum(dim=-1)
-    elif reduction == "mean":
-        reduced = windows.mean(dim=-1)
-    else:
-        raise ValueError(f"Unknown causal supervision reduction {reduction!r}")
-
-    output = torch.zeros_like(value)
-    output[factor - 1 :] = reduced
-    if trial_inds is not None:
-        trial_inds = ensure_tensor(trial_inds)
-        same_trial = trial_inds[factor - 1 :] == trial_inds[: 1 - factor]
-        output[factor - 1 :][~same_trial] = 0
-    return output
-
-
-def subsample_embedded_supervision(
-    dataset: CombinedEmbeddedDataset,
-    factor: int,
-    phase: int,
-) -> CombinedEmbeddedDataset:
-    """Select one native-time endpoint per supervision bin."""
-    if not 0 <= phase < factor:
-        raise ValueError(f"supervision phase must be in [0, {factor}), got {phase}")
-    filtered_indices = []
-    for indices in dataset.dset_inds:
-        indices = ensure_tensor(indices, dtype=torch.long)
-        filtered_indices.append(indices[indices.remainder(factor) == phase])
-    return CombinedEmbeddedDataset(
-        dataset.dsets,
-        filtered_indices,
-        dataset.keys_lags,
-        device=dataset.device,
-    )
-
-
 def apply_downsampling(dset: DictDataset, factor: int) -> DictDataset:
     """Apply appropriate downsampling to each covariate in the dataset."""
     if factor == 1:
@@ -497,7 +439,6 @@ def prepare_data(dataset_config: Dict[str, Any], strict: bool = True,
     datafilters = dataset_config.get("datafilters", {})
     keys_lags  = dataset_config["keys_lags"]
     sampling_config = dataset_config.get("sampling", None)
-    supervision_config = dataset_config.get("supervision", None)
     lab = dataset_config.get("lab", "yates")  # Default to yates for backward compatibility
 
     # Handle different session naming conventions
@@ -639,25 +580,6 @@ def prepare_data(dataset_config: Dict[str, Any], strict: bool = True,
                         dset[expose_as] = concatenated
                         # print(f"Concatenated {len(var_list)} variables for {expose_as}, final shape: {concatenated.shape}")
 
-            # Optionally make lower-rate count targets while retaining the
-            # native-rate time axis used by stimulus lags and behavior.  This
-            # is deliberately separate from global downsampling above.
-            if supervision_config:
-                source_rate = int(sampling_config["source_rate"])
-                target_rate = int(supervision_config["target_rate"])
-                if source_rate % target_rate:
-                    raise ValueError(
-                        f"supervision target_rate {target_rate} must divide source_rate {source_rate}"
-                    )
-                supervision_factor = source_rate // target_rate
-                trial_inds = dset["trial_inds"] if "trial_inds" in dset else None
-                dset["robs"] = causal_supervision_bin(
-                    dset["robs"], supervision_factor, "sum", trial_inds
-                )
-                dset["dfs"] = causal_supervision_bin(
-                    dset["dfs"], supervision_factor, "mean", trial_inds
-                )
-
             preprocessed_dsets.append(dset)
             print(f"stim shape: {dset.covariates['stim'].shape}")
             
@@ -698,24 +620,6 @@ def prepare_data(dataset_config: Dict[str, Any], strict: bool = True,
     )
     train_dset, val_dset = splits[0], splits[1]
     test_dset = splits[2] if test_fraction is not None else None
-
-    if supervision_config:
-        source_rate = int(sampling_config["source_rate"])
-        target_rate = int(supervision_config["target_rate"])
-        supervision_factor = source_rate // target_rate
-        supervision_phase = int(
-            supervision_config.get("phase", supervision_factor - 1)
-        )
-        train_dset = subsample_embedded_supervision(
-            train_dset, supervision_factor, supervision_phase
-        )
-        val_dset = subsample_embedded_supervision(
-            val_dset, supervision_factor, supervision_phase
-        )
-        if test_dset is not None:
-            test_dset = subsample_embedded_supervision(
-                test_dset, supervision_factor, supervision_phase
-            )
 
     print(f"Train size: {len(train_dset)} samples | "
           f"Val size: {len(val_dset)} samples"

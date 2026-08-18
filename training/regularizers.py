@@ -176,11 +176,8 @@ class Regularizer:
         self.patterns = spec.get("apply_to", [])
         self.schedule = spec.get("schedule", {"kind": "constant"})
         self.dims = spec.get("dims", None)
-        self.group_dims = spec.get("group_dims", None)
-        self.competition_dims = spec.get("competition_dims", [1])
         self.padding_mode = spec.get("padding_mode", "constant")
         self.reduction = spec.get("reduction", "dekel")
-        self.eps = float(spec.get("eps", 1e-6))
         
         # Cache tensors that match the patterns
         self.params = []
@@ -214,20 +211,8 @@ class Regularizer:
         for pattern in self.patterns:
             # Split pattern on "/" for AND logic
             components = pattern.split("/")
-            
-            # A component prefixed with ^ is anchored to the beginning of the
-            # full parameter name.  Plain components retain the historical
-            # substring semantics.  The anchor matters now that
-            # `modulator.*` and `output_modulator.*` coexist: a plain
-            # "modulator" intentionally matches both, while "^modulator"
-            # selects only the inherited feature-space path.
-            def component_matches(component):
-                if component.startswith("^"):
-                    return param_name.startswith(component[1:])
-                return component in param_name
-
             # Check if ALL components match the parameter name.
-            if all(component_matches(comp) for comp in components):
+            if all(comp in param_name for comp in components):
                 return True
                 
         return False
@@ -433,39 +418,6 @@ class Regularizer:
             # Clamp parameters to have minimum value of lambda (for std parameters)
             for param in self.params:
                 param.data = torch.clamp(param.data, min=effective_lambda)
-
-        elif self.kind == "proximal_sparsity_dekel":
-            # Port of NeuroVisKit.proximalSparsityDekel.  Within each output
-            # filter, preserve the strongest input-channel group and apply
-            # increasingly strong elementwise shrinkage to weaker groups.
-            for param in self.params:
-                if optimizer is not None and param.grad is None:
-                    continue
-                if self.group_dims is None:
-                    norm = param.data.abs()
-                else:
-                    group_dims = _canonical_dims(param.ndim, self.group_dims)
-                    norm = torch.linalg.vector_norm(
-                        param.data, ord=2, dim=group_dims, keepdim=True
-                    )
-                competition_dims = _canonical_dims(param.ndim, self.competition_dims)
-                strongest = norm.amax(dim=competition_dims, keepdim=True)
-                relative_shrinkage = (strongest / (norm + self.eps) - 1.0).clamp_min(0.0)
-
-                # The historical operator used the optimizer group's scalar
-                # learning rate (not Adam's coordinate-wise effective rate).
-                param_lr = lr
-                if optimizer is not None:
-                    for group in optimizer.param_groups:
-                        if any(candidate is param for candidate in group["params"]):
-                            param_lr = float(group["lr"])
-                            break
-                threshold = effective_lambda * param_lr * relative_shrinkage
-                updated = torch.sign(param.data) * (
-                    param.data.abs() - threshold
-                ).clamp_min(0.0)
-                param.data.copy_(updated)
-
 
 def create_regularizers(model_config: Dict[str, Any], named_params: List[Tuple[str, torch.Tensor]]) -> List[Regularizer]:
     """

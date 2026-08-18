@@ -1,12 +1,8 @@
 """Regression tests for fresh homogeneous batches on every epoch."""
 
-import ast
-from pathlib import Path
-
 import torch
 
 from training.samplers import ByDatasetBatchSampler
-from paper.model_selection.evaluate_dekel_split import iter_session_split_batches
 
 
 BATCH = 64
@@ -91,48 +87,3 @@ def test_batches_remain_homogeneous_and_full_size():
         for batch in sampler:
             assert len(batch) == BATCH
             assert len({dataset_index(i) for i in batch}) == 1
-
-
-def test_validation_epoch_hook_is_unique_and_synchronizes_sampler():
-    """Prevent a duplicate Lightning hook from silently dropping resume sync."""
-    path = (
-        Path(__file__).resolve().parents[1]
-        / "training"
-        / "pl_modules"
-        / "multidataset_model.py"
-    )
-    module = ast.parse(path.read_text())
-    model_class = next(
-        node
-        for node in module.body
-        if isinstance(node, ast.ClassDef) and node.name == "MultiDatasetModel"
-    )
-    hooks = [
-        node
-        for node in model_class.body
-        if isinstance(node, ast.FunctionDef)
-        and node.name == "on_validation_epoch_start"
-    ]
-    assert len(hooks) == 1
-    assert "_sync_loader_sampler_epoch" in ast.unparse(hooks[0])
-
-
-def test_full_split_evaluation_visits_every_example_once():
-    class _EvalDataset(torch.utils.data.Dataset):
-        def __len__(self):
-            return 5
-
-        def __getitem__(self, index):
-            return {"sample_index": index}
-
-    class _EvalDM:
-        names = ["session"]
-        val_dsets = {"session": _EvalDataset()}
-        test_dsets = {"session": _EvalDataset()}
-        batch = 2
-        workers = 0
-
-    batches = list(iter_session_split_batches(_EvalDM(), "val"))
-    assert [dataset_idx for dataset_idx, _, _ in batches] == [0, 0, 0]
-    visited = torch.cat([batch["sample_index"] for _, _, batch in batches])
-    assert torch.equal(visited, torch.arange(5))

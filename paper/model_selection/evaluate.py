@@ -249,7 +249,6 @@ def score_test_split(model, datamodule, device):
                         b["dataset_idx"][0],
                         b.get("behavior"),
                         b.get("history"),
-                        b.get("output_behavior"),
                     )
                 rhat = rhat.float()
                 # Matches `_step`: an identity activation means the model was

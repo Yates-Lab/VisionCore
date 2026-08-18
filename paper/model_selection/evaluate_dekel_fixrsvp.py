@@ -157,9 +157,6 @@ def _predict_endpoints(
     predictions = []
     stim_source = dset["stim"]
     behavior_source = dset["behavior"]
-    output_behavior_source = (
-        dset["output_behavior"] if "output_behavior" in dset else None
-    )
     model.eval()
     for start in range(0, len(indices), batch_size):
         raw_indices = torch.as_tensor(
@@ -170,23 +167,12 @@ def _predict_endpoints(
             raise RuntimeError("A FixRSVP endpoint lacks the requested stimulus history")
         stim = stim_source[lag_indices].permute(0, 2, 1, 3, 4).to(device)
         behavior = behavior_source[raw_indices].to(device)
-        output_behavior = (
-            output_behavior_source[raw_indices].to(device)
-            if output_behavior_source is not None
-            else None
-        )
         with torch.no_grad(), torch.autocast(
             device_type=device.type,
             dtype=torch.bfloat16,
             enabled=device.type == "cuda",
         ):
-            output = model(
-                stim,
-                dataset_idx,
-                behavior,
-                None,
-                output_behavior,
-            )
+            output = model(stim, dataset_idx, behavior, None)
             if model.log_input:
                 output = output.exp()
         predictions.append(output.float().cpu())
