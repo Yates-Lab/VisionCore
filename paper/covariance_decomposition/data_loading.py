@@ -17,6 +17,7 @@ None, n_trials_total/good, n_neurons_total/used, schema_version.
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -37,7 +38,12 @@ SUBJECTS = ["Allen", "Logan"]
 DATASET_CONFIGS_PATH = (
     VISIONCORE_ROOT / "experiments" / "dataset_configs" / "multi_basic_120_long.yaml"
 )
-CACHE_PATH = CACHE_DIR / "covdecomp_aligned_sessions.pkl"
+CACHE_PATH = Path(
+    os.environ.get(
+        "COVDECOMP_ALIGNED_CACHE_PATH",
+        str(CACHE_DIR / "covdecomp_aligned_sessions.pkl"),
+    )
+)
 
 
 def _load_contam_rate(session_name, subject):
