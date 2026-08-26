@@ -1,0 +1,86 @@
+% Methods text supporting the production Figure 4.
+
+\subsection{Retinal-motion replay and spatial information analysis}
+
+We sampled 250-ms fixation histories from continuous DDPI recordings. Eye
+position was placed on a uniform raw-sampling grid, filtered with the
+zero-phase analysis IIR selected by the eye-position power-spectrum audit
+(20-Hz passband, 30-Hz stopband), and sampled at the model's native 240-Hz
+input rate. Each trajectory translated a natural image through the same
+renderer used for model evaluation. The matched stabilized condition held gaze
+at the frame corresponding to the model's rounded mean first-layer peak-energy
+lag (15 frames; 62.5 ms before prediction). Measured and stabilized histories
+therefore shared the retinal frame with greatest average first-layer weight
+and differed in preceding motion. The 42-dimensional behavioral input was held
+at zero in both conditions.
+
+For each output unit, we evaluated its fitted spatial readout at every
+available position to obtain a nonnegative activation map $r(x)$. Single-spike
+information was
+\[
+  I_{\mathrm{SSI}} = \sum_x \frac{r(x)}{\sum_{x'}r(x')}
+  \log_2\!\left(\frac{r(x)}{\bar r}\right),
+\]
+where $\bar r$ is the spatial mean. SSI is invariant to uniform multiplicative
+gain. Panel B used all 725 checkpoint-available exact readouts, 40 natural
+images, and 200 filtered fixation histories without microsaccade
+stratification. Path length was measured after filtering over the same fixed
+window. Boxes report distributions over exact units; population intervals were
+obtained by crossed resampling of images, traces, and units.
+
+\subsection{Exact-unit spatiotemporal tuning and retinal-power engagement}
+
+We measured model SF$\times$TF tuning with controlled drifting gratings at the
+native 240-Hz rate through every checkpoint-native
+$(\mathrm{session},\mathrm{cid})$ readout. The assay contained nine spatial
+frequencies (1.07--15.94 cycles/deg), 14 nonzero temporal frequencies
+(1--90.51 Hz) plus a static condition, 18 motion directions, and 24 endpoint
+phases at 0.25 contrast; it was repeated at 0.125 contrast. The primary
+response was phase-averaged expected count per 1/240-s bin minus an explicit
+gray blank. Yu R0 and R1 surfaces were fit to every dynamic SF$\times$TF cell
+at the preferred motion direction. The strict exemplar audit required exact
+identity, a complete grid, 24-versus-12-phase convergence, positive drive, an
+interior coherent raw peak, full-grid fit $R^2\geq0.80$, raw/fit peak
+agreement, contrast repeatability, reliable non-boundary recorded-neuron SF,
+and recorded/model SF agreement. Recorded gratings constrained biological SF
+but did not vary TF; all TF values are therefore model measurements.
+
+Panel D used two units passing every strict gate. Panels E--H used a separate,
+explicit all-unit contract containing every checkpoint-available exact readout
+with a finite Yu fit (725 units). This contract preserves one-to-one
+$(\mathrm{session},\mathrm{cid})$ identity and retains, labels, and reports the
+units that fail stricter validation rather than treating them as validated.
+
+For Panels C and F, we used the Kuang/Rucci translation identity to combine
+radial natural-image power with the phase spectrum of filtered real fixations.
+Drift-rich and rapid-transient quartiles were defined within animal from each
+trace's nonzero-TF spectral centroid without reading neural or model responses.
+Each trace's TF$>0$ spectrum was normalized to unit mass before
+animal-balanced averaging; the two conditions therefore compare spectral
+shape. The exact TF$=0$ carrier and TF$>0$ dynamic fractions were independently
+verified to sum to one for every spatial Fourier mode.
+
+For Panel G, spectra were recomputed from the directly rendered finite movies
+for the same 40 images and 200 traces in the response matrix. Joint passband
+power was the projection of each movie's
+SF$\times$TF$\times$orientation power onto each unit's tuning weights.
+Fixation histories were ranked within unit by measured-minus-stabilized
+passband power. Rate and SSI modulation were calculated from the matched model
+responses, not from the spectral predictor. The comparison with path length
+used paired within-unit Spearman correlations and a unit bootstrap of their
+difference.
+
+\subsection{Cumulative trained-readout analysis}
+
+For Panel H, we selected unit--movie pairs in the top 20\% of each unit's
+passband-power distribution and replayed the matched measured and stabilized
+movies through the unmodified model. Trained output logits were accumulated
+over the S1-plus-phase, S2, and S3 feature groups, with the ordinary softplus
+link applied after each cumulative sum. The final cumulative map was required
+to match the ordinary model output numerically. Temporal modulation was
+calculated after removing each location's temporal mean and normalized by the
+movie-wide mean response; spatial sharpening was SSI of the mean-normalized
+activation map. Thus neither displayed quantity can be generated by a uniform
+output gain. Boxes show unit distributions and intervals resample exact units.
+The production release requires at least 100 crossed image--fixation movies;
+smaller runs are labeled smoke tests.

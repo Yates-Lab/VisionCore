@@ -1,0 +1,42 @@
+% Figure 4 caption for the production layout. Numerical results prose must be
+% written from results_provenance.json after the >=100-movie release audit.
+
+\begin{figure}[p]
+  \centering
+  \includegraphics[width=\linewidth]{figures/figure4.pdf}
+  \captionsetup{font=footnotesize,singlelinecheck=false}
+  \caption{
+    \textbf{Fixational eye movements engage V1 spatiotemporal passbands and
+    sharpen spatial coding.}
+    \textbf{(A)} A natural-image history translated by a filtered measured
+    fixation trajectory and its lag-aligned stabilized counterpart were passed
+    through the same model. The example unit increases both firing rate and
+    single-spike information (SSI); the difference map is measured motion minus
+    stabilized response.
+    \textbf{(B)} Population firing-rate and SSI modulation versus filtered
+    250-ms fixation path length for all 725 checkpoint-available exact
+    readouts. Boxes show the distribution of unit effects, whiskers span the
+    5th--95th percentiles, and curves show population estimates with bootstrap
+    intervals.
+    \textbf{(C)} Equal-dynamic-mass natural-image power distributions for
+    drift-rich and rapid-transient filtered fixation ensembles. Rapid dynamics
+    shift relative power toward higher temporal frequencies.
+    \textbf{(D)} Raw blank-subtracted responses of two strictly validated model
+    units to controlled drifting gratings. Stars mark fitted SF$\times$TF
+    preferences and curves show half-maximum Yu-fit passbands.
+    \textbf{(E)} Density of the fitted passbands for all 725
+    checkpoint-available exact readouts. The all-unit display retains units that
+    fail the stricter exemplar-validation gates.
+    \textbf{(F)} Rapid-transient minus drift-rich log$_2$ power contrast with
+    the same example passbands as in (D).
+    \textbf{(G)} Direct measured-motion minus stabilized firing-rate and SSI
+    modulation versus within-unit passband-power percentile. Boxes show
+    unit-specific bin medians; curves and intervals summarize the population.
+    \textbf{(H)} Gain-invariant temporal modulation and spatial sharpening for
+    top-passband movies traced through cumulative trained readout branches.
+    The final point is the ordinary model output; no affine, ablated, or
+    synthetic reference model is used. Production inference requires at least
+    100 crossed image--fixation movies.
+  }
+  \label{fig:ssi}
+\end{figure}

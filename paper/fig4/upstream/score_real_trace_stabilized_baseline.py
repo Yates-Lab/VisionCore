@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Score zero-motion stabilized SSI baselines for a real-trace SSI matrix."""
+"""Score stabilized baselines for an exact-unit fixation response matrix."""
 
 from __future__ import annotations
 
@@ -25,34 +25,7 @@ from real_trace_matrix.model import RealTraceMatrixScorer
 
 
 ROOT = Path(__file__).resolve().parents[3]
-RUN_STEM = "backimage_real_trace_ssi_matrix_large_contour_no_driftgate_ms200_n100x1000_history32_v2"
-RR100_VERSION = (
-    "V1-RR_MS_min_complete0p65_split0p75_pair0p60_anyfail_finalsplit0p75_"
-    "medoidPosthocminRepcomplete0p45_movieMedoid"
-)
-DEFAULT_MATRIX_DIR = ROOT / "outputs/active_sensing_movie_information" / RUN_STEM / "merged"
-CHECKPOINT_ENV = "FIG4_TWIN_CHECKPOINT"
-MODEL_CHECKPOINT_FILENAME = "epoch=147-val_bps_overall=0.5702.ckpt"
-STAGED_MODEL_CHECKPOINT_PATH = ROOT / "outputs/artifacts/model_checkpoints/fig4_twin" / MODEL_CHECKPOINT_FILENAME
-
-
-def default_checkpoint_path() -> Path:
-    if CHECKPOINT_ENV in os.environ:
-        return Path(os.environ[CHECKPOINT_ENV])
-    return STAGED_MODEL_CHECKPOINT_PATH
-DEFAULT_DATASET_CONFIGS = Path(
-    os.environ.get(
-        "FIG4_DATASET_CONFIGS",
-        str(UPSTREAM_DIR / "dataset_configs" / "multi_basic_120_long.yaml"),
-    )
-)
-DEFAULT_POPULATION_SPEC_DIR = Path(
-    os.environ.get(
-        "FIG4_RR100_POPULATION_SPEC_DIR",
-        str(ROOT / "outputs/redundancy_resolved_v1_twin/step1_activation_fingerprints"),
-    )
-)
-DEFAULT_MCFARLAND_OUTPUTS = os.environ.get("FIG4_MCFARLAND_OUTPUTS")
+DEFAULT_MCFARLAND_OUTPUTS = ROOT / "scripts/mcfarland_outputs_mono.pkl"
 OUTPUT_FILES = {
     "ssi": "stabilized_ssi_by_image.npy",
     "expected": "stabilized_expected_spikes_by_image.npy",
@@ -65,19 +38,18 @@ OUTPUT_FILES = {
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--matrix-dir", type=Path, default=DEFAULT_MATRIX_DIR)
+    parser.add_argument("--matrix-dir", type=Path, required=True)
     parser.add_argument("--out-dir", type=Path, default=None)
-    parser.add_argument("--rr100-version", type=str, default=RR100_VERSION)
-    parser.add_argument("--checkpoint-path", type=Path, default=default_checkpoint_path())
-    parser.add_argument("--dataset-configs", type=Path, default=DEFAULT_DATASET_CONFIGS)
-    parser.add_argument("--population-spec-dir", type=Path, default=DEFAULT_POPULATION_SPEC_DIR)
+    parser.add_argument("--population-version", type=str, required=True)
+    parser.add_argument("--checkpoint-path", type=Path, required=True)
+    parser.add_argument("--dataset-configs", type=Path, required=True)
+    parser.add_argument("--population-spec-dir", type=Path, required=True)
     parser.add_argument(
         "--mcfarland-outputs",
         type=Path,
-        default=Path(DEFAULT_MCFARLAND_OUTPUTS) if DEFAULT_MCFARLAND_OUTPUTS else None,
+        default=DEFAULT_MCFARLAND_OUTPUTS,
     )
     parser.add_argument("--n-timepoints", type=int, default=40)
-    parser.add_argument("--history-burn-in-samples", type=int, default=32)
     parser.add_argument("--bin-seconds", type=float, default=1.0 / 120.0)
     parser.add_argument("--patch-size-px", type=int, default=540)
     parser.add_argument("--device", type=str, default="cuda:0")
@@ -106,6 +78,14 @@ def read_merged_summary_defaults(matrix_dir: Path) -> dict[str, Any]:
     return summary if isinstance(summary, dict) else {}
 
 
+def selected_image_table_path(matrix_dir: Path) -> Path:
+    """Use only images scored in a shard; merged matrices use the full table."""
+    scored = Path(matrix_dir) / "scored_image_feature_table.csv"
+    if scored.exists():
+        return scored
+    return Path(matrix_dir) / "image_feature_table.csv"
+
+
 def main() -> int:
     args = parse_args()
     matrix_dir = Path(args.matrix_dir)
@@ -118,14 +98,15 @@ def main() -> int:
 
     summary_defaults = read_merged_summary_defaults(matrix_dir)
     n_timepoints = int(summary_defaults.get("n_timepoints", args.n_timepoints))
-    history_burn_in_samples = int(
-        summary_defaults.get("history_burn_in_samples", args.history_burn_in_samples)
-    )
     bin_seconds = float(summary_defaults.get("bin_seconds", args.bin_seconds))
     patch_size_px = int(summary_defaults.get("patch_size_px", args.patch_size_px))
-    rr100_version = str(summary_defaults.get("rr100_version", args.rr100_version))
+    population_version = str(summary_defaults.get("population_version", args.population_version))
+    if population_version != str(args.population_version):
+        raise ValueError(
+            "matrix population version does not match the requested exact-unit population"
+        )
 
-    image_path = matrix_dir / "image_feature_table.csv"
+    image_path = selected_image_table_path(matrix_dir)
     unit_path = matrix_dir / "unit_feature_table.csv"
     if not image_path.exists():
         raise FileNotFoundError(f"Missing selected image table: {image_path}")
@@ -140,12 +121,12 @@ def main() -> int:
         checkpoint_path=Path(args.checkpoint_path),
         dataset_configs=Path(args.dataset_configs),
         population_spec_dir=Path(args.population_spec_dir),
-        rr100_version=rr100_version,
+        population_version=population_version,
         device=str(args.device),
         mcfarland_outputs=Path(args.mcfarland_outputs) if args.mcfarland_outputs is not None else None,
     )
     if int(scorer.n_units) != int(units.shape[0]):
-        raise ValueError(f"RR100 scorer has {scorer.n_units} units but unit_feature_table has {units.shape[0]} rows.")
+        raise ValueError(f"Population scorer has {scorer.n_units} units but unit_feature_table has {units.shape[0]} rows.")
 
     ssi, expected, mean_rate, population, rows, timing = score_stabilized_images(
         scorer=scorer,
@@ -154,7 +135,6 @@ def main() -> int:
         n_timepoints=n_timepoints,
         bin_seconds=bin_seconds,
         patch_size_px=patch_size_px,
-        history_burn_in_samples=history_burn_in_samples,
     )
     np.save(out_dir / OUTPUT_FILES["ssi"], ssi)
     np.save(out_dir / OUTPUT_FILES["expected"], expected)
@@ -166,13 +146,12 @@ def main() -> int:
         "analysis": "backimage_real_trace_stabilized_baseline",
         "matrix_dir": matrix_dir,
         "out_dir": out_dir,
-        "rr100_version": rr100_version,
+        "image_table": image_path,
+        "image_indices": images["image_index"].astype(int).tolist(),
+        "population_version": population_version,
         "n_images": int(images.shape[0]),
         "n_units": int(scorer.n_units),
         "n_timepoints": n_timepoints,
-        "history_burn_in_samples": history_burn_in_samples,
-        "scored_trace_samples": n_timepoints,
-        "model_trace_samples": history_burn_in_samples + n_timepoints,
         "bin_seconds": bin_seconds,
         "patch_size_px": patch_size_px,
         "device": str(args.device),
@@ -182,8 +161,8 @@ def main() -> int:
         "model_provenance": scorer.provenance,
         "outputs": {key: out_dir / name for key, name in OUTPUT_FILES.items()},
         "contract": (
-            "Rows are selected images in image_feature_table order. Each row is a counterfactually stabilized "
-            "zero-motion movie scored with the same time-resolved spatial SSI calculation and RR100 population "
+            "Rows are selected images in the recorded image-table order. Each row is a counterfactually stabilized "
+            "zero-motion movie scored with the same time-resolved spatial SSI calculation and declared population "
             "view as the real-trace image x trace matrix."
         ),
     }
