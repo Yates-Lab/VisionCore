@@ -41,6 +41,30 @@ downstream artifact. Do not change a checkpoint path in an individual figure
 script, infer units by array position, or reuse a cache with a different
 digest.
 
+## Executable source boundary
+
+Each manuscript-facing runner declares its executable roots explicitly. The
+shared resolver in
+[`paper/production_source_closure.py`](paper/production_source_closure.py)
+then follows only transitive repository-local imports. These derived closures,
+rather than directory wildcards, are what the run manifests hash. A new Python
+file placed next to a production script is therefore neither executed nor
+silently added to provenance.
+
+Audit all three closures and fail on any undeclared Figure 4 module with:
+
+```bash
+conda run -n yatesfv python paper/audit_production_source_closure.py \
+  --output /path/to/external/production_source_closure_audit.json
+```
+
+The focused Figure 4 primitives are split by measurement boundary:
+`eye_trace_filter.py` owns raw-DDPI filtering, `retinal_replay.py` owns movie
+rendering and causal histories, `spectral_power.py` owns rendered SFxTF power
+and passband projections, and `population_response.py` owns the all-unit Panel
+B estimands and crossed bootstrap. Exploratory alternatives are retained only
+on the development archive branch, not in this production branch.
+
 ## 1. Three-stage native-240 fitting
 
 The curriculum and handoff policies are documented in
@@ -202,7 +226,9 @@ conda run -n yatesfv python -m pytest -q \
   tests/test_fig4_real_trace_matrix_plan.py \
   tests/test_panel_a_exemplar_audit.py \
   tests/test_matrix_spectral_replay.py \
+  tests/test_population_response.py \
   tests/test_passband_path_length_comparison.py \
+  tests/test_production_source_closure.py \
   tests/test_top_passband_stage_trajectory.py \
   tests/test_figure4_renderer.py \
   tests/test_run_production_figure4.py

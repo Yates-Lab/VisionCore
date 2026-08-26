@@ -9,8 +9,8 @@ SF x TF x orientation predictors, then joins them to the cached moving and
 stabilized responses after strict image, trace, unit, filter, and checkpoint
 checks.
 
-The output uses the same compact archive contract as ``run_retinal_causal_chain``
-so downstream mechanism plots can consume either source without special cases.
+The output stores only the compact spectral and response summaries required by
+the downstream mechanism panels.
 """
 from __future__ import annotations
 
@@ -29,13 +29,11 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from paper.fig4.spatiotemporal_tuning.analyze_direct_rendered_joint_engagement import (  # noqa: E402
+from paper.fig4.spatiotemporal_tuning.retinal_replay import (  # noqa: E402
     render_movies,
 )
-from paper.fig4.spatiotemporal_tuning.compute_native_rucci_overlap import (  # noqa: E402
+from paper.fig4.spatiotemporal_tuning.spectral_power import (  # noqa: E402
     frequency_grid,
-)
-from paper.fig4.spatiotemporal_tuning.run_retinal_causal_chain import (  # noqa: E402
     interpolate_tuning_temporal,
     load_signed_projection_controls,
     load_tuning_tensors,

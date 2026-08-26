@@ -22,24 +22,42 @@ from typing import Any
 
 import yaml
 
-
 ROOT = Path(__file__).resolve().parents[3]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from paper.production_source_closure import source_closure  # noqa: E402
+
+
 DEFAULT_MODEL_SPEC = ROOT / "paper/model_selection/production_model.yaml"
 
-ANALYSIS_CODE = tuple(
-    sorted((ROOT / "paper/fig4/spatiotemporal_tuning").glob("*.py"))
-) + (
+PRODUCTION_ENTRYPOINTS = (
+    Path(__file__).resolve(),
+    ROOT / "paper/fig4/spatiotemporal_tuning/run_exact_cid_drifting_tuning.py",
+    ROOT / "paper/fig4/spatiotemporal_tuning/audit_exact_cid_drifting_tuning.py",
+    ROOT / "paper/fig4/spatiotemporal_tuning/build_exact_cid_figure4_contract.py",
+    ROOT / "paper/fig4/spatiotemporal_tuning/build_all_available_population_spec.py",
+    ROOT / "paper/fig4/spatiotemporal_tuning/build_real_fixation_bank.py",
     ROOT / "paper/fig4/upstream/run_real_trace_matrix.py",
-    ROOT / "paper/fig4/upstream/merge_backimage_real_trace_ssi_matrix_shards.py",
     ROOT / "paper/fig4/upstream/score_real_trace_matrix.py",
+    ROOT / "paper/fig4/upstream/merge_backimage_real_trace_ssi_matrix_shards.py",
     ROOT / "paper/fig4/upstream/score_real_trace_stabilized_baseline.py",
-    ROOT / "paper/fig4/upstream/real_trace_matrix/core.py",
-    ROOT / "paper/fig4/upstream/real_trace_matrix/model.py",
-    ROOT / "paper/model_selection/native_twin.py",
-    ROOT / "paper/model_selection/evaluate_real_grating_tuning.py",
-    ROOT / "paper/model_selection/render_real_grating_tuning_comparison.py",
-    ROOT / "eval/real_grating_tuning.py",
+    ROOT / "paper/fig4/spatiotemporal_tuning/audit_panel_a_exemplars.py",
+    ROOT / "paper/fig4/spatiotemporal_tuning/build_panel_b_population_path_length.py",
+    ROOT / "paper/fig4/spatiotemporal_tuning/build_rucci_ensemble_power.py",
+    ROOT / "paper/fig4/spatiotemporal_tuning/build_matrix_spectral_replay.py",
+    ROOT / "paper/fig4/spatiotemporal_tuning/compare_passband_path_length.py",
+    ROOT / "paper/fig4/spatiotemporal_tuning/analyze_top_passband_stage_trajectory.py",
+    ROOT / "paper/fig4/spatiotemporal_tuning/audit_eye_trace_filter.py",
+    ROOT / "paper/fig4/spatiotemporal_tuning/build_figure4.py",
+    ROOT / "paper/fig4/spatiotemporal_tuning/audit_revised_figure4_release.py",
+    ROOT / "paper/fig4/spatiotemporal_tuning/build_figure4_results_provenance.py",
 )
+
+
+def production_source_closure() -> tuple[Path, ...]:
+    """Return the executable Figure-4 source graph from declared roots."""
+    return source_closure(ROOT, PRODUCTION_ENTRYPOINTS)
 
 
 def parse_args() -> argparse.Namespace:
@@ -270,9 +288,7 @@ def main() -> int:
     )
     for member in required_members:
         require_file(member, str(member))
-    missing_code = [str(path) for path in ANALYSIS_CODE if not path.is_file()]
-    if missing_code:
-        raise FileNotFoundError(f"Figure-4 source closure is incomplete: {missing_code}")
+    analysis_code = production_source_closure()
 
     trajectory_summary = load_json(paths["trajectory"] / "summary.json")
     n_movies = int(trajectory_summary.get("n_image_trace_pairs", 0))
@@ -307,7 +323,7 @@ def main() -> int:
             for name, path in hashed_inputs.items()
         },
         "analysis_code_sha256": {
-            str(path.relative_to(ROOT)): sha256(path) for path in ANALYSIS_CODE
+            str(path.relative_to(ROOT)): sha256(path) for path in analysis_code
         },
         "commands": [shlex.join(command) for command in commands],
         "git": git_provenance(),

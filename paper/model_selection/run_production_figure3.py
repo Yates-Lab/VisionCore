@@ -16,30 +16,26 @@ from typing import Any
 
 import yaml
 
-
 ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from paper.production_source_closure import source_closure  # noqa: E402
+
+
 DEFAULT_SPEC = ROOT / "paper/model_selection/production_model.yaml"
 
 
-ANALYSIS_CODE = (
+FIGURE3_ENTRYPOINTS = (
     Path(__file__).resolve(),
     ROOT / "paper/model_selection/regen_fig3_caches.py",
-    ROOT / "paper/fig3/_fig3_data.py",
-    ROOT / "paper/fig3/_fig3_ablation_data.py",
-    ROOT / "paper/fig3/_fig3_explainable_variance.py",
-    ROOT / "paper/fig3/_fig3_femfraction.py",
-    ROOT / "paper/fig3/_fig3_helpers.py",
-    ROOT / "paper/fig3/_fig3a_data.py",
-    ROOT / "paper/fig3/_fig3a_glyphs.py",
     ROOT / "paper/fig3/audit_ablation_cache.py",
-    ROOT / "paper/fig3/generate_fig3a.py",
     ROOT / "paper/fig3/generate_figure3.py",
-    ROOT / "paper/covariance_decomposition/data_loading.py",
-    ROOT / "paper/covariance_decomposition/derive.py",
-    ROOT / "paper/covariance_decomposition/fig3_windows.py",
-    ROOT / "paper/covariance_decomposition/model_decompose.py",
-    ROOT / "eval/eval_stack_multidataset.py",
 )
+
+
+def production_source_closure() -> tuple[Path, ...]:
+    return source_closure(ROOT, FIGURE3_ENTRYPOINTS)
 
 
 def resolve(path: str | Path) -> Path:
@@ -125,9 +121,7 @@ def main() -> int:
     covdecomp_aligned = existing(
         args.covdecomp_aligned_cache, "aligned covariance cache"
     )
-    missing_code = [str(path) for path in ANALYSIS_CODE if not path.is_file()]
-    if missing_code:
-        raise FileNotFoundError(f"Figure-3 source closure is incomplete: {missing_code}")
+    analysis_code = production_source_closure()
     if not args.dry_run and os.environ.get("CONDA_DEFAULT_ENV") != "yatesfv":
         raise RuntimeError(
             "Production Figure 3 must run in conda environment 'yatesfv'."
@@ -195,7 +189,7 @@ def main() -> int:
         "covdecomp_aligned_cache": str(covdecomp_aligned),
         "covdecomp_aligned_cache_sha256": sha256(covdecomp_aligned),
         "analysis_code_sha256": {
-            str(path.relative_to(ROOT)): sha256(path) for path in ANALYSIS_CODE
+            str(path.relative_to(ROOT)): sha256(path) for path in analysis_code
         },
         "git": git_provenance(),
         "output_root": str(output),

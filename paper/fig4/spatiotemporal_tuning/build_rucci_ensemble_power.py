@@ -33,10 +33,8 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from paper.fig4.spatiotemporal_tuning.analyze_direct_rendered_joint_engagement import (  # noqa: E402
+from paper.fig4.spatiotemporal_tuning.spectral_power import (  # noqa: E402
     mode_to_grid_matrix,
-)
-from paper.fig4.spatiotemporal_tuning.run_retinal_power_visualization import (  # noqa: E402
     spatial_frequency_grid,
 )
 from paper.fig4.upstream.real_trace_matrix.core import (  # noqa: E402

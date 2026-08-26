@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from paper.fig4.spatiotemporal_tuning.analyze_direct_rendered_joint_engagement import (  # noqa: E402
+from paper.fig4.spatiotemporal_tuning.retinal_replay import (  # noqa: E402
     render_movies,
 )
 from paper.fig4.spatiotemporal_tuning._spectral_shards import (  # noqa: E402

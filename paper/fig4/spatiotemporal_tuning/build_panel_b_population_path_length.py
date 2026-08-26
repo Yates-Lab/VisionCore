@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from paper.fig4.spatiotemporal_tuning.compare_motion_metrics import (
+from paper.fig4.spatiotemporal_tuning.population_response import (
     _population_arrays,
     assert_selected_matrix,
     configure,

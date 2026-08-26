@@ -40,15 +40,13 @@ if str(ROOT) not in sys.path:
 from paper.fig4.spatiotemporal_tuning._spectral_shards import (  # noqa: E402
     load_and_merge_shards,
 )
-from paper.fig4.spatiotemporal_tuning.audit_actual_nonlinear_sharpening import (  # noqa: E402
+from paper.fig4.spatiotemporal_tuning.retinal_replay import (  # noqa: E402
     causal_histories,
+    DEFAULT_MCFARLAND,
     evenly_spaced_rows,
 )
 from paper.fig4.spatiotemporal_tuning._figure4_renderer import (  # noqa: E402
     _direct_mechanism_values,
-)
-from paper.fig4.spatiotemporal_tuning.run_retinal_causal_chain import (  # noqa: E402
-    DEFAULT_MCFARLAND,
 )
 from paper.fig4.upstream.real_trace_matrix.core import extract_patch  # noqa: E402
 from paper.fig4.upstream.real_trace_matrix.model import (  # noqa: E402

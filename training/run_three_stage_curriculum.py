@@ -25,6 +25,16 @@ import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from paper.production_source_closure import source_closure  # noqa: E402
+
+
+TRAINING_ENTRYPOINTS = (
+    Path(__file__).resolve(),
+    REPO_ROOT / "training/train_multidataset.py",
+)
 VAL_BPS_PATTERN = re.compile(r"val_bps_overall=([-+]?(?:\d+(?:\.\d*)?|\.\d+))\.ckpt$")
 ALLOWED_REGULARIZERS = {
     "laplacian",
@@ -34,6 +44,10 @@ ALLOWED_REGULARIZERS = {
     "proximal_clamp_positive",
     "proximal_clamp_min",
 }
+
+
+def production_source_closure() -> tuple[Path, ...]:
+    return source_closure(REPO_ROOT, TRAINING_ENTRYPOINTS)
 
 
 def _resolve(path: str | Path) -> Path:
@@ -212,10 +226,10 @@ def _git_metadata() -> dict[str, Any]:
 
 
 def build_manifest(spec_path: Path, spec: dict[str, Any], run_id: str, gpu: int) -> dict[str, Any]:
-    tracked = [spec_path, _resolve(spec.get("trainer", "training/train_multidataset.py"))]
+    tracked = [spec_path]
     for stage in spec["stages"]:
         tracked.extend([_resolve(stage["model_config"]), _resolve(stage["dataset_config"])])
-    tracked.append(Path(__file__).resolve())
+    tracked.extend(production_source_closure())
     hashes = {str(path.relative_to(REPO_ROOT)): _sha256(path) for path in dict.fromkeys(tracked)}
     return {
         "schema_version": 1,

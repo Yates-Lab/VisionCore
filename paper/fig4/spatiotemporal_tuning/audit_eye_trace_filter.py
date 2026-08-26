@@ -26,15 +26,12 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from paper.fig4.spatiotemporal_tuning.run_retinal_causal_chain import DEFAULT_CHAIN
-
-
 EPS = np.finfo(np.float64).eps
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--fixation-bank", type=Path, default=DEFAULT_CHAIN / "fixation_bank")
+    parser.add_argument("--fixation-bank", type=Path, required=True)
     parser.add_argument("--out-dir", type=Path, required=True)
     parser.add_argument("--candidate-passbands-hz", type=float, nargs="+", default=(10, 15, 20, 30, 40, 60, 80, 100))
     parser.add_argument("--primary-passband-hz", type=float, default=20.0)

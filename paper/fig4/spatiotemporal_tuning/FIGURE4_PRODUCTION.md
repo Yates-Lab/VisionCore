@@ -6,6 +6,20 @@ Every Python command must run in the `yatesfv` environment with
 identities, eye-trace filter, and input tables must be explicit artifacts; no
 script may infer or substitute them from a model nickname.
 
+The production entry point declares every executable root in
+`run_production_figure4.py`; `paper/production_source_closure.py` follows their
+transitive repository-local imports and the manifest hashes that exact graph.
+No directory wildcard defines the release boundary. Run
+`paper/audit_production_source_closure.py` before handoff; it fails if a Python
+module in this Figure 4 directory is outside the declared graph.
+
+Shared measurement code is intentionally narrow: `eye_trace_filter.py`
+implements the audited DDPI filter, `retinal_replay.py` renders retinal movies
+and causal histories, `spectral_power.py` computes rendered SFxTF power and
+passband projections, and `population_response.py` computes the Panel B
+population estimands and crossed bootstrap. Production builders import these
+primitives rather than carrying private variants.
+
 ## Scientific narrative
 
 1. **A:** A filtered real fixation and its lag-aligned stabilized

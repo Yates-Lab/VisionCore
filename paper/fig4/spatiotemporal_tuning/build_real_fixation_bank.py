@@ -35,7 +35,7 @@ for candidate in (ROOT, DATAYATES_ROOT):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
 
-from paper.fig4.spatiotemporal_tuning.run_real_backimage_power import (
+from paper.fig4.spatiotemporal_tuning.eye_trace_filter import (
     anti_alias_eye_position,
     load_ddpi,
 )
