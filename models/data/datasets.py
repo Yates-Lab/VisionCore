@@ -383,6 +383,13 @@ class CombinedEmbeddedDataset(torch.utils.data.Dataset):
 
                 # Retrieve data with time embedding and store in output
                 out_dict[key][dset_final_inds == iD] = dset[key][keys_inds]
+
+        # Keep the identity of the physical stimulus bank (for example
+        # backimage/gaborium/gratings) separate from the outer multisession
+        # ``dataset_idx`` tag.  This makes stimulus-balanced likelihood
+        # training possible without inferring stimulus identity from rows or
+        # changing the tensors presented to the model.
+        out_dict["stimulus_type_idx"] = sample_inds[:, 0].clone()
         
         # permute stim if necessary
         if 'stim' in out_dict and out_dict['stim'].ndimension() == 5:
@@ -538,6 +545,12 @@ class CombinedEmbeddedDataset(torch.utils.data.Dataset):
         for key in target_keys:
             if protect_keys is not None and key in protect_keys:
                 continue
-            # Only update dtype if the original was floating point (matching DictDataset.cast behavior)
-            if self.keys_dtypes[key].is_floating_point and torch.can_cast(self.keys_dtypes[key], dtype):
+            # Match DictDataset.cast: every floating-point backing tensor is
+            # explicitly converted, including float -> uint8 storage.  The
+            # prior torch.can_cast guard left this metadata as float32 even
+            # after the backing stimulus became uint8, causing assignment
+            # failures during temporal embedding.
+            if self.keys_dtypes[key].is_floating_point:
                 self.keys_dtypes[key] = dtype
+
+        return self

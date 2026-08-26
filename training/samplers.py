@@ -267,7 +267,9 @@ class ByDatasetBatchSampler(Sampler):
     """
 
     def __init__(self, cat, name2idx, batch_size, contrast_scores=None,
-                 warmup_steps=8000, shuffle=True, drop_last=True, seed=0):
+                 sample_scores=None,
+                 warmup_steps=8000, shuffle=True, drop_last=True, seed=0,
+                 fixed_random=False, dataset_sampling="proportional"):
         # torch.utils.data.Sampler.__init__ no longer accepts a data_source
         # argument (removed after deprecation; torch >= 2.6), so passing one
         # falls through to object.__init__ and raises TypeError. The dataset is
@@ -278,8 +280,16 @@ class ByDatasetBatchSampler(Sampler):
         self.shuffle = bool(shuffle)
         self.drop_last = bool(drop_last)
         self.seed = int(seed)
+        self.fixed_random = bool(fixed_random)
         self.warmup_steps = int(warmup_steps)
         self.contrast_scores = contrast_scores or {}
+        self.sample_scores = sample_scores or {}
+        self.dataset_sampling = str(dataset_sampling)
+        if self.dataset_sampling not in {"proportional", "uniform"}:
+            raise ValueError(
+                "dataset_sampling must be 'proportional' or 'uniform', got "
+                f"{self.dataset_sampling!r}"
+            )
 
         # Reverse map idx->name to resolve contrast by dataset
         self.idx2name = {v: k for k, v in name2idx.items()}
@@ -297,6 +307,7 @@ class ByDatasetBatchSampler(Sampler):
 
         # Pre-cache per-subdataset contrast vectors aligned to local indices
         self._local_contrasts = []
+        self._local_sample_scores = []
         for (start, end, ds_idx, ds_name) in self._ranges:
             size = end - start
             vec = None
@@ -306,18 +317,50 @@ class ByDatasetBatchSampler(Sampler):
                     vec = cs[:size].to(dtype=torch.float32)
             if vec is None:
                 vec = torch.ones(size, dtype=torch.float32)
+            sample_vec = torch.ones(size, dtype=torch.float32)
+            if ds_name is not None and ds_name in self.sample_scores:
+                configured = self.sample_scores[ds_name]
+                if not isinstance(configured, torch.Tensor) or configured.numel() < size:
+                    raise ValueError(
+                        f"sample_scores[{ds_name!r}] must contain at least {size} values"
+                    )
+                sample_vec = configured[:size].to(dtype=torch.float32)
             self._local_contrasts.append(vec)
+            self._local_sample_scores.append(sample_vec)
 
         # Dataset-level sizes and probabilities for choosing which dataset to draw next batch from
         self._sizes = torch.tensor([end - start for (start, end, *_rest) in self._ranges], dtype=torch.float64)
-        total = float(self._sizes.sum()) if len(self._sizes) > 0 else 1.0
-        self._dataset_probs = (self._sizes / total).to(dtype=torch.float64)
+        if self.dataset_sampling == "uniform":
+            self._dataset_probs = torch.ones_like(self._sizes)
+            if len(self._dataset_probs):
+                self._dataset_probs /= float(len(self._dataset_probs))
+        else:
+            total = float(self._sizes.sum()) if len(self._sizes) > 0 else 1.0
+            self._dataset_probs = (self._sizes / total).to(dtype=torch.float64)
 
         # Internal step counter for curriculum; updated by CurriculumCallback via set_step
         self._step = 0
 
+        # Passes completed. The seed must advance between epochs on its own:
+        # `_step` only moves when CurriculumCallback is registered, which
+        # `train_multidataset.py` does solely under --enable_curriculum, so
+        # without this counter every epoch re-drew the identical batch
+        # sequence. Combined with limit_train_batches that meant a run saw one
+        # epoch's worth of samples repeated for its whole duration.
+        self._epoch = 0
+
     def set_step(self, step: int):
         self._step = int(step)
+
+    def set_epoch(self, epoch: int):
+        """Synchronize the deterministic draw counter with trainer epoch.
+
+        Lightning restores ``current_epoch`` but does not checkpoint this
+        custom batch sampler.  Calling this at each train-epoch boundary makes
+        a resumed run draw exactly the epoch it would have drawn without an
+        interruption, while preserving epoch-zero behavior for fresh runs.
+        """
+        self._epoch = int(epoch)
 
     def _alpha(self) -> float:
         # Blend coefficient from 0.5 to 1.0 across warmup_steps
@@ -326,11 +369,59 @@ class ByDatasetBatchSampler(Sampler):
         return 0.5 + 0.5 * (float(self._step) / float(self.warmup_steps))
 
     def __iter__(self):
-        # RNG for reproducibility across epochs (no epoch hook here; simple seed)
-        g = torch.Generator()
-        g.manual_seed(self.seed + self._step)
+        if not self.shuffle:
+            # Evaluation must be deterministic and must never repeat the first
+            # few rows of a session. Build nonrepeating homogeneous batches
+            # from either sequential or fixed-random local order, then
+            # interleave sessions round-robin so a ``limit_val_batches``
+            # prefix represents every recording.
+            per_dataset = []
+            for dataset_number, (start, end, _ds_idx, _ds_name) in enumerate(self._ranges):
+                local = torch.arange(int(end) - int(start))
+                if self.fixed_random and len(local):
+                    generator = torch.Generator().manual_seed(
+                        self.seed + 104_729 * dataset_number
+                    )
+                    local = local[torch.randperm(len(local), generator=generator)]
+                batches = []
+                cursor = 0
+                while cursor < len(local):
+                    stop = min(cursor + self.batch_size, len(local))
+                    if stop - cursor < self.batch_size and self.drop_last:
+                        break
+                    batches.append((local[cursor:stop] + int(start)).tolist())
+                    cursor = stop
+                per_dataset.append(batches)
+            batch_idx = 0
+            while True:
+                yielded = False
+                for batches in per_dataset:
+                    if batch_idx < len(batches):
+                        yielded = True
+                        yield batches[batch_idx]
+                if not yielded:
+                    break
+                batch_idx += 1
+            return
 
-        # Choose dataset order for this epoch (size-proportional or uniform when not shuffle)
+        # Deterministic given (seed, step, epoch), but *different every epoch*.
+        # A DataLoader re-enters __iter__ once per epoch, so seeding on
+        # `self.seed + self._step` alone made every epoch identical whenever
+        # `_step` was frozen at 0 -- which is the default, since only
+        # CurriculumCallback advances it and that is registered only under
+        # --enable_curriculum. The epoch term makes a fresh draw the default
+        # while leaving the curriculum path's step-dependence intact.
+        #
+        # The first pass is unchanged (epoch 0), so a single-epoch run is
+        # bitwise what it was before.
+        g = torch.Generator()
+        g.manual_seed(self.seed + self._step + 1_000_003 * self._epoch)
+        self._epoch += 1
+
+        # Choose dataset order for this epoch. Ordinary joint core training is
+        # size-proportional. Frozen multisession head calibration can request
+        # uniform sampling so small recordings receive the same number of
+        # readout updates as large recordings.
         dataset_indices = torch.arange(len(self._ranges))
         if self.shuffle and len(self._ranges) > 0:
             # Sample dataset indices with replacement proportional to dataset sizes
@@ -357,6 +448,7 @@ class ByDatasetBatchSampler(Sampler):
             local_weights = self._local_contrasts[dsj]
             # Blend toward uniform via clamping
             weights = torch.clamp(alpha * local_weights, max=1.0)
+            weights = weights * self._local_sample_scores[dsj]
 
             if self.shuffle:
                 # Sample local indices (with replacement when needed)
@@ -373,6 +465,13 @@ class ByDatasetBatchSampler(Sampler):
             yield global_idx
 
     def __len__(self) -> int:
+        if not self.shuffle:
+            if self.drop_last:
+                return sum((end - start) // self.batch_size for start, end, *_ in self._ranges)
+            return sum(
+                (end - start + self.batch_size - 1) // self.batch_size
+                for start, end, *_ in self._ranges
+            )
         total = sum(end - start for (start, end, *_rest) in self._ranges)
         if self.drop_last:
             return max(total // self.batch_size, 0)

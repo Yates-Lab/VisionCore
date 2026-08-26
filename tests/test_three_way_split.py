@@ -12,7 +12,11 @@ import pytest
 import torch
 
 from models.data.datasets import DictDataset
-from models.data.loading import get_embedded_datasets, resolve_split_fractions
+from models.data.loading import (
+    get_embedded_datasets,
+    prepare_data,
+    resolve_split_fractions,
+)
 from models.data.splitting import (
     split_inds_by_trial,
     split_inds_by_trial_train_val_test,
@@ -24,7 +28,13 @@ BINS_PER_TRIAL = 12
 SEED = 1002
 
 
-def _make_dset(n_trials=N_TRIALS, bins=BINS_PER_TRIAL, n_units=5, seed=0):
+def _make_dset(
+    n_trials=N_TRIALS,
+    bins=BINS_PER_TRIAL,
+    n_units=5,
+    seed=0,
+    name=None,
+):
     """Synthetic single-session DictDataset with clean trial structure."""
     rng = np.random.default_rng(seed)
     n = n_trials * bins
@@ -34,7 +44,7 @@ def _make_dset(n_trials=N_TRIALS, bins=BINS_PER_TRIAL, n_units=5, seed=0):
         "robs": torch.from_numpy(rng.poisson(1.0, size=(n, n_units)).astype(np.float32)),
         "dfs": torch.ones(n, n_units),
         "trial_inds": torch.from_numpy(trial_inds.astype(np.int64)),
-    })
+    }, metadata={} if name is None else {"name": name})
 
 
 def _trials_of(dset, inds):
@@ -190,3 +200,53 @@ def test_test_split_applies_per_sub_dataset():
 
     assert len(test_dset.dset_inds) == 2
     assert all(len(x) > 0 for x in test_dset.dset_inds)
+
+
+def test_train_all_types_exposes_every_valid_repeat_only_for_named_bank():
+    backimage = _make_dset(seed=1, name="backimage")
+    gratings = _make_dset(seed=2, name="gratings")
+    train, val, test = get_embedded_datasets(
+        sess=None,
+        types=[backimage, gratings],
+        keys_lags={"robs": 0, "stim": [0, 1, 2], "dfs": 0},
+        train_val_split=0.70,
+        cids=None,
+        seed=SEED,
+        pre_func=lambda x: x,
+        test_split=0.15,
+        train_all_types=["gratings"],
+    )
+
+    valid_backimage = backimage["dfs"].any(dim=1).nonzero(as_tuple=True)[0]
+    valid_gratings = gratings["dfs"].any(dim=1).nonzero(as_tuple=True)[0]
+    assert torch.equal(train.dset_inds[1], valid_gratings)
+    assert len(train.dset_inds[0]) < len(valid_backimage)
+    # The ordinary diagnostic views remain present even though their grating
+    # trials are intentionally also available to training.
+    assert len(val.dset_inds[1]) > 0
+    assert len(test.dset_inds[1]) > 0
+
+
+def test_train_all_types_rejects_misspelled_bank_name():
+    gratings = _make_dset(seed=2, name="gratings")
+    with pytest.raises(ValueError, match="absent"):
+        get_embedded_datasets(
+            sess=None,
+            types=[gratings],
+            keys_lags={"robs": 0, "stim": [0, 1, 2], "dfs": 0},
+            train_val_split=0.70,
+            cids=None,
+            seed=SEED,
+            pre_func=lambda x: x,
+            test_split=0.15,
+            train_all_types=["grating"],
+        )
+
+
+def test_prepare_data_rejects_train_all_name_absent_from_config_before_loading():
+    with pytest.raises(ValueError, match="configured stimulus banks"):
+        prepare_data({
+            "session": "unused_session",
+            "types": ["backimage"],
+            "train_all_stimulus_types": ["gratings"],
+        })

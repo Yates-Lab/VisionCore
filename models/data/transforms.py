@@ -151,6 +151,30 @@ def _make_pixelnorm(cfg, dataset_config=None):
         return (x.float() - 127) / 255
     return pixelnorm
 
+
+@_register("center_crop")
+def _make_center_crop(cfg, dataset_config=None):
+    """Crop the final two dimensions before temporal embedding."""
+    size = cfg if isinstance(cfg, int) else cfg.get("size", 35)
+    if isinstance(size, int):
+        target_h = target_w = size
+    else:
+        if len(size) != 2:
+            raise ValueError("center_crop size must be an int or [height, width]")
+        target_h, target_w = (int(size[0]), int(size[1]))
+
+    def center_crop(x: torch.Tensor):
+        height, width = x.shape[-2:]
+        if target_h > height or target_w > width:
+            raise ValueError(
+                f"Cannot center-crop {height}x{width} to {target_h}x{target_w}"
+            )
+        top = (height - target_h) // 2
+        left = (width - target_w) // 2
+        return x[..., top:top + target_h, left:left + target_w]
+
+    return center_crop
+
 @_register("diff")
 def _make_diff(cfg, dataset_config=None):
     axis = cfg.get("axis", 0)
@@ -443,4 +467,3 @@ def make_pipeline(op_list: List[Dict[str, Any]], dataset_config: Dict[str, Any] 
             x = fn(x)
         return x
     return pipeline
-

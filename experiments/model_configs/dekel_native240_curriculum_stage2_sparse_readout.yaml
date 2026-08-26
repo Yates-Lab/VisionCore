@@ -1,0 +1,140 @@
+# Stage 2 of the production native-240-Hz curriculum.
+#
+# The core and behavior pathway loaded from stage 1 are frozen.  An ordinary
+# Gaussian head is exactly embedded in a speckled sparse-Gaussian head, and a
+# zero-output rank-four signed stage-1 branch is added.  Only the two readout
+# families optimize Poisson spike likelihood.  Gratings are sampled more often
+# but their loss is not reweighted.
+model_type: v1multi
+sampling_rate: 240
+initial_input_channels: 1
+stimulus_sampling_weights: {gratings: 16.0}
+dataset_sampling: uniform
+trainable_components: [readouts, phase_readouts]
+
+adapter: {type: none, params: {}}
+frontend: {type: none, params: {}}
+
+convnet:
+  type: dekel
+  params:
+    temporal_support: 60
+    temporal_channels: 14
+    spatial_channels: [84, 84, 84]
+    spatial_kernels: [15, 11, 9]
+    norm_groups: [14, 28, 21, 14]
+    normalization:
+      type: groupnorm_lrn_presplit
+      lrn_size: 5
+      lrn_alpha: 0.1
+      lrn_beta: 0.75
+      lrn_k: 1.0
+    input_size: [35, 35]
+    scaffold_size: 9
+    scaffold_mode: nearest
+    pool_norm: 5
+    strict_input_size: true
+    phase_tap: stage1_signed
+    frequency_mask:
+      temporal: true
+      stem_spatial: true
+      hidden_spatial: false
+      window: hann
+      fft_pad: 2
+
+modulator:
+  type: mlp_behavior
+  params:
+    behavior_dim: 42
+    hidden_dims: [128]
+    additive_dim: 64
+    activation: gelu
+    dropout: 0.0
+    input_norm: false
+    use_film: true
+    film_max_gain: 0.5
+
+recurrent: {type: none, params: {}}
+
+readout:
+  type: sparse_gaussian
+  params:
+    n_units: 8
+    bias: true
+    spatial_shape: [9, 9]
+    initial_std: 1.0
+    initial_mean_scale: 0.1
+    migration_std_floor: 0.75
+
+phase_readout:
+  type: sparse_gaussian_low_rank
+  params:
+    n_units: 8
+    rank: 4
+    bias: false
+    spatial_shape: [35, 35]
+    initial_std: 3.0
+    initial_mean_scale: 0.1
+    migration_std_floor: 0.0
+    zero_features: true
+    output_scale: 35.0
+
+output_activation: softplus
+
+regularization:
+  - name: normalize_deep_space
+    type: proximal_unit_norm
+    lambda: 1.0
+    apply_to: ["readouts/spatial_weights"]
+    dims: [1, 2, 3]
+    schedule: {kind: constant}
+  - name: sparse_deep_space
+    type: proximal_l1
+    lambda: 2.0e-2
+    apply_to: ["readouts/spatial_weights"]
+    scalar_lr: true
+    schedule: {kind: ramp_then_constant, start_epoch: 2, end_epoch: 12}
+  - name: sparse_deep_channels
+    type: proximal_l1
+    lambda: 1.0e-1
+    apply_to: ["readouts/features"]
+    scalar_lr: true
+    schedule: {kind: ramp_then_constant, start_epoch: 2, end_epoch: 12}
+  - name: normalize_phase_space
+    type: proximal_unit_norm
+    lambda: 1.0
+    apply_to: ["phase_readouts/spatial_weights"]
+    dims: [1, 2, 3]
+    schedule: {kind: constant}
+  - name: sparse_phase_space
+    type: proximal_l1
+    lambda: 1.0e-1
+    apply_to: ["phase_readouts/spatial_weights"]
+    scalar_lr: true
+    schedule: {kind: ramp_then_constant, start_epoch: 2, end_epoch: 12}
+  - name: sparse_phase_channels
+    type: proximal_l1
+    lambda: 2.0e-2
+    apply_to: ["phase_readouts/features"]
+    scalar_lr: true
+    schedule: {kind: ramp_then_constant, start_epoch: 2, end_epoch: 12}
+  - name: deep_gaussian_width_ceiling
+    type: proximal_clamp_positive
+    lambda: 2.0
+    apply_to: ["readouts/std"]
+    schedule: {kind: constant}
+  - name: deep_gaussian_width_floor
+    type: proximal_clamp_min
+    lambda: 0.75
+    apply_to: ["readouts/std"]
+    schedule: {kind: constant}
+  - name: phase_gaussian_width_ceiling
+    type: proximal_clamp_positive
+    lambda: 4.0
+    apply_to: ["phase_readouts/std"]
+    schedule: {kind: constant}
+  - name: phase_gaussian_width_floor
+    type: proximal_clamp_min
+    lambda: 1.0
+    apply_to: ["phase_readouts/std"]
+    schedule: {kind: constant}

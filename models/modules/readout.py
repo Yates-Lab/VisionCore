@@ -14,7 +14,14 @@ import math
 from matplotlib.patches import Ellipse
 from .norm_act_pool import get_activation_layer
 
-__all__ = ['BaseFactorizedReadout', 'DynamicGaussianReadout', 'FlattenedLinearReadout']
+__all__ = [
+    'BaseFactorizedReadout',
+    'DynamicGaussianReadout',
+    'SparseGaussianReadout',
+    'SparseGaussianLowRankReadout',
+    'SparseGaussianSignEnergyReadout',
+    'FlattenedLinearReadout',
+]
 
 # --- BaseFactorizedReadout and DynamicGaussianReadout ---
 # (Assuming these are largely okay, minor adjustments for consistency if needed)
@@ -288,6 +295,183 @@ class DynamicGaussianReadout(BaseFactorizedReadout):
             
         mask = self.compute_gaussian_mask(self._cached_H, self._cached_W, self._cached_grid.device)
         return mask # Return on whatever device it was computed, detach if sending to CPU later
+
+
+class SparseGaussianReadout(DynamicGaussianReadout):
+    """Factorized sparse readout inside a learned Gaussian envelope.
+
+    For neuron ``u`` the effective separable weight is
+
+    ``channel_weights[u, c] * spatial_weights[u, y, x] * gaussian[u, y, x]``.
+
+    The Gaussian is an envelope, not the spatial readout itself.  Consequently
+    proximal sparsity can select both a small set of core channels and a small
+    set of spatial coefficients while the envelope suppresses distant weights.
+    This is the hybrid readout used in the earlier DataYatesV1 shifter work,
+    adapted to the config-driven multisession model.
+    """
+
+    def __init__(
+        self,
+        in_channels,
+        n_units,
+        bias=True,
+        initial_std=1.0,
+        initial_mean_scale=0.1,
+        spatial_shape=(9, 9),
+        migration_std_floor=0.0,
+        zero_features=False,
+        output_scale=1.0,
+    ):
+        super().__init__(
+            in_channels=in_channels,
+            n_units=n_units,
+            bias=bias,
+            initial_std=initial_std,
+            initial_mean_scale=initial_mean_scale,
+        )
+        if len(spatial_shape) != 2:
+            raise ValueError(f"spatial_shape must be [H, W], got {spatial_shape}")
+        self.spatial_shape = tuple(int(value) for value in spatial_shape)
+        if min(self.spatial_shape) < 1:
+            raise ValueError(f"spatial_shape must be positive, got {self.spatial_shape}")
+        # A narrow pretrained Gaussian can make the signed spatial map
+        # functionally one-pixel wide.  During Gaussian->sparse migration the
+        # loader may broaden the envelope to this floor and compensate in the
+        # spatial map exactly, leaving the effective readout unchanged.
+        self.migration_std_floor = float(migration_std_floor)
+        if self.migration_std_floor < 0:
+            raise ValueError("migration_std_floor must be nonnegative")
+
+        # Unit-L2 initialization resolves the feature/spatial scale ambiguity.
+        # Compensating the feature weights makes the initial effective readout
+        # identical in scale to an ordinary Gaussian readout.
+        spatial_scale = math.sqrt(float(math.prod(self.spatial_shape)))
+        self.spatial_weights = nn.Parameter(
+            torch.full((n_units, 1, *self.spatial_shape), 1.0 / spatial_scale)
+        )
+        with torch.no_grad():
+            self.features.weight.mul_(spatial_scale)
+            if zero_features:
+                self.features.weight.zero_()
+        self.zero_features_at_initialization = bool(zero_features)
+        self.output_scale = float(output_scale)
+        if not math.isfinite(self.output_scale) or self.output_scale <= 0:
+            raise ValueError("output_scale must be finite and positive")
+
+    def _spatial_map(self, height: int, width: int) -> torch.Tensor:
+        if (height, width) != self.spatial_shape:
+            raise ValueError(
+                "SparseGaussianReadout was configured for spatial shape "
+                f"{self.spatial_shape}, got {(height, width)}"
+            )
+        return self.spatial_weights[:, 0]
+
+    def effective_spatial_weights(self, height: int, width: int, device) -> torch.Tensor:
+        envelope = self.compute_gaussian_mask(height, width, device)
+        return self._spatial_map(height, width) * envelope
+
+    def forward(self, x):
+        if x.dim() == 5:
+            x = x[:, :, -1]
+        elif x.dim() != 4:
+            raise ValueError(
+                "SparseGaussianReadout expects 4D (N,C,H,W) or 5D "
+                f"(N,C,S,H,W) input, got {x.dim()}D"
+            )
+        _, _, height, width = x.shape
+        features = self.features(x)
+        spatial = self.effective_spatial_weights(height, width, x.device)
+        output = self.output_scale * (
+            features * spatial.unsqueeze(0)
+        ).sum(dim=(-2, -1))
+        if self.bias is not None:
+            output = output + self.bias
+        return output
+
+    def get_spatial_weights(self):
+        height, width = self.spatial_shape
+        return self.effective_spatial_weights(
+            height, width, self.spatial_weights.device
+        )
+
+
+class SparseGaussianLowRankReadout(SparseGaussianReadout):
+    """Sum of a few localized channel-by-space factors per neuron.
+
+    ``SparseGaussianReadout`` is rank one: every selected core channel must use
+    the same spatial weighting map.  This variant represents a neuron's readout
+    as a sum of ``rank`` separable subunits while retaining one learned Gaussian
+    RF envelope per neuron::
+
+        sum_r channel[u, r, c] * spatial[u, r, y, x] * gaussian[u, y, x]
+
+    The small explicit rank tests whether phase is lost through excessive
+    channel/spatial pooling without opening the door to a dense CxHxW tensor.
+    Proximal operators act on the channel and spatial tensors exactly as for
+    the rank-one readout.
+    """
+
+    def __init__(self, *args, rank=4, **kwargs):
+        zero_features = bool(kwargs.pop("zero_features", False))
+        super().__init__(*args, zero_features=False, **kwargs)
+        self.rank = int(rank)
+        if self.rank < 1:
+            raise ValueError("rank must be a positive integer")
+
+        self.features = nn.Conv2d(
+            self.in_channels,
+            self.n_units * self.rank,
+            kernel_size=1,
+            bias=False,
+        )
+        # Normalize jointly over rank and space.  Scaling every feature factor
+        # by sqrt(HW) gives rank-independent output variance at initialization.
+        height, width = self.spatial_shape
+        spatial = torch.randn(self.n_units, self.rank, height, width)
+        spatial = spatial / torch.linalg.vector_norm(
+            spatial, dim=(1, 2, 3), keepdim=True
+        ).clamp_min(1.0e-12)
+        self.spatial_weights = nn.Parameter(spatial)
+        with torch.no_grad():
+            self.features.weight.mul_(math.sqrt(float(height * width)))
+            if zero_features:
+                self.features.weight.zero_()
+        self.zero_features_at_initialization = zero_features
+
+    def _spatial_map(self, height: int, width: int) -> torch.Tensor:
+        if (height, width) != self.spatial_shape:
+            raise ValueError(
+                "SparseGaussianLowRankReadout was configured for spatial shape "
+                f"{self.spatial_shape}, got {(height, width)}"
+            )
+        return self.spatial_weights
+
+    def effective_spatial_weights(
+        self, height: int, width: int, device
+    ) -> torch.Tensor:
+        envelope = self.compute_gaussian_mask(height, width, device)
+        return self._spatial_map(height, width) * envelope[:, None]
+
+    def forward(self, x):
+        if x.dim() == 5:
+            x = x[:, :, -1]
+        elif x.dim() != 4:
+            raise ValueError(
+                "SparseGaussianLowRankReadout expects 4D (N,C,H,W) or 5D "
+                f"(N,C,S,H,W) input, got {x.dim()}D"
+            )
+        batch, _, height, width = x.shape
+        features = self.features(x).reshape(
+            batch, self.n_units, self.rank, height, width
+        )
+        spatial = self.effective_spatial_weights(height, width, x.device)
+        output = self.output_scale * (
+            features * spatial.unsqueeze(0)
+        ).sum(dim=(-3, -2, -1))
+        if self.bias is not None:
+            output = output + self.bias
+        return output
 
 
 # Create a custom linear readout that handles spatial dimensions

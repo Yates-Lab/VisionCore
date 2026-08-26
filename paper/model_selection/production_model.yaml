@@ -1,0 +1,73 @@
+schema_version: 1
+status: production_candidate
+selected_utc: 2026-08-26T04:51:01Z
+label: P240C1
+
+checkpoint:
+  path: /mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/production_curriculum/P240C1_s201/P240C1_s201_03_finetune/epoch=03-val_bps_overall=0.6210.ckpt
+  sha256: 828a3ecbb0c50bccbaf6fd59fee9efae4351e625532f4440b395c1d5bdde0af5
+  validation_bps_overall: 0.6210
+  handoff_policy: best_val_bps
+
+training:
+  environment: yatesfv
+  run_id: P240C1_s201
+  run_manifest:
+    path: /mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/production_curriculum/P240C1_s201/manifest.json
+    sha256: 77dd3bbb7c64a2905a3a6973723e6699c2e414b6def3d781f2c7dcd930621b50
+  curriculum:
+    path: experiments/curricula/native240_sparse_phase_v1.yaml
+    sha256: 4fb23f05241276ab7907aad079a6503b8c31e08de579284584bc452a7df532ed
+  stages:
+    - path: experiments/model_configs/dekel_native240_curriculum_stage1_core.yaml
+      sha256: ecb5f6e3526d5e01c087631ab586a414a0b702347afec4a5e273857fe2898972
+    - path: experiments/model_configs/dekel_native240_curriculum_stage2_sparse_readout.yaml
+      sha256: 540c3024b3e9deaa4ad915f725c7172305d0c2139638b9a90870acf3b415f702
+    - path: experiments/model_configs/dekel_native240_curriculum_stage3_finetune.yaml
+      sha256: dcbde8420ea41e70b998657c9c3416a195203d94770f3181b8814fc35e4bfd0d
+  datasets:
+    heldout:
+      path: paper/model_selection/configs/multi_240_long_split3_dekel35.yaml
+      sha256: 087686000c69558bff58132003156b1fa5cfc86ca0a07785f21bd92e8a501845
+    descriptive_all_gratings:
+      path: paper/model_selection/configs/multi_240_long_split3_dekel35_allgratings.yaml
+      sha256: 98d6c2f7e52fb5f933e780d4bbd2662b10004e0097efa3169ca110866f5cdd49
+
+architecture:
+  sampling_rate_hz: 240
+  stimulus_history_frames: 60
+  stimulus_history_ms: 250
+  stimulus_crop: [35, 35]
+  phase_readout_rank: 4
+  output_channels: 2790
+  parameters:
+    total: 19917876
+    visual_core: 3421516
+    behavior_modulator: 46520
+    deep_readouts: 1827450
+    phase_readouts: 14622390
+
+capacity_audit:
+  comparator:
+    label: M142
+    phase_readout_rank: 2
+    checkpoint: /mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/clean_phase/D240M142_m139e15_rank2_readoutrefit_phaseS0p1_sample16_s201/epoch=23-val_bps_overall=0.5842.ckpt
+    checkpoint_sha256: 7a5dfe994f037691a0fdcae77ade5299febb9b1c388d7ca3114ba809dba08c78
+    parameters:
+      total: 12613656
+      phase_readouts: 7318170
+  rule: >-
+    Rank-four capacity must be reported separately from predictive evidence.
+    Any generalization comparison must use the same unit identities, stimuli,
+    data filters, and metric implementation for both checkpoints.
+
+reporting_contract:
+  heldout_claims:
+    - natural-stimulus validation likelihood
+    - fixed-RSVP prediction
+  descriptive_only:
+    - grating responses fit after all genuine grating repeats were exposed
+  forbidden:
+    - describe descriptive grating capture as held-out generalization
+    - infer missing unit identities by position
+    - substitute another checkpoint or tuning cache without a matching digest
