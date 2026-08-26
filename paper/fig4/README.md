@@ -1,5 +1,13 @@
 # Figure 4
 
+> **Production note:** this file documents the legacy cache-first Figure 4
+> pipeline inherited from `main`. The native-240 manuscript production path is
+> [`spatiotemporal_tuning/FIGURE4_PRODUCTION.md`](spatiotemporal_tuning/FIGURE4_PRODUCTION.md),
+> with the repository-wide execution order in
+> [`../../PRODUCTION_PIPELINE_HANDOFF.md`](../../PRODUCTION_PIPELINE_HANDOFF.md).
+> Do not mix legacy RR100 caches or the 120-Hz checkpoint described below with
+> the native-240 production artifacts.
+
 Compose the figure:
 
 ```bash
