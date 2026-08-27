@@ -139,9 +139,11 @@ inclusion, and claim boundaries. The dependency order is:
    `audit_exact_cid_drifting_tuning.py`.
 2. Build the strict tuning contract with
    `build_exact_cid_figure4_contract.py`, then the explicitly labeled all-unit
-   analysis population with `build_all_available_population_spec.py`. Unit
-   identity is `(session, cid)` throughout; RR pooling, reclustering, and unit
-   substitution are forbidden.
+   response population with `build_all_available_population_spec.py` and its
+   complete Yu passband view with `build_all_unit_yu_tuning_view.py`. Unit
+   identity is `(session, cid)` throughout; strict-validation failures remain
+   disclosed, and RR pooling, reclustering, and unit substitution are
+   forbidden.
 3. Build the zero-phase-filtered 240-Hz fixation bank with
    `build_real_fixation_bank.py`.
 4. Plan and execute the exact-unit response matrix with
@@ -221,6 +223,7 @@ conda run -n yatesfv python -m pytest -q \
   tests/test_fig3_ablation_cache_audit.py \
   tests/test_exact_cid_drifting_tuning.py \
   tests/test_exact_cid_figure4_contract.py \
+  tests/test_all_unit_yu_tuning_view.py \
   tests/test_eye_trace_filter_audit.py \
   tests/test_real_fixation_bank.py \
   tests/test_fig4_real_trace_matrix_plan.py \

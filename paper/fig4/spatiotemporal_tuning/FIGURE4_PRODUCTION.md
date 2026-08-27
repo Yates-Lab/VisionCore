@@ -90,8 +90,11 @@ primitives rather than carrying private variants.
    `audit_exact_cid_drifting_tuning.py`.
 2. Build the one-hot exact-unit validation contract with
    `build_exact_cid_figure4_contract.py`, then the explicitly labeled all-unit
-   analysis contract with `build_all_available_population_spec.py`. RR
-   clustering or pooling is forbidden.
+   response contract with `build_all_available_population_spec.py` and the
+   matching all-unit Yu passband view with
+   `build_all_unit_yu_tuning_view.py`. The latter retains and discloses strict
+   validation failures rather than selecting on them. RR clustering or
+   pooling is forbidden.
 3. Build the filtered fixation bank, the all-unit 40-image × 200-trace response
    matrix, Panel A exemplar audit, and Panel B reduction.
 4. Build the equal-mass Kuang/Rucci ensemble and the two image-sharded exact
