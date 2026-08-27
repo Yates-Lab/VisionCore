@@ -166,10 +166,14 @@ inclusion, and claim boundaries. The dependency order is:
 5. Audit/select Panel A examples and reduce the all-unit Panel B population
    with `audit_panel_a_exemplars.py` and
    `build_panel_b_population_path_length.py`.
-6. Build the equal-dynamic-mass Kuang/Rucci spectra and exact spectral replay
-   with `build_rucci_ensemble_power.py` and
-   `build_matrix_spectral_replay.py`. The matched passband-versus-path-length
-   text statistic comes from `compare_passband_path_length.py`.
+6. Validate the analytic Kuang translation spectrum against both periodic
+   translation and the exact finite scorer with `validate_retinal_spectrum.py`.
+   Build the equal-dynamic-mass Kuang/Rucci spectra from the same hash-bound
+   filtered traces, images, and tuning grid with
+   `build_rucci_ensemble_power.py`, then build the exact spectral replay with
+   `build_matrix_spectral_replay.py`. The matched
+   passband-versus-path-length text statistic comes from
+   `compare_passband_path_length.py`.
 7. Trace top-passband movies through the actual trained cumulative readout with
    `analyze_top_passband_stage_trajectory.py`. Release requires at least 100
    crossed movies; smaller results are smoke tests only.

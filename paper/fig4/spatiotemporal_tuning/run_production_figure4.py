@@ -45,6 +45,7 @@ PRODUCTION_ENTRYPOINTS = (
     ROOT / "paper/fig4/upstream/score_real_trace_stabilized_baseline.py",
     ROOT / "paper/fig4/spatiotemporal_tuning/audit_panel_a_exemplars.py",
     ROOT / "paper/fig4/spatiotemporal_tuning/build_panel_b_population_path_length.py",
+    ROOT / "paper/fig4/spatiotemporal_tuning/validate_retinal_spectrum.py",
     ROOT / "paper/fig4/spatiotemporal_tuning/build_rucci_ensemble_power.py",
     ROOT / "paper/fig4/spatiotemporal_tuning/build_matrix_spectral_replay.py",
     ROOT / "paper/fig4/spatiotemporal_tuning/compare_passband_path_length.py",

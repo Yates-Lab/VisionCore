@@ -75,6 +75,10 @@ primitives rather than carrying private variants.
   averaging. The complete TF=0 plus TF>0 carrier budget must independently sum
   to one, so the visualization cannot mistake redistributed power for created
   power.
+- The acquired grating surfaces remain on their low-resolution measurement
+  grid. The analytic Kuang calculation uses a locked 25-point radial SF grid
+  from the assay's lower bound through 12 cycles/degree; this denser numerical
+  integration/display grid does not interpolate measured neural responses.
 - Panel G uses the directly rendered movie spectrum and the exact response
   matrix for the same image/trace pair. Cached replay is allowed only when its
   SF×TF passband tensors are numerically identical to the released contract.
@@ -97,9 +101,12 @@ primitives rather than carrying private variants.
    pooling is forbidden.
 3. Build the filtered fixation bank, the all-unit 40-image × 200-trace response
    matrix, Panel A exemplar audit, and Panel B reduction.
-4. Build the equal-mass Kuang/Rucci ensemble and the two image-sharded exact
-   spectral replays. Use `compare_passband_path_length.py` for the matched
-   within-unit text statistic.
+4. Run `validate_retinal_spectrum.py` on the exact filtered bank, natural-image
+   table, and tuning grid. It must pass both the periodic translation identity
+   and the finite 151-pixel scorer boundary. Build the equal-mass Kuang/Rucci
+   ensemble from those hash-identical inputs, then build the two image-sharded
+   exact spectral replays. Use `compare_passband_path_length.py` for the
+   matched within-unit text statistic.
 5. Run `analyze_top_passband_stage_trajectory.py` on at least 10 images × 10
    traces from the released population. This minimum is 100 crossed movies;
    smaller runs are smoke tests only.
