@@ -8,6 +8,9 @@ from paper.fig4.spatiotemporal_tuning.run_production_figure4 import (
     require_execution_environment,
     validate_panel_h_sample_size,
 )
+from paper.fig4.spatiotemporal_tuning.audit_revised_figure4_release import (
+    expected_visual_audit_pages,
+)
 
 
 def test_execution_requires_yatesfv_only_when_execute_is_requested() -> None:
@@ -22,6 +25,23 @@ def test_release_refuses_smoke_sized_panel_h() -> None:
     validate_panel_h_sample_size(mode="release", n_movies=100)
     with pytest.raises(ValueError, match="at least 100"):
         validate_panel_h_sample_size(mode="release", n_movies=40)
+
+
+def test_visual_audit_pages_follow_the_fresh_validated_population() -> None:
+    assert expected_visual_audit_pages({"n_validated_for_figure4": 145}) == list(
+        range(1, 9)
+    )
+    assert expected_visual_audit_pages({"n_validated_for_figure4": 101}) == list(
+        range(1, 7)
+    )
+    assert expected_visual_audit_pages(
+        {
+            "n_validated_for_figure4": 145,
+            "visual_audit_contract": {
+                "expected_validated_atlas_pages": [1, 2, 3]
+            },
+        }
+    ) == [1, 2, 3]
 
 
 def test_commands_preserve_explicit_all_unit_policy(tmp_path: Path) -> None:

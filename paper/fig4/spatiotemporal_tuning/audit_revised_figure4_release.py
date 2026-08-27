@@ -66,6 +66,22 @@ def load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def expected_visual_audit_pages(tuning_release: dict) -> list[int]:
+    """Resolve the complete atlas-page contract for this model's valid units."""
+    declared = tuning_release.get("visual_audit_contract", {}).get(
+        "expected_validated_atlas_pages"
+    )
+    if declared is not None:
+        pages = [int(value) for value in declared]
+    else:
+        n_units = int(tuning_release.get("n_validated_for_figure4", 0))
+        units_per_page = 20
+        pages = list(range(1, (n_units + units_per_page - 1) // units_per_page + 1))
+    if not pages or pages != list(range(1, len(pages) + 1)):
+        raise ValueError("tuning release contains an invalid visual-audit page contract")
+    return pages
+
+
 def main() -> int:
     args = parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -107,6 +123,7 @@ def main() -> int:
         raise ValueError(f"unsupported Figure-4 population policy: {population_policy}")
     n_available_units = int(tuning_release.get("n_units", 0))
     n_validated_units = int(tuning_release.get("n_validated_for_figure4", 0))
+    expected_atlas_pages = expected_visual_audit_pages(tuning_release)
     n_analysis_units = (
         n_available_units
         if population_policy == "all_checkpoint_available"
@@ -407,11 +424,12 @@ def main() -> int:
         "displayed raw surfaces passed visual audit and population fits are finite",
         str(tuning_visual.get("status")) == "PASS"
         and int(tuning_visual.get("n_units_inspected", 0)) == n_validated_units
-        and tuning_visual.get("atlas_pages_inspected") == list(range(1, 9)),
+        and tuning_visual.get("atlas_pages_inspected") == expected_atlas_pages,
         {
             "status": tuning_visual.get("status"),
             "n_units_inspected": tuning_visual.get("n_units_inspected"),
             "pages": tuning_visual.get("atlas_pages_inspected"),
+            "expected_pages": expected_atlas_pages,
         },
     )
     panel_g = figure_summary["panels"]["G"]

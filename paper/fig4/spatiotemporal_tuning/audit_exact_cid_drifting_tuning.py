@@ -53,6 +53,8 @@ EXPECTED_COUNT_METRICS = {
     "maximum_expected_count",
 }
 
+ATLAS_UNITS_PER_PAGE = 20
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -596,8 +598,8 @@ def render_atlas(
     dynamic_tf = tf[tf > 0]
     path = out_dir / filename
     with PdfPages(path) as pdf:
-        for start in range(0, len(summary), 20):
-            page = summary.iloc[start : start + 20]
+        for start in range(0, len(summary), ATLAS_UNITS_PER_PAGE):
+            page = summary.iloc[start : start + ATLAS_UNITS_PER_PAGE]
             figure, axes = plt.subplots(4, 5, figsize=(12.5, 9.2), squeeze=False)
             for axis, (_, row) in zip(axes.flat, page.iterrows()):
                 display = displays[int(row.unit_index)]
@@ -1090,6 +1092,18 @@ def main() -> None:
         "n_validated_model_sf_tf": int(summary.validated_model_sf_tf.sum()),
         "n_validated_for_figure4": validated_count,
         "validation_fraction": float(summary.validated_for_figure4.mean()),
+        "visual_audit_contract": {
+            "atlas_units_per_page": ATLAS_UNITS_PER_PAGE,
+            "expected_validated_atlas_pages": list(
+                range(
+                    1,
+                    (validated_count + ATLAS_UNITS_PER_PAGE - 1)
+                    // ATLAS_UNITS_PER_PAGE
+                    + 1,
+                )
+            ),
+            "inspection_scope": "every page of validated_exact_units_raw_tuning_atlas.pdf",
+        },
         "failure_counts": {
             key: int((~summary[key]).sum())
             for key in (
