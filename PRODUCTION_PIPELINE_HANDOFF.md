@@ -1,15 +1,19 @@
 # Native-240 model and Figures 3--4 production handoff
 
-This branch is a clean, reviewable extraction of the native-240 model-fitting
-pipeline and the production analyses for Figures 3 and 4. It is based on
-`origin/main` at `7e7587f` and is intentionally **not merged into main**.
+This branch is a clean, reviewable production-and-assurance extraction of the
+native-240 model-fitting pipeline and the production analyses for Figures 3
+and 4. It is based on `origin/main` at `7e7587f` and is intentionally **not
+merged into main**. "Production-and-assurance" is deliberate: the branch
+contains the executable workflows plus the audits, regression tests, configs,
+and scientific contracts needed to verify them. It is not described as a
+minimal branch merely because exploratory outputs were removed.
 
 ## Branch map
 
 - `codex/development-p240c1-fig3-fig4` at `3d45ad5` is the source-only archive
   of the full analysis-development state. It is retained for archaeology, not
   as the production entry point.
-- `codex/p240c1-production-pipeline` is this minimal production branch.
+- `codex/p240c1-production-pipeline` is this production-and-assurance branch.
 - The production branch contains no checkpoints, generated response arrays,
   figure caches, or unrelated data. Those remain external artifacts and are
   identified by path and SHA-256 digest in run manifests.
@@ -241,21 +245,31 @@ conda run -n yatesfv python -m pytest -q \
   tests/test_run_production_figure4.py
 ```
 
-At handoff:
+The clean reproduction under
+`outputs/clean_production_reproduction_f7b7e5e_20260827` exercised the branch
+from scratch with seed 201. It completed all three training stages, regenerated
+Figure 3 and its fixed-RSVP, ablation, and recorded-grating audits, evaluated
+the full 40-image by 200-trace response matrix for all 725 checkpoint-available
+exact units, and regenerated Figure 4. Panel H used 100 crossed movies and the
+Figure 4 release audit passed. Generated artifacts remain ignored and are
+bound to the fresh checkpoint and source hashes in the external bundle.
 
-- the three-stage pipeline and model audit are complete;
-- Figure 3 exactly reproduces the accepted production render from its declared
-  external inputs;
-- Figure 4 passes its real all-725 integration smoke except for the deliberate
-  production-size gate: Panel H currently contains 40 crossed movies, while a
-  release requires at least 100;
-- the 40-image by 200-trace response-matrix release job has been successfully
-  planned against the real checkpoint, native-240 dataset, exact 725-unit
-  population, and filtered replay bank.
+## Source-footprint interpretation
 
-Therefore the Figure 4 source pipeline is handed off, but the final Figure 4
-must not be described as release-ready until Panel H is rerun at 100 or more
-crossed movies and the release audit passes.
+Raw inserted-line counts combine distinct surfaces and should not be reported
+as though they were all model-fitting implementation. The final accounting
+must separate:
+
+1. executable fitting and Figure 3/4 source;
+2. explicitly requested scientific/model audits;
+3. regression tests;
+4. configurations and handoff/methods documentation.
+
+The release source-closure audit proves repository-local imports from declared
+entry points; the clean reproduction proves which declared programs actually
+ran. Neither check alone proves that every line is irreducible. Consolidation
+is acceptable only when it preserves the numerical contracts, source hashes,
+tests, and fresh reproduction evidence.
 
 ## Repository hygiene
 

@@ -359,7 +359,17 @@ def main() -> int:
             "reads_retinal_motion_response": example_contract.get(
                 "selection_reads_retinal_motion_response"
             ),
-            "unit_indices": example_contract.get("unit_indices"),
+            # ``unit_index`` in the validated exemplar contract is the row in
+            # that 145-unit contract, not the source model-unit identity.  Keep
+            # both namespaces explicit in the release report so a reader
+            # cannot mistake contract rows 74/136 for source units 74/136.
+            "validated_contract_row_indices": example_contract.get(
+                "unit_indices"
+            ),
+            "source_unit_indices": examples.source_unit_index.astype(int).tolist(),
+            "canonical_channels": examples.canonical_channel.astype(int).tolist(),
+            "sessions": examples.session.astype(str).tolist(),
+            "cids": examples.cid.astype(int).tolist(),
         },
     )
     gate(
