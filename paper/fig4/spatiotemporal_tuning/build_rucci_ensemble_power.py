@@ -54,6 +54,17 @@ PRODUCTION_MAX_SPATIAL_CPD = 12.0
 PRODUCTION_N_ORIENTATIONS = 8
 
 
+def json_ready(value):
+    """Recursively convert NumPy scalar metadata to strict JSON primitives."""
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, dict):
+        return {str(key): json_ready(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [json_ready(item) for item in value]
+    return value
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--image-table", type=Path, required=True)
@@ -877,7 +888,8 @@ def main() -> int:
         "diagnostic_figure": str((args.out_dir / "rucci_ensemble_power.png").resolve()),
     }
     (args.out_dir / "summary.json").write_text(
-        json.dumps(summary, indent=2) + "\n", encoding="utf-8"
+        json.dumps(json_ready(summary), indent=2, allow_nan=False) + "\n",
+        encoding="utf-8",
     )
     render_diagnostic(
         args.out_dir / "rucci_ensemble_power.png",

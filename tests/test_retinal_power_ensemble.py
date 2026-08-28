@@ -5,6 +5,7 @@ import pandas as pd
 import pytest
 
 from paper.fig4.spatiotemporal_tuning.build_rucci_ensemble_power import (
+    json_ready,
     load_filtered_fixation_bank,
     normalize_dynamic_power_per_trace,
     production_spectral_grid,
@@ -51,6 +52,16 @@ def test_filtered_bank_contract_rejects_non_zero_phase_source(tmp_path):
     _write_fixation_bank(bank, filter_kind="unfiltered")
     with pytest.raises(ValueError, match="zero_phase_filter"):
         load_filtered_fixation_bank(bank, analysis_samples=12, requested_traces=0)
+
+
+def test_summary_metadata_converts_numpy_scalars_to_strict_json():
+    payload = {
+        "gate": np.bool_(True),
+        "count": np.int64(7),
+        "nested": [np.float32(0.5)],
+    }
+    encoded = json.dumps(json_ready(payload), allow_nan=False)
+    assert json.loads(encoded) == {"gate": True, "count": 7, "nested": [0.5]}
 
 
 def test_filtered_bank_contract_preserves_trace_identity(tmp_path):
