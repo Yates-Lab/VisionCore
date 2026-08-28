@@ -23,18 +23,27 @@ def test_all_unit_view_retains_failed_units_with_exact_identity(
             "canonical_channel": [0, 1, 2],
             "yu_preferred_sf_cpd": [1.0, 2.0, 4.0],
             "yu_preferred_tf_hz": [16.0, 4.0, 2.0],
+            "preferred_motion_direction_deg": [0.0, 90.0, 180.0],
             "validated_for_figure4": [True, False, False],
             "failed_checks": ["", "coherent_surface", "recorded_sf_twin_match"],
         }
     )
     audit.to_csv(audit_dir / "unit_measurement_audit.csv", index=False)
+    source_provenance = {
+        "checkpoint_sha256": "abc123",
+        "model_label": "fresh",
+    }
+    (measurement / "provenance.json").write_text(json.dumps(source_provenance))
+    (measurement / "units.csv").write_text("unit_index\n0\n1\n2\n")
+    (measurement / "conditions.csv").write_text("condition_index\n0\n")
+    np.savez(measurement / "responses.npz", placeholder=np.zeros((1, 3)))
     (audit_dir / "release_audit.json").write_text(
         json.dumps(
             {
-                "source_provenance": {
-                    "checkpoint_sha256": "abc123",
-                    "model_label": "fresh",
-                }
+                "figure4_unblocked": True,
+                "n_units": 3,
+                "source_measurement": str(measurement),
+                "source_provenance": source_provenance,
             }
         )
     )

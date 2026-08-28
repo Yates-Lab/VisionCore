@@ -25,6 +25,7 @@ if str(ROOT) not in sys.path:
 
 from paper.fig4.spatiotemporal_tuning.build_exact_cid_figure4_contract import (  # noqa: E402
     _grouped_tuning,
+    _load_release,
 )
 
 
@@ -62,10 +63,10 @@ def main() -> int:
 
     audit_path = audit_dir / "unit_measurement_audit.csv"
     release_path = audit_dir / "release_audit.json"
-    audit = pd.read_csv(audit_path).sort_values(
+    audit, release, measurement_dir = _load_release(audit_dir)
+    audit = audit.sort_values(
         "unit_index", kind="mergesort"
     ).reset_index(drop=True)
-    release = json.loads(release_path.read_text(encoding="utf-8"))
     response_units = pd.read_csv(response_unit_path).sort_values(
         "unit_index", kind="mergesort"
     ).reset_index(drop=True)
@@ -95,7 +96,7 @@ def main() -> int:
     selected.insert(0, "source_unit_index", selected.unit_index.to_numpy(dtype=int))
     tuning, fits = _grouped_tuning(
         selected,
-        audit_dir.parent,
+        measurement_dir,
         require_optimizer_success=False,
     )
     tuning.to_csv(outputs[0], index=False)
@@ -143,6 +144,10 @@ def main() -> int:
         "source_unit_audit_sha256": sha256_file(audit_path),
         "source_release": str(release_path),
         "source_release_sha256": sha256_file(release_path),
+        "source_measurement": str(measurement_dir),
+        "source_measurement_provenance_sha256": sha256_file(
+            measurement_dir / "provenance.json"
+        ),
         "response_unit_table": str(response_unit_path),
         "response_unit_table_sha256": sha256_file(response_unit_path),
         "files": {
