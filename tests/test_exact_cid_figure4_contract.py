@@ -3,7 +3,11 @@ import json
 import numpy as np
 import pandas as pd
 import pytest
-from paper.fig4.spatiotemporal_tuning.build_exact_cid_figure4_contract import _crossed_yu_examples, _population_spec
+from paper.fig4.spatiotemporal_tuning.build_exact_cid_figure4_contract import (
+    _crossed_yu_examples,
+    _load_release,
+    _population_spec,
+)
 from paper.fig4.upstream.real_trace_matrix.model import population_unit_rows
 
 class _PopulationView:
@@ -48,3 +52,59 @@ def test_crossed_examples_preserve_yu_coordinate_chain_of_custody() -> None:
     log_tf = np.log2(high_group.preferred_tf_hz.to_numpy(dtype=float))
     distances = np.hypot(log_sf - np.median(log_sf), log_tf - np.median(log_tf))
     assert int(high.source_unit_index) == int(high_group.iloc[int(np.argmin(distances))].source_unit_index)
+
+
+def _write_release_fixture(tmp_path, *, sibling_audit: bool = True):
+    measurement = tmp_path / "measurement"
+    audit = tmp_path / "audit" if sibling_audit else measurement / "audit"
+    measurement.mkdir()
+    audit.mkdir()
+    provenance = {"analysis": "fixture", "checkpoint_sha256": "abc"}
+    (measurement / "provenance.json").write_text(json.dumps(provenance))
+    pd.DataFrame({"condition_index": [0]}).to_csv(
+        measurement / "conditions.csv", index=False
+    )
+    pd.DataFrame({"unit_index": [0]}).to_csv(measurement / "units.csv", index=False)
+    np.savez_compressed(measurement / "responses.npz", response=np.zeros((1, 1)))
+    pd.DataFrame(
+        {
+            "unit_index": [0],
+            "canonical_channel": [0],
+            "session": ["s"],
+            "cid": [1],
+            "validated_for_figure4": [True],
+            "yu_preferred_sf_cpd": [2.0],
+            "yu_preferred_tf_hz": [8.0],
+            "preferred_motion_direction_deg": [0.0],
+        }
+    ).to_csv(audit / "unit_measurement_audit.csv", index=False)
+    report = {
+        "figure4_unblocked": True,
+        "n_units": 1,
+        "source_measurement": str(measurement),
+        "source_provenance": provenance,
+    }
+    (audit / "release_audit.json").write_text(json.dumps(report))
+    return measurement, audit
+
+
+@pytest.mark.parametrize("sibling_audit", [True, False])
+def test_load_release_accepts_provenance_bound_sibling_or_nested_layout(
+    tmp_path, sibling_audit: bool
+) -> None:
+    measurement, audit = _write_release_fixture(
+        tmp_path, sibling_audit=sibling_audit
+    )
+    table, report, loaded_measurement = _load_release(audit)
+    assert len(table) == 1
+    assert report["source_provenance"]["checkpoint_sha256"] == "abc"
+    assert loaded_measurement == measurement.resolve()
+
+
+def test_load_release_rejects_measurement_provenance_mismatch(tmp_path) -> None:
+    measurement, audit = _write_release_fixture(tmp_path)
+    (measurement / "provenance.json").write_text(
+        json.dumps({"analysis": "fixture", "checkpoint_sha256": "wrong"})
+    )
+    with pytest.raises(ValueError, match="provenance does not match"):
+        _load_release(audit)

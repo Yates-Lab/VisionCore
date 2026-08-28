@@ -80,9 +80,30 @@ def _load_release(audit_dir: Path) -> tuple[pd.DataFrame, dict, Path]:
         raise ValueError("exact biological identities are not unique")
     if table.canonical_channel.duplicated().any():
         raise ValueError("canonical channels are not unique")
-    measurement_dir = Path(report["source_measurement"])
-    if measurement_dir.resolve() != audit_dir.parent.resolve():
-        raise ValueError("audit directory is not beside its declared source measurement")
+    measurement_dir = Path(report["source_measurement"]).expanduser().resolve()
+    if not measurement_dir.is_dir():
+        raise FileNotFoundError(
+            f"declared source measurement does not exist: {measurement_dir}"
+        )
+    provenance_path = measurement_dir / "provenance.json"
+    if not provenance_path.is_file():
+        raise FileNotFoundError(
+            f"declared source measurement lacks provenance.json: {measurement_dir}"
+        )
+    source_provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    if source_provenance != report.get("source_provenance"):
+        raise ValueError(
+            "declared source measurement provenance does not match the audited provenance"
+        )
+    required_measurement_files = ("units.csv", "conditions.csv", "responses.npz")
+    missing_measurement_files = [
+        name for name in required_measurement_files if not (measurement_dir / name).is_file()
+    ]
+    if missing_measurement_files:
+        raise FileNotFoundError(
+            "declared source measurement lacks required files: "
+            + ", ".join(missing_measurement_files)
+        )
     return table, report, measurement_dir
 
 
