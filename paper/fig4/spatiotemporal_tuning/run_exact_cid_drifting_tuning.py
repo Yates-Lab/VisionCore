@@ -44,7 +44,9 @@ from paper.fig4.upstream.real_trace_matrix.model import (
 )
 from paper.model_selection.native_twin import (
     TwinEncodingModel,
+    audit_native_cid_mapping,
     canonical_population_rows,
+    exact_unit_rows,
 )
 
 
@@ -251,61 +253,6 @@ def response_metrics(
     }
 
 
-def exact_unit_rows(model, canonical_rows: list[dict]) -> list[dict]:
-    """Attach the native model readout row to every canonical biological CID."""
-    rows: list[dict] = []
-    for channel, source in enumerate(canonical_rows):
-        dataset_index = int(source["model_readout_index"])
-        configured = np.asarray(
-            model.model.dataset_configs[dataset_index].get("cids", []), dtype=int
-        )
-        if configured.ndim != 1 or len(np.unique(configured)) != len(configured):
-            raise ValueError(
-                f"configured CIDs for {source['session']!r} are not unique and one-dimensional"
-            )
-        matches = np.flatnonzero(configured == int(source["source_cid"]))
-        row = dict(source)
-        row["channel"] = int(channel)
-        row["available"] = bool(len(matches) == 1)
-        row["model_readout_row"] = int(matches[0]) if len(matches) == 1 else None
-        rows.append(row)
-    return rows
-
-
-def audit_native_cid_mapping(encoding_model: TwinEncodingModel, unit_rows: list[dict]) -> dict:
-    """Reject duplicate identities, bad session indices, and invalid native rows."""
-    identities = [(str(row["session"]), int(row["source_cid"])) for row in unit_rows]
-    if len(set(identities)) != len(identities):
-        raise RuntimeError("canonical biological (session, cid) identities are not unique")
-    checked = 0
-    for row in unit_rows:
-        dataset_index = int(row["model_readout_index"])
-        if str(encoding_model.model.names[dataset_index]) != str(row["session"]):
-            raise RuntimeError("canonical session does not match the native model readout")
-        if not bool(row["available"]):
-            continue
-        native = encoding_model.model.model.readouts[dataset_index]
-        model_row = int(row["model_readout_row"])
-        if model_row < 0 or model_row >= int(native.n_units):
-            raise RuntimeError("canonical CID maps outside the native readout")
-        configured_cid = int(
-            encoding_model.model.model.dataset_configs[dataset_index]["cids"][model_row]
-        )
-        if configured_cid != int(row["source_cid"]):
-            raise RuntimeError("native readout row does not map back to the requested CID")
-        checked += 1
-    if checked == 0:
-        raise RuntimeError("no canonical biological CIDs are available in this checkpoint")
-    return {
-        "n_canonical_identities": int(len(unit_rows)),
-        "n_available_native_readouts_checked": int(checked),
-        "n_unavailable": int(len(unit_rows) - checked),
-        "identity_key": "(session, cid)",
-        "readout_path": "checkpoint-native per-session readout; no reconstructed population head",
-        "passed": True,
-    }
-
-
 def _native_scalar_output(readout, core: torch.Tensor) -> torch.Tensor:
     value = readout(core)
     value = value.reshape(value.shape[0], value.shape[1], -1)
@@ -421,7 +368,7 @@ def main() -> None:
     canonical_rows = canonical_population_rows(model, outputs)
     unit_rows = exact_unit_rows(model, canonical_rows)
     encoding_model = TwinEncodingModel(model=model, device=args.device)
-    readout_audit = audit_native_cid_mapping(encoding_model, unit_rows)
+    readout_audit = audit_native_cid_mapping(model, unit_rows)
 
     available_channels = np.asarray(
         [int(row["channel"]) for row in unit_rows if bool(row["available"])], dtype=int

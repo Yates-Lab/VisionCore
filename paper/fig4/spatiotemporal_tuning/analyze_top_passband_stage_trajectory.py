@@ -190,8 +190,9 @@ def _phase_map(readout: Any, phase: torch.Tensor) -> torch.Tensor:
         readout.phase_space_weights,
         readout.phase_rank,
         readout.phase_output_scale,
+        stride=readout.phase_stride,
     )
-    return value[..., :: readout.phase_stride, :: readout.phase_stride]
+    return value
 
 
 def cumulative_rate_maps(
@@ -267,7 +268,14 @@ def cumulative_rate_maps(
 
     rates = torch.stack(
         [
-            scorer.apply_population_view(module.activation(value), scorer.population_view)
+            scorer.apply_population_view(
+                (
+                    module.activation(value)
+                    + scorer.readout.post_activation_baseline[None, :, None, None]
+                )
+                * scorer.readout.available_mask[None, :, None, None],
+                scorer.population_view,
+            )
             for value in cumulative_logits
         ],
         dim=0,

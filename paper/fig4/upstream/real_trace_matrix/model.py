@@ -8,6 +8,9 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import yaml
 
 from .core import ROOT, sha256_file
@@ -345,11 +348,390 @@ def load_pinned_multidataset_model(
     return model, model_info
 
 
-def load_spatial_readout(model: Any, outputs: list[McfarlandOutput], *, device: str) -> tuple[Any, list[dict[str, Any]]]:
-    from scripts.spatial_info import get_spatial_readout
+class ExactCIDSpatialReadout(nn.Module):
+    """Translate checkpoint-native deep and phase heads over a larger field.
 
-    readout, unit_rows = get_spatial_readout(model, outputs, return_unit_rows=True)
-    readout = readout.to(device).eval()
+    Channels remain in the canonical biological ``(session, cid)`` coordinate
+    system.  Missing checkpoint CIDs occupy inert placeholder channels; the
+    exact-identity population view selects only available channels.
+    """
+
+    def __init__(
+        self,
+        *,
+        deep_features: torch.Tensor,
+        deep_space: torch.Tensor,
+        bias: torch.Tensor,
+        available: torch.Tensor,
+        deep_output_scale: float,
+        phase_features: torch.Tensor | None = None,
+        phase_space: torch.Tensor | None = None,
+        phase_output_scale: float | None = None,
+        phase_stride: int | None = None,
+        post_activation_baseline: torch.Tensor | None = None,
+        unit_chunk_size: int = 32,
+    ) -> None:
+        super().__init__()
+        if deep_features.ndim != 5 or deep_space.ndim != 4:
+            raise ValueError("deep readout factors must be [N,R,C,1,1] and [N,R,H,W]")
+        if deep_features.shape[:2] != deep_space.shape[:2]:
+            raise ValueError("deep feature and spatial ranks disagree")
+        self.n_units = int(deep_features.shape[0])
+        self.rank = int(deep_features.shape[1])
+        self.features = nn.Conv2d(
+            int(deep_features.shape[2]), self.n_units * self.rank, 1, bias=False
+        )
+        self.features.weight = nn.Parameter(
+            deep_features.reshape(self.n_units * self.rank, deep_features.shape[2], 1, 1),
+            requires_grad=False,
+        )
+        self.space_weights = nn.Parameter(deep_space, requires_grad=False)
+        self.bias = nn.Parameter(bias.reshape(self.n_units), requires_grad=False)
+        self.output_scale = float(deep_output_scale)
+        self.register_buffer("available_mask", available.to(dtype=torch.bool).reshape(self.n_units))
+        baseline = (
+            torch.zeros_like(self.bias)
+            if post_activation_baseline is None
+            else post_activation_baseline.reshape(self.n_units)
+        )
+        self.register_buffer("post_activation_baseline", baseline)
+        self.unit_chunk_size = max(1, int(unit_chunk_size))
+
+        if (phase_features is None) != (phase_space is None):
+            raise ValueError("phase feature and spatial factors must be supplied together")
+        self.has_phase_branch = phase_features is not None
+        if self.has_phase_branch:
+            assert phase_features is not None and phase_space is not None
+            if phase_features.ndim != 5 or phase_space.ndim != 4:
+                raise ValueError("phase factors must be [N,R,C,1,1] and [N,R,H,W]")
+            if phase_features.shape[:2] != phase_space.shape[:2]:
+                raise ValueError("phase feature and spatial ranks disagree")
+            if int(phase_features.shape[0]) != self.n_units:
+                raise ValueError("deep and phase branches contain different unit counts")
+            self.phase_rank = int(phase_features.shape[1])
+            self.phase_features = nn.Conv2d(
+                int(phase_features.shape[2]),
+                self.n_units * self.phase_rank,
+                1,
+                bias=False,
+            )
+            self.phase_features.weight = nn.Parameter(
+                phase_features.reshape(
+                    self.n_units * self.phase_rank,
+                    phase_features.shape[2],
+                    1,
+                    1,
+                ),
+                requires_grad=False,
+            )
+            self.phase_space_weights = nn.Parameter(phase_space, requires_grad=False)
+            self.phase_output_scale = float(phase_output_scale)
+            self.phase_stride = int(phase_stride)
+            if self.phase_stride < 1:
+                raise ValueError("phase stride must be positive")
+        else:
+            self.phase_rank = 0
+            self.phase_features = None
+            self.phase_space_weights = None
+            self.phase_output_scale = None
+            self.phase_stride = None
+
+    def _factorized_map(
+        self,
+        feature: torch.Tensor,
+        feature_projection: nn.Conv2d,
+        space_weights: torch.Tensor,
+        rank: int,
+        output_scale: float,
+        *,
+        stride: int = 1,
+    ) -> torch.Tensor:
+        """Apply a translated low-rank head without a full N×R feature tensor."""
+        if feature.ndim != 4:
+            raise ValueError(f"translated readout expects NCHW input, got {feature.shape}")
+        n_units = int(space_weights.shape[0])
+        if int(space_weights.shape[1]) != int(rank):
+            raise ValueError("spatial tensor does not match the declared readout rank")
+        outputs: list[torch.Tensor] = []
+        for start in range(0, n_units, self.unit_chunk_size):
+            stop = min(start + self.unit_chunk_size, n_units)
+            projected = F.conv2d(
+                feature,
+                feature_projection.weight[start * rank : stop * rank],
+            )
+            spatial = space_weights[start:stop].reshape(
+                (stop - start) * rank,
+                1,
+                space_weights.shape[-2],
+                space_weights.shape[-1],
+            )
+            value = F.conv2d(
+                projected,
+                spatial,
+                stride=int(stride),
+                groups=(stop - start) * rank,
+            )
+            value = value.reshape(
+                feature.shape[0],
+                stop - start,
+                rank,
+                value.shape[-2],
+                value.shape[-1],
+            ).sum(dim=2)
+            outputs.append(value)
+        return torch.cat(outputs, dim=1) * float(output_scale)
+
+    def forward(
+        self, deep_feature: torch.Tensor, phase_feature: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        if deep_feature.ndim == 5:
+            deep_feature = deep_feature[:, :, -1]
+        deep = self._factorized_map(
+            deep_feature,
+            self.features,
+            self.space_weights,
+            self.rank,
+            self.output_scale,
+        )
+        if self.has_phase_branch:
+            if phase_feature is None:
+                raise ValueError("phase-preserving model requires its phase feature map")
+            assert self.phase_features is not None
+            assert self.phase_space_weights is not None
+            phase = self._factorized_map(
+                phase_feature,
+                self.phase_features,
+                self.phase_space_weights,
+                self.phase_rank,
+                float(self.phase_output_scale),
+                stride=int(self.phase_stride),
+            )
+            if phase.shape[-2:] != deep.shape[-2:]:
+                raise RuntimeError(
+                    "translated deep and phase readouts are spatially misaligned: "
+                    f"{deep.shape[-2:]} versus {phase.shape[-2:]}"
+                )
+            deep = deep + phase
+        return deep + self.bias[None, :, None, None]
+
+
+def _native_readout_factors(readout: Any) -> tuple[torch.Tensor, torch.Tensor, int, float]:
+    rank = int(getattr(readout, "rank", 1))
+    feature = readout.features.weight.detach()
+    if feature.shape[0] != int(readout.n_units) * rank:
+        raise ValueError("native readout feature tensor does not match n_units × rank")
+    feature = feature.reshape(int(readout.n_units), rank, feature.shape[1], 1, 1)
+    height, width = tuple(int(value) for value in readout.spatial_shape)
+    spatial = readout.effective_spatial_weights(height, width, feature.device).detach()
+    if rank == 1 and spatial.ndim == 3:
+        spatial = spatial[:, None]
+    if spatial.shape[:2] != feature.shape[:2]:
+        raise ValueError("native readout feature and spatial factors disagree")
+    return feature, spatial, rank, float(getattr(readout, "output_scale", 1.0))
+
+
+def _assert_common_readout_contract(
+    reference: tuple[torch.Tensor, torch.Tensor, int, float],
+    candidate: tuple[torch.Tensor, torch.Tensor, int, float],
+    *,
+    branch: str,
+) -> None:
+    ref_feature, ref_space, ref_rank, ref_scale = reference
+    feature, space, rank, scale = candidate
+    if (
+        feature.shape[1:] != ref_feature.shape[1:]
+        or space.shape[1:] != ref_space.shape[1:]
+        or rank != ref_rank
+        or not math.isclose(scale, ref_scale, rel_tol=0.0, abs_tol=0.0)
+    ):
+        raise ValueError(f"session-specific {branch} readouts do not share one architecture")
+
+
+@torch.no_grad()
+def _audit_spatial_readout_equivalence(
+    model: Any,
+    readout: ExactCIDSpatialReadout,
+    unit_rows: list[dict[str, Any]],
+    *,
+    device: str,
+) -> dict[str, Any]:
+    """Prove assembled scalar logits equal every selected native session head."""
+    generator = torch.Generator(device="cpu").manual_seed(1701)
+    deep = torch.randn(
+        2,
+        readout.features.in_channels,
+        readout.space_weights.shape[-2],
+        readout.space_weights.shape[-1],
+        generator=generator,
+    ).to(device)
+    phase = None
+    if readout.has_phase_branch:
+        assert readout.phase_features is not None
+        assert readout.phase_space_weights is not None
+        phase = torch.randn(
+            2,
+            readout.phase_features.in_channels,
+            readout.phase_space_weights.shape[-2],
+            readout.phase_space_weights.shape[-1],
+            generator=generator,
+        ).to(device)
+    assembled = readout(deep, phase)[..., 0, 0]
+    by_dataset: dict[int, list[dict[str, Any]]] = {}
+    for row in unit_rows:
+        if bool(row["available"]):
+            by_dataset.setdefault(int(row["model_readout_index"]), []).append(row)
+    maximum_absolute_error = 0.0
+    maximum_relative_error = 0.0
+    checked = 0
+    phase_readouts = getattr(model.model, "phase_readouts", None)
+    for dataset_index, rows in by_dataset.items():
+        native = model.model.readouts[dataset_index](deep)
+        if phase_readouts is not None:
+            native = native + phase_readouts[dataset_index](phase)
+        channels = torch.as_tensor(
+            [int(row["channel"]) for row in rows], device=deep.device, dtype=torch.long
+        )
+        native_rows = torch.as_tensor(
+            [int(row["model_readout_row"]) for row in rows],
+            device=deep.device,
+            dtype=torch.long,
+        )
+        actual = assembled.index_select(1, channels)
+        expected = native.index_select(1, native_rows)
+        absolute = (actual - expected).abs()
+        relative = absolute / expected.abs().clamp_min(1.0e-6)
+        maximum_absolute_error = max(maximum_absolute_error, float(absolute.max().cpu()))
+        maximum_relative_error = max(maximum_relative_error, float(relative.max().cpu()))
+        if not torch.allclose(actual, expected, atol=3.0e-5, rtol=3.0e-5):
+            raise RuntimeError(
+                "assembled exact-CID spatial readout does not reproduce its native "
+                f"session head for dataset {dataset_index}: max abs "
+                f"{float(absolute.max().cpu()):.3g}"
+            )
+        checked += len(rows)
+    unavailable = ~readout.available_mask
+    if unavailable.any() and not torch.equal(
+        assembled[:, unavailable], torch.zeros_like(assembled[:, unavailable])
+    ):
+        raise RuntimeError("unavailable canonical placeholder logits are not inert")
+    return {
+        "passed": True,
+        "n_available_logits_checked": int(checked),
+        "n_unavailable_inert_placeholders": int(unavailable.sum().cpu()),
+        "maximum_absolute_error": maximum_absolute_error,
+        "maximum_relative_error": maximum_relative_error,
+        "comparison": "assembled translated head versus checkpoint-native scalar head",
+    }
+
+
+def load_spatial_readout(
+    model: Any,
+    outputs: list[McfarlandOutput],
+    *,
+    device: str,
+) -> tuple[ExactCIDSpatialReadout, list[dict[str, Any]]]:
+    """Build the exact-CID, deep-plus-phase spatial replay readout."""
+    from paper.model_selection.native_twin import (
+        audit_native_cid_mapping,
+        canonical_population_rows,
+        exact_unit_rows,
+    )
+
+    canonical = canonical_population_rows(model, outputs)
+    unit_rows = exact_unit_rows(model, canonical)
+    identity_audit = audit_native_cid_mapping(model, unit_rows)
+    available_rows = [row for row in unit_rows if bool(row["available"])]
+    first_dataset = int(available_rows[0]["model_readout_index"])
+    deep_reference = _native_readout_factors(model.model.readouts[first_dataset])
+    phase_readouts = getattr(model.model, "phase_readouts", None)
+    phase_reference = (
+        _native_readout_factors(phase_readouts[first_dataset])
+        if phase_readouts is not None
+        else None
+    )
+    n_units = len(unit_rows)
+    deep_feature_ref, deep_space_ref, deep_rank, deep_scale = deep_reference
+    deep_features = torch.zeros(
+        n_units, *deep_feature_ref.shape[1:], dtype=deep_feature_ref.dtype
+    )
+    deep_space = torch.zeros(
+        n_units, *deep_space_ref.shape[1:], dtype=deep_space_ref.dtype
+    )
+    bias = torch.zeros(n_units, dtype=deep_feature_ref.dtype)
+    baseline = torch.zeros_like(bias)
+    available = torch.zeros(n_units, dtype=torch.bool)
+
+    phase_features = phase_space = None
+    phase_rank = phase_scale = phase_stride = None
+    if phase_reference is not None:
+        phase_feature_ref, phase_space_ref, phase_rank, phase_scale = phase_reference
+        phase_features = torch.zeros(
+            n_units, *phase_feature_ref.shape[1:], dtype=phase_feature_ref.dtype
+        )
+        phase_space = torch.zeros(
+            n_units, *phase_space_ref.shape[1:], dtype=phase_space_ref.dtype
+        )
+        phase_stride = int(model.model.convnet.get_phase_spatial_stride())
+
+    cached: dict[int, dict[str, Any]] = {}
+    for dataset_index in sorted({int(row["model_readout_index"]) for row in available_rows}):
+        deep_native = model.model.readouts[dataset_index]
+        deep_factors = _native_readout_factors(deep_native)
+        _assert_common_readout_contract(deep_reference, deep_factors, branch="deep")
+        phase_factors = None
+        if phase_readouts is not None:
+            phase_factors = _native_readout_factors(phase_readouts[dataset_index])
+            assert phase_reference is not None
+            _assert_common_readout_contract(phase_reference, phase_factors, branch="phase")
+        native_bias = (
+            torch.zeros(int(deep_native.n_units), device=deep_factors[0].device)
+            if deep_native.bias is None
+            else deep_native.bias.detach()
+        )
+        native_baseline = torch.zeros_like(native_bias)
+        if bool(getattr(model.model, "baseline_enabled", False)):
+            native_baseline = model.model.baseline_activation(
+                model.model.baselines[dataset_index]
+            ).detach()
+        cached[dataset_index] = {
+            "deep_feature": deep_factors[0].cpu(),
+            "deep_space": deep_factors[1].cpu(),
+            "bias": native_bias.cpu(),
+            "baseline": native_baseline.cpu(),
+            "phase_feature": None if phase_factors is None else phase_factors[0].cpu(),
+            "phase_space": None if phase_factors is None else phase_factors[1].cpu(),
+        }
+
+    for row in available_rows:
+        channel = int(row["channel"])
+        dataset_index = int(row["model_readout_index"])
+        native_row = int(row["model_readout_row"])
+        values = cached[dataset_index]
+        deep_features[channel] = values["deep_feature"][native_row]
+        deep_space[channel] = values["deep_space"][native_row]
+        bias[channel] = values["bias"][native_row]
+        baseline[channel] = values["baseline"][native_row]
+        if phase_features is not None and phase_space is not None:
+            phase_features[channel] = values["phase_feature"][native_row]
+            phase_space[channel] = values["phase_space"][native_row]
+        available[channel] = True
+
+    readout = ExactCIDSpatialReadout(
+        deep_features=deep_features,
+        deep_space=deep_space,
+        bias=bias,
+        available=available,
+        deep_output_scale=deep_scale,
+        phase_features=phase_features,
+        phase_space=phase_space,
+        phase_output_scale=phase_scale,
+        phase_stride=phase_stride,
+        post_activation_baseline=baseline,
+    ).to(device).eval()
+    readout.identity_audit = identity_audit
+    readout.scalar_equivalence_audit = _audit_spatial_readout_equivalence(
+        model, readout, unit_rows, device=device
+    )
     return readout, list(unit_rows)
 
 
@@ -670,6 +1052,8 @@ class RealTraceMatrixScorer:
                     if getattr(readout, "has_phase_branch", False)
                     else None
                 ),
+                "native_cid_mapping_audit": dict(readout.identity_audit),
+                "scalar_equivalence_audit": dict(readout.scalar_equivalence_audit),
             },
             "population_version": str(population_view.name),
             "population_n_units": int(population_view.n_units),
@@ -738,11 +1122,18 @@ class RealTraceMatrixScorer:
         return self.torch.zeros(int(batch_size), int(behavior_dim), device=self.device, dtype=dtype)
 
     def _compute_rate_map(self, stim: Any) -> Any:
-        from scripts.spatial_info import compute_rate_map
-
         dtype = next(self.model.model.parameters()).dtype
         behavior = self._zero_behavior(int(stim.shape[0]), dtype)
-        return compute_rate_map(self.model, self.readout, stim, behavior=behavior)
+        module = self.model.model
+        if self.readout.has_phase_branch:
+            deep, phase = module.core_forward_spatial_map_with_phase(stim, behavior)
+            logits = self.readout(deep, phase)
+        else:
+            deep = module.core_forward_spatial_map(stim, behavior)
+            logits = self.readout(deep)
+        rate = module.activation(logits)
+        rate = rate + self.readout.post_activation_baseline[None, :, None, None]
+        return rate * self.readout.available_mask[None, :, None, None]
 
     def score_traces_for_patch(
         self,

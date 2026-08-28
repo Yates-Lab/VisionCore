@@ -11,9 +11,15 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import sys
 
 import numpy as np
 import pandas as pd
+
+
+ROOT = Path(__file__).resolve().parents[3]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 
 def parse_args() -> argparse.Namespace:
@@ -99,7 +105,7 @@ def runtime_identity_view(
     dataset_config: Path,
     mcfarland_outputs: Path,
     device: str,
-) -> tuple[pd.DataFrame, pd.DataFrame, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[pd.DataFrame, pd.DataFrame, np.ndarray, np.ndarray, np.ndarray, dict]:
     """Resolve availability from the exact readout construction used in replay."""
     from paper.fig4.upstream.real_trace_matrix.model import (
         load_mcfarland_outputs,
@@ -113,7 +119,7 @@ def runtime_identity_view(
         device=str(device),
     )
     outputs, _ = load_mcfarland_outputs(mcfarland_outputs)
-    _, runtime_rows = load_spatial_readout(model, outputs, device=str(device))
+    readout, runtime_rows = load_spatial_readout(model, outputs, device=str(device))
     canonical = pd.DataFrame(runtime_rows).rename(
         columns={"channel": "canonical_channel", "source_cid": "cid"}
     )
@@ -144,7 +150,17 @@ def runtime_identity_view(
     cluster_membership = membership.copy()
     labels = np.full(n_channels, -1, dtype=np.int32)
     labels[selected_channels] = np.arange(len(units), dtype=np.int32)
-    return canonical, units, membership, cluster_membership, labels
+    readout_audits = {
+        "native_cid_mapping": dict(readout.identity_audit),
+        "scalar_logit_equivalence": dict(readout.scalar_equivalence_audit),
+        "includes_phase_branch": bool(readout.has_phase_branch),
+        "deep_rank": int(readout.rank),
+        "phase_rank": int(readout.phase_rank) if readout.has_phase_branch else None,
+        "phase_spatial_stride": (
+            int(readout.phase_stride) if readout.has_phase_branch else None
+        ),
+    }
+    return canonical, units, membership, cluster_membership, labels, readout_audits
 
 
 def main() -> int:
@@ -169,7 +185,14 @@ def main() -> int:
             raise ValueError("runtime resolution requires both --dataset-config and --mcfarland-outputs")
         dataset_config = args.dataset_config.resolve()
         mcfarland_outputs = args.mcfarland_outputs.resolve()
-        canonical, units, membership, cluster_membership, labels = runtime_identity_view(
+        (
+            canonical,
+            units,
+            membership,
+            cluster_membership,
+            labels,
+            readout_audits,
+        ) = runtime_identity_view(
             checkpoint=checkpoint,
             dataset_config=dataset_config,
             mcfarland_outputs=mcfarland_outputs,
@@ -181,6 +204,7 @@ def main() -> int:
             "dataset_config_sha256": sha256_file(dataset_config),
             "mcfarland_outputs": str(mcfarland_outputs),
             "mcfarland_outputs_sha256": sha256_file(mcfarland_outputs),
+            "readout_audits": readout_audits,
         }
     else:
         if args.canonical_availability is None or args.unit_metrics is None:
@@ -264,6 +288,21 @@ def main() -> int:
             ),
             "no_pooling_or_substitution": True,
             "checkpoint_digest_bound": True,
+            "native_cid_mapping_passed": bool(
+                source_payload.get("readout_audits", {})
+                .get("native_cid_mapping", {})
+                .get("passed", not runtime_source)
+            ),
+            "scalar_logit_equivalence_passed": bool(
+                source_payload.get("readout_audits", {})
+                .get("scalar_logit_equivalence", {})
+                .get("passed", not runtime_source)
+            ),
+            "phase_branch_included": bool(
+                source_payload.get("readout_audits", {}).get(
+                    "includes_phase_branch", not runtime_source
+                )
+            ),
         },
     }
     outputs[4].write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
