@@ -148,7 +148,7 @@ def test_population_unit_effects_can_use_panel_b_matrix(tmp_path) -> None:
 
     assert result.unit_index.tolist() == [0, 1]
     assert np.all(result.population_rate_change_percent > 0)
-    assert np.isclose(result.loc[0, "population_rate_change_spikes_s"], 84.0)
+    assert np.isclose(result.loc[0, "population_rate_change_spikes_s"], 0.35)
     assert np.all(result.population_ssi_change_percent > 0)
     assert np.all(result.population_joint_rank_score > 0)
 

@@ -314,7 +314,9 @@ def _load_example_neurons(n=3, window_s=0.5, min_rho=0.85):
 
         mean = sd[f"model.readouts.{di}.mean"][neuron_id].detach().cpu().numpy().astype(np.float32)
         std  = sd[f"model.readouts.{di}.std"][neuron_id].detach().cpu().numpy().astype(np.float32)
-        feats = (sd[f"model.readouts.{di}.features.weight"][neuron_id]
+        # Feature rows are unit-major [unit, rank, channel], including rank > 1.
+        n_units = len(sd[f"model.readouts.{di}.mean"])
+        feats = (sd[f"model.readouts.{di}.features.weight"].reshape(n_units, -1)[neuron_id]
                  .detach().cpu().numpy().squeeze().astype(np.float32))
 
         # Trial-averaged PSTH (already computed during inference); spikes/bin.
@@ -524,7 +526,7 @@ def _load_readout_example():
     means = sd["model.readouts.0.mean"].detach().cpu().numpy()
     stds  = sd["model.readouts.0.std"].detach().cpu().numpy()
     feats = sd["model.readouts.0.features.weight"].detach().cpu().numpy()
-    feats = feats.squeeze(axis=(2, 3))   # (N_neurons, n_feat)
+    feats = feats.reshape(len(means), -1)  # (N_neurons, rank * n_feat)
     # Score by L4/L2 ratio (high → energy concentrated in few features)
     norm2 = np.sqrt((feats ** 2).sum(axis=1) + 1e-12)
     norm4 = np.power((feats ** 4).sum(axis=1) + 1e-12, 0.25)

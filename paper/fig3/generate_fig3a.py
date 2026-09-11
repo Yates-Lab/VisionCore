@@ -563,7 +563,7 @@ def _draw_top_row(ax, assets, row_cy):
     cube_w = cube_block["x_right"] - cube_block["x_left"]
 
     # "Visual" tag on the cube, with a grey dimensionality sub-line.
-    ax.text(cube_cx, cube_block["top_y"] + 0.24, "Visual", ha="center",
+    ax.text(cube_cx, cube_block["top_y"] + 0.46, "Visual", ha="center",
             va="bottom", fontsize=STIM_SUB_FS + 1.5, color=TEXT_COLOR)
     ax.text(cube_cx, cube_block["top_y"] + 0.02, "space × space × time",
             ha="center", va="bottom", fontsize=STIM_SUB_FS, color="#777",
@@ -580,9 +580,9 @@ def _draw_top_row(ax, assets, row_cy):
     beh_title_y = plus_y - 0.34
     ax.text(cube_cx, beh_title_y, "Extraretinal", ha="center", va="top",
             fontsize=STIM_SUB_FS + 1.5, color=TEXT_COLOR)
-    ax.text(cube_cx, beh_title_y - 0.26, "signals × time", ha="center",
+    ax.text(cube_cx, beh_title_y - 0.43, "signals × time", ha="center",
             va="top", fontsize=STIM_SUB_FS, color="#777", style="italic")
-    beh_top = beh_title_y - 0.50
+    beh_top = beh_title_y - 0.82
     beh_row = _draw_behavior_traces(
         ax, assets, beh_x0, beh_top, cube_w,
         labeled=True, scale_bar=True, box=False, trace_h=0.95, key_side="right",
@@ -758,7 +758,7 @@ ARCH_NAME_FS = 7.5             # stage names (Frontend, ResBlock 1, …)
 ARCH_SUB_FS = 6.0             # stage sub-captions (kernel · channels)
 
 LABEL_GAP = 0.18
-SUB_GAP = 0.32
+SUB_GAP = 0.45
 HEADER_GAP = 0.55
 
 SKIP_DEPTH = 1.8
@@ -1222,9 +1222,9 @@ def _draw_behavior_traces(ax, assets, x0, y_top, w, *, labeled=True,
 
     x_left = x0
     if labeled:
-        ax.text(x0 - 0.12, y_eye + panel_h / 2, "eye\nposition", ha="right",
+        ax.text(x0 - 0.12, y_eye + panel_h / 2, "position", ha="right",
                 va="center", fontsize=6.0, color="#444", linespacing=1.0)
-        ax.text(x0 - 0.12, y_speed + panel_h / 2, "eye\nvelocity", ha="right",
+        ax.text(x0 - 0.12, y_speed + panel_h / 2, "speed", ha="right",
                 va="center", fontsize=6.0, color="#444", linespacing=1.0)
         x_left = x0 - 0.55
 
@@ -1484,10 +1484,10 @@ def _draw_all(ax, assets):
     # Title the retinal pathway (mirrors the "Extraretinal input" label). The
     # italic sub-line names the reafferent motion the stabilized cube removes.
     cube_cx = 0.5 * (cube_in["x_left"] + cube_in["x_right"])
-    ax.text(cube_cx, cube_in["top_y"] + 0.30, "Retinal input", ha="center",
+    ax.text(cube_cx, cube_in["top_y"] + 0.53, "Retinal input", ha="center",
             va="bottom", fontsize=STIM_HEADER_FS, color=TEXT_COLOR,
             fontweight="bold")
-    ax.text(cube_cx, cube_in["top_y"] + 0.10, "moves with eye (reafference)",
+    ax.text(cube_cx, cube_in["top_y"] + 0.10, "moves with eye",
             ha="center", va="bottom", fontsize=STIM_SUB_FS, color="#555",
             style="italic")
 
@@ -1505,10 +1505,10 @@ def _draw_all(ax, assets):
         ax, assets, (BOT_CUBE_CX, stab_cy), draw_header=False, draw_dims=False,
         draw_time=False, cube_override=stab_cube, outline=STABILIZED_COLOR)
     stab_cx = 0.5 * (stab_block["x_left"] + stab_block["x_right"])
-    ax.text(stab_cx, stab_block["top_y"] + 0.22, "Stabilized",
+    ax.text(stab_cx, stab_block["top_y"] + 0.45, "Stabilized",
             ha="center", va="bottom", fontsize=STIM_HEADER_FS - 0.5,
             color=STABILIZED_COLOR, fontweight="bold")
-    ax.text(stab_cx, stab_block["top_y"] + 0.02, "reafference removed",
+    ax.text(stab_cx, stab_block["top_y"] + 0.02, "fixed gaze",
             ha="center", va="bottom", fontsize=STIM_SUB_FS,
             color=STABILIZED_COLOR, style="italic")
 

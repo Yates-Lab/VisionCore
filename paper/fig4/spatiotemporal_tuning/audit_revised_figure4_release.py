@@ -253,7 +253,7 @@ def main() -> int:
         and figure_summary["panels"]["C"].get(
             "selected_by_microsaccade_label"
         )
-        is False
+        == bool(rucci.get("spectral_shape_regimes", {}).get("selected_by_microsaccade_label", False))
         and len(figure_summary["panels"]["C"].get("regimes", [])) == 2
         and bool(rucci.get("spectral_shape_regimes", {}).get(
             "selection_reads_neural_or_model_responses"
@@ -269,6 +269,22 @@ def main() -> int:
         ),
         figure_summary["panels"]["C"],
     )
+
+    event_regimes = rucci.get("spectral_shape_regimes", {})
+    if event_regimes.get("selected_by_microsaccade_label"):
+        groups = figure_summary["panels"]["C"]["regimes"]
+        event_contract = event_regimes.get("event_classification", {})
+        gate(
+            "C", "event-defined drift/microsaccade groups match the audited subdegree contract",
+            figure_summary["panels"]["C"].get("conditions") == ["drift", "microsaccades"]
+            and [g["n_fixation_epochs"] for g in groups] == event_regimes["n_fixation_epochs"]
+            and groups[0]["microsaccade_positive_fraction"] == 0.0
+            and groups[1]["microsaccade_positive_fraction"] == 1.0
+            and event_contract.get("amplitude_max_deg_exclusive") == 1.0
+            and event_contract.get("selection_reads_spectra_or_responses") is False
+            and event_regimes.get("selected_by_spectral_centroid") is False,
+            event_contract,
+        )
 
     validated = unit_audit.loc[unit_audit.validated_for_figure4.astype(bool)]
     source_lookup = unit_audit.set_index("unit_index")

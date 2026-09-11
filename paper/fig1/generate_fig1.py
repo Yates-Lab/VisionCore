@@ -22,6 +22,7 @@ import cairosvg
 from PIL import Image, ImageEnhance, ImageOps
 
 from VisionCore.paths import FIGURES_DIR
+from VisionCore.figure_typography import apply_font_floor
 from generate_fig1b import (
     plot_panel_b, pick_representative_session, _load_all_fixrsvp_stimuli,
     EXTENT_VIEW_MARGIN_DEG,
@@ -273,7 +274,10 @@ def _render_main_svg(out_path, recalc_c=False, recalc_d=False, recalc_f=False,
     # every panel has been moved to its final box.
     draw_gaze_raster_arrows(fig)
 
-    fig.savefig(out_path, dpi=400)
+    apply_font_floor(fig)
+    # Preserve text as text so the compiled manuscript can audit its size.
+    with plt.rc_context({"svg.fonttype": "none"}):
+        fig.savefig(out_path, dpi=400)
     plt.close(fig)
 
 

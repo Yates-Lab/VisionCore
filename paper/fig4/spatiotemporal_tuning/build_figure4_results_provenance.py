@@ -150,6 +150,8 @@ def main() -> int:
                 ],
             },
             "rucci_power": {
+                "trace_filter": rucci["trace_filter"],
+                "regimes": rucci["spectral_shape_regimes"],
                 "equal_dynamic_mass": rucci["spectral_shape_regimes"][
                     "map_integrals_after_normalization"
                 ],

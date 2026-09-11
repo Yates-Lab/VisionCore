@@ -1,10 +1,51 @@
 import numpy as np
+import pytest
+import torch
+from pathlib import Path
+from types import SimpleNamespace
+
+from models import build_model
+from models.config_loader import load_config
+from paper.fig4.upstream.real_trace_matrix.model import ExactCIDSpatialReadout
 
 from paper.fig4.spatiotemporal_tuning.analyze_top_passband_stage_trajectory import (
     select_top_traces,
     unit_top_bin_effects,
     unit_top_bin_normalized_effects,
+    cumulative_rate_maps,
+    stage_names_for_readout,
 )
+
+
+@pytest.mark.parametrize("rank", [1, 2])
+def test_no_phase_cumulative_output_equals_full_model(rank):
+    torch.manual_seed(8)
+    root = Path(__file__).resolve().parents[1]
+    config = load_config(root / f"experiments/model_configs/dekel_native240_no_phase_rank{rank}_stage3.yaml")
+    model = build_model(config, [{"session": "test", "cids": [0, 1, 2]}]).eval()
+    head = model.readouts[0]
+    spatial = head.get_spatial_weights()
+    if spatial.ndim == 3:
+        spatial = spatial[:, None]
+    readout = ExactCIDSpatialReadout(
+        deep_features=head.features.weight.reshape(3, rank, -1, 1, 1),
+        deep_space=spatial, bias=head.bias,
+        available=torch.ones(3, dtype=torch.bool), deep_output_scale=head.output_scale,
+    )
+    zeros = lambda n, dtype: torch.zeros(n, 42, dtype=dtype)
+    scorer = SimpleNamespace(
+        model=SimpleNamespace(model=model), readout=readout,
+        _zero_behavior=zeros, population_view=None,
+        apply_population_view=lambda value, view: value,
+        _compute_rate_map=lambda stimulus: model.activation(readout(
+            model.core_forward_spatial_map(stimulus, zeros(len(stimulus), stimulus.dtype))
+        )),
+    )
+    with torch.inference_mode():
+        rates, checks = cumulative_rate_maps(scorer, torch.randn(2, 1, 60, 39, 39), check_identity=True)
+    assert rates.shape[:3] == (3, 2, 3)
+    assert checks["ordinary_output_max_abs"] < 2e-5
+    assert stage_names_for_readout(readout) == ("S1", "+ S2", "+ S3 / output")
 
 
 def test_select_top_traces_stratifies_full_top_bin_and_covers_units():

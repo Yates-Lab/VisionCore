@@ -96,15 +96,19 @@ def architecture_summary(module: MultiDatasetModel) -> dict[str, Any]:
     ranks = sorted(
         {int(readout.rank) for readout in phase_readouts or [] if hasattr(readout, "rank")}
     )
-    if len(ranks) != 1:
+    if phase_readouts and len(ranks) != 1:
         raise ValueError(f"Expected one phase-readout rank across sessions, got {ranks}")
+    readout_ranks = {int(getattr(readout, "rank", 1)) for readout in module.model.readouts}
+    if len(readout_ranks) != 1:
+        raise ValueError(f"Ordinary readout ranks differ across sessions: {readout_ranks}")
     return {
         "total": sum(parameter.numel() for parameter in parameters.values()),
         "visual_core": count("adapters", "frontend", "convnet", "recurrent"),
         "behavior_modulator": count("modulator"),
         "deep_readouts": count("readouts"),
         "phase_readouts": count("phase_readouts"),
-        "phase_readout_rank": ranks[0],
+        "phase_readout_rank": ranks[0] if ranks else 0,
+        "readout_rank": readout_ranks.pop(),
         "output_channels": sum(len(config.get("cids", [])) for config in module.cfgs),
         "sessions": len(module.cfgs),
     }
@@ -131,6 +135,8 @@ def audit(spec_path: Path, *, verbose: bool = False) -> dict[str, Any]:
     observed = architecture_summary(module)
     expected = spec["architecture"]
     require_equal(observed["phase_readout_rank"], expected["phase_readout_rank"], "rank")
+    if "readout_rank" in expected:
+        require_equal(observed["readout_rank"], expected["readout_rank"], "ordinary rank")
     require_equal(observed["output_channels"], expected["output_channels"], "outputs")
     for name, value in expected["parameters"].items():
         require_equal(observed[name], int(value), f"parameter count {name}")

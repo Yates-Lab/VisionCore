@@ -1,0 +1,109 @@
+{
+  "checkpoint_sha256": "e70f287462155607a96c7d23d9d56e347111319aa48cafd3f54fe88dd4484cb9",
+  "history_sha256": "7587c971d2e7cde708829f3ca4219ead19eec81cd9a0253901dec448596008b4",
+  "history_order": "lag 0 first, reversed from cached chronological FixRSVP lag_cube",
+  "history_source": {
+    "condition": "fixrsvp",
+    "session": "Allen_2022-04-08",
+    "cache": "/home/jake/repos/VisionCore/outputs/no_phase_readout_comparison_20260910/rank1/figure3/cache/fig3a_assets.pkl",
+    "cache_sha256": "d6d34913634c3216d233cd2cfd47c233c8f59d9be9275c163a29b79bd8272577",
+    "display_alignment": "paired cached illustrations share a most-recent frame aligned to the test-screen ROI",
+    "stabilized_history_sha256": "a9593f3b9f1af6f0ab273b216f20ead1021edfb8f1ff35c83e1eba7c53e99970"
+  },
+  "behavior_source": "separate cached FixRSVP eye-position and speed example from the same session",
+  "preprocessing": "35-pixel cached crop; production pixelnorm: (pixel - 127) / 255",
+  "feature_channels": [
+    [
+      91,
+      90,
+      49,
+      48
+    ],
+    [
+      17,
+      44,
+      111,
+      15
+    ],
+    [
+      96,
+      132,
+      73,
+      15
+    ]
+  ],
+  "filter_channels": [
+    0,
+    5,
+    10
+  ],
+  "selection": "four channels with greatest spatial variance at each stage",
+  "display": "each displayed feature map independently contrast-normalized",
+  "readout_glyphs": "schematic spatial and feature weights, not fitted coefficients",
+  "example_psth": {
+    "session": "Allen_2022-04-06",
+    "neuron_id": 76
+  },
+  "architecture": {
+    "stage_shapes": [
+      [
+        168,
+        35,
+        35
+      ],
+      [
+        168,
+        18,
+        18
+      ],
+      [
+        168,
+        9,
+        9
+      ]
+    ],
+    "readout_rank": 1,
+    "phase_readout_rank": 0
+  },
+  "hypothesis_tests": {
+    "weights": "same fitted weights for all three input conditions",
+    "full": {
+      "color": "#1f77b4",
+      "retinal": "measured motion",
+      "extraretinal": "retained"
+    },
+    "retinal_only": {
+      "color": "#d62728",
+      "retinal": "measured motion",
+      "extraretinal": "input zeroed before the behavioral MLP"
+    },
+    "stabilized": {
+      "color": "#9467bd",
+      "retinal": "gaze-induced motion removed",
+      "extraretinal": "retained"
+    },
+    "stabilized_cube": "paired FixRSVP history with image flashes preserved and ROI held at the example trial medoid; quantified ablation uses the session-global gaze centroid",
+    "shared_input_arrows": "one neutral retinal arrow and one behavioral arrow; colors mark condition labels and the two input interventions"
+  },
+  "schematic_architecture": {
+    "stage_shapes": [
+      [
+        168,
+        35,
+        35
+      ],
+      [
+        168,
+        18,
+        18
+      ],
+      [
+        168,
+        9,
+        9
+      ]
+    ],
+    "readout_rank": 1,
+    "phase_readout_rank": 0
+  }
+}

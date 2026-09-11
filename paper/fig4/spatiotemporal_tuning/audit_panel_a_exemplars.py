@@ -8,7 +8,7 @@ the retinal frame at the model's resolved mean peak temporal lag; only the
 surrounding motion history differs.
 
 The final unit/image/trace combination is explicitly an illustrative example.
-It is selected from the preregistered candidate grid using disclosed response
+It is selected from the deterministic candidate grid using disclosed response
 clarity gates.  Every scored candidate is retained in ``candidate_metrics.csv``.
 Population inference must come from the factorial replay, never this audit.
 """
@@ -85,6 +85,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--history-samples", type=int, default=60)
     parser.add_argument("--patch-size-px", type=int, default=540)
     parser.add_argument("--n-image-candidates", type=int, default=12)
+    parser.add_argument("--image-selection", choices=("contrast_quantiles", "central_detail"),
+                        default="contrast_quantiles")
     parser.add_argument("--n-trace-candidates-per-subject", type=int, default=6)
     parser.add_argument(
         "--population-unit-candidates",
@@ -176,6 +178,8 @@ def select_trace_windows(
     windows: dict[int, np.ndarray] = {}
     first_complete_endpoint = 2 * int(history_samples) - 1
     for trace_index, trace in enumerate(np.asarray(traces, dtype=np.float32)):
+        if "event_class" in trace_table and trace_table.iloc[trace_index].event_class == "excluded":
+            continue
         best: dict[str, Any] | None = None
         for endpoint in range(first_complete_endpoint, len(trace)):
             window = trace[endpoint - int(history_samples) + 1 : endpoint + 1]
@@ -208,7 +212,7 @@ def select_trace_windows(
         best.update(
             {
                 "subject": str(row.session).split("_")[0],
-                "saved_microsaccade_count": int(row.saved_microsaccade_count),
+                "saved_microsaccade_count": int(row.get("verified_microsaccade_count", row.saved_microsaccade_count)),
                 "session": str(row.session),
             }
         )
@@ -233,6 +237,9 @@ def select_trace_windows(
         candidates.spectral_regime_code.eq(1).astype(int)
         + candidates.saved_microsaccade_count.gt(0).astype(int)
     )
+    if "event_class" in trace_table:
+        candidates["spectral_regime_code"] = candidates.saved_microsaccade_count.gt(0).astype(int)
+        candidates["event_priority"] = candidates.saved_microsaccade_count.gt(0).astype(int)
     selected = []
     for _, group in candidates.groupby("subject", sort=True):
         ordered = group.sort_values(
@@ -252,12 +259,34 @@ def select_trace_windows(
     return selected_frame, selected_windows
 
 
-def select_images(table: pd.DataFrame, count: int) -> pd.DataFrame:
-    """Span natural-image RMS contrast without using neural responses."""
+def select_images(table: pd.DataFrame, count: int, *, method: str = "contrast_quantiles",
+                  patch_size_px: int = 540) -> pd.DataFrame:
+    """Choose image candidates from image features without using neural responses."""
     valid = table.copy()
     if "image_feature_ok" in valid:
         valid = valid.loc[valid.image_feature_ok.astype(bool)]
     valid = valid.loc[np.isfinite(valid.image_patch_rms_contrast)]
+    if method == "central_detail":
+        # Evaluate image structure before running the model. The central half
+        # of the rendered field excludes detail confined to the patch border.
+        cache = {}
+        detail = []
+        for _, row in valid.iterrows():
+            patch, _ = extract_patch(row, canvas_cache=cache, patch_size_px=patch_size_px)
+            frame = render_movies(patch, np.zeros((1, 1, 2), dtype=np.float32),
+                                  device="cpu")[0, 0]
+            h, w = frame.shape
+            center = frame[h // 4:3 * h // 4, w // 4:3 * w // 4].astype(float)
+            gy, gx = np.gradient(center)
+            detail.append(float(np.sqrt(np.mean(gx * gx + gy * gy))))
+        valid["central_gradient_rms"] = detail
+        valid = valid.sort_values(["central_gradient_rms", "image_index"],
+                                  ascending=[False, True])
+        if len(valid) < int(count):
+            raise RuntimeError(f"only {len(valid)} valid images for {count} requested candidates")
+        return valid.head(int(count)).copy().reset_index(drop=True)
+    if method != "contrast_quantiles":
+        raise ValueError(f"unknown image selection method: {method}")
     valid = valid.sort_values("image_patch_rms_contrast").reset_index(drop=True)
     if len(valid) < int(count):
         raise RuntimeError(f"only {len(valid)} valid images for {count} requested candidates")
@@ -322,7 +351,6 @@ def population_unit_effects_from_matrix(matrix_dir: Path) -> pd.DataFrame:
     bin_seconds = float(summary["validated_common_provenance"]["bin_seconds"])
     if not np.isfinite(bin_seconds) or bin_seconds <= 0:
         raise ValueError("matrix summary has an invalid bin_seconds")
-    output_rate_hz = 1.0 / bin_seconds
     rate_motion = np.load(matrix_dir / "mean_rate_matrix.npy")
     ssi_motion = np.load(matrix_dir / "ssi_matrix.npy")
     rate_stable = np.load(matrix_dir / "stabilized_mean_rate_by_image.npy")
@@ -350,8 +378,7 @@ def population_unit_effects_from_matrix(matrix_dir: Path) -> pd.DataFrame:
             "population_rate_change_percent": 100.0
             * (motion_rate_center - stable_rate_center)
             / np.maximum(stable_rate_center, EPS),
-            "population_rate_change_spikes_s": output_rate_hz
-            * (motion_rate_center - stable_rate_center),
+            "population_rate_change_spikes_s": motion_rate_center - stable_rate_center,
             "population_ssi_change_percent": 100.0
             * (motion_ssi_center - stable_ssi_center)
             / np.maximum(stable_ssi_center, EPS),
@@ -482,7 +509,8 @@ def main() -> None:
         maximum_peak_speed=float(args.maximum_window_peak_speed_deg_s),
     )
     image_table = pd.read_csv(args.image_table)
-    image_candidates = select_images(image_table, int(args.n_image_candidates))
+    image_candidates = select_images(image_table, int(args.n_image_candidates),
+                                     method=args.image_selection, patch_size_px=args.patch_size_px)
     trace_candidates.to_csv(args.out_dir / "trace_candidates.csv", index=False)
     image_candidates.to_csv(args.out_dir / "image_candidates.csv", index=False)
     population_units = None
@@ -683,7 +711,10 @@ def main() -> None:
         "model_peak_lag": lag_contract,
         "image_selection": {
             "uses_neural_response": False,
-            "method": "even quantiles of natural-image RMS contrast after image QC",
+            "method": ("largest RMS image gradient in the central half of the rendered field after image QC"
+                       if args.image_selection == "central_detail" else
+                       "even quantiles of natural-image RMS contrast after image QC"),
+            "policy": args.image_selection,
             "candidate_count": int(len(image_candidates)),
         },
         "response_selection": {

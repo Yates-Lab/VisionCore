@@ -1,5 +1,39 @@
 # Native-240-Hz production curriculum
 
+## Readout simplification comparison
+
+`native240_no_phase_rank1_v1.yaml` and `native240_no_phase_rank2_v1.yaml`
+repeat the complete 488/24/64-epoch curriculum with seed 201 and no separate
+signed stage-1 readout. The rank applies to the ordinary 568-channel,
+9-by-9 multiscale/behavioral readout. Each run independently fits the initial
+Gaussian-head model from scratch; rank differs at the sparse-readout stage.
+Stage 2 freezes everything except `readouts`, and stage 3 unfreezes the model.
+The rank-two handoff preserves the Gaussian model's predictions exactly and
+seeds a second spatial factor with zero feature weights so it can learn.
+
+Both sparse stages retain proximal L1 on spatial weights (0.02) and feature
+weights (0.1), spatial normalization over rank and space, and a shared learned
+Gaussian envelope per neuron with width clamped to [0.75, 2.0] grid pixels.
+L1 ramps over epochs 2--12 of stage 2 and is constant during stage 3. Stage 1
+has Gaussian readouts and no proximal L1. Total parameter counts for the 2,790
+units are 5,295,486 (rank one) and 7,106,196 (rank two).
+
+Launch either run with its explicit spec:
+
+```bash
+conda run --no-capture-output -n yatesfv python training/run_three_stage_curriculum.py \
+  --spec experiments/curricula/native240_no_phase_rank1_v1.yaml \
+  --run-id NO_PHASE_R1_s201 --gpu 0 --execute
+```
+
+Use the rank-two spec and `NO_PHASE_R2_s201 --gpu 1` for the second run.
+The 2026-09-10 comparison, logs, checkpoint manifests, queued Figure 3/4
+workflows, and per-run manuscript-statistics exports live under
+`outputs/no_phase_readout_comparison_20260910/`. The historical selected model
+remains pinned until the new results have been evaluated.
+
+## Previous model with a separate stage-1 branch
+
 `native240_sparse_phase_v1.yaml` is the complete predictive training story:
 
 1. Train the visual core, behavior pathway, and ordinary Gaussian

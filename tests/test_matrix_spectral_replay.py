@@ -3,15 +3,19 @@ from __future__ import annotations
 import json
 
 import numpy as np
+import pytest
+from paper.fig4.upstream.real_trace_matrix.model import RESPONSE_UNITS
 
 from paper.fig4.spatiotemporal_tuning.build_matrix_spectral_replay import (
     _load_matrix_responses,
     _matrix_contract,
+    _pack_response_conditions,
 )
 
 
 def _model_provenance(checkpoint: str = "a" * 64) -> dict:
     return {
+        "response_units": dict(RESPONSE_UNITS),
         "model": {
             "checkpoint_sha256": checkpoint,
             "dataset_configs_sha256": "b" * 64,
@@ -50,6 +54,33 @@ def test_load_matrix_responses_preserves_image_major_trace_order(tmp_path):
     assert result["moving_mean_rate"].shape == (2, 3, 4)
     np.testing.assert_array_equal(result["moving_mean_rate"][1, 0], moving[3])
     np.testing.assert_array_equal(result["stable_map_ssi"], stable)
+
+
+def test_condition_archive_preserves_hz_and_full_movie_counts():
+    moving_hz = np.arange(1, 25, dtype=np.float32).reshape(2, 3, 4)
+    stable_hz = np.arange(30, 38, dtype=np.float32).reshape(2, 4)
+    duration_seconds = 60 / 240
+    responses = {
+        "moving_mean_rate": moving_hz,
+        "stable_mean_rate": stable_hz,
+        "moving_expected_spikes": moving_hz * duration_seconds,
+        "stable_expected_spikes": stable_hz * duration_seconds,
+        "moving_map_ssi": np.full_like(moving_hz, 0.2),
+        "stable_map_ssi": np.full_like(stable_hz, 0.1),
+    }
+    units = np.array([2, 0])
+
+    result = _pack_response_conditions(responses, units)
+
+    assert result["mean_rate"].shape == (2, 3, 2, 2)
+    np.testing.assert_array_equal(result["mean_rate"][:, :, 1], moving_hz[:, :, units])
+    np.testing.assert_array_equal(
+        result["mean_rate"][:, :, 0],
+        np.broadcast_to(stable_hz[:, None, units], (2, 3, 2)),
+    )
+    np.testing.assert_array_equal(
+        result["expected_spikes"], result["mean_rate"] * duration_seconds
+    )
 
 
 def test_matrix_contract_requires_matching_checkpoint_and_filtered_gate(tmp_path):
@@ -103,3 +134,12 @@ def test_matrix_contract_rejects_checkpoint_mismatch(tmp_path):
         assert "different checkpoints" in str(error)
     else:
         raise AssertionError("checkpoint mismatch was not rejected")
+
+
+def test_matrix_contract_rejects_undeclared_response_units(tmp_path):
+    model = _model_provenance()
+    del model["response_units"]
+    (tmp_path / "summary.json").write_text(json.dumps({"shard_summaries": [{"model_provenance": model}]}))
+    (tmp_path / "stabilized_baseline_summary.json").write_text(json.dumps({"model_provenance": model}))
+    with pytest.raises(ValueError, match="response.units"):
+        _matrix_contract(tmp_path)

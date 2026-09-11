@@ -6,7 +6,43 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from scipy import signal
+from scipy import ndimage, signal
+
+
+def gaussian_filter_spec(sigma_seconds: float = 0.006) -> dict:
+    """Explicit provenance for the non-ringing Figure-4 analysis filter."""
+    if not np.isfinite(sigma_seconds) or sigma_seconds <= 0:
+        raise ValueError("Gaussian sigma must be finite and positive")
+    return {
+        "kind": "zero-phase positive Gaussian on uniform raw-DDPI grid before 240-Hz sampling",
+        "family": "gaussian",
+        "sigma_seconds": float(sigma_seconds),
+        "truncate_sigma": 5.0,
+        "minus_3db_hz": float(np.sqrt(np.log(2)) / (2 * np.pi * sigma_seconds)),
+        "selection_basis": "gentle rolloff near the independently measured 20-Hz DDPI PSD break; transient and width-sensitivity controls",
+    }
+
+
+def filter_contract_valid(spec: dict) -> bool:
+    """Recognize explicit Gaussian or legacy 20/30-Hz filter provenance."""
+    if "zero-phase" not in str(spec.get("kind", "")).lower():
+        return False
+    if spec.get("family") == "gaussian":
+        sigma = float(spec.get("sigma_seconds", np.nan))
+        return bool(np.isfinite(sigma) and 0.004 <= sigma <= 0.008
+                    and float(spec.get("truncate_sigma", 0)) >= 5)
+    return bool(np.isclose(float(spec.get("passband_hz", np.nan)), 20)
+                and np.isclose(float(spec.get("stopband_hz", np.nan)), 30))
+
+
+def filter_qc_passed(provenance: dict) -> bool:
+    """Use the declared filter's QC, without relabeling Gaussian as a stopband."""
+    spec = provenance.get("filter", {})
+    if spec.get("family") == "gaussian":
+        qc = provenance.get("filter_validation", {})
+        return filter_contract_valid(spec) and all(qc.get(key) is True for key in
+            ("positive_kernel", "monotonic_step_response", "continuous_raw_before_resampling", "padding_covers_kernel"))
+    return bool(provenance.get("spectral_filter_qc", {}).get("stopband_suppression_gate", False))
 
 
 def load_ddpi(path: Path) -> pd.DataFrame:
@@ -33,12 +69,20 @@ def anti_alias_eye_position(
     passband_hz: float,
     stopband_hz: float,
     padding_seconds: float,
+    filter_family: str = "elliptic",
+    gaussian_sigma_seconds: float = 0.006,
 ) -> dict[str, np.ndarray | float]:
     """Zero-phase filter raw pixel eye position before native-240 sampling."""
     time = ddpi.t_ephys.to_numpy(dtype=float)
     raw_nyquist = 0.5 / np.median(np.diff(time[: min(len(ddpi), 10000)]))
-    if not 0 < passband_hz < stopband_hz < raw_nyquist:
+    if filter_family not in ("elliptic", "gaussian"):
+        raise ValueError(f"unknown eye filter family: {filter_family}")
+    if filter_family == "elliptic" and not 0 < passband_hz < stopband_hz < raw_nyquist:
         raise ValueError("eye filter edges are inconsistent with raw DDPI Nyquist")
+    if filter_family == "gaussian":
+        gaussian_filter_spec(gaussian_sigma_seconds)
+        if padding_seconds < 5 * gaussian_sigma_seconds:
+            raise ValueError("padding does not cover the Gaussian kernel")
     left, right = np.searchsorted(
         time, (start_ephys - padding_seconds, stop_ephys + padding_seconds)
     )
@@ -57,18 +101,22 @@ def anti_alias_eye_position(
             for coordinate in range(2)
         ]
     )
-    sos = signal.iirdesign(
-        wp=float(passband_hz),
-        ws=float(stopband_hz),
-        gpass=0.1,
-        gstop=60.0,
-        fs=source_rate_hz,
-        output="sos",
-    )
     fixation_center = np.median(uniform_position, axis=0, keepdims=True)
-    filtered_uniform = fixation_center + signal.sosfiltfilt(
-        sos, uniform_position - fixation_center, axis=0
-    )
+    if filter_family == "gaussian":
+        if (start_ephys - uniform_time[0] < 5 * gaussian_sigma_seconds or
+                uniform_time[-1] - stop_ephys < 5 * gaussian_sigma_seconds):
+            raise ValueError("raw record does not cover Gaussian padding")
+        sos = np.empty((0, 6))
+        filtered_uniform = ndimage.gaussian_filter1d(
+            uniform_position, gaussian_sigma_seconds * source_rate_hz,
+            axis=0, mode="reflect", truncate=5.0,
+        )
+    else:
+        sos = signal.iirdesign(wp=float(passband_hz), ws=float(stopband_hz),
+            gpass=0.1, gstop=60.0, fs=source_rate_hz, output="sos")
+        filtered_uniform = fixation_center + signal.sosfiltfilt(
+            sos, uniform_position - fixation_center, axis=0
+        )
     target_time = np.arange(
         start_ephys + 0.5 / target_rate_hz,
         stop_ephys,

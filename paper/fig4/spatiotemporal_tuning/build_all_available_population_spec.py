@@ -154,6 +154,8 @@ def runtime_identity_view(
         "native_cid_mapping": dict(readout.identity_audit),
         "scalar_logit_equivalence": dict(readout.scalar_equivalence_audit),
         "includes_phase_branch": bool(readout.has_phase_branch),
+        "phase_branch_matches_checkpoint": bool(readout.has_phase_branch)
+        == (getattr(model.model, "phase_readouts", None) is not None),
         "deep_rank": int(readout.rank),
         "phase_rank": int(readout.phase_rank) if readout.has_phase_branch else None,
         "phase_spatial_stride": (
@@ -298,9 +300,9 @@ def main() -> int:
                 .get("scalar_logit_equivalence", {})
                 .get("passed", not runtime_source)
             ),
-            "phase_branch_included": bool(
+            "phase_branch_matches_checkpoint": bool(
                 source_payload.get("readout_audits", {}).get(
-                    "includes_phase_branch", not runtime_source
+                    "phase_branch_matches_checkpoint", not runtime_source
                 )
             ),
         },

@@ -1,0 +1,11 @@
+{
+  "bundle": "outputs/no_phase_readout_comparison_20260910/rank1",
+  "checkpoint_sha256": "e70f287462155607a96c7d23d9d56e347111319aa48cafd3f54fe88dd4484cb9",
+  "final_manifest_sha256": "a0207ad82ec9ceef733adf3920083f46588c4083c3337df8b6a4f0d473731243",
+  "model_spec_sha256": "e00c55c3712acfb05a7dc06db5879e0756f58d71ed7dd346129fbf3f94038449",
+  "figure3_manifest_sha256": "ef9b00e47e9ed032ac62e42f2467e648d845171e8900a69bbffc526363307976",
+  "figure4_results_sha256": "f0662903fa941fc4d38758341369273023a69971f5ee09fa6564fe9f9ff43749",
+  "schematic_no_phase_preview": false,
+  "reason": "User selected completed rank-one no-phase model for every model-dependent manuscript analysis",
+  "selected_utc": "2026-09-11T07:49:03.041746+00:00"
+}

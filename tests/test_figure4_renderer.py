@@ -1,6 +1,7 @@
 from __future__ import annotations
 import numpy as np
 import pandas as pd
+import pytest
 from matplotlib.figure import Figure
 from paper.fig4.spatiotemporal_tuning.build_panel_b_population_path_length import summarize, summarize_unit_distributions, unit_level_effects
 from paper.fig4.spatiotemporal_tuning._figure4_renderer import PANEL_LAYOUT, _direct_mechanism_values, _draw_panel_c_power, _draw_panel_e_population, _draw_panel_h_normalized
@@ -81,12 +82,17 @@ def test_panel_e_draws_one_authoritative_contour_per_released_unit() -> None:
     assert 'no KDE' in report['density_definition']
     assert report['contours_share_authoritative_code_with_panels_d_and_f'] is True
 
-def test_panel_h_uses_gain_invariant_natural_unit_trajectories() -> None:
+@pytest.mark.parametrize('has_phase', [False, True])
+def test_panel_h_uses_gain_invariant_natural_unit_trajectories(has_phase) -> None:
     trajectory = {'stage_names': np.asarray(('S1 + phase', '+ S2', '+ S3 / output')), 'unit_temporal_modulation_points': np.asarray([[2.0, 3.0], [5.0, 7.0], [9.0, 11.0]]), 'unit_ssi_delta_bits_per_spike': np.asarray([[0.01, 0.02], [0.03, 0.04], [0.05, 0.06]])}
     summary = {'n_images': 4, 'n_traces': 10, 'n_image_trace_pairs': 40, 'readout_trajectory': {'final_stage_is_ordinary_model': True}, 'identity_checks': {'ordinary_output_max_abs': 1e-06}, 'cached_G_output_checks': {}}
+    summary['readout_trajectory']['has_phase_branch'] = has_phase
+    if not has_phase:
+        trajectory['stage_names'][0] = 'S1'
     figure = Figure(figsize=(4.22, 2.72))
     report = _draw_panel_h_normalized(figure, trajectory, summary, n_bootstrap=20, seed=3)
     assert report['mean_rate_gain_plotted'] is False
     assert report['final_stage_is_ordinary_model'] is True
     assert report['cumulative_stage_labels'][-1] == '+ S3 / output'
     assert 'movie-wide mean' in report['normalization']
+    assert ('phase' in report['intermediate_definition']) is has_phase

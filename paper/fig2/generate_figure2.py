@@ -459,20 +459,6 @@ def _plot_compact_cov_decomp(fig, subplot_spec, data, letter="D",
         xyB=(0.50, 1.01), coordsB=bot_axes[3].transAxes,
         **arrow_kw))
 
-    bot_axes[3].annotate(
-        "Independent\nvariance\n(diagonal)",
-        xy=(0.46, 0.56),
-        xycoords=bot_axes[3].transAxes,
-        xytext=(0.92, 1.24),
-        textcoords=bot_axes[3].transAxes,
-        arrowprops=dict(arrowstyle="->", color="0.45", lw=1.2,
-                        shrinkA=2, shrinkB=2),
-        fontsize=7.2,
-        ha="center",
-        va="bottom",
-        clip_on=False,
-    )
-
     top_axes[0].text(-0.13, 1.16, letter, transform=top_axes[0].transAxes,
                      fontweight="bold", fontsize=10, va="top", ha="left")
     return top_axes + top_sep_axes + bot_axes + bot_sep_axes + note_axes + [cbar_ax]
@@ -760,21 +746,13 @@ def _plot_subspace_schematic(fig, subplot_spec):
     # f = projected variance / total variance. U holds the leading PSTH
     # eigenvectors that span the subspace. ---
     ax.text2D(0.5, 0.135,
-              "Fraction of FEM variance in the PSTH subspace",
+              "Variance captured =\nprojected / total variance",
               transform=ax.transAxes, fontsize=8.5, color="0.20",
               ha="center", va="center")
     # Directional subscript: this is FEM variance measured *in* the PSTH
     # subspace, the opposite direction from the other bar in panel I -- and it
     # also keeps the symbol distinct from panel B/C's f_FEM, a different
     # quantity (the FEM share of single-neuron rate variance).
-    ax.text2D(0.5, 0.045,
-              r"$f_{\mathrm{FEM}\to\mathrm{PSTH}} \;=\; "
-              r"\frac{\mathrm{projected\ variance}}"
-              r"{\mathrm{total\ variance}} \;=\; "
-              r"\frac{\mathrm{tr}\!\left(U^{\top}\Sigma_{\mathrm{FEM}}\,U\right)}"
-              r"{\mathrm{tr}\!\left(\Sigma_{\mathrm{FEM}}\right)}$",
-              transform=ax.transAxes, fontsize=11.5, color="0.10",
-              ha="center", va="center")
     return ax
 
 
@@ -921,8 +899,7 @@ def compose(refresh=False, split_subjects=False, *,
         _, c_primary = plot_fem_fraction(ax=c_ax, data=data)
         _normalize_axis_text(c_primary)
         _label(c_primary, "C")
-        c_primary.set_xlabel("Fraction of rate modulation\n"
-                             r"due to FEM ($f_{\mathrm{FEM}}$)")
+        c_primary.set_xlabel("FEM fraction of rate modulation")
 
         # --- Row 1: D covariance decomposition (~55% width), with the two
         # decomposition results side by side to its right: E Fano, F noise corr.
@@ -953,14 +930,14 @@ def compose(refresh=False, split_subjects=False, *,
         _panel_header(
             pr_ax,
             "G",
-            "Stimulus and FEM are low-rank vs. the noise",
+            "Stimulus and FEM are low-dimensional",
             y=1.02,
         )
 
         schem_ax = _plot_subspace_schematic(fig, gs[2, 2:4])
         schem_ax.text2D(-0.04, 1.02, "H", transform=schem_ax.transAxes,
                         fontweight="bold", fontsize=10, va="bottom", ha="left")
-        schem_ax.text2D(0.08, 1.02, "Testing low-rank subspace alignment",
+        schem_ax.text2D(0.08, 1.02, "Subspace alignment",
                         transform=schem_ax.transAxes, fontsize=8,
                         va="bottom", ha="left")
 
@@ -969,10 +946,12 @@ def compose(refresh=False, split_subjects=False, *,
         _panel_header(
             align_ax,
             "I",
-            "FEM largely lives in the stimulus subspace",
+            "Stimulus and FEM share a subspace",
             y=1.02,
         )
 
+    from VisionCore.figure_typography import apply_font_floor
+    apply_font_floor(fig)
     if return_png_bytes:
         import io
         buf = io.BytesIO()

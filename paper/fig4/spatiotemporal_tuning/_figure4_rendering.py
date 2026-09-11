@@ -12,11 +12,13 @@ import shutil
 import subprocess
 
 import matplotlib.pyplot as plt
-from matplotlib.patches import FancyArrowPatch, Polygon
+from matplotlib.patches import Circle, FancyArrowPatch, Polygon
+from matplotlib.ticker import MaxNLocator
 import numpy as np
 import pandas as pd
 from PIL import Image as PILImage, ImageDraw
 from scipy.optimize import least_squares
+from VisionCore.figure_typography import apply_font_floor
 
 EPS = np.finfo(np.float64).eps
 BLUE = "#0072B2"
@@ -25,7 +27,6 @@ PURPLE = "#6A51A3"
 ROLE_COLORS = (BLUE, ORANGE)
 ROLE_NAMES = ("low SF / high TF", "high SF / low TF")
 PASSBAND_RESPONSE_FRACTION = 0.55
-NETWORK_ICON_BOX_ASPECT = 1.05
 YU_EFFECTIVE_CONDITIONS = 36
 YU_FIT_EPS = 1e-10
 CYAN = "#00A6B8"
@@ -200,19 +201,29 @@ def _frequency_axes(axis: plt.Axes, *, show_y: bool) -> None:
 
 
 def _draw_network(axis: plt.Axes) -> None:
-    """Draw only a compact feed-forward network, with no spatial readout icon."""
-    axis.set_box_aspect(NETWORK_ICON_BOX_ASPECT)
+    """One schematic feature-plane stack, without individual stages/readouts.
+
+    The uniform grids are vector symbols, not measured feature activations;
+    the actual, checkpoint-derived activation maps appear to the right.
+    """
+    axis.set_box_aspect(1.0)
     axis.set_anchor('C')
     axis.set_xlim(0, 1)
     axis.set_ylim(0, 1)
-    layers = ((0.14, np.linspace(0.28, 0.72, 3)), (0.48, np.linspace(0.2, 0.8, 4)), (0.82, np.linspace(0.34, 0.66, 2)))
-    for (left_x, left_y), (right_x, right_y) in zip(layers[:-1], layers[1:]):
-        for y0 in left_y:
-            for y1 in right_y:
-                axis.plot((left_x, right_x), (y0, y1), color='0.72', lw=0.45, alpha=0.7, zorder=1)
-    for layer_index, (x, ys) in enumerate(layers):
-        axis.scatter(np.full(len(ys), x), ys, s=23 if layer_index == 1 else 27, color='white', edgecolor='0.27', linewidth=0.7, zorder=2)
-    axis.annotate('', xy=(0.98, 0.5), xytext=(0.88, 0.5), arrowprops={'arrowstyle': '-|>', 'color': '0.30', 'lw': 0.8})
+    horizontal = np.array((0.57, 0.14))
+    vertical = np.array((0.0, 0.49))
+    for index, (fill, edge) in enumerate(zip(
+        ('#eef3f7', '#e1eaf2', '#d4e2ee', '#bdd4e4'),
+        ('#8174a2', '#7186a6', '#5679a4', '#5791ad'),
+    )):
+        origin = np.array((0.12 + 0.065 * index, 0.34 - 0.055 * index))
+        corners = [origin, origin + horizontal, origin + horizontal + vertical, origin + vertical]
+        axis.add_patch(Polygon(corners, facecolor=fill, edgecolor=edge, lw=0.8, zorder=3 * index))
+        for fraction in np.linspace(0, 1, 9)[1:-1]:
+            for start, step in ((origin + fraction * horizontal, vertical),
+                                (origin + fraction * vertical, horizontal)):
+                axis.plot([start[0], start[0] + step[0]], [start[1], start[1] + step[1]],
+                          color='white', lw=0.35, alpha=0.65, zorder=3 * index + 1)
     axis.axis('off')
 
 
@@ -270,35 +281,81 @@ def draw_panel_a(subfigure, example: dict[str, np.ndarray | float | int | str]) 
     stable_history = np.asarray(example['stable_history'], dtype=float)
     motion_mean, motion_ssi, motion_gain = spatial_information(motion_map)
     stable_mean, stable_ssi, stable_gain = spatial_information(stable_map)
-    grid = subfigure.add_gridspec(2, 4, width_ratios=(1.34, 0.58, 0.92, 0.92), wspace=0.1, hspace=0.24)
+    ink, muted = '#303b45', '#617080'
+    for x, label in ((0.145, 'Retinal history'), (0.385, 'Predictive model'),
+                     (0.625, 'Activation maps'), (0.855, 'Difference')):
+        subfigure.text(x, 0.965, label, ha='center', va='top',
+                       fontsize=7.7, fontweight='semibold', color=ink)
+    subfigure.text(0.625, 0.905, 'response / spatial mean', ha='center', va='top', fontsize=6.1, color=muted)
+    subfigure.text(0.855, 0.905, 'motion − stabilized', ha='center', va='top', fontsize=6.1, color=muted)
     map_low = min(float(np.quantile(motion_gain, 0.01)), float(np.quantile(stable_gain, 0.01)))
     map_high = max(float(np.quantile(motion_gain, 0.995)), float(np.quantile(stable_gain, 0.995)))
-    conditions = (('measured motion', motion_mean, motion_ssi, motion_gain, motion_history), ('stabilized', stable_mean, stable_ssi, stable_gain, stable_history))
+    conditions = (('Measured motion', motion_mean, motion_ssi, motion_gain, motion_history), ('Stabilized', stable_mean, stable_ssi, stable_gain, stable_history))
+    cube_axes, map_axes = [], []
     for row, (condition, mean, information, gain, history) in enumerate(conditions):
-        cube_axis = subfigure.add_subplot(grid[row, 0])
-        _draw_spacetime_cube(cube_axis, history, condition)
-        map_axis = subfigure.add_subplot(grid[row, 2])
+        cube_axis = subfigure.add_axes((0.03, 0.535 - 0.415 * row, 0.23, 0.33))
+        _draw_spacetime_cube(cube_axis, history, condition, outline='#5791ad')
+        cube_axis.title.set_fontsize(6.8)
+        cube_axis.title.set_color(ink)
+        map_axis = subfigure.add_axes((0.53, 0.555 - 0.415 * row, 0.19, 0.30))
         map_axis.imshow(gain, cmap='viridis', vmin=map_low, vmax=map_high)
         map_axis.set_xticks([])
         map_axis.set_yticks([])
-        map_axis.set_title('normalized response', fontsize=6.5, pad=2)
-        map_axis.text(0.03, 0.97, f'{output_rate_hz * mean:.2f} spikes/s\n{information:.3f} bits/spike', transform=map_axis.transAxes, ha='left', va='top', color='white', fontsize=5.5, bbox={'facecolor': 'black', 'alpha': 0.55, 'edgecolor': 'none', 'pad': 1.2})
-    network_axis = subfigure.add_subplot(grid[:, 1])
+        for spine in map_axis.spines.values():
+            spine.set_visible(True)
+            spine.set_color('#d8dfe3')
+            spine.set_linewidth(0.5)
+        map_axis.text(0.5, -0.065, f'{output_rate_hz * mean:.2f} spikes/s\n{information:.3f} bits/spike',
+                      transform=map_axis.transAxes, ha='center', va='top', color=muted, fontsize=6.1)
+        cube_axes.append(cube_axis)
+        map_axes.append(map_axis)
+    network_axis = subfigure.add_axes((0.295, 0.27, 0.18, 0.49))
     _draw_network(network_axis)
-    network_axis.set_title('model', fontsize=7.0, fontweight='semibold', pad=3)
-    difference_axis = subfigure.add_subplot(grid[:, 3])
+    network_axis.text(0.5, -0.09, 'same model, both conditions', ha='center', va='top',
+                      transform=network_axis.transAxes, fontsize=6.1, color=muted)
+    difference_axis = subfigure.add_axes((0.775, 0.265, 0.16, 0.505))
     difference = motion_gain - stable_gain
     difference_limit = max(float(np.quantile(np.abs(difference), 0.995)), EPS)
     image = difference_axis.imshow(difference, cmap='RdBu_r', vmin=-difference_limit, vmax=difference_limit)
     difference_axis.set_xticks([])
     difference_axis.set_yticks([])
-    difference_axis.set_title('motion − stabilized', fontsize=6.5, pad=2)
+    for spine in difference_axis.spines.values():
+        spine.set_visible(True)
+        spine.set_color('#d8dfe3')
+        spine.set_linewidth(0.5)
     relative = 100.0 * (motion_ssi - stable_ssi) / max(stable_ssi, EPS)
     rate_relative = 100.0 * (motion_mean - stable_mean) / max(stable_mean, EPS)
-    colorbar = subfigure.colorbar(image, ax=difference_axis, fraction=0.045, pad=0.015)
-    colorbar.ax.tick_params(labelsize=4.7, pad=1.0)
-    for start, stop in (((0.3, 0.67), (0.375, 0.58)), ((0.3, 0.33), (0.375, 0.42))):
-        subfigure.add_artist(FancyArrowPatch(start, stop, transform=subfigure.transFigure, arrowstyle='-|>', mutation_scale=8.0, linewidth=0.9, color='0.18'))
+    # Resolve equal-aspect image axes before attaching arrows to their edges.
+    subfigure.canvas.draw()
+    network = network_axis.get_position()
+    difference_box = difference_axis.get_position()
+    colorbar_axis = subfigure.add_axes((difference_box.x1 + 0.008, difference_box.y0,
+                                      0.006, difference_box.height))
+    colorbar = subfigure.colorbar(image, cax=colorbar_axis,
+                                ticks=MaxNLocator(nbins=3, symmetric=True, prune='both'))
+    colorbar.outline.set_linewidth(0.5)
+    colorbar.ax.tick_params(labelsize=6.1, pad=1.5, length=2, width=0.5)
+    def arrow(start, stop, *, curve=0.0):
+        subfigure.add_artist(FancyArrowPatch(start, stop, transform=subfigure.transFigure,
+                             arrowstyle='-|>', connectionstyle=f'arc3,rad={curve}',
+                             mutation_scale=7.0, linewidth=0.8, color=ink, shrinkA=0, shrinkB=0))
+    for row, (cube_axis, map_axis) in enumerate(zip(cube_axes, map_axes)):
+        cube, response = cube_axis.get_position(), map_axis.get_position()
+        arrow((cube.x1 + 0.008, cube.y0 + 0.54 * cube.height),
+              (network.x0 + 0.09 * network.width, network.y0 + (0.68 - 0.27 * row) * network.height),
+              curve=0.08 if row else -0.08)
+        arrow((network.x0 + 0.92 * network.width, network.y0 + (0.68 - 0.27 * row) * network.height),
+              (response.x0 - 0.009, response.y0 + 0.5 * response.height),
+              curve=-0.08 if row else 0.08)
+        arrow((response.x1 + 0.009, response.y0 + 0.5 * response.height),
+              (0.745, 0.518 + (0.025 if row == 0 else -0.025)))
+    # The top response minus the bottom response yields the actual difference.
+    operation = subfigure.add_axes((0.734, 0.488, 0.022, 0.06))
+    operation.set_box_aspect(1)
+    operation.add_patch(Circle((0.5, 0.5), 0.46, facecolor='white', edgecolor=muted, lw=0.7))
+    operation.text(0.5, 0.5, '−', ha='center', va='center', fontsize=7.0, color=ink)
+    operation.axis('off')
+    arrow((0.758, 0.518), (difference_box.x0 - 0.005, 0.518))
     return {'unit_index': int(unit_index), 'image_index': image_index, 'trace_index': trace_index, 'selection_kind': str(example.get('selection_kind', 'unknown')), 'alignment_kind': str(example.get('alignment_kind', 'endpoint')), 'alignment_anchor_frame': int(example.get('alignment_anchor_frame', 59)), 'alignment_anchor_lag_frames': int(example.get('alignment_anchor_lag_frames', 0)), 'alignment_anchor_time_ms': float(example.get('alignment_anchor_time_ms', 0.0)), 'stable_rate_spikes_s': float(output_rate_hz * stable_mean), 'motion_rate_spikes_s': float(output_rate_hz * motion_mean), 'rate_change_percent': float(rate_relative), 'stable_ssi_bits_per_spike': float(stable_ssi), 'motion_ssi_bits_per_spike': float(motion_ssi), 'ssi_change_bits_per_spike': float(motion_ssi - stable_ssi), 'ssi_change_percent': float(relative), 'network_icon_contains_spatial_readout': False}
 
 
@@ -344,6 +401,8 @@ def routing_metrics(archive: dict[str, np.ndarray], fits: pd.DataFrame) -> dict[
     routing_separation = float(gain[0, 1] / max(gain[1, 1], EPS)) if gain.shape[0] >= 2 else float('nan')
     raw_mass_ratio = float(np.median(dynamic_mass[regime_code == 1]) / max(np.median(dynamic_mass[regime_code == 0]), EPS))
     trace_metadata = {key: np.asarray(archive[key], dtype=dtype) for key, dtype in (('per_trace_power_centroid_hz', float), ('speed_deg_s', float), ('path_length_arcmin', float), ('microsaccade_count', int)) if key in archive}
+    trace_metadata['regime_selection'] = str(np.asarray(archive.get('spectral_regime_selection', 'centroid_quartiles')).item())
+    trace_metadata['regime_names'] = ('drift', 'microsaccades') if trace_metadata['regime_selection'] == 'events' else ('drift-rich', 'rapid-transient')
     return {'spatial': spatial, 'temporal': temporal, 'regime_power': regime_power, 'regime_code': regime_code, 'log_power': log_power, 'display_limits': (float(display_low), float(display_high)), 'contrast': contrast, 'contrast_limit': contrast_limit, 'surfaces': surfaces, 'lasso_fraction': lasso_fraction, 'lasso_gain': gain, 'routing_separation': routing_separation, 'raw_mass_ratio': raw_mass_ratio, 'integrals': integrals, **trace_metadata}
 
 
@@ -379,12 +438,18 @@ def select_population_units(data: dict[str, np.ndarray], unit_indices: list[int]
     return selected
 
 
-def _render_panel(output: Path, figsize: tuple[float, float], draw, *args, margins: tuple[float, float, float, float]=(0.08, 0.97, 0.12, 0.87), **kwargs) -> dict[str, object]:
+def _render_panel(output: Path, figsize: tuple[float, float], draw, *args, margins: tuple[float, float, float, float]=(0.08, 0.97, 0.12, 0.87), text_replacements: dict[str, str] | None=None, **kwargs) -> dict[str, object]:
     """Render one fixed-size vector panel for deterministic page composition."""
     figure = plt.figure(figsize=figsize, facecolor='white')
     left, right, bottom, top = margins
     figure.subplots_adjust(left=left, right=right, bottom=bottom, top=top)
     report = draw(figure, *args, **kwargs)
+    if text_replacements:
+        from matplotlib.text import Text
+        for artist in figure.findobj(match=lambda obj: isinstance(obj, Text)):
+            if artist.get_text() in text_replacements:
+                artist.set_text(text_replacements[artist.get_text()])
+    apply_font_floor(figure)
     figure.savefig(output, facecolor='white')
     plt.close(figure)
     return report

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import yaml
+import pytest
 
 from training.run_three_stage_curriculum import (
     REPO_ROOT,
@@ -24,6 +25,16 @@ def test_production_curriculum_contract():
     assert configs[0]["readout"]["type"] == "gaussian"
     assert configs[1]["trainable_components"] == ["readouts", "phase_readouts"]
     assert configs[2]["phase_readout"]["params"]["rank"] == 4
+
+
+@pytest.mark.parametrize("rank", [1, 2])
+def test_no_phase_curriculum_contract(rank):
+    spec = yaml.safe_load((REPO_ROOT / f"experiments/curricula/native240_no_phase_rank{rank}_v1.yaml").read_text())
+    configs = validate_curriculum(spec)
+    assert all("phase_readout" not in config for config in configs)
+    assert configs[1]["trainable_components"] == ["readouts"]
+    assert configs[1]["readout"]["params"].get("rank", 1) == rank
+    assert [stage["max_epochs"] for stage in spec["stages"]] == [488, 24, 64]
 
 
 def test_commands_start_fresh_optimizers_at_boundaries(tmp_path):

@@ -39,6 +39,8 @@ PRODUCTION_ENTRYPOINTS = (
     ROOT / "paper/fig4/spatiotemporal_tuning/build_all_available_population_spec.py",
     ROOT / "paper/fig4/spatiotemporal_tuning/build_all_unit_yu_tuning_view.py",
     ROOT / "paper/fig4/spatiotemporal_tuning/build_real_fixation_bank.py",
+    ROOT / "paper/fig4/spatiotemporal_tuning/refilter_fixation_bank.py",
+    ROOT / "paper/fig4/spatiotemporal_tuning/build_filtered_replay_inputs.py",
     ROOT / "paper/fig4/upstream/run_real_trace_matrix.py",
     ROOT / "paper/fig4/upstream/score_real_trace_matrix.py",
     ROOT / "paper/fig4/upstream/merge_backimage_real_trace_ssi_matrix_shards.py",

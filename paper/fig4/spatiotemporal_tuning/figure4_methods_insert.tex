@@ -4,8 +4,8 @@
 
 We sampled 250-ms fixation histories from continuous DDPI recordings. Eye
 position was placed on a uniform raw-sampling grid, filtered with the
-zero-phase analysis IIR selected by the eye-position power-spectrum audit
-(20-Hz passband, 30-Hz stopband), and sampled at the model's native 240-Hz
+zero-phase positive Gaussian kernel ($\sigma=6$ ms, truncated at five standard
+deviations), and sampled at the model's native 240-Hz
 input rate. Each trajectory translated a natural image through the same
 renderer used for model evaluation. The matched stabilized condition held gaze
 at the frame corresponding to the model's rounded mean first-layer peak-energy
@@ -13,6 +13,15 @@ lag (15 frames; 62.5 ms before prediction). Measured and stabilized histories
 therefore shared the retinal frame with greatest average first-layer weight
 and differed in preceding motion. The 42-dimensional behavioral input was held
 at zero in both conditions.
+
+Filtering used 0.6 s of continuous padding on each side. The Gaussian's gentle
+rolloff near the independently measured DDPI spectral breakpoint avoids the
+overshoot of the earlier sharp elliptic filter. Widths of 4 and 8 ms were
+evaluated as retinal-power spectral sensitivity controls. Windows lacking sufficient raw padding,
+valid native tracking, or reliable event coverage were excluded from the
+event comparison. Saved event times and sample bounds were checked against
+the current DDPI record, accounting for session affine calibration differences;
+amplitudes were measured from current DDPI displacement at those sample bounds.
 
 For each output unit, we evaluated its fitted spatial readout at every
 available position to obtain a nonnegative activation map $r(x)$. Single-spike
@@ -53,8 +62,12 @@ units that fail stricter validation rather than treating them as validated.
 
 For Panels C and F, we used the Kuang/Rucci translation identity to combine
 radial natural-image power with the phase spectrum of filtered real fixations.
-Drift-rich and rapid-transient quartiles were defined within animal from each
-trace's nonzero-TF spectral centroid without reading neural or model responses.
+The two conditions were event-free drift windows and equal-duration windows
+containing verified microsaccades with $0<\mathrm{amplitude}<1^\circ$.
+Events had to lie fully inside the scored window with 50-ms margins; drift
+windows had no event within 50 ms of either edge. Larger events, unmatched
+rapid movements, and uncertain coverage were excluded. Selection did not use
+spectral centroids, neural activity, or model responses.
 Each trace's TF$>0$ spectrum was normalized to unit mass before
 animal-balanced averaging; the two conditions therefore compare spectral
 shape. The exact TF$=0$ carrier and TF$>0$ dynamic fractions were independently

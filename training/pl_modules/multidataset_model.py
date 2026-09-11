@@ -419,10 +419,33 @@ class MultiDatasetModel(pl.LightningModule):
                     spatial_key = prefix + ".spatial_weights"
                     if feature_key in selected and spatial_key in selected:
                         continue
-                    if feature_key not in source or spatial_key not in source:
+                    if feature_key not in source:
                         continue
                     source_feature = source[feature_key]
-                    source_spatial = source[spatial_key]
+                    if spatial_key in source:
+                        source_spatial = source[spatial_key]
+                    elif component_name == "readouts" and source_feature.shape[0] == readout.n_units:
+                        # Embed an ordinary Gaussian as one sparse factor before
+                        # expanding its rank. Broaden its envelope, compensating
+                        # exactly in the spatial factor and channel weights.
+                        height, width = readout.spatial_shape
+                        std_key = prefix + ".std"
+                        old_std = source[std_key]
+                        new_std = old_std.clamp_min(readout.migration_std_floor)
+                        masks = [
+                            MultiDatasetModel._gaussian_mask_from_parameters(
+                                source[prefix + ".mean"], std,
+                                source[prefix + ".theta"], height, width,
+                            )
+                            for std in (old_std, new_std)
+                        ]
+                        ratio = masks[0] / masks[1].clamp_min(torch.finfo(new_std.dtype).tiny)
+                        norm = ratio.square().sum((-2, -1), keepdim=True).sqrt().clamp_min(1e-12)
+                        source_spatial = (ratio / norm).unsqueeze(1)
+                        source_feature = source_feature * norm.reshape(-1, 1, 1, 1) / readout.output_scale
+                        selected[std_key] = new_std
+                    else:
+                        continue
                     target_feature = target[feature_key]
                     target_spatial = target[spatial_key]
                     if (

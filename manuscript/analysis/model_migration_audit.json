@@ -1,0 +1,45 @@
+{
+  "status": "complete",
+  "completed_utc": "2026-09-11T07:55:06.367157+00:00",
+  "checkpoint_sha256": "e70f287462155607a96c7d23d9d56e347111319aa48cafd3f54fe88dd4484cb9",
+  "selected_bundle": "outputs/no_phase_readout_comparison_20260910/rank1",
+  "readout_rank": 1,
+  "phase_readout_rank": 0,
+  "main_pdf": {
+    "sha256": "6362cc4e5efa43201089d61cc2f3382b9876598bb2b8cd130854dc786906f822",
+    "pages": 40
+  },
+  "main_tex_sha256": "64bb06cbe388a5eb0ecbeacf65d77dffbfee2fd13958387ec4ed69fb41cae504",
+  "figure_audit_sha256": "c4eb36eae1fb5bffec365815a4c8a2f4146865406bbe84835a45d6c11090c398",
+  "interpretation_review_sha256": "006f0e01d597847d013696545ef10e57c6133f2f6a9b14c058a87cdf0739b49c",
+  "physical_response_units_audit_sha256": "a6f19224b11719a748c60205affdd3c20f34a876bb7582f2121e0cdaa5256f06",
+  "complete_response_integrity_sha256": "b8fb7147551c3f06eeadd285e8e483274fe87c3721dab2561e1d876f5eb3cfb8",
+  "n_generated_statistics": 95,
+  "all_model_dependent_analyses_use_selected_checkpoint": true,
+  "temporary_model_update_flags_removed": true,
+  "final_visual_review": {
+    "figure_pages": [
+      8,
+      12
+    ],
+    "caption_pages": [
+      9,
+      13
+    ],
+    "notes": [
+      "Actual rank-one/no-phase Figure 3 schematic retains FixRSVP histories, one arrow per shared input and the intervention colors.",
+      "Figure 4 activation maps, drift/microsaccade contours, tuning overlays, population effects and cumulative stages are legible at manuscript size.",
+      "B uses a shared path-length label; G/H labels wrap to avoid crowding. Numerical reports exactly match selected production results.",
+      "Caption statistics and Results agree with selected analysis; no temporary retained-results or spectrum-only notes remain."
+    ],
+    "minimum_compiled_figure_font_pt": 6.087270259857178
+  },
+  "validation": [
+    "20 targeted response-unit, spectral packing, stage identity and exemplar regression tests passed.",
+    "Complete 8000-movie/40-baseline matrix and both spectral archive integrity audits passed.",
+    "Independent held-out prediction audit and all Figure 4 production release gates passed.",
+    "make -C manuscript audit passed after final label wrapping."
+  ],
+  "remaining_for_requested_rank1_migration": [],
+  "subsequent_editorial_audit": "manuscript/analysis/submission_wording_audit.json"
+}

@@ -49,6 +49,7 @@ from paper.fig4.spatiotemporal_tuning._figure4_renderer import (  # noqa: E402
     _direct_mechanism_values,
 )
 from paper.fig4.upstream.real_trace_matrix.core import extract_patch  # noqa: E402
+from paper.fig4.spatiotemporal_tuning.eye_trace_filter import filter_qc_passed
 from paper.fig4.upstream.real_trace_matrix.model import (  # noqa: E402
     RealTraceMatrixScorer,
 )
@@ -56,6 +57,10 @@ from paper.fig4.upstream.real_trace_matrix.model import (  # noqa: E402
 
 EPS = 1.0e-12
 STAGE_NAMES = ("S1 + phase", "+ S2", "+ S3 / output")
+
+
+def stage_names_for_readout(readout: Any) -> tuple[str, str, str]:
+    return ("S1 + phase" if readout.has_phase_branch else "S1", *STAGE_NAMES[1:])
 CONDITION_NAMES = ("stabilized", "measured motion")
 RATE_HZ = 240.0
 
@@ -253,7 +258,8 @@ def cumulative_rate_maps(
 
     base_logit = _deep_map(scorer.readout, base_post)
     contributions = [_deep_map(scorer.readout, value) for value in piece_post]
-    contributions[0] = contributions[0] + _phase_map(scorer.readout, phase)
+    if scorer.readout.has_phase_branch:
+        contributions[0] = contributions[0] + _phase_map(scorer.readout, phase)
     cumulative_logits = []
     current = base_logit + scorer.readout.bias[None, :, None, None]
     for contribution in contributions:
@@ -330,9 +336,9 @@ def score_histories(
             gain = flat / mean[..., None].clamp_min(1.0e-8)
             bits = (gain * gain.clamp_min(1.0e-8).log2()).mean(dim=-1)
             rate_sum += mean.sum(dim=1).detach().cpu().numpy()
-            expected += (mean.sum(dim=1) / RATE_HZ).detach().cpu().numpy()
+            expected += mean.sum(dim=1).detach().cpu().numpy()
             information_numerator += (
-                (mean * bits).sum(dim=1) / RATE_HZ
+                (mean * bits).sum(dim=1)
             ).detach().cpu().numpy()
             rate_cpu = rate.double().detach().cpu().numpy()
             batch_sum = rate_cpu.sum(axis=1)
@@ -461,6 +467,7 @@ def render_figure(
     *,
     n_bootstrap: int,
     seed: int,
+    stage_names: tuple[str, str, str] = STAGE_NAMES,
 ) -> dict[str, Any]:
     colors = ("#D55E00", "#6A51A3")
     fig, axes = plt.subplots(1, 2, figsize=(7.2, 3.25), sharex=True)
@@ -507,7 +514,7 @@ def render_figure(
             if label == "temporal modulation"
             else "motion − stabilized\n(bits/spike)"
         )
-        axis.set_xticks(x, STAGE_NAMES, rotation=18, ha="right")
+        axis.set_xticks(x, stage_names, rotation=18, ha="right")
         axis.grid(axis="y", color="0.9", lw=0.6)
         axis.spines[["top", "right"]].set_visible(False)
         report[label] = {
@@ -537,12 +544,8 @@ def main() -> int:
     filter_kind = str(trace_provenance.get("filter", {}).get("kind", ""))
     if "zero-phase" not in filter_kind.lower():
         raise ValueError("the selected fixation traces are not zero-phase filtered")
-    if not bool(
-        trace_provenance.get("spectral_filter_qc", {}).get(
-            "stopband_suppression_gate", False
-        )
-    ):
-        raise ValueError("the fixation-filter suppression gate did not pass")
+    if not filter_qc_passed(trace_provenance):
+        raise ValueError("the fixation-filter validation did not pass")
 
     images = pd.read_csv(args.image_table)
     traces = np.load(args.trace_array)
@@ -577,6 +580,7 @@ def main() -> int:
         )
     scorer.model.model.eval()
     scorer.readout.eval()
+    stage_names = stage_names_for_readout(scorer.readout)
 
     shape = (len(image_rows), len(trace_rows), 2, len(STAGE_NAMES), scorer.n_units)
     rate = np.empty(shape, dtype=np.float32)
@@ -651,9 +655,12 @@ def main() -> int:
         "expected_spikes_max_abs": float(np.max(np.abs(expected[..., -1, :] - cached_expected))),
         "ssi_bits_per_spike_max_abs": float(np.max(np.abs(ssi[..., -1, :] - cached_ssi))),
     }
-    if cache_errors["mean_rate_spikes_s_max_abs"] > 2.0e-3:
+    rate_tolerance_hz = 2.0e-3
+    # Apply the same rate-error budget to counts over the scored duration.
+    count_tolerance = rate_tolerance_hz * float(traces.shape[1]) / RATE_HZ
+    if cache_errors["mean_rate_spikes_s_max_abs"] > rate_tolerance_hz:
         raise RuntimeError(f"final rates do not reproduce G cache: {cache_errors}")
-    if cache_errors["expected_spikes_max_abs"] > 2.0e-5:
+    if cache_errors["expected_spikes_max_abs"] > count_tolerance:
         raise RuntimeError(f"final expected spikes do not reproduce G cache: {cache_errors}")
     if cache_errors["ssi_bits_per_spike_max_abs"] > 2.0e-4:
         raise RuntimeError(f"final SSI does not reproduce G cache: {cache_errors}")
@@ -679,7 +686,7 @@ def main() -> int:
         top_membership=membership,
         image_rows=image_rows,
         trace_rows=trace_rows,
-        stage_names=np.asarray(STAGE_NAMES),
+        stage_names=np.asarray(stage_names),
         condition_names=np.asarray(CONDITION_NAMES),
     )
     figure = args.out_dir / "top_passband_stage_trajectory.png"
@@ -689,6 +696,7 @@ def main() -> int:
         unit_ssi,
         n_bootstrap=int(args.n_bootstrap),
         seed=int(args.seed),
+        stage_names=stage_names,
     )
     summary = {
         "analysis": "top-passband motion effect through the trained cumulative output readout",
@@ -711,10 +719,13 @@ def main() -> int:
             "all_units_covered": bool(np.all(membership.any(axis=0))),
         },
         "readout_trajectory": {
-            "stages": list(STAGE_NAMES),
+            "stages": list(stage_names),
+            "has_phase_branch": bool(scorer.readout.has_phase_branch),
             "definition": (
                 "trained deep-readout logits are added by their S1, S2, and S3 "
-                "feature-channel groups; the trained phase branch is assigned to S1; "
+                "feature-channel groups; "
+                + ("the trained phase branch is assigned to S1; " if scorer.readout.has_phase_branch else "")
+                +
                 "fixed zero-behavior additive channels and readout bias enter once; "
                 "ordinary softplus is applied after each cumulative sum"
             ),
@@ -738,6 +749,11 @@ def main() -> int:
         },
         "identity_checks": identity,
         "cached_G_output_checks": cache_errors,
+        "cached_G_output_tolerances": {
+            "mean_rate_spikes_s_max_abs": rate_tolerance_hz,
+            "expected_spikes_max_abs": count_tolerance,
+            "ssi_bits_per_spike_max_abs": 2.0e-4,
+        },
         "trace_filter": filter_kind,
         "n_images": int(len(image_rows)),
         "n_traces": int(len(trace_rows)),

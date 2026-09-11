@@ -1,0 +1,56 @@
+name: native240_no_phase_rank1_v1
+description: Scratch core fit, frozen sparse rank-1 multiscale readout, and end-to-end
+  fine-tuning; no extra stage-1 branch.
+checkpoint_root: outputs/no_phase_readout_comparison_20260910/training
+project_name: model_selection
+trainer: training/train_multidataset.py
+common:
+  max_datasets: 30
+  batch_size: 128
+  weight_decay: 1.0e-05
+  accumulate_grad_batches: 1
+  steps_per_epoch: 512
+  gradient_clip_val: 10.0
+  precision: bf16-mixed
+  dset_dtype: uint8
+  num_workers: 16
+  limit_val_batches: 0.1
+  seed: 201
+  homogeneous_batches: true
+  early_stopping: false
+stages:
+- key: core
+  model_config: experiments/model_configs/dekel_native240_curriculum_stage1_core.yaml
+  dataset_config: paper/model_selection/configs/multi_240_long_split3_dekel35.yaml
+  initialization: scratch
+  handoff: best_val_bps
+  learning_rate: 0.0005
+  core_lr_scale: 1.0
+  lr_scheduler: cosine_warmup
+  warmup_epochs: 2
+  max_epochs: 488
+  check_val_every_n_epoch: 4
+- key: sparse_readout
+  model_config: experiments/model_configs/dekel_native240_no_phase_rank1_stage2.yaml
+  dataset_config: paper/model_selection/configs/multi_240_long_split3_dekel35_allgratings.yaml
+  initialization: previous
+  pretrained_load_heads: true
+  handoff: last
+  learning_rate: 0.0001
+  core_lr_scale: 1.0
+  lr_scheduler: cosine_warmup
+  warmup_epochs: 2
+  max_epochs: 24
+  check_val_every_n_epoch: 8
+- key: finetune
+  model_config: experiments/model_configs/dekel_native240_no_phase_rank1_stage3.yaml
+  dataset_config: paper/model_selection/configs/multi_240_long_split3_dekel35_allgratings.yaml
+  initialization: previous
+  pretrained_load_heads: true
+  handoff: best_val_bps
+  learning_rate: 0.0001
+  core_lr_scale: 0.05
+  lr_scheduler: cosine_warmup
+  warmup_epochs: 2
+  max_epochs: 64
+  check_val_every_n_epoch: 4

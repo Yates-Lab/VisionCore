@@ -1,0 +1,2 @@
+# Treat manuscript PDF assets as binary files in Git diffs and merges.
+*.pdf binary

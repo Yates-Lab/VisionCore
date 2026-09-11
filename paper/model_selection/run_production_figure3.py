@@ -97,6 +97,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--covdecomp-aligned-cache", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--gpu", type=int, default=0)
+    parser.add_argument("--layout", choices=("production", "manuscript"), default="production")
     parser.add_argument("--reuse-existing-caches", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
@@ -168,7 +169,7 @@ def main() -> int:
             "--out",
             str(audit_path),
         ],
-        [sys.executable, str(ROOT / "paper/fig3/generate_figure3.py")],
+        [sys.executable, str(ROOT / "paper/fig3/generate_figure3.py"), "--layout", args.layout],
     ]
     manifest: dict[str, Any] = {
         "schema_version": 1,

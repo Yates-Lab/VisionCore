@@ -133,14 +133,18 @@ def validate_curriculum(spec: dict[str, Any]) -> list[dict[str, Any]]:
     core, sparse, finetune = configs
     if "phase_readout" in core or "trainable_components" in core:
         raise ValueError("The scratch core stage must use the ordinary readout only")
-    if sparse.get("trainable_components") != ["readouts", "phase_readouts"]:
-        raise ValueError("Stage 2 must freeze everything except both readout families")
-    sparse_rank = sparse.get("phase_readout", {}).get("params", {}).get("rank")
-    finetune_rank = finetune.get("phase_readout", {}).get("params", {}).get("rank")
-    if not isinstance(sparse_rank, int) or sparse_rank < 1:
-        raise ValueError("Stage 2 phase-readout rank must be a positive integer")
-    if finetune_rank != sparse_rank:
-        raise ValueError("Phase-readout rank changes between stages 2 and 3")
+    readout_families = ["readouts"]
+    if sparse.get("phase_readout") is not None:
+        readout_families.append("phase_readouts")
+        sparse_rank = sparse["phase_readout"].get("params", {}).get("rank")
+        if not isinstance(sparse_rank, int) or sparse_rank < 1:
+            raise ValueError("Stage 2 phase-readout rank must be a positive integer")
+    if sparse.get("trainable_components") != readout_families:
+        raise ValueError("Stage 2 must freeze everything except its configured readout families")
+    if sparse["readout"]["type"] == "sparse_gaussian_low_rank":
+        rank = sparse["readout"].get("params", {}).get("rank")
+        if not isinstance(rank, int) or rank < 1:
+            raise ValueError("Stage 2 ordinary-readout rank must be a positive integer")
     if "trainable_components" in finetune:
         raise ValueError("Stage 3 must unfreeze the entire model")
     if sparse.get("readout") != finetune.get("readout"):

@@ -69,6 +69,33 @@ PANEL_LAYOUT = {
     "G": (3.34, 6.62, 4.15, 2.72),
     "H": (7.62, 6.62, 4.22, 2.72),
 }
+MANUSCRIPT_PAGE_SIZE = (6.5, 8.5)
+MANUSCRIPT_PANEL_LAYOUT = {
+    "A": (0.04, 0.04, 6.40, 2.35),
+    "B": (0.04, 2.46, 3.20, 1.90),
+    "C": (3.30, 2.46, 3.15, 1.90),
+    "D": (0.04, 4.46, 3.20, 1.85),
+    "E": (3.30, 4.46, 1.50, 1.85),
+    "F": (4.91, 4.46, 1.54, 1.85),
+    "G": (0.04, 6.42, 3.20, 1.98),
+    "H": (3.30, 6.42, 3.15, 1.98),
+}
+MANUSCRIPT_LABELS = {
+    "Population response versus fixational path length": "Effect of fixation path length",
+    "firing-rate change": "Rate change",
+    "single-spike information change": "SSI change",
+    "filtered fixation path length (arcmin)": "Path length (arcmin)",
+    "motion − stabilized (%)": "Change (%)",
+    "firing-rate change\nmotion − stabilized (%)": "Rate change (%)",
+    "single-spike information change\nmotion − stabilized (%)": "SSI change (%)",
+    "passband-power percentile": "Engagement\npercentile",
+    "cumulative readout": "Cumulative\nreadout",
+    "SF (cycles/deg)": "SF (cpd)",
+    "log₁₀ conditional power density": "log₁₀ power density",
+    "power shifts to\nhigher TF": "Higher TF",
+    "motion − stabilized\n(% of mean response)": "Temporal change\n(% mean response)",
+    "motion − stabilized\n(bits/spike)": "SSI change\n(bits/spike)",
+}
 
 
 def _panel_label(subfigure, label: str) -> None:
@@ -107,6 +134,7 @@ def parse_args() -> argparse.Namespace:
         help="Audited top-passband cumulative-readout trajectory for Panel H.",
     )
     parser.add_argument("--out-dir", type=Path, required=True)
+    parser.add_argument("--layout", choices=("production", "manuscript"), default="production")
     parser.add_argument(
         "--population-policy",
         choices=("validated", "all_checkpoint_available"),
@@ -149,11 +177,15 @@ def _draw_panel_b(
             rtol=0.0,
         ):
             raise ValueError(f"Panel-B {outcome} distribution bins do not match its curve")
-        spacing = float(np.min(np.diff(positions)))
+        gaps = np.diff(positions)
+        # Keep crowded bins separate without collapsing boxes at sparse paths.
+        widths = 0.42 * np.minimum(
+            np.r_[gaps[0], gaps], np.r_[gaps, gaps[-1]]
+        )
         box = axis.boxplot(
             [row[np.isfinite(row)] for row in distributions],
             positions=positions,
-            widths=0.42 * spacing,
+            widths=widths,
             whis=(5, 95),
             showfliers=False,
             patch_artist=True,
@@ -188,8 +220,8 @@ def _draw_panel_b(
         )
         axis.axhline(0, color="0.5", lw=0.75)
         axis.set_title(title, fontsize=6.9)
-        axis.set_xlabel("filtered fixation path length (arcmin)")
-        axis.set_ylabel("motion − stabilized (%)")
+        if outcome == "rate":
+            axis.set_ylabel("motion − stabilized (%)")
         axis.grid(axis="y", alpha=0.16)
         reports[outcome] = {
             "x_median": frame.x_median.to_numpy(dtype=float).tolist(),
@@ -205,6 +237,8 @@ def _draw_panel_b(
                 "fraction_positive": np.mean(distributions > 0, axis=1).tolist(),
             },
         }
+    subfigure.supxlabel("filtered fixation path length (arcmin)", x=0.56, y=0.045,
+                       fontsize=6.8)
     return {
         "curves": reports,
         "distribution_display": (
@@ -309,32 +343,37 @@ def _draw_panel_c_power(
     sf_limits, tf_limits = _shared_frequency_limits(tuning, metrics)
     log_power = np.asarray(metrics["log_power"], dtype=float)
     low, high = map(float, metrics["display_limits"])
+    names = tuple(metrics.get("regime_names", ("drift-rich", "rapid-transient")))
+    event_groups = metrics.get("regime_selection") == "events"
+    levels = np.linspace(low, high, 12)
     rendered = None
     for index in range(2):
         rendered = axes[index].contourf(
             spatial,
             temporal,
             log_power[index].T,
-            levels=np.linspace(low, high, 12),
+            levels=levels,
             cmap="magma",
             extend="both",
         )
         _frequency_axes(axes[index], show_y=index == 0)
         axes[index].set_xlim(*sf_limits)
         axes[index].set_ylim(*tf_limits)
-    axes[1].annotate(
-        "power shifts to\nhigher TF",
-        xy=(0.76, 0.79),
-        xytext=(0.76, 0.40),
-        xycoords="axes fraction",
-        textcoords="axes fraction",
-        ha="center",
-        va="center",
-        fontsize=5.2,
-        fontweight="semibold",
-        color="white",
-        arrowprops={"arrowstyle": "-|>", "color": "white", "lw": 1.2},
-    )
+        axes[index].set_title(names[index], fontsize=6.5)
+    if not event_groups:
+        axes[1].annotate(
+            "power shifts to\nhigher TF",
+            xy=(0.76, 0.79),
+            xytext=(0.76, 0.40),
+            xycoords="axes fraction",
+            textcoords="axes fraction",
+            ha="center",
+            va="center",
+            fontsize=5.2,
+            fontweight="semibold",
+            color="white",
+            arrowprops={"arrowstyle": "-|>", "color": "white", "lw": 1.2},
+        )
     if rendered is None:
         raise RuntimeError("Panel C failed to render conditional power")
     colorbar = subfigure.colorbar(
@@ -346,6 +385,7 @@ def _draw_panel_c_power(
         aspect=18,
     )
     colorbar.set_label("log₁₀ conditional power density", fontsize=5.3)
+    colorbar.set_ticks(np.arange(np.ceil(low), np.floor(high) + 1, 2))
     colorbar.ax.tick_params(labelsize=4.8, length=2)
     metadata_keys = (
         "regime_code",
@@ -367,7 +407,7 @@ def _draw_panel_c_power(
     ):
         raise ValueError("Panel-C regime metadata arrays are not aligned")
     regime_reports = []
-    for code, name in enumerate(("drift-rich", "rapid-transient")):
+    for code, name in enumerate(names):
         keep = regime_code == code
         if not np.any(keep):
             raise ValueError(f"Panel C has no {name} fixation epochs")
@@ -386,20 +426,22 @@ def _draw_panel_c_power(
     return {
         "data_dependent": True,
         "source": "Kuang-factorized natural-image × filtered real-fixation ensemble",
-        "conditions": ["drift-rich", "rapid-transient"],
+        "conditions": list(names),
         "conditional_power_integrals": np.asarray(metrics["integrals"], dtype=float).tolist(),
         "equal_dynamic_mass_before_comparison": bool(
             np.allclose(np.asarray(metrics["integrals"], dtype=float), 1.0, atol=1e-6, rtol=0.0)
         ),
         "passband_contours_drawn": False,
         "selection_rule": (
+            "audited event-free drift windows versus windows containing verified microsaccades below 1 degree"
+            if event_groups else
             "within each animal, lower and upper quartiles of each filtered "
             "fixation's geometric temporal-frequency centroid after normalizing "
             "that fixation's TF>0 spectrum to unit mass"
         ),
-        "selected_by_microsaccade_label": False,
+        "selected_by_microsaccade_label": event_groups,
         "regimes": regime_reports,
-        "annotation": "rapid-transient fixation dynamics redistribute conditional power toward higher temporal frequencies",
+        "annotation": "" if event_groups else "rapid-transient fixation dynamics redistribute conditional power toward higher temporal frequencies",
     }
 
 
@@ -435,7 +477,9 @@ def _draw_panel_f_contrast(
         pad=0.035,
         aspect=18,
     )
-    colorbar.set_label("log₂ rapid / drift", fontsize=5.3)
+    colorbar.set_label("log₂ microsaccade / drift" if metrics.get("regime_selection") == "events" else "log₂ rapid / drift", fontsize=5.3)
+    colorbar.set_ticks([-limit, 0, limit])
+    colorbar.set_ticklabels([f"{-limit:g}", "0", f"{limit:g}"])
     colorbar.ax.tick_params(labelsize=4.8, length=2)
     return {
         "units": list(map(int, tuning["units"])),
@@ -856,7 +900,8 @@ def _draw_panel_h_normalized(
     """Show gain-invariant modulation and sharpening across the readout."""
     _panel_label(subfigure, "H")
     stage_names = np.asarray(trajectory["stage_names"]).astype(str)
-    expected_stages = np.asarray(("S1 + phase", "+ S2", "+ S3 / output"))
+    has_phase = trajectory_summary.get("readout_trajectory", {}).get("has_phase_branch", True)
+    expected_stages = np.asarray(("S1 + phase" if has_phase else "S1", "+ S2", "+ S3 / output"))
     if not np.array_equal(stage_names, expected_stages):
         raise ValueError(f"Panel-H cumulative stages changed: {stage_names.tolist()}")
     unit_temporal = np.asarray(
@@ -887,7 +932,7 @@ def _draw_panel_h_normalized(
             np.quantile(draws, 0.975, axis=1),
         )
 
-    axes = subfigure.subplots(1, 2, gridspec_kw={"wspace": 0.43})
+    axes = subfigure.subplots(1, 2, gridspec_kw={"wspace": 0.72})
     x = np.arange(len(stage_names), dtype=float)
     reports: dict[str, object] = {}
     for index, (axis, values, name, ylabel, color) in enumerate(
@@ -939,7 +984,7 @@ def _draw_panel_h_normalized(
         )
         axis.set_xticks(
             x,
-            ("S1 + phase", "+ S2", "output"),
+            (stage_names[0], "+ S2", "output"),
             rotation=18,
             ha="right",
         )
@@ -989,7 +1034,7 @@ def _draw_panel_h_normalized(
         ),
         "mean_rate_gain_plotted": False,
         "intermediate_definition": (
-            "trained output logits accumulated by S1 plus phase, S2, and S3 feature "
+            f"trained output logits accumulated by {stage_names[0].replace(' + ', ' plus ')}, S2, and S3 feature "
             "groups, with the ordinary softplus applied after each cumulative sum"
         ),
         **reports,
@@ -1017,6 +1062,9 @@ def _model_identity(spec: dict[str, object]) -> tuple[str, str]:
 def main() -> int:
     args = parse_args()
     configure()
+    manuscript_layout = args.layout == "manuscript"
+    page_size = MANUSCRIPT_PAGE_SIZE if manuscript_layout else PAGE_SIZE
+    panel_layout = MANUSCRIPT_PANEL_LAYOUT if manuscript_layout else PANEL_LAYOUT
     model_spec = yaml.safe_load(args.model_spec.read_text(encoding="utf-8"))
     required = (
         args.panel_a_audit / "selected_example.npz",
@@ -1197,15 +1245,26 @@ def main() -> int:
         ),
     }
     panel_paths: dict[str, Path] = {}
+    manuscript_margins = {
+        "A": (0.025, 0.96, 0.12, 0.88),
+        "B": (0.16, 0.985, 0.24, 0.76),
+        "C": (0.14, 0.84, 0.24, 0.82),
+        "D": (0.14, 0.98, 0.24, 0.82),
+        "E": (0.28, 0.95, 0.24, 0.83),
+        "F": (0.28, 0.77, 0.24, 0.83),
+        "G": (0.18, 0.985, 0.26, 0.85),
+        "H": (0.18, 0.985, 0.26, 0.85),
+    }
     for label, (draw, positional, keyword, margins) in drawers.items():
         path = panels_dir / f"panel_{label.lower()}.pdf"
         panel_paths[label] = path
         reports[label] = _render_panel(
             path,
-            PANEL_LAYOUT[label][2:],
+            panel_layout[label][2:],
             draw,
             *positional,
-            margins=margins,
+            margins=manuscript_margins[label] if manuscript_layout else margins,
+            text_replacements=MANUSCRIPT_LABELS if manuscript_layout else None,
             **keyword,
         )
     pdf = args.out_dir / "figure4.pdf"
@@ -1213,9 +1272,9 @@ def main() -> int:
     svg = args.out_dir / "figure4.svg"
     _compose_page(
         pdf,
-        [(panel_paths[label], *PANEL_LAYOUT[label][:2]) for label in "ABCDEFGH"],
-        page_width_in=PAGE_SIZE[0],
-        page_height_in=PAGE_SIZE[1],
+        [(panel_paths[label], *panel_layout[label][:2]) for label in "ABCDEFGH"],
+        page_width_in=page_size[0],
+        page_height_in=page_size[1],
     )
     _render_page_png(pdf, png)
     executable = shutil.which("pdftocairo")
@@ -1235,8 +1294,9 @@ def main() -> int:
         ),
         "model_label": model_label,
         "checkpoint_sha256": expected_digest,
-        "page_size_inches": list(PAGE_SIZE),
-        "panel_layout_inches": {key: list(value) for key, value in PANEL_LAYOUT.items()},
+        "layout": args.layout,
+        "page_size_inches": list(page_size),
+        "panel_layout_inches": {key: list(value) for key, value in panel_layout.items()},
         "analysis_population_units": len(analysis_units),
         "panel_populations": {
             "A": "one audited exact-CID exemplar",

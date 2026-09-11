@@ -1,0 +1,7 @@
+# Imported figure assets are manuscript inputs; override the repository PDF rule.
+!/figures/*.pdf
+!/old_figures/*.pdf
+!/analysis/*.json
+
+# Keep the compiled PDF and LaTeX intermediate files out of source control.
+/build/

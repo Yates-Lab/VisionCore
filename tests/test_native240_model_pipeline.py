@@ -95,6 +95,46 @@ def test_rank_two_phase_readout_is_exactly_embedded_in_rank_four():
     assert torch.allclose(target(stimulus), source(stimulus), atol=1.0e-6)
 
 
+@pytest.mark.parametrize("floor", [0.0, 0.75])
+def test_gaussian_to_rank_two_preserves_predictions_and_extra_factor_learns(floor):
+    torch.manual_seed(201)
+    source = DynamicGaussianReadout(4, 3, initial_std=0.5)
+    target = SparseGaussianLowRankReadout(
+        4, 3, rank=2, spatial_shape=(9, 9), migration_std_floor=floor
+    )
+    model = nn.Module()
+    model.readouts = nn.ModuleList([target])
+    model.phase_readouts = None
+    checkpoint = {
+        f"model.readouts.0.{key}": value.clone()
+        for key, value in source.state_dict().items()
+    }
+    holder = SimpleNamespace(model=model)
+    selected, _ = MultiDatasetModel._compatible_pretrained_state(
+        holder, checkpoint, load_heads=True
+    )
+    model.load_state_dict(selected, strict=True)
+    stimulus = torch.randn(5, 4, 9, 9)
+    assert torch.allclose(target(stimulus), source(stimulus), atol=1e-6)
+    assert torch.allclose(torch.linalg.vector_norm(target.spatial_weights, dim=(1, 2, 3)), torch.ones(3))
+    assert torch.count_nonzero(target.features.weight.reshape(3, 2, 4)[:, 1]) == 0
+    target(stimulus).square().sum().backward()
+    assert torch.count_nonzero(target.features.weight.grad.reshape(3, 2, 4)[:, 1]) > 0
+
+
+@pytest.mark.parametrize("rank", [1, 2])
+def test_no_phase_curriculum_models_and_frozen_stage(rank):
+    configs = [{"session": "test", "cids": [0, 1, 2]}]
+    for stage in (2, 3):
+        config = load_config(ROOT / f"experiments/model_configs/dekel_native240_no_phase_rank{rank}_stage{stage}.yaml")
+        model = build_model(config, configs)
+        assert model.phase_readouts is None
+        assert getattr(model.readouts[0], "rank", 1) == rank
+        if stage == 2:
+            set_trainable_model_components(model, config["trainable_components"])
+            assert all(p.requires_grad == name.startswith("readouts.") for name, p in model.named_parameters())
+
+
 def test_stage_configs_build_native_240_models():
     dataset_configs = [{"session": "test", "cids": [0, 1, 2]}]
     stage_paths = [

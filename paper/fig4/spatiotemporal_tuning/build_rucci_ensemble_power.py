@@ -46,6 +46,7 @@ from paper.fig4.spatiotemporal_tuning.spectral_power import (  # noqa: E402
 from paper.fig4.upstream.real_trace_matrix.core import (  # noqa: E402
     extract_patch,
 )
+from paper.fig4.spatiotemporal_tuning.eye_trace_filter import filter_contract_valid, filter_qc_passed
 
 
 EPS = np.finfo(np.float64).eps
@@ -194,6 +195,40 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def event_defined_regimes(table: pd.DataFrame, subject: np.ndarray):
+    """Select matched-duration event classes without consulting their spectra."""
+    required = {"event_class", "event_coverage_pass", "unmatched_rapid_motion",
+                "verified_microsaccade_count", "verified_microsaccade_max_amplitude_deg"}
+    if missing := required.difference(table.columns):
+        raise ValueError(f"event classification lacks audit fields: {sorted(missing)}")
+    codes = table.event_class.map({"drift": 0, "microsaccade": 1, "excluded": -1})
+    if codes.isna().any():
+        raise ValueError("unrecognized event class")
+    codes = codes.to_numpy(dtype=np.int8)
+    for code in (0, 1):
+        keep = codes == code
+        if not table.loc[keep, "event_coverage_pass"].eq(True).all():
+            raise ValueError("an event group contains unverified coverage")
+        if not table.loc[keep, "unmatched_rapid_motion"].eq(False).all():
+            raise ValueError("an event group contains unmatched rapid motion")
+        if any(not np.any(keep & (subject == animal)) for animal in np.unique(subject)):
+            raise ValueError("both event groups must contain each animal")
+    micro = codes == 1
+    if not ((table.loc[micro, "verified_microsaccade_count"] > 0).all()
+            and table.loc[micro, "verified_microsaccade_max_amplitude_deg"].between(0, 1, inclusive="neither").all()
+            and (table.loc[codes == 0, "verified_microsaccade_count"] == 0).all()):
+        raise ValueError("drift/microsaccade labels disagree with the event audit")
+    return codes, {
+        "rule": "audited event-free drift windows versus windows containing verified microsaccades below 1 degree",
+        "regime_names": ["drift", "microsaccades"],
+        "selected_by_microsaccade_label": True,
+        "selected_by_spectral_centroid": False,
+        "excluded_n_traces": int(np.sum(codes < 0)),
+        "animal_counts": {str(animal): [int(np.sum((subject == animal) & (codes == c))) for c in (0, 1)]
+                          for animal in np.unique(subject)},
+    }
+
+
 def load_filtered_fixation_bank(
     directory: Path, *, analysis_samples: int, requested_traces: int
 ) -> tuple[dict[str, object], pd.DataFrame, np.ndarray, np.ndarray]:
@@ -207,11 +242,12 @@ def load_filtered_fixation_bank(
     gates = {
         "native_240_hz": np.isclose(float(manifest.get("target_rate_hz", np.nan)), 240.0),
         "zero_phase_filter": "zero-phase" in str(filter_spec.get("kind", "")),
-        "passband_20_hz": np.isclose(float(filter_spec.get("passband_hz", np.nan)), 20.0),
-        "stopband_30_hz": np.isclose(float(filter_spec.get("stopband_hz", np.nan)), 30.0),
+        "declared_filter_contract": filter_contract_valid(filter_spec),
         "analysis_interval_available": int(manifest.get("analysis_samples", -1))
         >= int(analysis_samples),
     }
+    if filter_spec.get("family") == "gaussian":
+        gates["gaussian_filter_validation"] = filter_qc_passed(manifest)
     failed = sorted(name for name, passed in gates.items() if not bool(passed))
     if failed:
         raise ValueError(f"fixation-bank contract failed: {failed}")
@@ -638,7 +674,7 @@ def main() -> int:
     spatial_cpd, orientation_deg = production_spectral_grid(args.tuning_table)
     speed = trace_table.analysis_speed_mean_deg_s.to_numpy(dtype=float)
     path_length = 60.0 * trace_table.analysis_path_length_deg.to_numpy(dtype=float)
-    microsaccade_count = trace_table.saved_microsaccade_count.to_numpy(dtype=int)
+    microsaccade_count = trace_table.get("verified_microsaccade_count", trace_table.saved_microsaccade_count).to_numpy(dtype=int)
     subject = trace_table.session.astype(str).str.split("_").str[0].to_numpy()
     temporal_hz, per_trace_q = trajectory_phase_power_per_trace(
         traces,
@@ -675,18 +711,17 @@ def main() -> int:
     ) = normalize_dynamic_power_per_trace(
         per_trace_dynamic_power, spatial_cpd, temporal_hz
     )
-    regime_names = np.asarray(
-        ("drift-rich quartile", "rapid-transient quartile"), dtype="U32"
-    )
-    spectral_regime_code, spectral_regime_report = within_subject_metric_tails(
-        subject,
-        per_trace_power_centroid_hz,
-        tail_fraction=0.25,
-        metric_name="geometric TF centroid of the normalized dynamic spectrum",
-        metric_units="Hz",
-        low_name=str(regime_names[0]),
-        high_name=str(regime_names[1]),
-    )
+    if "event_class" in trace_table:
+        regime_names = np.asarray(("drift", "microsaccades"), dtype="U32")
+        spectral_regime_code, spectral_regime_report = event_defined_regimes(trace_table, subject)
+        spectral_regime_report["event_classification"] = manifest["event_classification"]
+    else:
+        regime_names = np.asarray(("drift-rich quartile", "rapid-transient quartile"), dtype="U32")
+        spectral_regime_code, spectral_regime_report = within_subject_metric_tails(
+            subject, per_trace_power_centroid_hz, tail_fraction=0.25,
+            metric_name="geometric TF centroid of the normalized dynamic spectrum",
+            metric_units="Hz", low_name=str(regime_names[0]), high_name=str(regime_names[1]),
+        )
     regime_power_distribution = np.stack(
         [
             animal_balanced_mean(
@@ -762,6 +797,7 @@ def main() -> int:
         per_trace_dynamic_power_mass=per_trace_dynamic_mass.astype(np.float32),
         per_trace_power_centroid_hz=per_trace_power_centroid_hz.astype(np.float32),
         spectral_regime_names=regime_names,
+        spectral_regime_selection=np.asarray("events" if "event_class" in trace_table else "centroid_quartiles"),
         spectral_regime_code=spectral_regime_code,
         spectral_regime_power_distribution=regime_power_distribution.astype(np.float32),
         spectral_regime_integrals=regime_integrals.astype(np.float32),
@@ -859,8 +895,9 @@ def main() -> int:
         ),
         "conditions": ["full_filtered"],
         "component_claim_boundary": (
-            "the production estimate uses only the instrument-valid full filtered trace; "
-            "no microsaccade label or post-hoc component decomposition selects a regime"
+            "Complete equal-duration trajectories, not a decomposition into additive motion components. "
+            + ("Event-defined drift-only versus microsaccade-containing windows; no spectral-centroid selection."
+               if "event_class" in trace_table else "No microsaccade label selects a regime.")
         ),
         "kuang_estimator": {
             "definition": (

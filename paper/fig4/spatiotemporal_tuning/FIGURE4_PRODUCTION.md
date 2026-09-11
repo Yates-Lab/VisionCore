@@ -28,9 +28,9 @@ primitives rather than carrying private variants.
 2. **B:** All 725 checkpoint-available exact readouts summarize rate and SSI
    modulation versus filtered 250-ms path length. There is no SF or
    microsaccade split.
-3. **C:** Equal-dynamic-mass conditional Kuang spectra show drift-rich and
-   rapid-transient fixation distributions separately; the only in-panel text
-   marks the shift toward higher temporal frequency.
+3. **C:** Equal-dynamic-mass conditional Kuang spectra compare event-free drift
+   windows with equal-duration windows containing verified microsaccades below
+   1 degree. Groups are defined before evaluating their spectra.
 4. **D:** Two raw, low-resolution, preferred-direction F0 SF×TF surfaces show
    the measured model responses. Their half-max lassos come from Yu R0/R1 fits
    to those exact surfaces.
@@ -38,7 +38,7 @@ primitives rather than carrying private variants.
    readouts show population occupancy in SF×TF space. The 145-unit strict
    validation subset supplies the audited exemplars in D, but is not silently
    substituted for the declared all-unit population.
-6. **F:** The explicitly signed rapid-minus-drift power contrast is shown with
+6. **F:** The log2 microsaccade/drift power ratio is shown with
    the same two authoritative example-unit lassos.
 7. **G:** Across the same 725 checkpoint-available exact readouts, passband engagement is related
    directly to measured-minus-stabilized rate and SSI modulation. Both panels
@@ -51,9 +51,19 @@ primitives rather than carrying private variants.
 
 ## Non-negotiable measurement contracts
 
-- Eye traces are filtered on the uniformly sampled raw-DDPI grid with the
-  audited zero-phase 20-Hz-passband/30-Hz-stopband IIR, then sampled at the
-  model's native 240 Hz.
+- Eye traces are filtered on the uniformly sampled raw-DDPI grid with a
+  positive Gaussian (sigma 6 ms, five-sigma truncation, 0.6-s padding), then
+  sampled at the model's native 240 Hz. Four- and eight-ms kernels supply
+  sensitivity controls. The former 20/30-Hz elliptic contract remains readable
+  for historical reproduction, but is not the corrected analysis filter.
+- `refilter_fixation_bank.py` verifies saved detector coordinates and original
+  row indices, measures amplitudes in current DDPI degrees, and records event
+  coverage/exclusion reasons. Drift windows have no event within 50 ms;
+  microsaccade windows contain complete verified subdegree events with 50-ms
+  margins. Invalid tracking, unverified or larger events, unmatched rapid
+  motion, and displacements >=1 degree within 50 ms are excluded from the
+  condition comparison. `build_filtered_replay_inputs.py` selects an equal
+  number of eligible response histories from each animal.
 - Stabilization is anchored to the frame at the model's resolved mean
   first-layer peak lag. The measured and stabilized histories therefore share
   the most influential current retinal frame.

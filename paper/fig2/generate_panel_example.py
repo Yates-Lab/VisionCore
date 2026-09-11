@@ -479,7 +479,7 @@ def plot_unaccounted_variance_panel(ax, decomp=None, caption=True):
     # threshold end (screen-right under the reversed axis), where the band
     # between this line and the total is clear of the decomposition bar.
     ax.text(0.02, U_naive + 0.015 * y_hi,
-            r"$\sigma^{2,\mathrm{unc}}_{\mathrm{res}}$",
+            "Uncorrected",
             fontsize=7.5, ha="right", va="bottom")
 
     # Decomposition bar at x = xa (the loose-threshold end, screen-left under
@@ -494,10 +494,10 @@ def plot_unaccounted_variance_panel(ax, decomp=None, caption=True):
                 arrowprops=dict(arrowstyle="<->", color=DIVERGENT_COLOR, lw=2.0),
                 zorder=4)
     ax.text(xa - 0.02, 0.5 * (sigma_int + U_naive),
-            "FEM variability\n$(\\sigma^2_{\\mathrm{FEM}})$",
+            "FEM variability",
             color="k", fontsize=7.5, ha="left", va="center")
     ax.text(xa - 0.02, 0.5 * (U_naive + Ctotal),
-            "Eye position ignored $(\\sigma^2_{\\mathrm{PSTH}})$",
+            "Stimulus variability",
             color="k", fontsize=7.5, ha="left", va="center")
 
     # Matched end sits on the internal floor (eye position fully accounted for);
@@ -518,17 +518,13 @@ def plot_unaccounted_variance_panel(ax, decomp=None, caption=True):
         # Take-home: descriptive phrase bottom-left, fraction equation
         # bottom-right (larger so it reads clearly).
         ax.text(0.02, 0.04,
-                "Fraction of\nconditional rate\nvariance obscured\nby eye movements",
+                "FEM fraction of\nconditional rate variance",
                 transform=ax.transAxes, fontsize=7.0, ha="left", va="bottom")
-        ax.text(0.99, 0.05,
-                r"$f_{\mathrm{FEM}} = \frac{\sigma^2_{\mathrm{FEM}}}"
-                r"{\sigma^2_{\mathrm{FEM}}+\sigma^2_{\mathrm{PSTH}}}$",
-                transform=ax.transAxes, fontsize=11.5, ha="right", va="bottom")
 
     # Reversed: threshold gets stricter to the right (1 -> 0).
     ax.set_xlim(1.03, -0.05)
     ax.set_ylim(0.0, y_hi)
-    ax.set_xlabel("Eye-trajectory mismatch threshold, Δe < x (°)")
+    ax.set_xlabel("Trajectory mismatch threshold (°)")
     ax.set_ylabel("Residual variability (spk²)")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)

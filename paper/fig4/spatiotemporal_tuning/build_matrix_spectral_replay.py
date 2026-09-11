@@ -42,6 +42,8 @@ from paper.fig4.spatiotemporal_tuning.spectral_power import (  # noqa: E402
     spectral_predictors,
 )
 from paper.fig4.upstream.real_trace_matrix.core import extract_patch  # noqa: E402
+from paper.fig4.upstream.real_trace_matrix.model import RESPONSE_UNITS  # noqa: E402
+from paper.fig4.spatiotemporal_tuning.eye_trace_filter import filter_qc_passed
 
 
 EPS = 1e-12
@@ -139,6 +141,25 @@ def _load_matrix_responses(
     return output
 
 
+def _pack_response_conditions(
+    responses: dict[str, np.ndarray], unit_indices: np.ndarray
+) -> dict[str, np.ndarray]:
+    """Join stabilized/moving responses, preserving source rates in spikes/s.
+
+    Expected spike counts cover the full scored movie; the mean-rate matrices
+    already divide these counts by that movie's duration.
+    """
+    n_images, n_traces, _ = responses["moving_mean_rate"].shape
+    units = np.asarray(unit_indices, dtype=int)
+    output: dict[str, np.ndarray] = {}
+    for key in ("mean_rate", "expected_spikes", "map_ssi"):
+        values = np.empty((n_images, n_traces, 2, len(units)), dtype=np.float32)
+        values[:, :, 0] = responses[f"stable_{key}"][:, None, units]
+        values[:, :, 1] = responses[f"moving_{key}"][:, :, units]
+        output[key] = values
+    return output
+
+
 def _matrix_contract(matrix_dir: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     summary_path = matrix_dir / "summary.json"
     baseline_path = matrix_dir / "stabilized_baseline_summary.json"
@@ -160,16 +181,15 @@ def _matrix_contract(matrix_dir: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     )
     if checkpoint != baseline_checkpoint:
         raise ValueError("moving matrix and stabilized baseline use different checkpoints")
+    units = _unique_nested(shards, ("model_provenance", "response_units"))
+    if units != RESPONSE_UNITS or baseline.get("model_provenance", {}).get("response_units") != RESPONSE_UNITS:
+        raise ValueError("matrix response units must explicitly declare spikes/s and full-movie counts")
     trace_provenance = _unique_nested(shards, ("trace_bank", "trace_provenance"))
     trace_filter = trace_provenance.get("filter", {})
     if "zero-phase" not in str(trace_filter.get("kind", "")).lower():
         raise ValueError("matrix traces were not continuously zero-phase filtered")
-    if not bool(
-        trace_provenance.get("spectral_filter_qc", {}).get(
-            "stopband_suppression_gate", False
-        )
-    ):
-        raise ValueError("matrix trace-filter suppression gate did not pass")
+    if not filter_qc_passed(trace_provenance):
+        raise ValueError("matrix trace-filter validation did not pass")
     return summary, {
         "checkpoint_sha256": checkpoint,
         "dataset_configs_sha256": str(
@@ -269,23 +289,10 @@ def main() -> int:
         raise ValueError(f"matrix is not native 240 Hz: {frame_rate_hz:g} Hz")
     n_units = len(unit_indices)
     shape = (n_images, n_traces, 2, n_units)
-    mean_rate = np.empty(shape, dtype=np.float32)
-    expected_spikes = np.empty(shape, dtype=np.float32)
-    map_ssi = np.empty(shape, dtype=np.float32)
-    for key, destination in (
-        ("mean_rate", mean_rate),
-        ("expected_spikes", expected_spikes),
-        ("map_ssi", map_ssi),
-    ):
-        stable = responses[f"stable_{key}"][:, unit_indices]
-        moving = responses[f"moving_{key}"][:, :, unit_indices]
-        if key == "mean_rate":
-            # The matrix stores expected spikes per native output bin.  The
-            # causal-chain archive contract expresses mean_rate in spikes/s.
-            stable = frame_rate_hz * stable
-            moving = frame_rate_hz * moving
-        destination[:, :, 0] = stable[:, None, :]
-        destination[:, :, 1] = moving
+    packed = _pack_response_conditions(responses, unit_indices)
+    mean_rate = packed["mean_rate"]
+    expected_spikes = packed["expected_spikes"]
+    map_ssi = packed["map_ssi"]
 
     predictors = {
         name: np.zeros(shape, dtype=np.float32) for name in PREDICTOR_NAMES
@@ -415,7 +422,7 @@ def main() -> int:
             "is not evaluated a second time"
         ),
         "mean_rate_units": (
-            "spikes/s; source expected-spikes-per-bin values multiplied by frame_rate_hz"
+            "spikes/s; copied unchanged from the source mean-rate matrices"
         ),
         "spectrum": (
             "exact 151-pixel renderer; spatial Tukey; temporal mean removed; "

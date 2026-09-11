@@ -955,6 +955,13 @@ def population_unit_rows(population_view: Any, canonical_unit_rows: list[dict[st
     return rows
 
 
+RESPONSE_UNITS = {
+    "model_output": "expected_counts_per_native_bin",
+    "mean_rate": "spikes_per_second",
+    "expected_spikes": "expected_counts_per_movie",
+}
+
+
 @dataclass
 class RealTraceMatrixScorer:
     model: Any
@@ -1058,6 +1065,7 @@ class RealTraceMatrixScorer:
             "population_version": str(population_view.name),
             "population_n_units": int(population_view.n_units),
             "population_checkpoint_availability": availability_report,
+            "response_units": dict(RESPONSE_UNITS),
             "population_spec_npz": spec_npz,
             "population_spec_npz_sha256": sha256_file(spec_npz) if spec_npz is not None else None,
             "population_spec_json": spec_json,
@@ -1122,6 +1130,7 @@ class RealTraceMatrixScorer:
         return self.torch.zeros(int(batch_size), int(behavior_dim), device=self.device, dtype=dtype)
 
     def _compute_rate_map(self, stim: Any) -> Any:
+        """Expected counts per native output bin, before conversion to spikes/s."""
         dtype = next(self.model.model.parameters()).dtype
         behavior = self._zero_behavior(int(stim.shape[0]), dtype)
         module = self.model.model
@@ -1182,7 +1191,6 @@ class RealTraceMatrixScorer:
             )
         scored_per_source = self.output_rate_hz // source_rate_hz
         scored_timepoints = n_timepoints * scored_per_source
-        output_bin_seconds = 1.0 / float(self.output_rate_hz)
 
         with self.torch.no_grad():
             for trace_start in range(0, n_traces, trace_batch_size):
@@ -1254,7 +1262,8 @@ class RealTraceMatrixScorer:
                         mask = ids == int(trace_idx)
                         rb = rbar_cpu[mask]
                         ub = bits_cpu[mask]
-                        weights = rb * output_bin_seconds
+                        # The native model already predicts counts per bin.
+                        weights = rb
                         unit_expected[int(trace_idx)] += np.sum(weights, axis=0)
                         unit_numer[int(trace_idx)] += np.sum(ub * weights, axis=0)
                         unit_rate_sum[int(trace_idx)] += np.sum(rb, axis=0)
@@ -1270,7 +1279,10 @@ class RealTraceMatrixScorer:
                     self.torch.cuda.empty_cache()
 
         unit_bits = np.divide(unit_numer, np.maximum(unit_expected, 1e-8)).astype(np.float32)
-        unit_mean_rate = np.divide(unit_rate_sum, np.maximum(unit_frame_count[:, None], 1)).astype(np.float32)
+        unit_mean_rate = (
+            float(self.output_rate_hz)
+            * np.divide(unit_rate_sum, np.maximum(unit_frame_count[:, None], 1))
+        ).astype(np.float32)
         population_numer = np.sum(unit_numer, axis=1)
         population_denom = np.sum(unit_expected, axis=1)
         population_bits = np.divide(population_numer, np.maximum(population_denom, 1e-8)).astype(np.float32)
