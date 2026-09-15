@@ -56,7 +56,7 @@ from generate_fig3a import plot_panel_a
 # stabilized-retina (extraretinal retained) = purple, PSTH = grey.
 INTACT_COLOR = "#1f77b4"
 ABLATED_COLOR = "#d62728"
-STABILIZED_COLOR = "#9467bd"
+STABILIZED_COLOR = "#b97800"
 PSTH_COLOR = "0.55"
 SCATTER_COLOR = "0.35"
 ACCENT = "#c0392b"
@@ -191,13 +191,6 @@ def _plot_ccnorm_violins(ax, abl):
     m = pop & _finite_mask(intact, ablated, stab)
     gi, ga, gs = intact[m], ablated[m], stab[m]
 
-    # Horizontal dashed guide at each condition's median, spanning the panel so
-    # the three medians can be read off against one another at a glance.
-    for grp, color in zip((gi, ga, gs),
-                          (INTACT_COLOR, ABLATED_COLOR, STABILIZED_COLOR)):
-        ax.axhline(float(np.median(grp)), color=color, lw=0.9,
-                   ls=(0, (4, 3)), alpha=0.55, zorder=1)
-
     _box_whisker(ax, [gi, ga, gs], [0, 1, 2],
                  [INTACT_COLOR, ABLATED_COLOR, STABILIZED_COLOR])
 
@@ -208,12 +201,11 @@ def _plot_ccnorm_violins(ax, abl):
     d_s = float(np.median(gs - gi))   # reafferent ablation cost (stabilized retina)
     pct_z = 100.0 * abs(d_z) / intact_med if intact_med != 0 else np.nan
     pct_s = 100.0 * abs(d_s) / intact_med if intact_med != 0 else np.nan
-    # ccnorm is bounded at 1: keep 1.0 as the top tick but extend the axis so the
-    # two stacked significance connectors sit clear above the distributions.
-    ax.set_ylim(0, 1.24)
-    ax.set_yticks(np.arange(0, 1.001, 0.2))
-    _sig_bracket(ax, 0, 1, 0.96, p_z, h=0.014)
-    _sig_bracket(ax, 0, 2, 1.09, p_s, h=0.014)
+    # Zoom to the displayed whiskers and reserve only a narrow bracket band.
+    ax.set_ylim(0.20, 0.97)
+    ax.set_yticks(np.arange(0.2, 0.901, 0.1))
+    _sig_bracket(ax, 0, 1, 0.875, p_z, h=0.009)
+    _sig_bracket(ax, 0, 2, 0.93, p_s, h=0.009)
 
     ax.set_xlim(-0.6, 2.9)
     ax.set_xticks([0, 1, 2])
@@ -360,10 +352,9 @@ def _plot_explainable_variance_boxes(ax, abl):
 
     _box_whisker(ax, groups, positions, colors)
 
-    # Panel C's frame and tick spacing, extended downward so the PSTH and
-    # stabilized whisker feet stay inside the axes.
-    ax.set_ylim(-0.3, 1.24)
-    ax.set_yticks(np.arange(-0.2, 1.001, 0.2))
+    # Include all displayed whiskers, with compact headroom for the brackets.
+    ax.set_ylim(-0.25, 0.84)
+    ax.set_yticks(np.arange(-0.2, 0.801, 0.2))
     # Zero is the constant-prediction reference: no captured rate variance.
     # Solid, so it reads as the panel's zero-variance-explained baseline (the
     # dashed grey line above it is the trial-average median).
@@ -373,6 +364,9 @@ def _plot_explainable_variance_boxes(ax, abl):
     # one sits above it.
     psth_median = float(np.median(vals["psth"][m]))
     ax.axhline(psth_median, color="0.55", lw=0.8, ls="--", alpha=0.8, zorder=0)
+    ax.annotate("PSTH median", xy=(3.60, psth_median), xytext=(3.60, .47),
+                ha="right", va="bottom", fontsize=5.3, color="0.4",
+                arrowprops={"arrowstyle": "-", "lw": .6, "color": ".55"})
 
     # Nothing is clipped or folded onto one. The above-reference tail is left off
     # the panel to keep it readable and is disclosed in the caption, the manifest,
@@ -384,9 +378,9 @@ def _plot_explainable_variance_boxes(ax, abl):
     ref_median = {key: float(np.median(vals[key][m])) for key in keys}
     contrasts = [
         # name, x1, x2, first, second, y, reference key
-        ("ablated_vs_full", 1, 2, "intact", "zeroed", 0.83, None),
-        ("full_vs_psth", 0, 1, "psth", "intact", 0.96, "psth"),
-        ("stabilized_vs_full", 1, 3, "intact", "stabilized", 1.09, "intact"),
+        ("ablated_vs_full", 1, 2, "intact", "zeroed", 0.68, None),
+        ("full_vs_psth", 0, 1, "psth", "intact", 0.735, "psth"),
+        ("stabilized_vs_full", 1, 3, "intact", "stabilized", 0.79, "intact"),
     ]
     contrast_stats = {}
     for (name, x1, x2, first_key, second_key, y_bracket, ref_key) in contrasts:
@@ -949,8 +943,8 @@ def compose(*, recompute: bool = False, out_dir=FIG_DIR, dpi: int = 300, layout:
             _plot_missing_cache(a)
 
     _standard_panel_heading(ax_c, "C", "Ablations modestly reduce\ntrial-averaged predictions")
-    _standard_panel_heading(ax_d, "D", "Single-trial prediction depends\non retinal image motion")
-    _standard_panel_heading(ax_e, "E", "Reafference reproduces the\nempirical FEM modulation")
+    _standard_panel_heading(ax_d, "D", "Retinal input predicts\nsingle-trial responses")
+    _standard_panel_heading(ax_e, "E", "Retinal input reproduces\nempirical FEM modulation")
 
     # No bbox_inches="tight": keep the canvas at exactly the intended
     # page-width figsize (8.5 in) rather than cropping to the ink bounds.

@@ -38,5 +38,6 @@
   "wording_replacements_this_review": 13,
   "previous_editorial_audit": "manuscript/build/submission_wording_followup/before/analysis/submission_wording_audit.json",
   "scientific_controls_and_limitations_preserved": true,
-  "statistical_macro_occurrences_unchanged": true
+  "statistical_macro_occurrences_unchanged": true,
+  "subsequent_coauthor_review": "manuscript/analysis/coauthor_edits.json"
 }

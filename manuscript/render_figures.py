@@ -49,13 +49,13 @@ def replay_example(env, device):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    choices=('1','2','3','4','supplement')
-    parser.add_argument('figures',nargs='*',metavar='FIGURE',help='Select 1, 2, 3, 4, or supplement (default: all)')
+    choices=('1','2','3','4','supplement','stabilization')
+    parser.add_argument('figures',nargs='*',metavar='FIGURE',help='Select 1, 2, 3, 4, supplement, or stabilization (default: all)')
     parser.add_argument('--replay-example',action='store_true')
     parser.add_argument('--device',default='cuda:0')
     args=parser.parse_args()
     if any(which not in choices for which in args.figures):
-        parser.error('FIGURE must be 1, 2, 3, 4, or supplement')
+        parser.error('FIGURE must be 1, 2, 3, 4, supplement, or stabilization')
     env=os.environ.copy()
     env.update(MPLCONFIGDIR=str(BUILD/'mpl'),OMP_NUM_THREADS='2',OPENBLAS_NUM_THREADS='2')
     BUILD.mkdir(exist_ok=True);(BUILD/'mpl').mkdir(exist_ok=True)
@@ -98,6 +98,9 @@ def main():
             if SELECTED.get('schematic_no_phase_preview',False):
                 command.append('--schematic-no-phase')
             source=out/'figure3.pdf'
+        elif which=='stabilization':
+            run([sys.executable, HERE/'render_stabilization_control.py'], current)
+            continue
         elif which=='4':
             example=BUILD/'panel_a_exemplar_audit'
             if SELECTION.exists():

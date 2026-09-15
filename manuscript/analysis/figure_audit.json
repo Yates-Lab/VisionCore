@@ -16,14 +16,14 @@
     },
     {
       "file": "figures/figure3.pdf",
-      "sha256": "ab85d41bffac10c54f6d19a37794c61ad6aeb6b2e30d90d3e0dfe23e3a4b9317",
-      "text_spans": 132,
+      "sha256": "b5ae44ad26b83e99f99e0431c7b8d6f83d8da002069fd09160fd3cbdd500c878",
+      "text_spans": 134,
       "minimum_source_pt": 8.5
     },
     {
       "file": "figures/figure4.pdf",
-      "sha256": "a0bef539f9450317bbcf93be0a9e9ea2a5a9fe95173653a9be4e5951ae8ca16b",
-      "text_spans": 144,
+      "sha256": "b879f6c52c354509e96d69dca6e616fa6a777cfd0882d818d514350bf14651d0",
+      "text_spans": 130,
       "minimum_source_pt": 6.099999904632568
     },
     {
@@ -37,6 +37,12 @@
       "sha256": "625effb84a78e72c6aa4c38b2566eb75cb7940ed8e02f6c95ef89804f8d28611",
       "text_spans": 112,
       "minimum_source_pt": 7.0
+    },
+    {
+      "file": "figures/stabilization_control.pdf",
+      "sha256": "b5ca9bff9b4a3e37d2e7e310c0e241df5172e714c5f5d04902b4d212163d47b7",
+      "text_spans": 31,
+      "minimum_source_pt": 8.0
     }
   ],
   "compiled_pages": [
@@ -53,27 +59,32 @@
     {
       "pdf_page": 8,
       "minimum_figure_font_pt": 6.500035285949707,
-      "text_spans": 132
+      "text_spans": 134
     },
     {
-      "pdf_page": 12,
+      "pdf_page": 13,
       "minimum_figure_font_pt": 6.099999904632568,
-      "text_spans": 144
+      "text_spans": 130
     },
     {
-      "pdf_page": 39,
+      "pdf_page": 41,
       "minimum_figure_font_pt": 6.087270259857178,
       "text_spans": 165
     },
     {
-      "pdf_page": 41,
+      "pdf_page": 43,
       "minimum_figure_font_pt": 6.148800373077393,
       "text_spans": 112
+    },
+    {
+      "pdf_page": 44,
+      "minimum_figure_font_pt": 8.0,
+      "text_spans": 31
     }
   ],
   "compiled_pdf": {
-    "sha256": "2f89552ec60a42dfa00ec7b8d33f3082cd829b9baa7c01f7004975b3754bcf83",
-    "pages": 41
+    "sha256": "e987910da3835d964cf45a21ffa5c2f0894f00774d9f8d9140eb3f536c93316e",
+    "pages": 44
   },
   "installed_figures_match_rendered": {
     "1": true,
@@ -94,6 +105,10 @@
     "F": true,
     "G": true,
     "H": true
+  },
+  "stabilization_control": {
+    "summary": "manuscript/analysis/stabilization_control/summary.json",
+    "summary_sha256": "c60fb20fefdc4883cd86e7f2785ffc537b67ae17a43ff70c70614cf27bf1a4aa"
   },
   "selected_analysis_bundle": "/home/jake/repos/VisionCore/outputs/no_phase_readout_comparison_20260910/rank1",
   "figure4_interim_spectrum_selection": null,
@@ -259,30 +274,37 @@
     "paper/fig1/fig1a.svg": "0adff6fcf54c4048c1a601cc46036039ffcba58555d30d86d86994fbd2c6ce5e",
     "paper/fig2/generate_figure2.py": "f312411bdb92ce973e3a47d9e5ba9228867a35bc98997c1f450001603969a8cb",
     "paper/fig2/generate_panel_example.py": "080f1fc1d4590c937932bd870813da9d4a7f14b930bb008380ae325560b2c47f",
-    "paper/fig3/generate_fig3a.py": "8408ce4132ace237603fe2141f5d2589ef30eb0e334c280d97670bc25ffa7330",
-    "paper/fig3/generate_figure3.py": "cd31aa6489d477b4647e3dcfe6760b3e3d6181171109a93dd5621ef09e1e5ec5",
-    "paper/fig3/manuscript_schematic.py": "fd82e608e2f91e74c3eddec1188d13e386fd8d1565c8f164df167133c62fe3a0",
+    "paper/fig3/generate_fig3a.py": "179260a316b467b0ebb60f0cc7dc32b01760104c461f4a4137f6ac58400a42dc",
+    "paper/fig3/generate_figure3.py": "33eaff4035d768d37c81b806fbd16ab3ee0c6b3f1a92e451a30331aabd15ec9b",
+    "paper/fig3/manuscript_schematic.py": "df2d134ffa562a8daeac47015834342db436e259720dcc2e266a33bf7e5b4918",
+    "paper/fig3/manuscript_examples.py": "271a86e9356c30f94d86fd0214733af4e4757a9c50fb0961abffc895925bd35c",
+    "paper/fig3/history_stabilization.py": "e3b262a87818f816a70cc1f246efd997d90c30180e9bcb543b6a742735b8444d",
+    "paper/fig3/run_history_stabilization.py": "48f10d12912def510887da6ca9760a4c9a3159c7f653838265caeb3b2b0ce97d",
+    "paper/fig3/_fig3_ablation_data.py": "fc783362c07f9a2f4e82bc2cf51105f5e402edd4dde88773ee7ecab48b0ce445",
+    "paper/fig3/_fig3_femfraction.py": "8615846ba3f10d51db4067ecf53812d130c3678a162b6296c6d6304e366e8f25",
+    "manuscript/render_stabilization_control.py": "6879560365eb1ab490a0620dcf4aa6fd39f572e0cb272c11f8ad4d648c333ae6",
     "models/modules/dekel.py": "2682f5594c287478b4440713a30c49180c121a8be0566b9633e88cfdd4864e17",
     "models/data/transforms.py": "1f4f4f4aeee5d79b859c312a7ead93a0ba21773e4b8d9c545363ec4a1cfc32d5",
-    "paper/fig4/spatiotemporal_tuning/_figure4_renderer.py": "15581f991517cfe1b7f3a65e8f752e322abe8d50b6f7835c9b25b75a0ca864cc",
+    "paper/fig4/spatiotemporal_tuning/_figure4_renderer.py": "906d596dea13c6fffee10d4192a6015c670c0a6cb0af1d917d126fd082030b52",
     "paper/fig4/spatiotemporal_tuning/_figure4_rendering.py": "62a2599bf98d9926fee29a1c743c55cc4582aad554bed15ffe34b14e459eb20e",
     "paper/fig4/spatiotemporal_tuning/audit_panel_a_exemplars.py": "4d99f488a6d23766b45443963a75c134ce42a2cc1e0a11c0fc584e917e89b754",
     "manuscript/render_support.py": "75f9d21d112f28858b1bd3a54a99ff318d01454af347565b69e59001fc1c60cd",
-    "manuscript/render_figures.py": "b73c6f23a38a1947ae7d5190d235697bb8cc27220344b17c753ae15ea4c027e7",
+    "manuscript/render_figures.py": "f5565bfc65a828274ea50d03cb065e38f802e05bb7953f51e021a23275893af0",
     "manuscript/sync_stats.py": "283baf101771b4cce3bd79ca1dc30ad3990ef58138384f86a4140d65956f61f4",
     "manuscript/export_empirical_stats.py": "e3bbdf793d72d07340992f7baeb82c493c8dfbc507111ae411b174ade307cd4d",
-    "manuscript/audit_figures.py": "c21095244cf4eb6fa80b4238e2324a3d2463a8a59a8bfbdd7ab25fe5dfcb5054",
+    "manuscript/audit_figures.py": "31e2df7fa20faaf231323147f2878543add8424a1ba60c375f490770c89967da",
     "manuscript/Makefile": "fac76916f9b4c13470c1fad89c8d4a6af500ae5564675873c5d81c33a514a7bd",
     "manuscript/figure4_selection.py": "cb03a2b9bb4bfcd55d666bdb90e969c8af9cd8d29006d67aeb6e71cac75ae49f",
     "manuscript/analysis_selection.py": "2a06f27fe40d3ad46ee0f441e8783a248c8e49c2081498ca0705378fe01032a1"
   },
   "manuscript_sha256": {
-    "main.tex": "6cb862e3446676557a9e2f40b779ed72d596961f5540f343502e7b24cf36165e",
-    "refs.bib": "a5bb4c1fda60f3b86d830c3a0965961115bb4a003e57e6aa32e4df3d59047db5",
+    "main.tex": "a570ebcec3576cf9af2400e52a830f151e9918145e7ae91e801d701d24e79f9d",
+    "refs.bib": "0c3a7dbdad8ae1ac6bbe9cd45304c2c9f707fe799c60049f0d4076c7515b2f90",
     "lite.cls": "9700d568283012b961f79f08fe496f0da2591fdd0eff571e27931cecfc6edded",
     "generated_stats.tex": "4ce1fb4e6e635bd5fe2ebc9e74ffcadb4a2b621684690946a7b0d8456f5fdb9e",
     "analysis/panel_a_selection.json": "89f3254c9e508da8c18a66d380bee8006eccf0b578047e12a797e547272bf55b",
-    "analysis/figure3_schematic.json": "4da1ab0b953024fc6e61770aa789f5d494587e84f0542e1379c200b9db6978ea"
+    "analysis/figure3_schematic.json": "d3507f79445e8fbd74846cd5b5c7175b8726af29ec852223a616206142fcf01d",
+    "stabilization_stats.tex": "baf4be896428aa1c69a111435dcca7babf4e593ee25f042fd0bd16c77460c1ff"
   },
   "outlined_text_note": "Figure 1 schematic labels were restored from SVG aria-label paths; all other main-figure text exported as measurable fonts. Supplement 1 vector text re-typeset at the original baselines."
 }

@@ -3,8 +3,9 @@
 The supplied Overleaf export was imported on 2026-09-10. The active manuscript
 uses the completed rank-one model without the separate first-stage readout.
 Figures 3 and 4, their model-dependent statistics, feature-map illustrations,
-and Methods use the same selected checkpoint. Figures 1 and 2 and the two
-supplements retain their empirical analyses. See [POSTING_AUDIT.md](POSTING_AUDIT.md)
+and Methods use the same selected checkpoint. Figures 1 and 2 and the first two
+supplements retain their empirical analyses. A third supplement compares
+session-global and history-local retinal stabilization in the selected model. See [POSTING_AUDIT.md](POSTING_AUDIT.md)
 for the completed migration and earlier revision history.
 
 `analysis/selected_model_bundle.json` pins the completed analysis and result
@@ -13,21 +14,30 @@ hashes. Figure 3B depicts the selected checkpoint's actual architecture;
 
 Figure 3B also depicts the input interventions with the same colors as C--E:
 Full (blue), Retinal only (red; extraretinal input zeroed before the MLP), and
-Stabilized (purple; retinal motion removed, extraretinal input retained).
+Stabilized (ochre; retinal motion removed, extraretinal input retained).
 Both retinal histories enter the same core; all conditions use the same weights.
-Each shared input uses a single arrow. The paired cubes use the cached FixRSVP
-illustrations, preserving image flashes, and feature textures are evaluated on
-the displayed measured history. The caption distinguishes the illustration's
-trial-medoid stabilization/shared current frame from the session-global gaze
-anchor used in the quantified analysis. The eye traces also come from FixRSVP. `analysis/figure3_schematic.json` records this mapping.
+Each shared input uses a single arrow. The paired cubes now use an unaltered
+recorded FixRSVP history and a counterpart frozen at the session-global gaze centroid,
+with image flashes preserved and a shared display contrast scale. Selection
+uses retinal contrast and gaze displacement, independently of neural effects.
+Both cubes preserve the actual flashed images without frame replacement.
+Feature maps are recomputed from the displayed measured history. The schematic
+uses the same global stabilization as the main quantified ablation; the
+history-local control appears in the supplement.
+The eye traces also come from FixRSVP. `analysis/figure3_schematic.json` records
+this mapping and the selection of the held-out prediction example.
 
 Figure 4 uses continuously Gaussian-filtered eye trajectories (6-ms standard
-deviation) with verified subdegree microsaccades. Its C/F filled contours compare
+deviation) with verified subdegree microsaccades. Its C/E filled contours compare
 47 drift windows and 18 microsaccade-containing windows (<1 degree), with
 unit dynamic power per trace and equal animal weights. All response analyses,
 tuning, passband overlays, and stage contributions use the selected rank-one
 model and corrected trajectory selection. The former interim panel override
-and manuscript draft notes have been retired.
+and manuscript draft notes have been retired. Individual tuning heatmaps are
+omitted from the manuscript; their fitted contours overlay both spectra in C.
+Population passband occupancy is D, the power ratio is E, engagement is F, and
+cumulative readouts are G. Source reports retain their original semantic keys
+for numerical comparison; `display_panel_letters` records the mapping.
 
 ## Build the PDF
 
@@ -111,11 +121,51 @@ the font requirement and retains its imported PDF.
 The audit needs the regenerated Figure 3/4 manifests and Figure 4A replay
 summary under `build/`. It checks installed PDF identity, source text bounds,
 all measurable figure text after LaTeX scaling (including math subscripts),
-and exact agreement of Figure 3 numerical summaries and Figure 4B–H reports
-with their selected sources. It saves `analysis/figure_audit.json` with
+and exact agreement of Figure 3 numerical summaries and the original Figure
+4B–H source reports (allowing only C's contour-display flag). It also checks
+the stabilization supplement's checkpoint, data identity, paired-score hashes,
+and generated `stabilization_stats.tex`. It saves `analysis/figure_audit.json` with
 source/result hashes and final font sizes, and page previews under
 `build/page_previews/`. Font checks complement visual inspection; after
 changing layout, inspect the compiled figure pages for collisions as well.
+
+## History-local stabilization control
+
+The additional replay fixes gaze within each 60-frame history at its latest
+input position. It preserves the RSVP sequence and current retinal frame;
+gaze may vary across predictions. This tests removal of within-history motion
+while retaining current retinal position. It uses the same Figure 3 C/D scoring
+pipeline, population, affine calibration, correlation ceilings, and variance
+denominators. It does not estimate a new FEM variance decomposition.
+
+Both controls preserve temporal modulation from the 20-Hz flashed images.
+The supplement also compares the within-unit costs of removing recent retinal
+motion (Full minus History-local) and explicit extraretinal input (Full minus
+Retinal-only). Their paired difference is Retinal-only minus History-local;
+its session-bootstrap interval is computed directly, not from a difference of
+population medians. The single-trial comparison does not establish a larger
+cost for recent-motion removal (median 0.00077, 95% CI -0.00622 to 0.01316).
+
+The completed replay is separate from the pinned production bundle:
+`outputs/stabilization_control_20260915/`. Compact paired scores and summaries
+are retained in `analysis/stabilization_control/`; the summary is bound by
+`analysis/stabilization_control.json`. Re-render without model inference:
+
+```sh
+conda run --no-capture-output -n yatesfv python manuscript/render_figures.py stabilization
+```
+
+For a new replay, use a new output directory and a CUDA-enabled environment:
+
+```sh
+OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 conda run --no-capture-output -n yatesfv python paper/fig3/run_history_stabilization.py --out-dir outputs/stabilization_control_new --gpu 0
+conda run --no-capture-output -n yatesfv python manuscript/render_stabilization_control.py --inference-dir outputs/stabilization_control_new
+```
+
+The replay resumes from a per-session partial cache and checks every current
+frame against the recorded retinal image. `test_history_stabilization.py`
+independently checks historical image identities and integer ROI extraction
+against the native renderer, without running the model.
 
 ## Selected analysis and files
 

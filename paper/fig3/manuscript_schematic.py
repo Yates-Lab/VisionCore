@@ -61,9 +61,10 @@ def _model_maps(assets, *, no_phase_preview=False):
         'history_order': 'lag 0 first, reversed from cached chronological FixRSVP lag_cube',
         'history_source': {
             'condition': 'fixrsvp', 'session': assets.session,
-            'cache': str(PANEL_A_CACHE_PATH),
-            'cache_sha256': hashlib.sha256(PANEL_A_CACHE_PATH.read_bytes()).hexdigest(),
-            'display_alignment': 'paired cached illustrations share a most-recent frame aligned to the test-screen ROI',
+            'base_assets_cache': str(PANEL_A_CACHE_PATH),
+            'base_assets_cache_sha256': hashlib.sha256(PANEL_A_CACHE_PATH.read_bytes()).hexdigest(),
+            'movie_source': 'native FixRSVP recording; window and exact rendering recorded in example_selection',
+            'display_alignment': 'unaltered measured history paired with the production session-global stabilization',
             'stabilized_history_sha256': hashlib.sha256(stabilized_history.tobytes()).hexdigest(),
         },
         'behavior_source': 'separate cached FixRSVP eye-position and speed example from the same session',
@@ -87,10 +88,11 @@ def _model_maps(assets, *, no_phase_preview=False):
                             'extraretinal': 'input zeroed before the behavioral MLP'},
             'stabilized': {'color': STABILIZED_COLOR, 'retinal': 'gaze-induced motion removed',
                            'extraretinal': 'retained'},
-            'stabilized_cube': 'paired FixRSVP history with image flashes preserved and ROI held at the example trial medoid; quantified ablation uses the session-global gaze centroid',
+            'stabilized_cube': 'paired FixRSVP history with image flashes preserved and ROI held at the session-global gaze centroid, matching the quantified ablation',
             'shared_input_arrows': 'one neutral retinal arrow and one behavioral arrow; colors mark condition labels and the two input interventions',
         },
     }
+    record['example_selection'] = assets.manuscript_example_provenance
     record['schematic_architecture'] = dict(record['architecture'])
     if no_phase_preview:
         record['schematic_architecture'].update(
@@ -176,7 +178,9 @@ def _draw_model(ax, assets, *, no_phase_preview=False):
     corners = box_corners_3d((1.15, 6.5, 0), (1.35, 1.35, .95),
                              yaw_deg=-25, pitch_deg=0, roll_deg=0)
     cube = np.asarray(assets.lag_cube)
-    _draw_lag_cube(ax, cube[::-1], corners, outline=INTACT_COLOR, edge_width=.9)
+    cube_limits = np.percentile(np.stack([cube, assets.stab_lag_cube]), [2, 98])
+    _draw_lag_cube(ax, cube[::-1], corners, outline=INTACT_COLOR, edge_width=.9,
+                   display_limits=cube_limits)
     _label(ax, 1.0, heading_y, 'Retinal\nhistory', weight='bold', va='bottom')
     _label(ax, 1.0, 5.25, 'Measured\nmotion', color=INTACT_COLOR)
     # Both Full and Retinal only retain the measured retinal sequence.
@@ -185,7 +189,8 @@ def _draw_model(ax, assets, *, no_phase_preview=False):
     stabilized = np.asarray(assets.stab_lag_cube)[::-1]
     corners = box_corners_3d((1.15, 3.0, 0), (1.35, 1.35, .95),
                              yaw_deg=-25, pitch_deg=0, roll_deg=0)
-    _draw_lag_cube(ax, stabilized, corners, outline=STABILIZED_COLOR, edge_width=.9)
+    _draw_lag_cube(ax, stabilized, corners, outline=STABILIZED_COLOR, edge_width=.9,
+                   display_limits=cube_limits)
     _label(ax, 1.0, 4.48, 'Stabilized', color=STABILIZED_COLOR, weight='bold')
     _label(ax, 1.0, 1.47, 'Retinal motion\nremoved', color=STABILIZED_COLOR)
     _arrow(ax, [(1.94, 3.0), (2.17, 4.10), (2.17, 5.75), (2.62, 6.15)],
@@ -291,6 +296,8 @@ def _draw_model(ax, assets, *, no_phase_preview=False):
 
 def plot_panel_ab(ax, assets, *, no_phase_preview=False):
     from generate_fig3a import _draw_top_row, _fit_one_axes_in_rect, _data_aspect
+    from manuscript_examples import prepare_examples
+    assets = prepare_examples(assets)
     if assets.arch['model_family'] != 'dekel' or assets.arch['frontend_k'] != 60:
         raise ValueError('The manuscript schematic requires the 60-frame Dekel twin')
     fig=ax.figure; rect=ax.get_position(); ax.remove()

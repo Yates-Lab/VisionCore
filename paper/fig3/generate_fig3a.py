@@ -289,10 +289,10 @@ def _project_screen(ax, image, corners3d, *, source_box=None,
 
 
 def _draw_lag_cube(ax, cube, corners3d, *, outline=CYAN, edge_width=1.4,
-                   zorder=4):
+                   zorder=4, display_limits=None):
     """Texture front, top, and left faces of a 3D box from a (T,H,W) cube."""
     n_lags, H, W = cube.shape
-    vmin, vmax = np.percentile(cube, [2, 98])
+    vmin, vmax = np.percentile(cube, [2, 98]) if display_limits is None else display_limits
     if vmax <= vmin:
         vmax = vmin + 1.0
 

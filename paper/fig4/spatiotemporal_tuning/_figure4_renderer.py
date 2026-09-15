@@ -69,17 +69,19 @@ PANEL_LAYOUT = {
     "G": (3.34, 6.62, 4.15, 2.72),
     "H": (7.62, 6.62, 4.22, 2.72),
 }
-MANUSCRIPT_PAGE_SIZE = (6.5, 8.5)
+MANUSCRIPT_PAGE_SIZE = (6.5, 7.2)
 MANUSCRIPT_PANEL_LAYOUT = {
-    "A": (0.04, 0.04, 6.40, 2.35),
-    "B": (0.04, 2.46, 3.20, 1.90),
-    "C": (3.30, 2.46, 3.15, 1.90),
+    "A": (0.04, 0.04, 6.40, 2.10),
+    "B": (0.04, 2.18, 6.40, 1.30),
+    "C": (0.04, 3.53, 3.20, 1.70),
+    # Retain the source example report, but omit its heatmaps from composition.
     "D": (0.04, 4.46, 3.20, 1.85),
-    "E": (3.30, 4.46, 1.50, 1.85),
-    "F": (4.91, 4.46, 1.54, 1.85),
-    "G": (0.04, 6.42, 3.20, 1.98),
-    "H": (3.30, 6.42, 3.15, 1.98),
+    "E": (3.30, 3.53, 1.50, 1.70),
+    "F": (4.91, 3.53, 1.54, 1.70),
+    "G": (0.04, 5.30, 3.20, 1.85),
+    "H": (3.30, 5.30, 3.15, 1.85),
 }
+MANUSCRIPT_PANEL_LETTERS = {"A": "A", "B": "B", "C": "C", "E": "D", "F": "E", "G": "F", "H": "G"}
 MANUSCRIPT_LABELS = {
     "Population response versus fixational path length": "Effect of fixation path length",
     "firing-rate change": "Rate change",
@@ -334,8 +336,9 @@ def _draw_panel_c_power(
     subfigure,
     tuning: dict[str, object],
     metrics: dict[str, object],
+    *, overlay_passbands=False,
 ) -> dict[str, object]:
-    """Show the two equal-mass conditional power distributions without tuning."""
+    """Show equal-mass conditional power, optionally with fitted passbands."""
     _panel_label(subfigure, "C")
     axes = subfigure.subplots(1, 2, gridspec_kw={"wspace": 0.24})
     spatial = np.asarray(metrics["spatial"], dtype=float)
@@ -360,6 +363,8 @@ def _draw_panel_c_power(
         axes[index].set_xlim(*sf_limits)
         axes[index].set_ylim(*tf_limits)
         axes[index].set_title(names[index], fontsize=6.5)
+        if overlay_passbands:
+            _overlay_passbands(axes[index], spatial, temporal, metrics["surfaces"])
     if not event_groups:
         axes[1].annotate(
             "power shifts to\nhigher TF",
@@ -431,7 +436,7 @@ def _draw_panel_c_power(
         "equal_dynamic_mass_before_comparison": bool(
             np.allclose(np.asarray(metrics["integrals"], dtype=float), 1.0, atol=1e-6, rtol=0.0)
         ),
-        "passband_contours_drawn": False,
+        "passband_contours_drawn": bool(overlay_passbands),
         "selection_rule": (
             "audited event-free drift windows versus windows containing verified microsaccades below 1 degree"
             if event_groups else
@@ -1247,15 +1252,18 @@ def main() -> int:
     panel_paths: dict[str, Path] = {}
     manuscript_margins = {
         "A": (0.025, 0.96, 0.12, 0.88),
-        "B": (0.16, 0.985, 0.24, 0.76),
+        "B": (0.08, 0.985, 0.29, 0.74),
         "C": (0.14, 0.84, 0.24, 0.82),
         "D": (0.14, 0.98, 0.24, 0.82),
         "E": (0.28, 0.95, 0.24, 0.83),
         "F": (0.28, 0.77, 0.24, 0.83),
-        "G": (0.18, 0.985, 0.26, 0.85),
-        "H": (0.18, 0.985, 0.26, 0.85),
+        "G": (0.18, 0.985, 0.30, 0.85),
+        "H": (0.18, 0.985, 0.30, 0.85),
     }
     for label, (draw, positional, keyword, margins) in drawers.items():
+        keyword = dict(keyword)
+        if manuscript_layout and label == "C":
+            keyword["overlay_passbands"] = True
         path = panels_dir / f"panel_{label.lower()}.pdf"
         panel_paths[label] = path
         reports[label] = _render_panel(
@@ -1264,7 +1272,7 @@ def main() -> int:
             draw,
             *positional,
             margins=manuscript_margins[label] if manuscript_layout else margins,
-            text_replacements=MANUSCRIPT_LABELS if manuscript_layout else None,
+            text_replacements={**MANUSCRIPT_LABELS, label: MANUSCRIPT_PANEL_LETTERS.get(label, label)} if manuscript_layout else None,
             **keyword,
         )
     pdf = args.out_dir / "figure4.pdf"
@@ -1272,7 +1280,8 @@ def main() -> int:
     svg = args.out_dir / "figure4.svg"
     _compose_page(
         pdf,
-        [(panel_paths[label], *panel_layout[label][:2]) for label in "ABCDEFGH"],
+        [(panel_paths[label], *panel_layout[label][:2]) for label in
+         (MANUSCRIPT_PANEL_LETTERS if manuscript_layout else "ABCDEFGH")],
         page_width_in=page_size[0],
         page_height_in=page_size[1],
     )
@@ -1295,8 +1304,11 @@ def main() -> int:
         "model_label": model_label,
         "checkpoint_sha256": expected_digest,
         "layout": args.layout,
+        "display_panel_letters": MANUSCRIPT_PANEL_LETTERS if manuscript_layout else {label: label for label in "ABCDEFGH"},
+        "source_panels_not_displayed": ["D"] if manuscript_layout else [],
         "page_size_inches": list(page_size),
-        "panel_layout_inches": {key: list(value) for key, value in panel_layout.items()},
+        "panel_layout_inches": {key: list(value) for key, value in panel_layout.items()
+                                if not manuscript_layout or key in MANUSCRIPT_PANEL_LETTERS},
         "analysis_population_units": len(analysis_units),
         "panel_populations": {
             "A": "one audited exact-CID exemplar",

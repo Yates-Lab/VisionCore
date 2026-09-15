@@ -116,6 +116,9 @@ def _load_ablation_femfraction_source():
         return None
     if any("femfraction" not in record for record in results):
         return None
+    if any(record.get("stabilization_reference", "session_global") != "session_global"
+           for record in results):
+        return None  # The history-local prediction control is not the main FEM assay.
     return payload
 
 

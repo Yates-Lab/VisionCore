@@ -5,24 +5,24 @@ and, at inference, remove one of the two FEM information routes:
 
   - intact     : full retinal stimulus + full behavior input (reference)
   - zeroed     : behavior set to 0 (extraretinal route removed; "retinal only")
-  - stabilized : retinal input frozen at ONE session-global centroid gaze so the
-                 image no longer moves with the eye (reafferent route removed;
-                 "extraretinal only"), behavior intact.
+  - stabilized : gaze frozen at ONE session-global centroid, preserving image
+                 flashes while removing gaze-dependent retinal displacements;
+                 behavior intact.
 
-The two ablations are symmetric counterfactuals. The fixRSVP stimulus is rendered
+The fixRSVP stimulus is rendered
 in retinal (eye-referenced) coordinates, so fixational eye movements are already
 in the visual stream; the behavior tensor is the only *separate* extraretinal
-route. `zeroed` removes the extraretinal route; `stabilized` removes the reafferent
-(retinal-image-motion) route. If single-trial prediction survives `zeroed` but
-collapses under `stabilized`, the trial-to-trial variability the twin captures is
-carried by the moving retinal image, not by extraretinal modulation of V1.
+route. The interventions measure predictive dependence on these model inputs;
+they do not identify the independent biological contributions of covarying
+retinal and extraretinal signals. Global stabilization also changes the current
+retinal position. The separate `history_stabilized` prediction control retains
+that position while removing gaze displacement within each input history.
 
 The stabilized retinal input is rendered pixel-exactly with DataYatesV1
 `FixRsvpTrial.get_rois` at a constant session-global centroid ROI (validated
-against the native grid_sample renderer), in the raw 240 Hz frame, then decimated
-to the model's
-120 Hz frame exactly as the training pipeline does (`downsample_stimulus` =
-decimation). A per-session alignment gate asserts decimate(raw stored stim) ==
+against the native grid_sample renderer), on the raw 240-Hz grid. Legacy models
+use the training pipeline's stimulus decimation; the selected native-rate model
+keeps all samples. A per-session alignment gate asserts decimate(raw stored stim) ==
 embedded `dset['stim']` bit-exactly, so the substitution is frame-aligned and the
 intact re-render carries zero rendering artifact.
 
@@ -430,7 +430,7 @@ def _renormalize_ccnorm_to_intact_anchor(ccabs, anchor):
     return ccnorm, ccmax, anchored_ccabs, unstable
 
 
-def _run_inference(session_filter=None, cache_path=CACHE_PATH):
+def _run_inference(session_filter=None, cache_path=CACHE_PATH, *, history_stabilized=False):
     """Run the twin under all three conditions and write a summary cache.
 
     ``session_filter`` and ``cache_path`` support an off-cache alignment smoke
@@ -484,6 +484,10 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH):
         results = []
         partial_cache_path = _partial_cache_path(cache_path)
     completed_sessions = {str(record["session"]) for record in results}
+    reference = "history_endpoint" if history_stabilized else "session_global"
+    if any(record.get("stabilization_reference", "session_global") != reference
+           for record in results):
+        raise ValueError("Partial cache uses a different stabilization reference")
     if completed_sessions:
         print(
             f"Resuming schema-v{INFERENCE_SCHEMA_VERSION} ablation inference "
@@ -568,15 +572,23 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH):
         render_factor = (
             int(samp['source_rate']) // int(samp['target_rate']) if samp else 1
         )
-        stab_stim_np, align_maxabs, n_tr_stab = build_stabilized_stim(
-            session_name, dset['stim'].numpy(), render_factor)
+        history_renderer = None
+        if history_stabilized:
+            from history_stabilization import HistoryStabilizer
+            history_renderer = HistoryStabilizer(
+                session_name, dset['stim'].numpy(), render_factor)
+            align_maxabs = history_renderer.align_maxabs
+            n_tr_stab = len(np.unique(trial_inds))
+        else:
+            stab_stim_np, align_maxabs, n_tr_stab = build_stabilized_stim(
+                session_name, dset['stim'].numpy(), render_factor)
         print(f"  stabilized render: {n_tr_stab} trials, factor={render_factor}, "
               f"alignment max-abs(decimate(raw)-embedded)={align_maxabs}")
         if align_maxabs != 0:
             print(f"  Skipping: stabilized-stim alignment gate failed "
                   f"(max-abs={align_maxabs})")
             continue
-        stab_stim = torch.from_numpy(stab_stim_np)
+        stab_stim = None if history_stabilized else torch.from_numpy(stab_stim_np)
 
         robs = np.full((NT, T, NC), np.nan)
         dfs = np.full((NT, T, NC), np.nan)
@@ -601,7 +613,11 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH):
                 continue
             stim_lag_indices = model_indices[:, None] - stim_lags[None, :]
             stim = dset['stim'][stim_lag_indices].permute(0, 2, 1, 3, 4)
-            stim_stab = stab_stim[stim_lag_indices].permute(0, 2, 1, 3, 4)
+            if history_renderer is None:
+                stim_stab = stab_stim[stim_lag_indices].permute(0, 2, 1, 3, 4)
+            else:
+                stim_stab = torch.from_numpy(history_renderer.render(
+                    model_indices, stim_lags))
             behavior0 = dset['behavior'][model_indices]
             output_behavior0 = (
                 dset['output_behavior'][model_indices]
@@ -716,9 +732,10 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH):
                 count_bins=FIG2_REPORTED_WINDOW_BINS,
             )
             for condition, prediction in rhat_rs.items()
+            if not history_stabilized  # Supplement tests prediction (C/D), not the FEM decomposition.
         }
-        observed_anchor = femfraction["intact"]
-        for condition in ABLATIONS:
+        observed_anchor = femfraction.get("intact")
+        for condition in ([] if history_stabilized else ABLATIONS):
             for key in ("B_obs", "B_obs_uncl"):
                 if not np.allclose(
                     femfraction[condition][key],
@@ -852,6 +869,8 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH):
 
         results.append({
             "session": session_name, "subject": subject,
+            "stabilization_reference": reference,
+            "history_render_audit": history_renderer.audit if history_renderer else None,
             "neuron_mask": neuron_mask, "n_neurons": n_neurons,
             "ve": ve, "ve_psth": ve_psth,
             "ccnorm": ccnorm, "ccabs": ccabs, "ccmax": ccmax,
@@ -1160,6 +1179,8 @@ def load_ablation_data(recompute=False):
                     f"{payload.get('checkpoint_path')}, but CHECKPOINT_PATH is "
                     f"{CHECKPOINT_PATH}. Re-run inference."
                 )
+            if any(r.get("stabilization_reference", "session_global") != "session_global" for r in results):
+                raise ValueError("History-local control must not replace the main Figure-3 ablation cache")
         else:  # pre-split cache: a bare list, no provenance recorded
             print("  (legacy cache format: no schema/checkpoint provenance)")
             results = payload
