@@ -1,0 +1,36 @@
+{
+  "checkpoint_sha256": "e70f287462155607a96c7d23d9d56e347111319aa48cafd3f54fe88dd4484cb9",
+  "parent_design_sha256": "f9a4aeb9b06f8bb62820d7464e109feb8c373ba577ec68bf3b9134cc563dfa57",
+  "parent_summary_sha256": "a9e53a11a5b389f3f789f39b869767ac5bc7ab1851c1e3ade57c12a56bab1316",
+  "source_sha256": {
+    "outputs/passband_comparison_20260914/analysis_inputs.npz": "56d5ee4d8814bb4c7c090c981c88590517c3db018d35e1f1a464460fb8359cd5",
+    "outputs/passband_comparison_20260914/traces.csv": "f57b58accc87a16eaa51a56e636393433cd333e04c14bfdae3fece474a5e362f",
+    "outputs/passband_comparison_20260914/images.csv": "b951d489fd151e294e2ea5790aa87a280005b99f0c6eac5fdebcb13a52ada116",
+    "outputs/passband_comparison_20260914/units.csv": "b3092dd3ad0b3ee00a45ac4c62395840c17f784c96771e003bb4763a35a94f33",
+    "outputs/passband_comparison_20260914/primary_predictions_lambda_0.01.npz": "a9600693f0be952c344a4411fce66e05fa388298b3b8a21f21da2e260bc0e2f5"
+  },
+  "source_code_sha256": {
+    "jake/passband_comparison/normalized_overlap.py": "75f7e68c5768350b53bd869342541da0882786ba37af045367bffae941204a8d",
+    "jake/passband_comparison/MINIMAL_AUDIT.md": "b929b51aca573e851f80f8425bd93195ff9e96c7396e27897859b1659a814111",
+    "jake/passband_comparison/statistics.py": "5c46515e51e6ddeebacbc2b32f6d04013532254181b79985e06b6568c42f4e23",
+    "jake/passband_comparison/run.py": "479b5d64baef672d6d7e83af21762b22401f3c45a739addd51dc0289da888fdb",
+    "jake/passband_comparison/data.py": "67a45f32c89372ff2f036c02de645e094c6bc83b6f8128694f21956ff75f58c0"
+  },
+  "predictor": "q_u(movie) = movie_engagement_u / movie_dynamic; then median over images",
+  "primary_contrast": "class_path_dynamic_normalized_overlap__over__class_path_dynamic",
+  "secondary_contrast": "class_path_normalized_overlap__over__class_path",
+  "outcome_order": [
+    "rate_percent",
+    "ssi_percent"
+  ],
+  "n_images": 40,
+  "n_histories": 200,
+  "n_units": 725,
+  "strict_n_units": 145,
+  "ridge_penalty": 0.01,
+  "folds": 5,
+  "repeats": 3,
+  "bootstrap_repeats": 1000,
+  "bootstrap_seed": 20261014,
+  "scope": "Same fixed image ensemble, finite-window estimator, fitted twin and regression rules."
+}

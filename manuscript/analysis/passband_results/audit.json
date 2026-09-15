@@ -1,0 +1,448 @@
+{
+  "passed": true,
+  "checkpoint_sha256": "e70f287462155607a96c7d23d9d56e347111319aa48cafd3f54fe88dd4484cb9",
+  "checks": {
+    "selected_checkpoint": {
+      "passed": true,
+      "detail": null
+    },
+    "documented_analysis_design": {
+      "passed": true,
+      "detail": null
+    },
+    "source:manuscript/analysis/selected_model_bundle.json": {
+      "passed": true,
+      "detail": null
+    },
+    "source:outputs/no_phase_readout_comparison_20260910/rank1/figure4/production_figure4/audit/production_audit.json": {
+      "passed": true,
+      "detail": null
+    },
+    "source:outputs/no_phase_readout_comparison_20260910/rank1/figure4/top_passband_stage_trajectory_10img_x_10fix/summary.json": {
+      "passed": true,
+      "detail": null
+    },
+    "source:outputs/figure4_gaussian_event_split_20260911/inputs/response_replay_bank_40img_x_200fix_250ms/trace_feature_table.csv": {
+      "passed": true,
+      "detail": null
+    },
+    "source:outputs/figure4_gaussian_event_split_20260911/inputs/response_replay_bank_40img_x_200fix_250ms/image_feature_table.csv": {
+      "passed": true,
+      "detail": null
+    },
+    "source:outputs/figure4_gaussian_event_split_20260911/inputs/response_replay_bank_40img_x_200fix_250ms/trace_provenance.json": {
+      "passed": true,
+      "detail": null
+    },
+    "source:outputs/no_phase_readout_comparison_20260910/rank1/figure4/all_available_yu_tuning/summary.json": {
+      "passed": true,
+      "detail": null
+    },
+    "source:outputs/no_phase_readout_comparison_20260910/rank1/figure4/all_available_yu_tuning/tuning_summary.csv": {
+      "passed": true,
+      "detail": null
+    },
+    "source:outputs/no_phase_readout_comparison_20260910/rank1/figure4/matrix_spectral_replay/shard_00/causal_chain_shard.npz": {
+      "passed": true,
+      "detail": null
+    },
+    "source:outputs/no_phase_readout_comparison_20260910/rank1/figure4/matrix_spectral_replay/shard_00/summary.json": {
+      "passed": true,
+      "detail": null
+    },
+    "source:outputs/no_phase_readout_comparison_20260910/rank1/figure4/all_available_yu_tuning/frequency_tuning_grouped.csv": {
+      "passed": true,
+      "detail": null
+    },
+    "source:outputs/no_phase_readout_comparison_20260910/rank1/figure4/matrix_spectral_replay/shard_01/causal_chain_shard.npz": {
+      "passed": true,
+      "detail": null
+    },
+    "source:outputs/no_phase_readout_comparison_20260910/rank1/figure4/matrix_spectral_replay/shard_01/summary.json": {
+      "passed": true,
+      "detail": null
+    },
+    "source:outputs/fem_band_tuning_20260914/design.json": {
+      "passed": true,
+      "detail": null
+    },
+    "source:outputs/no_phase_readout_comparison_20260910/rank1/figure4/passband_vs_path_length/summary.json": {
+      "passed": true,
+      "detail": null
+    },
+    "input_numerical_audit": {
+      "passed": true,
+      "detail": null
+    },
+    "estimator_source:paper/fig4/spatiotemporal_tuning/spectral_power.py": {
+      "passed": true,
+      "detail": null
+    },
+    "estimator_source:outputs/passband_comparison_20260914/analysis_inputs.npz": {
+      "passed": true,
+      "detail": null
+    },
+    "estimator_source:outputs/passband_comparison_20260914/units.csv": {
+      "passed": true,
+      "detail": null
+    },
+    "primary_fold_shape": {
+      "passed": true,
+      "detail": null
+    },
+    "primary_trial_disjoint_r0_k0": {
+      "passed": true,
+      "detail": null
+    },
+    "primary_trial_disjoint_r0_k1": {
+      "passed": true,
+      "detail": null
+    },
+    "primary_trial_disjoint_r0_k2": {
+      "passed": true,
+      "detail": null
+    },
+    "primary_trial_disjoint_r0_k3": {
+      "passed": true,
+      "detail": null
+    },
+    "primary_trial_disjoint_r0_k4": {
+      "passed": true,
+      "detail": null
+    },
+    "primary_trial_disjoint_r1_k0": {
+      "passed": true,
+      "detail": null
+    },
+    "primary_trial_disjoint_r1_k1": {
+      "passed": true,
+      "detail": null
+    },
+    "primary_trial_disjoint_r1_k2": {
+      "passed": true,
+      "detail": null
+    },
+    "primary_trial_disjoint_r1_k3": {
+      "passed": true,
+      "detail": null
+    },
+    "primary_trial_disjoint_r1_k4": {
+      "passed": true,
+      "detail": null
+    },
+    "primary_trial_disjoint_r2_k0": {
+      "passed": true,
+      "detail": null
+    },
+    "primary_trial_disjoint_r2_k1": {
+      "passed": true,
+      "detail": null
+    },
+    "primary_trial_disjoint_r2_k2": {
+      "passed": true,
+      "detail": null
+    },
+    "primary_trial_disjoint_r2_k3": {
+      "passed": true,
+      "detail": null
+    },
+    "primary_trial_disjoint_r2_k4": {
+      "passed": true,
+      "detail": null
+    },
+    "32_complete_self_excluding_shuffles": {
+      "passed": true,
+      "detail": null
+    },
+    "secondary_full_prediction_coverage": {
+      "passed": true,
+      "detail": null
+    },
+    "canvas_group:0cf32eb99e5b148446c23901d07920bb701fa206819db75a60a5d6df859cebcb": {
+      "passed": true,
+      "detail": null
+    },
+    "canvas_group:0db944ee5456178c7c51926da96fea91fd36990c2e12e7ef490f942f368d1e77": {
+      "passed": true,
+      "detail": null
+    },
+    "canvas_group:4b08282ccd96f2024fdeb78d47744e70e0edc44faeff7f63b9407a0325437109": {
+      "passed": true,
+      "detail": null
+    },
+    "canvas_group:4edc8b12fc08b32b5d2d1c78f294bc568aec688ba7fd6c8185d83f67ecbfbaa5": {
+      "passed": true,
+      "detail": null
+    },
+    "canvas_group:7f437d467776ce377a80565d854d8866a61b64f52f79867cc722c2a5887501ef": {
+      "passed": true,
+      "detail": null
+    },
+    "canvas_group:95d90ae91edf31618bdf7b1e693503c68dec6e566b3d2d84e02b31a3052cd974": {
+      "passed": true,
+      "detail": null
+    },
+    "canvas_group:b8233e5163eeef1dbaa3812c999144ccc9cf813855a561edb68ddf42c8158bec": {
+      "passed": true,
+      "detail": null
+    },
+    "canvas_group:c6941a42349bd51eecd9ed63736b7f5d2bfd98bbd83751224df2d89ca1d838f2": {
+      "passed": true,
+      "detail": null
+    },
+    "canvas_group:cf219a622652911c1f6fadd3562c6432e9e015e9d01d837462ee88033cbece6b": {
+      "passed": true,
+      "detail": null
+    },
+    "canvas_group:d45b15072a02127bb37cf493d4e6071b7134dd6b78d984c9e909c239639e94d1": {
+      "passed": true,
+      "detail": null
+    },
+    "canvas_group:d5c64a78f882af8196d94d5cd49e8866a2b93ff94488ebf54771e79783025e89": {
+      "passed": true,
+      "detail": null
+    },
+    "canvas_group:da1146bfb2a5db0abd19743702ead5a23c9ff9dc8cc3c2fd78007385d0091623": {
+      "passed": true,
+      "detail": null
+    },
+    "canvas_group:f8c07ed099fd985d62d6b4d450a8c31575c7238244084aa17d5b2afcbae868bd": {
+      "passed": true,
+      "detail": null
+    },
+    "secondary_trial_disjoint_0": {
+      "passed": true,
+      "detail": null
+    },
+    "secondary_trial_disjoint_1": {
+      "passed": true,
+      "detail": null
+    },
+    "secondary_trial_disjoint_2": {
+      "passed": true,
+      "detail": null
+    },
+    "secondary_trial_disjoint_3": {
+      "passed": true,
+      "detail": null
+    },
+    "secondary_trial_disjoint_4": {
+      "passed": true,
+      "detail": null
+    },
+    "primary_predictions:animal": {
+      "passed": true,
+      "detail": null
+    },
+    "primary_predictions:class": {
+      "passed": true,
+      "detail": null
+    },
+    "primary_predictions:path": {
+      "passed": true,
+      "detail": null
+    },
+    "primary_predictions:engagement": {
+      "passed": true,
+      "detail": null
+    },
+    "primary_predictions:class_path": {
+      "passed": true,
+      "detail": null
+    },
+    "primary_predictions:class_path_engagement": {
+      "passed": true,
+      "detail": null
+    },
+    "primary_predictions:class_path_dynamic": {
+      "passed": true,
+      "detail": null
+    },
+    "primary_predictions:class_path_dynamic_engagement": {
+      "passed": true,
+      "detail": null
+    },
+    "primary_predictions:class_path_dynamic_population_passband": {
+      "passed": true,
+      "detail": null
+    },
+    "secondary_predictions:class_path": {
+      "passed": true,
+      "detail": null
+    },
+    "secondary_predictions:class_path_engagement": {
+      "passed": true,
+      "detail": null
+    },
+    "secondary_predictions:class_path_dynamic": {
+      "passed": true,
+      "detail": null
+    },
+    "secondary_predictions:class_path_dynamic_engagement": {
+      "passed": true,
+      "detail": null
+    },
+    "secondary_predictions:class_path_dynamic_population_passband": {
+      "passed": true,
+      "detail": null
+    },
+    "fresh_fit_primary_0_class_path": {
+      "passed": true,
+      "detail": 3.7954948766127927e-06
+    },
+    "fresh_fit_primary_0_class_path_engagement": {
+      "passed": true,
+      "detail": 3.3645337538246167e-06
+    },
+    "fresh_fit_primary_0_class_path_dynamic": {
+      "passed": true,
+      "detail": 3.724055972043061e-06
+    },
+    "fresh_fit_primary_0_class_path_dynamic_engagement": {
+      "passed": true,
+      "detail": 3.6106593199747294e-06
+    },
+    "fresh_fit_primary_0_class_path_dynamic_population_passband": {
+      "passed": true,
+      "detail": 3.7937466572657286e-06
+    },
+    "fresh_fit_primary_2_class_path": {
+      "passed": true,
+      "detail": 3.7422907439577102e-06
+    },
+    "fresh_fit_primary_2_class_path_engagement": {
+      "passed": true,
+      "detail": 3.7773057215417793e-06
+    },
+    "fresh_fit_primary_2_class_path_dynamic": {
+      "passed": true,
+      "detail": 3.7406657611427363e-06
+    },
+    "fresh_fit_primary_2_class_path_dynamic_engagement": {
+      "passed": true,
+      "detail": 3.750021704718165e-06
+    },
+    "fresh_fit_primary_2_class_path_dynamic_population_passband": {
+      "passed": true,
+      "detail": 3.8093136396355476e-06
+    },
+    "fresh_fit_primary_4_class_path": {
+      "passed": true,
+      "detail": 3.4237742738696397e-06
+    },
+    "fresh_fit_primary_4_class_path_engagement": {
+      "passed": true,
+      "detail": 3.716113354812478e-06
+    },
+    "fresh_fit_primary_4_class_path_dynamic": {
+      "passed": true,
+      "detail": 3.802565515798051e-06
+    },
+    "fresh_fit_primary_4_class_path_dynamic_engagement": {
+      "passed": true,
+      "detail": 3.575045383286124e-06
+    },
+    "fresh_fit_primary_4_class_path_dynamic_population_passband": {
+      "passed": true,
+      "detail": 3.6679391541838413e-06
+    },
+    "fresh_secondary_canvas_disjoint_0": {
+      "passed": true,
+      "detail": null
+    },
+    "fresh_fit_secondary_0_class_path": {
+      "passed": true,
+      "detail": 7.058509538637736e-06
+    },
+    "fresh_fit_secondary_0_class_path_engagement": {
+      "passed": true,
+      "detail": 7.538390349282054e-06
+    },
+    "fresh_fit_secondary_0_class_path_dynamic": {
+      "passed": true,
+      "detail": 7.6071789294474e-06
+    },
+    "fresh_fit_secondary_0_class_path_dynamic_engagement": {
+      "passed": true,
+      "detail": 7.262356291448668e-06
+    },
+    "fresh_fit_secondary_0_class_path_dynamic_population_passband": {
+      "passed": true,
+      "detail": 7.605595243376229e-06
+    },
+    "fresh_secondary_canvas_disjoint_2": {
+      "passed": true,
+      "detail": null
+    },
+    "fresh_fit_secondary_2_class_path": {
+      "passed": true,
+      "detail": 3.8061385936316583e-06
+    },
+    "fresh_fit_secondary_2_class_path_engagement": {
+      "passed": true,
+      "detail": 7.490474899896071e-06
+    },
+    "fresh_fit_secondary_2_class_path_dynamic": {
+      "passed": true,
+      "detail": 7.471614196674636e-06
+    },
+    "fresh_fit_secondary_2_class_path_dynamic_engagement": {
+      "passed": true,
+      "detail": 7.576158992605997e-06
+    },
+    "fresh_fit_secondary_2_class_path_dynamic_population_passband": {
+      "passed": true,
+      "detail": 7.4810365333632944e-06
+    },
+    "fresh_secondary_canvas_disjoint_4": {
+      "passed": true,
+      "detail": null
+    },
+    "fresh_fit_secondary_4_class_path": {
+      "passed": true,
+      "detail": 3.811544061704808e-06
+    },
+    "fresh_fit_secondary_4_class_path_engagement": {
+      "passed": true,
+      "detail": 3.80524357979084e-06
+    },
+    "fresh_fit_secondary_4_class_path_dynamic": {
+      "passed": true,
+      "detail": 3.8089070812930004e-06
+    },
+    "fresh_fit_secondary_4_class_path_dynamic_engagement": {
+      "passed": true,
+      "detail": 6.433184694287775e-06
+    },
+    "fresh_fit_secondary_4_class_path_dynamic_population_passband": {
+      "passed": true,
+      "detail": 3.8085360358763864e-06
+    }
+  },
+  "fresh_regression_max_abs_error": 7.6071789294474e-06,
+  "source_code_sha256": {
+    "jake/passband_comparison/data.py": "67a45f32c89372ff2f036c02de645e094c6bc83b6f8128694f21956ff75f58c0",
+    "jake/passband_comparison/estimator_diagnostics.py": "002349cb6bbc93e97b8687b1082b262b4d55562a91aa557a6da24b3bdb45b5c4",
+    "jake/passband_comparison/finalize.py": "954f76a458cd8f179db208d55de2d1cab5821654832c31f567a9d7e2f3cbf9eb",
+    "jake/passband_comparison/run.py": "479b5d64baef672d6d7e83af21762b22401f3c45a739addd51dc0289da888fdb",
+    "jake/passband_comparison/statistics.py": "5c46515e51e6ddeebacbc2b32f6d04013532254181b79985e06b6568c42f4e23",
+    "jake/passband_comparison/test_comparison.py": "9bd908de81f4d60a0721eed75cbbec4d14eeff8f0ebc62218feb6c8f063a838a",
+    "paper/fig4/spatiotemporal_tuning/build_exact_cid_figure4_contract.py": "5d2eaed847f1a8f99e8a54e8030a15c923c18a9492d28b0c01c4db9d048f9c47",
+    "paper/fig4/spatiotemporal_tuning/spectral_power.py": "7916344f2354da335b6b1fd01aebac9d43d27f4c9e717c137f4f7817300c384e"
+  },
+  "artifact_sha256": {
+    "units.csv": "b3092dd3ad0b3ee00a45ac4c62395840c17f784c96771e003bb4763a35a94f33",
+    "per_source_canvas.csv": "848f285f90f958f9e2286a0002073c9c016029900e62480eff06b6cbfe478256",
+    "traces.csv": "f57b58accc87a16eaa51a56e636393433cd333e04c14bfdae3fece474a5e362f",
+    "primary_per_unit.csv": "cc93f36439fe52384c541c11fa2a9f62822afac46c84e7187eec3a2b6cd97c68",
+    "primary_predictions_lambda_0.001.npz": "2a52750b2f061bbe04b56770e0d1386d5aaaa07bb416a806042598157482fc68",
+    "images.csv": "b951d489fd151e294e2ea5790aa87a280005b99f0c6eac5fdebcb13a52ada116",
+    "estimator_resolution_calibration.npz": "c05e1f2709c9f68c57719621175e9cd07fe76da2363070d8d94efa5a91a87a27",
+    "primary_predictions_lambda_0.01.npz": "a9600693f0be952c344a4411fce66e05fa388298b3b8a21f21da2e260bc0e2f5",
+    "primary_predictions_lambda_0.1.npz": "a57384033f5d72c0fe75ccd13d7a2f3736f03a4e90393ecdcf826dbeddd32616",
+    "analysis_inputs.npz": "56d5ee4d8814bb4c7c090c981c88590517c3db018d35e1f1a464460fb8359cd5",
+    "secondary_per_unit.csv": "31cde776373a53498188f349c63911482d90224b966bd1add2de9705153ba02e",
+    "secondary_predictions.npz": "16f106f0c2f868b13bbf5ec43c07796cecb8d17e11bd00d0edefe3eb762752e5"
+  },
+  "method_description_correction": "Engagement uses nonnegative fitted Yu SF\u00d7TF predictions multiplied by measured axial-orientation weights, normalized to unit mass; it does not use raw phase-RMS responses when passband_weight is present."
+}

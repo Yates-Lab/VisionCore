@@ -1,0 +1,47 @@
+{
+  "checkpoint_sha256": "e70f287462155607a96c7d23d9d56e347111319aa48cafd3f54fe88dd4484cb9",
+  "source_sha256": {
+    "manuscript/analysis/selected_model_bundle.json": "bb7001b1ddcce8633c51331d96e30f4ed035cf845c9586dad1e3fb709265d670",
+    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/production_figure4/audit/production_audit.json": "a2ec804f06d61e7762b2b70a59dcb57e8df47b3f27e62f92cc0b01db551043e2",
+    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/top_passband_stage_trajectory_10img_x_10fix/summary.json": "a540629fd99c4b012b65b4188a6b6aa7f4d82d75782dac855ae7041729684cf4",
+    "outputs/figure4_gaussian_event_split_20260911/inputs/response_replay_bank_40img_x_200fix_250ms/trace_feature_table.csv": "83b83738dc1e4cb64cff42621e96d213bed226d7a7c7ec5f8a6fc181aa465ce4",
+    "outputs/figure4_gaussian_event_split_20260911/inputs/response_replay_bank_40img_x_200fix_250ms/image_feature_table.csv": "404aa0a95f743e81093c5e43e20dfe6b59ad921944fdc5f212d518bc5811f9a2",
+    "outputs/figure4_gaussian_event_split_20260911/inputs/response_replay_bank_40img_x_200fix_250ms/trace_provenance.json": "901b1a0079391b6a5535d963a7cfe65883244db2eec1d679905b0b6744b9f52e",
+    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/all_available_yu_tuning/summary.json": "7a78e685975b954871427ee867916c229d65a8f0e002e9b9e04d3f47b0a76daf",
+    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/all_available_yu_tuning/tuning_summary.csv": "cc550a70d759f9971e344d23c6a9a82fe2741c148a88bc4b2bab7a3fdcc0bbf0",
+    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/matrix_spectral_replay/shard_00/causal_chain_shard.npz": "f54463df8ea4b9e41f78b87c15387014c1124d09f5dfbc55879aecae56fd80d2",
+    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/matrix_spectral_replay/shard_00/summary.json": "c9e57cdffc9e1fd779be2a8284698b72281e3b7cc87cb5f5e29b3614c0528061",
+    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/all_available_yu_tuning/frequency_tuning_grouped.csv": "cfb4e9dab457ecfd440d6f85a877f3590a0348f4ced186c7a830a26e96c9a8b1",
+    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/matrix_spectral_replay/shard_01/causal_chain_shard.npz": "5182d84dddf51b87daa56da18bad497b526fea568977b72973c613800391d488",
+    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/matrix_spectral_replay/shard_01/summary.json": "b684f73b658df12783b2a2e3aee0f79f1c2319de754a866bddec0ca631f0756e",
+    "outputs/fem_band_tuning_20260914/design.json": "19b7b671fe514ce25a07f0f63cebb93dae093e4f8e3a5b705add5a3bc61b5062",
+    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/passband_vs_path_length/summary.json": "087bda00ba32c564477291a16a00857aec0fa68e53acddb8a904f6379b1481f3"
+  },
+  "n_scenes": 40,
+  "n_traces": 200,
+  "n_units": 725,
+  "n_canvas_clusters": 13,
+  "n_eye_trial_clusters": 187,
+  "strict_n_units": 145,
+  "outcome_order": [
+    "rate_percent",
+    "ssi_percent"
+  ],
+  "primary_repeats": 3,
+  "folds": 5,
+  "ridge_penalty": 0.01,
+  "ridge_sensitivity": [
+    0.001,
+    0.1
+  ],
+  "shuffle_assignments": 32,
+  "bootstrap_repeats": 1000,
+  "seed": 20260914,
+  "readme_sha256": "9536895e7de668465a28574dfec564b1a97a2ff9a841c4c4e11587d1b2eaca6a",
+  "primary_estimand": "Released image-reduced modulation; held-out eye trials; intervals conditional on fixed 40-image ensemble.",
+  "secondary_estimand": "Per-movie modulation; both source canvas and source eye trial held out; crossed stimulus/history intervals.",
+  "spectrum": "Exact Figure 4 rendered movies; 6-ms Gaussian eye filter, 250-ms window, temporal demeaning and DPSS NW=1.5 K=2; no resimulation.",
+  "population": "Fixed all-725 model population, with strict-145 sensitivity subset; no unit bootstrap.",
+  "class_path_baseline": "animal + event class + five spline terms for path + five event-by-path terms",
+  "inference_scope": "Conditional on fitted twin; no measured neural noise or animal-population inference."
+}

@@ -61,19 +61,19 @@
       "text_spans": 144
     },
     {
-      "pdf_page": 38,
+      "pdf_page": 39,
       "minimum_figure_font_pt": 6.087270259857178,
       "text_spans": 165
     },
     {
-      "pdf_page": 40,
+      "pdf_page": 41,
       "minimum_figure_font_pt": 6.148800373077393,
       "text_spans": 112
     }
   ],
   "compiled_pdf": {
-    "sha256": "b8bf879604ce14a90d52a8c66acfbfa56a8f530072b1721afb6c17efacaaf673",
-    "pages": 40
+    "sha256": "2f89552ec60a42dfa00ec7b8d33f3082cd829b9baa7c01f7004975b3754bcf83",
+    "pages": 41
   },
   "installed_figures_match_rendered": {
     "1": true,
@@ -120,6 +120,11 @@
       "outputs/no_phase_readout_comparison_20260910/rank1/audits/production_model.json": "6e9273c95ee389fbc44d7e10be2c4af532e9f405a54cac56178011b0a66f7556",
       "manuscript/analysis/empirical_stats.json": "20d96d7609ff207d954e34026a0e30a15b3d673c203d1623b31b8578a09e79ba",
       "outputs/dekel240_paper/m77_epoch279/production_figure3/cache/covdecomp_derived.pkl": "b9c058c9c3d99bc18826c1b4177c1f680af3eae6a4c815c70f546dea7b3a5fd2",
+      "manuscript/analysis/passband_comparison.json": "0f1e7423094e5a589e0f566ee5749f5b40f3c8959d9cd556068307f6e417a713",
+      "manuscript/analysis/passband_results/summary.json": "a9e53a11a5b389f3f789f39b869767ac5bc7ab1851c1e3ade57c12a56bab1316",
+      "manuscript/analysis/passband_results/audit.json": "7574cb426b467ee3ec5c5ad14c3f1eb065c1068daafc3a75fea700fef69933f6",
+      "manuscript/analysis/passband_results/normalized_overlap/summary.json": "4d43f586927d794298a0cbbf745817fae5fe042158a99ba66e28e17d337e1a0c",
+      "manuscript/analysis/passband_results/normalized_overlap/design.json": "cb9147feefefcf762c8d2ea3f096d536273c144532a94d9e3c135d0490f3f464",
       "outputs/no_phase_readout_comparison_20260910/rank1/figure4/all_available_yu_tuning/all_yu_fits.csv": "7ad277def4977aa7c73a0b3a73d34d2ae1de2b4dc373e4d83c659f16aa2d70b6"
     },
     "macros": {
@@ -204,6 +209,34 @@
       "FigFourSSIPathRho": "0.690",
       "FigFourSSIRhoDifference": "0.030",
       "FigFourSSIRhoCI": "[0.025, 0.037]",
+      "FigFourCompareRateReduction": "14.5",
+      "FigFourCompareRateCI": "[5.4, 23.1]",
+      "FigFourCompareSSIReduction": "14.0",
+      "FigFourCompareSSICI": "[8.5, 18.1]",
+      "FigFourComparePowerRateReduction": "0.5",
+      "FigFourComparePowerRateCI": "[-3.0, 3.3]",
+      "FigFourComparePowerSSIReduction": "2.0",
+      "FigFourComparePowerSSICI": "[0.6, 3.2]",
+      "FigFourCompareMovieRateReduction": "11.1",
+      "FigFourCompareMovieRateCI": "[-1.4, 20.1]",
+      "FigFourCompareMovieSSIReduction": "0.7",
+      "FigFourCompareMovieSSICI": "[-5.4, 3.2]",
+      "FigFourCompareMoviePowerRateReduction": "1.0",
+      "FigFourCompareMoviePowerRateCI": "[-1.6, 3.3]",
+      "FigFourCompareMoviePowerSSIReduction": "-0.5",
+      "FigFourCompareMoviePowerSSICI": "[-2.2, 0.6]",
+      "FigFourCompareStrictRateReduction": "17.3",
+      "FigFourCompareStrictSSIReduction": "12.2",
+      "FigFourEngagementPredictorRho": "0.974",
+      "FigFourCarrierResolutionCosine": "0.991",
+      "FigFourNormalizedRateReduction": "0.3",
+      "FigFourNormalizedRateCI": "[-1.8, 2.7]",
+      "FigFourNormalizedStrictRateReduction": "-0.2",
+      "FigFourNormalizedStrictRateCI": "[-2.0, 2.3]",
+      "FigFourNormalizedSSIReduction": "4.2",
+      "FigFourNormalizedSSICI": "[1.6, 6.7]",
+      "FigFourNormalizedStrictSSIReduction": "4.3",
+      "FigFourNormalizedStrictSSICI": "[1.1, 7.6]",
       "FigFourStageImages": "10",
       "FigFourStageTraces": "10",
       "FigFourStageMovies": "100",
@@ -236,7 +269,7 @@
     "paper/fig4/spatiotemporal_tuning/audit_panel_a_exemplars.py": "4d99f488a6d23766b45443963a75c134ce42a2cc1e0a11c0fc584e917e89b754",
     "manuscript/render_support.py": "75f9d21d112f28858b1bd3a54a99ff318d01454af347565b69e59001fc1c60cd",
     "manuscript/render_figures.py": "b73c6f23a38a1947ae7d5190d235697bb8cc27220344b17c753ae15ea4c027e7",
-    "manuscript/sync_stats.py": "6cb6eb9c48eaba627d80ad5f205179ac6942e4af60d9369384d9fe1621fb15bd",
+    "manuscript/sync_stats.py": "283baf101771b4cce3bd79ca1dc30ad3990ef58138384f86a4140d65956f61f4",
     "manuscript/export_empirical_stats.py": "e3bbdf793d72d07340992f7baeb82c493c8dfbc507111ae411b174ade307cd4d",
     "manuscript/audit_figures.py": "c21095244cf4eb6fa80b4238e2324a3d2463a8a59a8bfbdd7ab25fe5dfcb5054",
     "manuscript/Makefile": "fac76916f9b4c13470c1fad89c8d4a6af500ae5564675873c5d81c33a514a7bd",
@@ -244,10 +277,10 @@
     "manuscript/analysis_selection.py": "2a06f27fe40d3ad46ee0f441e8783a248c8e49c2081498ca0705378fe01032a1"
   },
   "manuscript_sha256": {
-    "main.tex": "c562e4871248432d3cb1a66bf8f67323fa4115973c3f791f256817f7d329bf62",
+    "main.tex": "6cb862e3446676557a9e2f40b779ed72d596961f5540f343502e7b24cf36165e",
     "refs.bib": "a5bb4c1fda60f3b86d830c3a0965961115bb4a003e57e6aa32e4df3d59047db5",
     "lite.cls": "9700d568283012b961f79f08fe496f0da2591fdd0eff571e27931cecfc6edded",
-    "generated_stats.tex": "e030b13d0b5107150d5dae29475fafcfc726af2876106f0564d081d2d7e37ab9",
+    "generated_stats.tex": "4ce1fb4e6e635bd5fe2ebc9e74ffcadb4a2b621684690946a7b0d8456f5fdb9e",
     "analysis/panel_a_selection.json": "89f3254c9e508da8c18a66d380bee8006eccf0b578047e12a797e547272bf55b",
     "analysis/figure3_schematic.json": "4da1ab0b953024fc6e61770aa789f5d494587e84f0542e1379c200b9db6978ea"
   },

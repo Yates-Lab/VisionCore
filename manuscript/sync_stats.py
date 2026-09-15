@@ -150,6 +150,72 @@ def main() -> None:
         value("FigFour" + label + "RhoDifference", result["median_paired_difference"])
         lo, hi = result["paired_unit_bootstrap_ci95"]
         values["FigFour" + label + "RhoCI"] = f"[{lo:.3f}, {hi:.3f}]"
+
+    # Text-only extension: preserve the released figure bundle and bind the
+    # additional comparisons to their separately audited, matching analysis.
+    comparison_path = MANUSCRIPT / "analysis/passband_comparison.json"
+    if comparison_path.exists():
+        comparison = json.loads(comparison_path.read_text())
+        if comparison["checkpoint_sha256"] != CHECKPOINT:
+            raise ValueError("Passband text comparison uses a different checkpoint")
+        sources[str(comparison_path.relative_to(ROOT))] = digest(comparison_path)
+        report_path = ROOT / comparison["summary"]
+        if digest(report_path) != comparison["summary_sha256"]:
+            raise ValueError("Passband text comparison summary changed")
+        report = json.loads(report_path.read_text())
+        audit_path = report_path.parent / "audit.json"
+        if digest(audit_path) != report["audit_sha256"]:
+            raise ValueError("Passband text comparison audit changed")
+        audit = json.loads(audit_path.read_text())
+        if not audit["passed"] or report["checkpoint_sha256"] != CHECKPOINT:
+            raise ValueError("Passband text comparison failed its audit")
+        sources[str(report_path.relative_to(ROOT))] = digest(report_path)
+        sources[str(audit_path.relative_to(ROOT))] = digest(audit_path)
+        pairs = (
+            ("primary", "class_path_engagement__over__class_path", "Compare"),
+            ("primary", "class_path_dynamic_engagement__over__class_path_dynamic", "ComparePower"),
+            ("secondary", "class_path_engagement__over__class_path", "CompareMovie"),
+            ("secondary", "class_path_dynamic_engagement__over__class_path_dynamic", "CompareMoviePower"),
+        )
+        for stage, contrast, prefix in pairs:
+            result = report[stage]["contrasts"][contrast]
+            for index, label in enumerate(("Rate", "SSI")):
+                name = "FigFour" + prefix + label
+                value(name + "Reduction", 100 * result["median_error_reduction"][index], 1)
+                interval(name + "CI", [100 * v for v in result["error_reduction_ci95"][index]], 1)
+        for index, label in enumerate(("Rate", "SSI")):
+            result = report["primary"]["contrasts"]["class_path_engagement__over__class_path"]
+            value("FigFourCompareStrict" + label + "Reduction", 100 * result["strict_median_error_reduction"][index], 1)
+        estimator = report["estimator_diagnostics"]
+        value("FigFourEngagementPredictorRho", estimator["actual_predictors"]["median_pairwise_rank_correlation"])
+        value("FigFourCarrierResolutionCosine", estimator["60"]["known_carrier_pairs"][0]["estimated_spectrum_cosine"])
+        if "normalized_overlap" in comparison:
+            selection = comparison["normalized_overlap"]
+            shape_path = ROOT / selection["summary"]
+            if digest(shape_path) != selection["summary_sha256"]:
+                raise ValueError("Normalized-overlap summary changed")
+            shape = json.loads(shape_path.read_text())
+            if (not shape["passed"] or shape["checkpoint_sha256"] != CHECKPOINT
+                    or not all(check["passed"] for check in shape["checks"].values())):
+                raise ValueError("Normalized-overlap audit failed")
+            design_path = shape_path.parent / "design.json"
+            if digest(design_path) != shape["design_sha256"]:
+                raise ValueError("Normalized-overlap design changed")
+            shape_design = json.loads(design_path.read_text())
+            if shape_design["parent_summary_sha256"] != comparison["summary_sha256"]:
+                raise ValueError("Normalized-overlap parent comparison changed")
+            for name, expected in {**shape_design["source_sha256"],
+                                   **shape["source_code_sha256"]}.items():
+                if digest(ROOT / name) != expected:
+                    raise ValueError("Normalized-overlap source changed: " + name)
+            sources[str(shape_path.relative_to(ROOT))] = digest(shape_path)
+            sources[str(design_path.relative_to(ROOT))] = digest(design_path)
+            contrast = shape["contrasts"]["class_path_dynamic_normalized_overlap__over__class_path_dynamic"]
+            for index, label in enumerate(("Rate", "SSI")):
+                for prefix, key in (("", ""), ("Strict", "strict_")):
+                    name = "FigFourNormalized" + prefix + label
+                    value(name + "Reduction", 100 * contrast[key + "median_error_reduction"][index], 1)
+                    interval(name + "CI", [100 * v for v in contrast[key + "error_reduction_ci95"][index]], 1)
     trajectory = claims["gain_invariant_stage_trajectory"]
     for key, label in (("n_images", "Images"), ("n_traces", "Traces"), ("n_movies", "Movies")):
         value("FigFourStage" + label, trajectory[key], 0)

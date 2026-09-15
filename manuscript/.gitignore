@@ -2,6 +2,8 @@
 !/figures/*.pdf
 !/old_figures/*.pdf
 !/analysis/*.json
+!/analysis/passband_results/*.json
+!/analysis/passband_results/normalized_overlap/*.json
 
 # Keep the compiled PDF and LaTeX intermediate files out of source control.
 /build/
