@@ -5,7 +5,7 @@ import hashlib
 import json
 import re
 import pymupdf as fitz
-from figure4_selection import SPECTRUM_SELECTION, spectrum_update
+from figure4_selection import SPECTRUM_SELECTION, EXAMPLE_SELECTION, spectrum_update, selected_example_dir
 from analysis_selection import SELECTION, selected_analysis
 
 HERE = Path(__file__).resolve().parent
@@ -33,6 +33,9 @@ RENDER_SOURCES = [
     'manuscript/sync_stats.py', 'manuscript/export_empirical_stats.py',
     'manuscript/audit_figures.py', 'manuscript/Makefile',
     'manuscript/figure4_selection.py',
+    'manuscript/review_figure4_examples.py',
+    'manuscript/export_figure4_zero_tests.py',
+    'paper/fig4/spatiotemporal_tuning/population_response.py',
     'manuscript/analysis_selection.py',
 ]
 
@@ -113,17 +116,50 @@ def main():
         spectral_figure=json.loads((ROOT/update['figure_summary']).read_text())
         for key in update['updated_panels']:
             base4['panels'][key]=spectral_figure['panels'][key]
-    # The manuscript removes the example heatmaps and draws their unchanged
-    # fitted contours on C. Only this display flag differs from source metrics.
+    # Allow only declared display changes; preserve every population estimate.
     expected_c = dict(base4['panels']['C'], passband_contours_drawn=True)
-    stats4={key:(expected_c if key == 'C' else base4['panels'][key])==new4['panels'][key]
-            for key in 'BCDEFGH'}
-    if new4.get('display_panel_letters') != {'A':'A','B':'B','C':'C','E':'D','F':'E','G':'F','H':'G'}:
+    expected_e = dict(base4['panels']['E'], example_contours_highlighted=[])
+    expected_g = dict(base4['panels']['G'], shared_y_limits_percent=None)
+    actual_g = dict(new4['panels']['G'])
+    distribution_limits = actual_g.pop('unit_distribution_y_limits_percent', None)
+    if distribution_limits is None or len(distribution_limits)!=2:
+        errors.append('Figure 4F must retain ranges covering its unit distributions')
+    expected_panels = dict(base4['panels'], C=expected_c, E=expected_e, G=expected_g)
+    stats4={key:expected_panels[key]==(actual_g if key=='G' else new4['panels'][key]) for key in 'BCDEFGH'}
+    if new4.get('display_panel_letters') != {'A':'A','B':'B','C':'C','F':'D','E':'E','G':'F','H':'G'}:
         errors.append('Figure 4 manuscript panel mapping differs from the caption')
     if not all(stats4.values()):errors.append('Rendered Figure 4 results differ from the selected analysis')
     selection=json.loads((HERE/'analysis/panel_a_selection.json').read_text())
     example=json.loads((HERE/'build/panel_a_exemplar_audit/summary.json').read_text())
     if selection!=example:errors.append('Saved Figure 4A selection differs from the replay summary')
+    example_dir=selected_example_dir(BUNDLE)
+    if example!=json.loads((example_dir/'summary.json').read_text()):
+        errors.append('Figure 4A does not use the selected manuscript illustration')
+    if digest(HERE/'build/panel_a_exemplar_audit/selected_example.npz')!=digest(example_dir/'selected_example.npz'):
+        errors.append('Figure 4A maps differ from the selected illustration')
+    import numpy as np
+    from export_figure4_zero_tests import bootstrap_zero_p, holm
+    zero_path=HERE/'analysis/figure4_zero_tests/summary.json'
+    zero=json.loads(zero_path.read_text())
+    if zero['checkpoint_sha256']!=SELECTED['checkpoint_sha256']:
+        errors.append('Figure 4 zero-improvement tests use a different model')
+    if digest(HERE/'analysis/figure4_zero_tests/bootstrap_draws.npz')!=zero['draws_sha256']:
+        errors.append('Figure 4 zero-improvement bootstrap draws changed')
+    displayed_tests=new4.get('zero_improvement_tests') or {}
+    if displayed_tests.get('sha256')!=digest(zero_path) or displayed_tests.get('records')!=zero['records']:
+        errors.append('Figure 4 significance annotations differ from the retained tests')
+    draws=np.load(HERE/'analysis/figure4_zero_tests/bootstrap_draws.npz')
+    raw=np.array([bootstrap_zero_p(draws[r['draws_key']])[r['index']] for r in zero['records']])
+    if len(raw)!=32 or not np.array_equal(raw, [r['p_raw'] for r in zero['records']]):
+        errors.append('Figure 4 zero-improvement probabilities do not reproduce')
+    adjusted=holm(raw)
+    if not np.array_equal(adjusted, [r['p_holm'] for r in zero['records']]):
+        errors.append('Figure 4 Holm correction does not reproduce')
+    if [bool(r['estimate']>0 and p<.05) for r,p in zip(zero['records'],adjusted)]!=[r['significant_positive'] for r in zero['records']]:
+        errors.append('Figure 4 significance labels disagree with their tests')
+    for key in ('motion_rate_spikes_s','stable_rate_spikes_s','motion_ssi_bits_per_spike','stable_ssi_bits_per_spike'):
+        if not np.isclose(new4['panels']['A'][key], example['selected'][key], rtol=1e-10):
+            errors.append(f'Figure 4A displayed metric differs from replay: {key}')
     stats_sources=json.loads((HERE/'build/stats_sources.json').read_text())
     if selection['checkpoint_sha256']!=stats_sources['checkpoint_sha256']:
         errors.append('Figure 4A and manuscript statistics use different checkpoints')
@@ -184,6 +220,7 @@ def main():
          'selected_analysis_bundle':str(BUNDLE),
          'figure4_interim_spectrum_selection':update,
          'figure4_interim_selection_sha256':digest(SPECTRUM_SELECTION) if update else None,
+         'figure4_example_selection_sha256':digest(EXAMPLE_SELECTION) if EXAMPLE_SELECTION.exists() else None,
          'figure3_schematic_text_overlaps':schematic_overlaps,
          'figure3_schematic_image_overlaps':schematic_image_overlaps,
          'revised_architecture_with_retained_results':draft_architecture,

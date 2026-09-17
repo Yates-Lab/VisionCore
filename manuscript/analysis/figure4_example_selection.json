@@ -1,0 +1,10 @@
+{
+  "model_bundle": "outputs/no_phase_readout_comparison_20260910/rank1",
+  "checkpoint_sha256": "e70f287462155607a96c7d23d9d56e347111319aa48cafd3f54fe88dd4484cb9",
+  "audit_dir": "manuscript/analysis/figure4_example",
+  "source_sha256": {
+    "manuscript/analysis/figure4_example/selected_example.npz": "dba4885c8d286de01bd9d278adf5ed47fe5d81fa8cbeae52ad4d6e3931189c1e",
+    "manuscript/analysis/figure4_example/summary.json": "86b78d5a79f2ef83c7a85f32821ba1fe93a3cdd7d997add675bc07a5fc6ed40d",
+    "manuscript/analysis/figure4_example/shortlist.csv": "bfff198aea19d0674f14d22e0d92c4633db0657cb7d58537514ddb2b72b7a9a3"
+  }
+}

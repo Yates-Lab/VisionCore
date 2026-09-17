@@ -269,7 +269,9 @@ def _load_panel_a_audit(audit_dir: Path) -> tuple[dict[str, np.ndarray | float |
     return (result, summary)
 
 
-def draw_panel_a(subfigure, example: dict[str, np.ndarray | float | int | str]) -> dict[str, object]:
+def draw_panel_a(subfigure, example: dict[str, np.ndarray | float | int | str], *, compact=False) -> dict[str, object]:
+    if compact:
+        return _draw_panel_a_compact(subfigure, example)
     _panel_title(subfigure, 'A', '')
     unit_index = int(example['unit_index'])
     image_index = int(example['image_index'])
@@ -357,6 +359,77 @@ def draw_panel_a(subfigure, example: dict[str, np.ndarray | float | int | str]) 
     operation.axis('off')
     arrow((0.758, 0.518), (difference_box.x0 - 0.005, 0.518))
     return {'unit_index': int(unit_index), 'image_index': image_index, 'trace_index': trace_index, 'selection_kind': str(example.get('selection_kind', 'unknown')), 'alignment_kind': str(example.get('alignment_kind', 'endpoint')), 'alignment_anchor_frame': int(example.get('alignment_anchor_frame', 59)), 'alignment_anchor_lag_frames': int(example.get('alignment_anchor_lag_frames', 0)), 'alignment_anchor_time_ms': float(example.get('alignment_anchor_time_ms', 0.0)), 'stable_rate_spikes_s': float(output_rate_hz * stable_mean), 'motion_rate_spikes_s': float(output_rate_hz * motion_mean), 'rate_change_percent': float(rate_relative), 'stable_ssi_bits_per_spike': float(stable_ssi), 'motion_ssi_bits_per_spike': float(motion_ssi), 'ssi_change_bits_per_spike': float(motion_ssi - stable_ssi), 'ssi_change_percent': float(relative), 'network_icon_contains_spatial_readout': False}
+
+
+def _draw_panel_a_compact(figure, example):
+    """Give the paired maps priority in the narrow manuscript column."""
+    _panel_label = lambda: figure.text(0, .985, 'A', fontsize=10, weight='bold', va='top')
+    _panel_label()
+    ink, muted = '#303b45', '#617080'
+    conditions = []
+    for key, name in (('motion', 'Measured motion'), ('stable', 'Stabilized')):
+        mean, ssi, gain = spatial_information(example[key+'_rate_map'])
+        conditions.append((name, mean * example['output_rate_hz'], ssi, gain, example[key+'_history']))
+    common_max = max(row[3].max() for row in conditions)
+    figure.text(.135, .975, 'Retinal history', ha='center', va='top', fontsize=7.2, weight='semibold', color=ink)
+    figure.text(.49, .975, 'Spatial response', ha='center', va='top', fontsize=7.2, weight='semibold', color=ink)
+    figure.text(.49, .932, 'response / spatial mean', ha='center', va='top', fontsize=6.1, color=muted)
+    figure.text(.835, .975, 'Difference', ha='center', va='top', fontsize=7.2, weight='semibold', color=ink)
+    figure.text(.835, .932, 'motion − stabilized', ha='center', va='top', fontsize=6.1, color=muted)
+    cubes, maps = [], []
+    for index, (name, rate, ssi, gain, history) in enumerate(conditions):
+        cube = figure.add_axes((.013, .545-.435*index, .237, .33))
+        _draw_spacetime_cube(cube, history, name, outline='#5791ad')
+        cube.title.set_fontsize(6.4)
+        axis = figure.add_axes((.355, .565-.435*index, .265, .33))
+        displayed = axis.imshow(gain, cmap='viridis', vmin=0, vmax=common_max, interpolation='nearest')
+        axis.set_xticks([]); axis.set_yticks([])
+        for spine in axis.spines.values():
+            spine.set_visible(True); spine.set_color('#d8dfe3'); spine.set_linewidth(.5)
+        axis.text(.5, -.06, f'{rate:.1f} spikes/s\n{ssi:.3f} bits/spike', transform=axis.transAxes,
+                  ha='center', va='top', fontsize=6.1, color=muted)
+        cubes.append(cube); maps.append(axis)
+    # The caption specifies the shared model; each arrow connects a movie to
+    # its corresponding response without an intermediate schematic node.
+    figure.canvas.draw()
+    def arrow(start, end):
+        figure.add_artist(FancyArrowPatch(start, end, transform=figure.transFigure,
+                          arrowstyle='-|>', mutation_scale=6,
+                          lw=.7, color=ink, shrinkA=0, shrinkB=0))
+    for cube, axis in zip(cubes, maps):
+        c, m = cube.get_position(), axis.get_position()
+        y = m.y0 + .5*m.height
+        arrow((c.x1+.008, y), (m.x0-.012, y))
+    colorbar_axis = figure.add_axes((.633, .235, .010, .47))
+    colorbar = figure.colorbar(displayed, cax=colorbar_axis, ticks=MaxNLocator(nbins=3, integer=True))
+    colorbar.ax.tick_params(labelsize=6.1, length=2, pad=1, width=.5)
+    colorbar.outline.set_linewidth(.5)
+    difference = conditions[0][3] - conditions[1][3]
+    limit = max(float(np.abs(difference).max()), EPS)
+    axis = figure.add_axes((.712, .355, .247, .33))
+    display = axis.imshow(difference, cmap='RdBu_r', vmin=-limit, vmax=limit, interpolation='nearest')
+    axis.set_xticks([]); axis.set_yticks([])
+    for spine in axis.spines.values():
+        spine.set_visible(True); spine.set_color('#d8dfe3'); spine.set_linewidth(.5)
+    # A horizontal difference key keeps tick labels inside Panel A.
+    colorbar_axis = figure.add_axes((.735, .305, .20, .012))
+    colorbar = figure.colorbar(display, cax=colorbar_axis, orientation='horizontal',
+                              ticks=MaxNLocator(nbins=3, symmetric=True, prune='both'))
+    colorbar.ax.tick_params(labelsize=6.1, length=2, pad=1, width=.5)
+    colorbar.outline.set_linewidth(.5)
+    rate_gain = 100*(conditions[0][1]/conditions[1][1]-1)
+    ssi_gain = 100*(conditions[0][2]/conditions[1][2]-1)
+    figure.text(.835, .195, f'Rate {rate_gain:+.0f}%\nSSI {ssi_gain:+.0f}%', ha='center', va='center',
+                fontsize=7, color=ink, linespacing=1.5)
+    return {key: example[key] for key in ('unit_index', 'image_index', 'trace_index', 'alignment_kind',
+             'alignment_anchor_frame', 'alignment_anchor_lag_frames', 'alignment_anchor_time_ms', 'selection_kind')} | {
+        'stable_rate_spikes_s': float(conditions[1][1]), 'motion_rate_spikes_s': float(conditions[0][1]),
+        'stable_ssi_bits_per_spike': float(conditions[1][2]), 'motion_ssi_bits_per_spike': float(conditions[0][2]),
+        'rate_change_percent': float(rate_gain), 'ssi_change_percent': float(ssi_gain),
+        'ssi_change_bits_per_spike': float(conditions[0][2]-conditions[1][2]),
+        'network_icon_contains_spatial_readout': False,
+        'map_display': {'shared_limits': [0, float(common_max)], 'difference_limits': [-limit, limit],
+                        'spatial_crop': None, 'interpolation': 'nearest'}}
 
 
 def _exemplar_tuning(tuning_table: pd.DataFrame, fits: pd.DataFrame) -> dict[str, object]:

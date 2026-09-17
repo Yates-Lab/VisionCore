@@ -28,16 +28,48 @@ The eye traces also come from FixRSVP. `analysis/figure3_schematic.json` records
 this mapping and the selection of the held-out prediction example.
 
 Figure 4 uses continuously Gaussian-filtered eye trajectories (6-ms standard
-deviation) with verified subdegree microsaccades. Its C/E filled contours compare
+deviation) with verified subdegree microsaccades. Its C/D filled contours compare
 47 drift windows and 18 microsaccade-containing windows (<1 degree), with
 unit dynamic power per trace and equal animal weights. All response analyses,
 tuning, passband overlays, and stage contributions use the selected rank-one
 model and corrected trajectory selection. The former interim panel override
 and manuscript draft notes have been retired. Individual tuning heatmaps are
-omitted from the manuscript; their fitted contours overlay both spectra in C.
-Population passband occupancy is D, the power ratio is E, engagement is F, and
+omitted from the manuscript; their fitted contours overlay both spectra in C
+and the power ratio in D. The population occupancy in E has no example contours.
+Population passband occupancy is E, the power ratio is D, engagement is F, and
 cumulative readouts are G. Source reports retain their original semantic keys
 for numerical comparison; `display_panel_letters` records the mapping.
+
+Gray boxes in B, F, and G show variation across units (IQR and median, with
+5th--95th percentile whiskers). Colored points and capped bars show population
+estimates and 95% bootstrap confidence intervals. F uses separate vertical
+ranges that include the displayed unit-distribution whiskers. Annotations test
+each population effect against zero improvement using its existing paired
+bootstrap scheme, with Holm correction across all 32 displayed comparisons.
+The retained draws and probabilities are in `analysis/figure4_zero_tests/`;
+regenerate with `python manuscript/export_figure4_zero_tests.py` in `yatesfv`.
+
+A and B share the top row, with B's rate and SSI axes stacked. A gives more
+space to the complete response maps, displayed on one shared linear color
+scale; its difference map uses symmetric limits. Horizontal arrows connect
+each retinal movie directly to its activation map; the caption specifies the
+shared model. D and E use wider axes with reduced side margins.
+The illustration is selected
+by the largest absolute SSI gain within the original top-eight-unit and
+bounded response criteria. The eight leading distinct image--unit candidates
+were replayed and visually inspected. The winner (image 56, trace 153, unit 376)
+increases SSI from 0.269 to 0.485 bits/spike and rate from 10.4 to 28.0 spikes/s.
+The updated illustration does not change any population estimates.
+
+`analysis/figure4_example_selection.json` binds the retained example archive,
+summary, and shortlist in `analysis/figure4_example/`. Reproduce the bounded
+review and install its highest-ranked candidate with:
+
+```sh
+conda run --no-capture-output -n yatesfv python manuscript/review_figure4_examples.py
+conda run --no-capture-output -n yatesfv python manuscript/review_figure4_examples.py --install-reviewed
+conda run --no-capture-output -n yatesfv python manuscript/render_figures.py 4
+```
 
 ## Build the PDF
 

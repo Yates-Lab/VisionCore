@@ -12,7 +12,7 @@ import shlex
 import shutil
 import subprocess
 import sys
-from figure4_selection import spectrum_update
+from figure4_selection import EXAMPLE_SELECTION, spectrum_update, selected_example_dir
 from analysis_selection import SELECTION, selected_analysis
 
 HERE=Path(__file__).resolve().parent
@@ -28,6 +28,11 @@ def run(command, env):
 
 
 def replay_example(env, device):
+    if EXAMPLE_SELECTION.exists():
+        command=[sys.executable,HERE/'review_figure4_examples.py']
+        run([*command,'--device',device],env)
+        run([*command,'--install-reviewed'],env)
+        return
     previous=json.loads((BUNDLE/'figure4/panel_a_exemplar_audit/summary.json').read_text())
     spectrum=json.loads((BUNDLE/'figure4/kuang_rucci_ensemble/summary.json').read_text())
     args={'image-table':BUNDLE/'inputs/natural_image_table_100.csv',
@@ -104,7 +109,7 @@ def main():
         elif which=='4':
             example=BUILD/'panel_a_exemplar_audit'
             if SELECTION.exists():
-                example=BUNDLE/'figure4/panel_a_exemplar_audit'
+                example=selected_example_dir(BUNDLE)
                 # Install the exact selected analysis alongside the manuscript
                 # render; no new example selection occurs during typesetting.
                 shutil.copytree(example, BUILD/'panel_a_exemplar_audit', dirs_exist_ok=True)
@@ -119,6 +124,10 @@ def main():
             if update:
                 command[command.index('--rucci-ensemble')+1]=str(ROOT/update['rucci_ensemble'])
             command.extend(['--layout','manuscript'])
+            zero_tests=HERE/'analysis/figure4_zero_tests/summary.json'
+            if not zero_tests.exists():
+                run([sys.executable,HERE/'export_figure4_zero_tests.py'],current)
+            command.extend(['--zero-tests',zero_tests])
             current['VISIONCORE_MIN_FIGURE_FONT_PT']='6.1'
             source=out/'figure4.pdf'
         else:

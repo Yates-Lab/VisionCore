@@ -13,7 +13,7 @@ import sys
 # Also support bundle drivers loading this exporter with importlib.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from analysis_selection import SELECTION, selected_analysis
-from figure4_selection import SPECTRUM_SELECTION, spectrum_update
+from figure4_selection import SPECTRUM_SELECTION, EXAMPLE_SELECTION, spectrum_update, selected_example_dir
 
 ROOT = Path(__file__).resolve().parents[1]
 MANUSCRIPT = Path(__file__).resolve().parent
@@ -236,7 +236,11 @@ def main() -> None:
         value("FigFour" + label + "EngagementLow", centers[0], 1)
         value("FigFour" + label + "EngagementHigh", centers[-1], 1)
     value("FigFourPassbandPercent", 100 * figure["panels"]["E"]["passband_response_fraction"], 0)
-    example = read('figure4/panel_a_exemplar_audit/summary.json')
+    example_dir = selected_example_dir(BUNDLE)
+    example = json.loads((example_dir/'summary.json').read_text())
+    sources[str((example_dir/'summary.json').relative_to(ROOT))] = digest(example_dir/'summary.json')
+    if EXAMPLE_SELECTION.exists():
+        sources[str(EXAMPLE_SELECTION.relative_to(ROOT))] = digest(EXAMPLE_SELECTION)
     if example['checkpoint_sha256'] != CHECKPOINT:
         raise ValueError('Figure 4 example uses a different checkpoint')
     lag = example['model_peak_lag']['resolved_rounded_peak_lag_frames']

@@ -216,6 +216,7 @@ def crossed_population_bootstrap(
     *,
     n_bootstrap: int,
     rng: np.random.Generator,
+    return_draws: bool = False,
 ) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float]]:
     traces = np.asarray(trace_indices, dtype=int)
     centers = population_effects(reduced, traces)
@@ -234,4 +235,5 @@ def crossed_population_bootstrap(
         )
     low = np.quantile(draws, 0.025, axis=0)
     high = np.quantile(draws, 0.975, axis=0)
-    return tuple(centers), tuple(low), tuple(high)
+    result = (tuple(centers), tuple(low), tuple(high))
+    return (*result, draws) if return_draws else result

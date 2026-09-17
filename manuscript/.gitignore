@@ -6,6 +6,11 @@
 !/analysis/passband_results/normalized_overlap/*.json
 !/analysis/stabilization_control/*.json
 !/analysis/stabilization_control/paired_scores.npz
+!/analysis/figure4_example/*.json
+!/analysis/figure4_example/*.csv
+!/analysis/figure4_example/selected_example.npz
+!/analysis/figure4_zero_tests/*.json
+!/analysis/figure4_zero_tests/*.npz
 
 # Keep the compiled PDF and LaTeX intermediate files out of source control.
 /build/
