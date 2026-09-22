@@ -10,7 +10,11 @@ import pytorch_lightning as pl
 from torch.utils.data import Dataset, DataLoader
 
 from training.utils import Float32View, group_collate
-from training.samplers import ContrastWeightedSampler, ByDatasetBatchSampler
+from training.samplers import (
+    ByDatasetBatchSampler,
+    ContrastWeightedSampler,
+    FixedRandomDistributedSampler,
+)
 
 
 class MultiDatasetDM(pl.LightningDataModule):
@@ -440,20 +444,15 @@ class MultiDatasetDM(pl.LightningDataModule):
         tagd = [Tag(ds, self.name2idx[n]) for n, ds in dsets.items()]
         cat = torch.utils.data.ConcatDataset(tagd)
 
-        # Validation/test use one seeded permutation without replacement. This
-        # keeps limited prefixes representative while making repeated scoring
-        # deterministic; distributed ranks receive disjoint shards of it.
-        fixed_indices = None
-        if fixed_random:
-            generator = torch.Generator().manual_seed(0)
-            fixed_indices = torch.randperm(len(cat), generator=generator).tolist()
-
         if torch.distributed.is_initialized():
-            if fixed_indices is not None:
-                world_size = torch.distributed.get_world_size()
-                rank = torch.distributed.get_rank()
-                usable = len(fixed_indices) - len(fixed_indices) % world_size
-                sampler = fixed_indices[rank:usable:world_size]
+            if fixed_random:
+                # Subclassing DistributedSampler prevents Lightning from
+                # wrapping and sharding this already-sharded sampler again.
+                sampler = FixedRandomDistributedSampler(
+                    cat,
+                    num_replicas=torch.distributed.get_world_size(),
+                    rank=torch.distributed.get_rank(),
+                )
                 return DataLoader(
                     cat,
                     batch_size=self.batch,
@@ -510,6 +509,13 @@ class MultiDatasetDM(pl.LightningDataModule):
                     prefetch_factor=self.prefetch_factor,
                     collate_fn=group_collate,
                 )
+
+        # Single-device validation/test use one seeded permutation without
+        # replacement so limited prefixes are representative and repeatable.
+        fixed_indices = None
+        if fixed_random:
+            generator = torch.Generator().manual_seed(0)
+            fixed_indices = torch.randperm(len(cat), generator=generator).tolist()
 
         # Single-GPU path
         if self.homogeneous_batches:

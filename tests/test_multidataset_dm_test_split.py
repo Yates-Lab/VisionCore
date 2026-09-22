@@ -111,6 +111,50 @@ def test_limited_mixed_validation_represents_every_session(monkeypatch, distribu
     assert prefix() == first
 
 
+def test_lightning_does_not_double_shard_fixed_distributed_validation(monkeypatch):
+    from lightning.pytorch.trainer.connectors.data_connector import _DataConnector
+    from lightning.pytorch.trainer.states import RunningStage, TrainerFn
+
+    dm = _make_dm()
+    dm.name2idx = {f"session{i}": i for i in range(3)}
+    dm.val_dsets = {name: _Stub(100) for name in dm.name2idx}
+    by_rank = []
+
+    for rank in (0, 1):
+        monkeypatch.setattr(torch.distributed, "is_initialized", lambda: True)
+        monkeypatch.setattr(torch.distributed, "get_world_size", lambda: 2)
+        monkeypatch.setattr(torch.distributed, "get_rank", lambda rank=rank: rank)
+        loader = dm.val_dataloader()
+
+        connector = _DataConnector.__new__(_DataConnector)
+        connector.trainer = SimpleNamespace(
+            _accelerator_connector=SimpleNamespace(
+                use_distributed_sampler=True,
+                is_distributed=True,
+            ),
+            distributed_sampler_kwargs={"num_replicas": 2, "rank": rank},
+            overfit_batches=0,
+            state=SimpleNamespace(fn=TrainerFn.VALIDATING),
+        )
+        prepared = connector._prepare_dataloader(
+            loader,
+            shuffle=False,
+            mode=RunningStage.VALIDATING,
+        )
+
+        assert prepared is loader
+        assert len(prepared.sampler) == 150
+
+        first = list(prepared.sampler)
+        assert {index // 100 for index in first[:30]} == {0, 1, 2}
+        prepared.sampler.set_epoch(7)
+        assert list(prepared.sampler) == first
+        by_rank.append(set(first))
+
+    assert by_rank[0].isdisjoint(by_rank[1])
+    assert len(by_rank[0] | by_rank[1]) == 300
+
+
 def test_test_dataloader_fails_loudly_when_no_test_split_was_configured(stub_data):
     """Silently returning the validation loader here would report selection
     numbers as test numbers, which is the exact bias the split exists to fix."""

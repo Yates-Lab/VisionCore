@@ -5,6 +5,24 @@ Custom data samplers for distributed training with curriculum learning.
 import math
 import torch
 from torch.utils.data import Sampler
+from torch.utils.data.distributed import DistributedSampler
+
+
+class FixedRandomDistributedSampler(DistributedSampler):
+    """A fixed evaluation permutation that Lightning recognizes as sharded."""
+
+    def __init__(self, dataset, num_replicas, rank, seed=0):
+        super().__init__(
+            dataset,
+            num_replicas=num_replicas,
+            rank=rank,
+            shuffle=True,
+            seed=seed,
+            drop_last=True,
+        )
+
+    def set_epoch(self, epoch):
+        """Keep validation/test ordering fixed across Lightning epoch hooks."""
 
 
 class ContrastWeightedSampler(Sampler):
