@@ -41,7 +41,7 @@ from real_trace_matrix.model import RealTraceMatrixScorer
 
 
 ROOT = Path(__file__).resolve().parents[3]
-RUN_STEM = "backimage_real_trace_ssi_matrix_large_contour_no_driftgate_ms200_n100x1000_v1"
+RUN_STEM = "backimage_real_trace_ssi_matrix_large_contour_no_driftgate_ms200_n100x1000_history32_v2"
 RR100_VERSION = (
     "V1-RR_MS_min_complete0p65_split0p75_pair0p60_anyfail_finalsplit0p75_"
     "medoidPosthocminRepcomplete0p45_movieMedoid"
@@ -137,6 +137,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--benchmark-n-traces", type=int, default=12)
     parser.add_argument("--seed", type=int, default=20260717)
     parser.add_argument("--n-timepoints", type=int, default=40)
+    parser.add_argument("--history-burn-in-samples", type=int, default=32)
     parser.add_argument("--bin-seconds", type=float, default=1.0 / 120.0)
     parser.add_argument("--patch-size-px", type=int, default=540)
     parser.add_argument("--image-contrast-quantile", type=float, default=0.75)
@@ -173,7 +174,8 @@ def feature_rows_from_items(items: list[dict[str, Any]], *, scale_metric: str, n
 def build_trace_bank(args: argparse.Namespace, rows: pd.DataFrame) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     trace_rows = rows.drop_duplicates("source_row").copy()
     if "n_samples" in trace_rows.columns:
-        trace_rows = trace_rows[pd.to_numeric(trace_rows["n_samples"], errors="coerce") >= int(args.n_timepoints)].copy()
+        minimum_samples = 2 * int(args.history_burn_in_samples) + int(args.n_timepoints)
+        trace_rows = trace_rows[pd.to_numeric(trace_rows["n_samples"], errors="coerce") >= minimum_samples].copy()
     sessions = trace_rows["session"].astype(str).dropna().unique().tolist()
     eyepos_by_session = load_backimage_eyepos_by_session(sessions)
     bank, meta = build_native_snippet_trace_bank(
@@ -184,6 +186,7 @@ def build_trace_bank(args: argparse.Namespace, rows: pd.DataFrame) -> tuple[list
         microsaccade_speed_threshold_dps=None,
         microsaccade_threshold_z=6.0,
         microsaccade_pad_frames=1,
+        history_burn_in_samples=int(args.history_burn_in_samples),
     )
     eligible: list[dict[str, Any]] = []
     for item in bank:
@@ -207,6 +210,7 @@ def replay_selection(args: argparse.Namespace, out_dir: Path) -> dict[str, Any]:
     image_path = replay_dir / "image_feature_table.csv"
     trace_path = replay_dir / "trace_feature_table.csv"
     trace_xy_path = replay_dir / "trace_xy.npy"
+    trace_xy_model_path = replay_dir / "trace_xy_model.npy"
     for path in (image_path, trace_path, trace_xy_path):
         if not path.exists():
             raise FileNotFoundError(f"Replay input is missing: {path}")
@@ -214,6 +218,7 @@ def replay_selection(args: argparse.Namespace, out_dir: Path) -> dict[str, Any]:
     image_table = pd.read_csv(image_path)
     trace_table_all = pd.read_csv(trace_path)
     trace_xy_all = np.load(trace_xy_path)
+    trace_xy_model_all = np.load(trace_xy_model_path) if trace_xy_model_path.exists() else None
     if "image_index" not in image_table.columns:
         raise ValueError(f"{image_path} must contain image_index.")
     if int(trace_xy_all.shape[0]) != int(trace_table_all.shape[0]):
@@ -246,7 +251,17 @@ def replay_selection(args: argparse.Namespace, out_dir: Path) -> dict[str, Any]:
         )
     trace_table = trace_table_all.iloc[trace_start:trace_stop].copy().reset_index(drop=True)
     trace_xy = np.asarray(trace_xy_all[trace_start:trace_stop], dtype=np.float32)
-    traces = trace_items_from_table_and_array(trace_table, trace_xy, n_timepoints=int(args.n_timepoints))
+    trace_xy_model = (
+        None
+        if trace_xy_model_all is None
+        else np.asarray(trace_xy_model_all[trace_start:trace_stop], dtype=np.float32)
+    )
+    traces = trace_items_from_table_and_array(
+        trace_table,
+        trace_xy,
+        n_timepoints=int(args.n_timepoints),
+        trace_xy_model=trace_xy_model,
+    )
     trace_table.to_csv(out_dir / "trace_feature_table.csv", index=False)
     write_csv(out_dir / "trace_bank_metric_summary.csv", trace_bank_metric_summary_rows(trace_table.to_dict("records")))
 
@@ -279,7 +294,10 @@ def replay_selection(args: argparse.Namespace, out_dir: Path) -> dict[str, Any]:
         "trace_bank": {
             "trace_bank_snippet_policy": "replay_trace_xy",
             "trace_bank_native_snippet_n_timepoints": int(args.n_timepoints),
+            "history_burn_in_samples": 0 if trace_xy_model is None else int(trace_xy_model.shape[1] - args.n_timepoints),
+            "model_trace_samples": int(args.n_timepoints) if trace_xy_model is None else int(trace_xy_model.shape[1]),
             "trace_xy": trace_xy_path,
+            "trace_xy_model": trace_xy_model_path if trace_xy_model_path.exists() else None,
             "trace_feature_table": trace_path,
         },
         "image_start": int(image_start),
@@ -391,6 +409,12 @@ def main() -> int:
     image_table = selection["image_table"]
     score_images = selection["score_images"]
     traces = selection["traces"]
+    actual_model_trace_samples = (
+        int(np.asarray(traces[0].get("model_trace", traces[0]["trace"])).shape[0])
+        if traces
+        else int(args.n_timepoints)
+    )
+    actual_history_burn_in_samples = int(actual_model_trace_samples - int(args.n_timepoints))
 
     scorer = RealTraceMatrixScorer.load(
         checkpoint_path=Path(args.checkpoint_path),
@@ -431,6 +455,9 @@ def main() -> int:
         "out_dir": out_dir,
         "rr100_version": str(args.rr100_version),
         "n_timepoints": int(args.n_timepoints),
+        "history_burn_in_samples": actual_history_burn_in_samples,
+        "scored_trace_samples": int(args.n_timepoints),
+        "model_trace_samples": actual_model_trace_samples,
         "bin_seconds": float(args.bin_seconds),
         "patch_size_px": int(args.patch_size_px),
         "source_filter": selection["source_filter"],
@@ -460,12 +487,15 @@ def main() -> int:
             "scored_image_feature_table": out_dir / "scored_image_feature_table.csv",
             "trace_feature_table": out_dir / "trace_feature_table.csv",
             "trace_xy": out_dir / "trace_xy.npy",
+            "trace_xy_model": out_dir / "trace_xy_model.npy",
             "unit_feature_table": out_dir / "unit_feature_table.csv",
         },
         "contract": (
             "Rows are image-major image x trace movies. SSI is corrected time-resolved spatial SSI "
             "from full twin rate maps after applying the RR100 population view. Traces are unscaled "
-            "center-cropped native real BackImage snippets."
+            f"center-cropped native real BackImage snippets. Movement features use trace_xy ({int(args.n_timepoints)} "
+            f"scored samples) only; model input uses trace_xy_model ({actual_history_burn_in_samples} history + "
+            f"{int(args.n_timepoints)} scored samples)."
         ),
     }
     write_json(out_dir / "summary.json", payload)

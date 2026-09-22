@@ -776,6 +776,11 @@ def trace_bank_metadata_row(item: dict[str, Any], idx: int, *, n_timepoints: int
         "snippet_n_samples": int(item.get("snippet_n_samples", int(n_timepoints))),
         "snippet_duration_s": float(item.get("snippet_duration_s", np.nan)),
         "trace_hash": trace_hash(item["trace"]),
+        "model_trace_global_start": int(item.get("model_trace_global_start", item["global_start"])),
+        "model_trace_global_stop": int(item.get("model_trace_global_stop", item["global_stop"])),
+        "model_trace_n_samples": int(item.get("model_trace_n_samples", int(n_timepoints))),
+        "history_burn_in_samples": int(item.get("history_burn_in_samples", 0)),
+        "model_trace_hash": trace_hash(item.get("model_trace", item["trace"])),
         "scale_metric": str(scale_metric),
         "scale_metric_value": trace_metric_value(item, str(scale_metric)),
     }
@@ -788,6 +793,7 @@ def trace_items_from_table_and_array(
     trace_xy: np.ndarray,
     *,
     n_timepoints: int,
+    trace_xy_model: np.ndarray | None = None,
 ) -> list[dict[str, Any]]:
     traces = np.asarray(trace_xy, dtype=np.float32)
     if traces.ndim != 3 or traces.shape[1:] != (int(n_timepoints), 2):
@@ -798,6 +804,16 @@ def trace_items_from_table_and_array(
         raise ValueError(
             f"trace_feature_table rows ({trace_table.shape[0]}) do not match trace_xy rows ({traces.shape[0]})."
         )
+    model_traces = traces if trace_xy_model is None else np.asarray(trace_xy_model, dtype=np.float32)
+    if model_traces.ndim != 3 or model_traces.shape[0] != traces.shape[0] or model_traces.shape[2] != 2:
+        raise ValueError(
+            "trace_xy_model must have shape (n_traces, model_trace_samples, 2), "
+            f"got {tuple(model_traces.shape)}."
+        )
+    if model_traces.shape[1] < int(n_timepoints):
+        raise ValueError("trace_xy_model cannot be shorter than the scored trace_xy interval.")
+    if not np.array_equal(model_traces[:, -int(n_timepoints) :], traces):
+        raise ValueError("The trailing scored interval of trace_xy_model must equal trace_xy exactly.")
     out: list[dict[str, Any]] = []
     for idx, (_, row) in enumerate(trace_table.reset_index(drop=True).iterrows()):
         item = row.to_dict()
@@ -811,6 +827,7 @@ def trace_items_from_table_and_array(
             item["session"] = ""
         item["session"] = str(item["session"])
         item["trace"] = traces[idx]
+        item["model_trace"] = model_traces[idx]
         out.append(item)
     return out
 
@@ -877,13 +894,17 @@ def build_native_snippet_trace_bank(
     microsaccade_speed_threshold_dps: float | None,
     microsaccade_threshold_z: float,
     microsaccade_pad_frames: int,
+    history_burn_in_samples: int = 32,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     bank: list[dict[str, Any]] = []
     n_short = 0
     n_bad = 0
     n_timepoints = int(n_timepoints)
+    history_burn_in_samples = int(history_burn_in_samples)
     if n_timepoints < 2:
         raise ValueError("--n-timepoints must be at least 2.")
+    if history_burn_in_samples < 0:
+        raise ValueError("history_burn_in_samples must be nonnegative.")
 
     for _, row in rows.iterrows():
         session = str(row["session"])
@@ -891,17 +912,21 @@ def build_native_snippet_trace_bank(
         window_start = max(0, min(int(row["global_start"]), int(eyepos.shape[0])))
         window_stop = max(0, min(int(row["global_stop"]), int(eyepos.shape[0])))
         n_available = int(window_stop - window_start)
-        if n_available < n_timepoints:
+        scored_offset = int((n_available - n_timepoints) // 2)
+        if n_available < n_timepoints or scored_offset < history_burn_in_samples:
             n_short += 1
             continue
-        snippet_offset = int((n_available - n_timepoints) // 2)
-        snippet_start = int(window_start + snippet_offset)
+        snippet_start = int(window_start + scored_offset)
         snippet_stop = int(snippet_start + n_timepoints)
-        raw = np.asarray(eyepos[snippet_start:snippet_stop], dtype=np.float64)
-        if raw.ndim != 2 or raw.shape != (n_timepoints, 2):
+        model_trace_start = int(snippet_start - history_burn_in_samples)
+        model_trace_stop = int(snippet_stop)
+        model_trace_n_samples = int(history_burn_in_samples + n_timepoints)
+        raw_model = np.asarray(eyepos[model_trace_start:model_trace_stop], dtype=np.float64)
+        if raw_model.ndim != 2 or raw_model.shape != (model_trace_n_samples, 2):
             n_bad += 1
             continue
-        trace = raw.copy()
+        scored_slice = slice(history_burn_in_samples, model_trace_n_samples)
+        trace = raw_model[scored_slice].copy()
         finite = np.isfinite(trace).all(axis=1)
         if not np.all(finite):
             good = np.flatnonzero(finite)
@@ -911,8 +936,21 @@ def build_native_snippet_trace_bank(
                 bad = np.flatnonzero(~finite)
                 for dim in range(2):
                     trace[bad, dim] = np.interp(bad, good, trace[good, dim])
-        trace -= np.mean(trace, axis=0, keepdims=True)
-        trace = trace.astype(np.float32)
+        model_trace = raw_model.copy()
+        model_trace[scored_slice] = trace
+        finite = np.isfinite(model_trace).all(axis=1)
+        if not np.all(finite):
+            good = np.flatnonzero(finite)
+            if good.size == 0:
+                model_trace = np.zeros_like(model_trace)
+            else:
+                bad = np.flatnonzero(~finite)
+                for dim in range(2):
+                    model_trace[bad, dim] = np.interp(bad, good, model_trace[good, dim])
+        scored_mean = np.mean(model_trace[scored_slice], axis=0, keepdims=True)
+        model_trace = (model_trace - scored_mean).astype(np.float32)
+        trace = model_trace[scored_slice].copy()
+        raw = raw_model[scored_slice]
         ms = microsaccade_stats(
             trace,
             dt=float(dt),
@@ -940,11 +978,16 @@ def build_native_snippet_trace_bank(
             "snippet_global_stop": int(snippet_stop),
             "snippet_n_samples": int(n_timepoints),
             "snippet_duration_s": snippet_duration_s,
+            "model_trace_global_start": int(model_trace_start),
+            "model_trace_global_stop": int(model_trace_stop),
+            "model_trace_n_samples": int(model_trace_n_samples),
+            "history_burn_in_samples": int(history_burn_in_samples),
             "source_window_n_samples": int(n_available),
             "source_window_duration_s": source_window_duration_s,
             "mean_x_deg": float(np.nanmean(raw[:, 0])),
             "mean_y_deg": float(np.nanmean(raw[:, 1])),
             "trace": trace,
+            "model_trace": model_trace,
             "observed_rms_deg": trace_rms(trace),
             "source_trace_observed_rms_deg": trace_rms(trace),
             "path_length_deg": path_length(trace),
@@ -954,7 +997,7 @@ def build_native_snippet_trace_bank(
             "trace_cov_anisotropy": trace_covariance_anisotropy(trace),
             "source_trace_cov_anisotropy": trace_covariance_anisotropy(trace),
             "source_anisotropy": trace_covariance_anisotropy(trace),
-            "trace_bank_snippet_policy": "center_crop_native_n_timepoints",
+            "trace_bank_snippet_policy": "central_scored_interval_with_explicit_preceding_history",
         }
         item.update(metrics)
         item.update(
@@ -976,9 +1019,12 @@ def build_native_snippet_trace_bank(
         bank.append(item)
 
     meta = {
-        "trace_bank_snippet_policy": "center_crop_native_n_timepoints",
+        "trace_bank_snippet_policy": "central_scored_interval_with_explicit_preceding_history",
         "trace_bank_native_dt_s": float(dt),
         "trace_bank_native_snippet_n_timepoints": int(n_timepoints),
+        "history_burn_in_samples": int(history_burn_in_samples),
+        "scored_trace_samples": int(n_timepoints),
+        "model_trace_samples": int(history_burn_in_samples + n_timepoints),
         "n_trace_bank_source_windows_skipped_short": int(n_short),
         "n_trace_bank_source_windows_skipped_bad_shape": int(n_bad),
     }
@@ -1142,6 +1188,14 @@ def score_matrix(
     movie_index_stride: int | None = None,
 ) -> dict[str, Any]:
     traces = [np.asarray(item["trace"], dtype=np.float32) for item in trace_items]
+    model_traces = [np.asarray(item.get("model_trace", item["trace"]), dtype=np.float32) for item in trace_items]
+    for trace, model_trace in zip(traces, model_traces, strict=True):
+        if trace.shape != (int(n_timepoints), 2):
+            raise ValueError(f"Scored trace must have shape ({int(n_timepoints)}, 2), got {trace.shape}.")
+        if model_trace.ndim != 2 or model_trace.shape[1] != 2 or model_trace.shape[0] < trace.shape[0]:
+            raise ValueError(f"Invalid model trace shape {model_trace.shape} for scored trace {trace.shape}.")
+        if not np.array_equal(model_trace[-int(n_timepoints) :], trace):
+            raise ValueError("Each model trace must end with the exact scored trace interval.")
     n_images = int(image_rows.shape[0])
     n_traces = int(len(traces))
     n_movies = n_images * n_traces
@@ -1164,7 +1218,7 @@ def score_matrix(
         )
         image_ssi, image_expected, image_mean_rate, image_population = scorer.score_traces_for_patch(
             patch,
-            traces,
+            model_traces,
             trace_batch_size=int(trace_batch_size),
             frame_batch_size=int(frame_batch_size),
             n_timepoints=int(n_timepoints),
@@ -1215,6 +1269,7 @@ def score_matrix(
         np.save(out_dir / "mean_rate_matrix.npy", mean_rate_matrix)
         np.save(out_dir / "population_ssi.npy", population_ssi)
         np.save(out_dir / "trace_xy.npy", np.stack(traces, axis=0).astype(np.float32))
+        np.save(out_dir / "trace_xy_model.npy", np.stack(model_traces, axis=0).astype(np.float32))
         write_csv(out_dir / "movie_feature_table.csv", movie_rows)
     return {
         "elapsed_s": float(elapsed),
@@ -1235,9 +1290,10 @@ def score_stabilized_images(
     n_timepoints: int,
     bin_seconds: float,
     patch_size_px: int,
+    history_burn_in_samples: int = 32,
     patch_loader: Callable[..., tuple[np.ndarray, dict[str, Any]]] = extract_patch,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[dict[str, Any]], dict[str, Any]]:
-    zero_trace = np.zeros((int(n_timepoints), 2), dtype=np.float32)
+    zero_trace = np.zeros((int(history_burn_in_samples) + int(n_timepoints), 2), dtype=np.float32)
     n_images = int(images.shape[0])
     n_units = int(scorer.n_units)
     ssi = np.zeros((n_images, n_units), dtype=np.float32)

@@ -33,7 +33,7 @@ ROOT = Path(__file__).resolve().parents[3]
 FIG4_DIR = ROOT / "paper" / "fig4"
 UPSTREAM_DIR = FIG4_DIR / "upstream"
 
-RUN_STEM = "backimage_real_trace_ssi_matrix_large_contour_no_driftgate_ms200_n100x1000_v1"
+RUN_STEM = "backimage_real_trace_ssi_matrix_large_contour_no_driftgate_ms200_n100x1000_history32_v2"
 RR100_VERSION = (
     "V1-RR_MS_min_complete0p65_split0p75_pair0p60_anyfail_finalsplit0p75_"
     "medoidPosthocminRepcomplete0p45_movieMedoid"
@@ -64,7 +64,7 @@ DEFAULT_WINDOW_FEATURES_CSV = (
     ROOT / "outputs/fixation_statistics_by_stimulus_all_sessions_after_review/window_features.csv"
 )
 DEFAULT_PRODUCTION_OUT_ROOT = ROOT / "outputs/active_sensing_movie_information" / RUN_STEM
-DEFAULT_SMOKE_OUT_ROOT = ROOT / "outputs/figures/fig4/smoke/real_trace_matrix_smoke"
+DEFAULT_SMOKE_OUT_ROOT = ROOT / "outputs/figures/fig4/smoke/real_trace_matrix_history32_smoke"
 DEFAULT_DATASET_CONFIGS = UPSTREAM_DIR / "dataset_configs" / "multi_basic_120_long.yaml"
 DEFAULT_POPULATION_SPEC_DIR = (
     ROOT / "outputs/redundancy_resolved_v1_twin/step1_activation_fingerprints"
@@ -91,6 +91,8 @@ PROFILES: dict[str, dict[str, Any]] = {
         "n_traces": 1000,
         "seed": 20260717,
         "n_timepoints": 40,
+        "history_burn_in_samples": 32,
+        "model_trace_samples": 72,
         "bin_seconds": 1.0 / 120.0,
         "patch_size_px": 540,
         "image_contrast_quantile": 0.75,
@@ -115,6 +117,8 @@ PROFILES: dict[str, dict[str, Any]] = {
         "n_traces": 2,
         "seed": 20260717,
         "n_timepoints": 40,
+        "history_burn_in_samples": 32,
+        "model_trace_samples": 72,
         "bin_seconds": 1.0 / 120.0,
         "patch_size_px": 540,
         "image_contrast_quantile": 0.75,
@@ -437,6 +441,8 @@ def matrix_command(
         cli_value(profile["seed"]),
         "--n-timepoints",
         cli_value(profile["n_timepoints"]),
+        "--history-burn-in-samples",
+        cli_value(profile["history_burn_in_samples"]),
         "--bin-seconds",
         cli_value(profile["bin_seconds"]),
         "--patch-size-px",
@@ -511,6 +517,7 @@ def matrix_command(
             shard_dir / "trace_feature_table.csv",
             shard_dir / "unit_feature_table.csv",
             shard_dir / "trace_xy.npy",
+            shard_dir / "trace_xy_model.npy",
         ),
     )
 
@@ -555,6 +562,7 @@ def merge_command(
             merged_dir / "trace_feature_table.csv",
             merged_dir / "unit_feature_table.csv",
             merged_dir / "trace_xy.npy",
+            merged_dir / "trace_xy_model.npy",
         ),
     )
 
@@ -577,6 +585,8 @@ def baseline_command(
         RR100_VERSION,
         "--n-timepoints",
         cli_value(profile["n_timepoints"]),
+        "--history-burn-in-samples",
+        cli_value(profile["history_burn_in_samples"]),
         "--bin-seconds",
         cli_value(profile["bin_seconds"]),
         "--patch-size-px",
@@ -715,11 +725,23 @@ def build_manifest(
         },
         "temporal_contract": {
             "model_history_frames": 32,
+            "model_history_includes_current_frame": True,
+            "history_burn_in_samples": int(profile["history_burn_in_samples"]),
             "scored_trace_samples": int(profile["n_timepoints"]),
+            "model_trace_samples": int(profile["model_trace_samples"]),
             "bin_seconds": float(profile["bin_seconds"]),
+            "current_history_policy": "explicit_preceding_history",
+            "scored_sample_lag_index_rule": (
+                "For scored sample s and lag channel l, with l=0 as the current frame, "
+                "the model-trace index is 32+s-l."
+            ),
+            "scored_model_current_frame_indices_0based": [32, 71],
+            "discarded_lagged_output_current_frame_index_0based": 31,
             "boundary": (
-                "The twin stimulus uses a 32-frame model history, but the SSI "
-                "analysis scores the 40 native FEM samples after lag alignment."
+                "trace_xy_model contains 32 preceding history samples followed by the 40-sample "
+                "trace_xy scored interval. The 72-frame trace is embedded directly without prefix "
+                "seeding; only outputs whose current frames are 32..71 contribute to SSI. All "
+                "movement metrics, microsaccade labels, and path-bin variables use trace_xy only."
             ),
         },
         "recovered_production_facts": {
@@ -765,7 +787,7 @@ def default_out_root(profile_name: str) -> Path:
 
 
 def default_plan_json(profile_name: str) -> Path:
-    return ROOT / "outputs/figures/fig4/provenance" / f"real_trace_matrix_{profile_name}_plan.json"
+    return ROOT / "outputs/figures/fig4/provenance" / f"real_trace_matrix_history32_{profile_name}_plan.json"
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:

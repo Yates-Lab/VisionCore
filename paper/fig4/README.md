@@ -229,6 +229,26 @@ cleanly against the old merged cache at `atol=1e-5, rtol=1e-5`, with zero
 array differences for SSI, expected spikes, mean rate, and population SSI.
 The full 100-image production matrix still needs the normal two long shard runs.
 
+### Temporal burn-in contract for the refreshed matrix
+
+Each refreshed image x trace movie contains 72 native FEM samples at 120 Hz:
+32 explicit history samples followed by the historical central 40 scored
+samples. For a 128-sample source window these are source samples `12:84` and
+`44:84`, respectively. The 72-frame trace is embedded directly, without the
+historical `trace[:32] + trace` prefix seeding.
+
+Embedding 32 lags from 72 frames produces 41 outputs. The first output, whose
+current frame is model-trace frame 31, is discarded. SSI, expected spikes, and
+mean rate accumulate only outputs 1--40, whose current frames are 32--71. With
+0-based scored sample `s` and lag channel `l` (`l=0` is current), the model-trace
+index is therefore `32 + s - l`.
+
+`trace_xy.npy` remains the 40-sample scored trace consumed by downstream Figure
+4 path, RMS, microsaccade, and binning analyses. `trace_xy_model.npy` stores the
+72-frame burn-in-plus-scored model input. The trace-bank builder computes all
+movement features and sampling strata from the scored array only. Stabilized
+baselines use a 72-frame zero-motion input and the identical 40-output mask.
+
 To audit the clean scorer against a historical matrix cache without resampling
 images or traces, replay the selected tables and `trace_xy.npy` from that cache.
 The audit launcher plans by default and executes with `--run`:

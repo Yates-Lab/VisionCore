@@ -72,12 +72,21 @@ def assert_same_table(first: pd.DataFrame, other: pd.DataFrame, *, name: str) ->
         raise ValueError(f"{name} differs across shards.")
 
 
-def load_reference_tables(shard_dirs: list[Path]) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, np.ndarray]:
+def load_reference_tables(
+    shard_dirs: list[Path],
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, np.ndarray, np.ndarray]:
     first = shard_dirs[0]
     image_table = pd.read_csv(require_member(first, "image_feature_table.csv"))
     trace_table = pd.read_csv(require_member(first, "trace_feature_table.csv"))
     unit_table = pd.read_csv(require_member(first, "unit_feature_table.csv"))
     trace_xy = np.load(require_member(first, "trace_xy.npy"))
+    trace_xy_model = np.load(require_member(first, "trace_xy_model.npy"))
+    if trace_xy.ndim != 3 or trace_xy.shape[2] != 2:
+        raise ValueError("trace_xy.npy has an incompatible shape.")
+    if trace_xy_model.ndim != 3 or trace_xy_model.shape[0] != trace_xy.shape[0] or trace_xy_model.shape[2] != 2:
+        raise ValueError("trace_xy_model.npy has an incompatible shape.")
+    if not np.array_equal(trace_xy_model[:, -trace_xy.shape[1] :], trace_xy):
+        raise ValueError("trace_xy.npy must equal the trailing scored interval of trace_xy_model.npy.")
 
     for shard_dir in shard_dirs[1:]:
         assert_same_table(
@@ -98,8 +107,11 @@ def load_reference_tables(shard_dirs: list[Path]) -> tuple[pd.DataFrame, pd.Data
         other_xy = np.load(require_member(shard_dir, "trace_xy.npy"))
         if trace_xy.shape != other_xy.shape or not np.array_equal(trace_xy, other_xy):
             raise ValueError("trace_xy.npy differs across shards.")
+        other_xy_model = np.load(require_member(shard_dir, "trace_xy_model.npy"))
+        if trace_xy_model.shape != other_xy_model.shape or not np.array_equal(trace_xy_model, other_xy_model):
+            raise ValueError("trace_xy_model.npy differs across shards.")
 
-    return image_table, trace_table, unit_table, trace_xy
+    return image_table, trace_table, unit_table, trace_xy, trace_xy_model
 
 
 def allocate_arrays(shard_dir: Path, *, n_movies: int) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
@@ -160,7 +172,7 @@ def main() -> None:
             raise FileNotFoundError(f"Shard directory not found: {shard_dir}")
 
     summaries = [load_json(require_member(path, "summary.json")) for path in shard_dirs]
-    image_table, trace_table, unit_table, trace_xy = load_reference_tables(shard_dirs)
+    image_table, trace_table, unit_table, trace_xy, trace_xy_model = load_reference_tables(shard_dirs)
     n_images = int(image_table.shape[0])
     n_traces = int(trace_table.shape[0])
     n_units = int(unit_table.shape[0])
@@ -200,6 +212,7 @@ def main() -> None:
     unit_table.to_csv(out_dir / "unit_feature_table.csv", index=False)
     merged_movie.to_csv(out_dir / "movie_feature_table.csv", index=False)
     np.save(out_dir / "trace_xy.npy", trace_xy)
+    np.save(out_dir / "trace_xy_model.npy", trace_xy_model)
     if (shard_dirs[0] / "trace_bank_metric_summary.csv").exists():
         pd.read_csv(shard_dirs[0] / "trace_bank_metric_summary.csv").to_csv(
             out_dir / "trace_bank_metric_summary.csv",
@@ -222,6 +235,7 @@ def main() -> None:
             "trace_feature_table": out_dir / "trace_feature_table.csv",
             "unit_feature_table": out_dir / "unit_feature_table.csv",
             "trace_xy": out_dir / "trace_xy.npy",
+            "trace_xy_model": out_dir / "trace_xy_model.npy",
         },
     }
     write_json(out_dir / "summary.json", summary)
