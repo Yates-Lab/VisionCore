@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -28,6 +29,16 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[3]
+ARTIFACT_ROOT = Path(
+    os.environ.get("VISIONCORE_MANUSCRIPT_SOURCE_ROOT", ROOT)
+).expanduser().resolve()
+
+
+def _source_file(value: str | Path) -> Path:
+    path = Path(value)
+    return path if path.is_absolute() else ARTIFACT_ROOT / path
+
+
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -1271,7 +1282,7 @@ def main() -> int:
         if zero_tests['checkpoint_sha256'] != expected_digest:
             raise ValueError('Zero-improvement tests use a different checkpoint')
         for name, digest in zero_tests['source_sha256'].items():
-            if hashlib.sha256((ROOT/name).read_bytes()).hexdigest() != digest:
+            if hashlib.sha256(_source_file(name).read_bytes()).hexdigest() != digest:
                 raise ValueError(f'Zero-improvement test source changed: {name}')
         for row in zero_tests['records']:
             zero_groups.setdefault(row['panel'], {}).setdefault(row['outcome'], []).append(row)

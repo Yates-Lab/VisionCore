@@ -13,12 +13,12 @@ import shutil
 import subprocess
 import sys
 from figure4_selection import EXAMPLE_SELECTION, spectrum_update, selected_example_dir
-from analysis_selection import SELECTION, selected_analysis
+from analysis_selection import SOURCE_ROOT, SELECTION, selected_analysis, source_path
 
 HERE=Path(__file__).resolve().parent
 ROOT=HERE.parent
 SELECTED=selected_analysis()
-BUNDLE=ROOT/SELECTED['bundle']
+BUNDLE=SOURCE_ROOT/SELECTED['bundle']
 BUILD=HERE/'build'
 
 
@@ -95,7 +95,17 @@ def main():
             source=BUILD/'fig2/figure2.pdf'
         elif which=='3':
             manifest=json.loads((BUNDLE/'figure3/run_manifest.json').read_text())
-            current.update(manifest['environment'])
+            current.update({
+                key: str(source_path(value)) if Path(value).is_absolute() else value
+                for key, value in manifest['environment'].items()
+            })
+            if cache_dir := env.get('VISIONCORE_MANUSCRIPT_EMPIRICAL_CACHE_DIR'):
+                cache_dir = Path(cache_dir).expanduser().resolve()
+                current.update(
+                    FIG3_COVDECOMP_CACHE_PATH=str(cache_dir/'covdecomp_empirical.pkl'),
+                    FIG3_COVDECOMP_DERIVED_CACHE_PATH=str(cache_dir/'covdecomp_derived.pkl'),
+                    COVDECOMP_ALIGNED_CACHE_PATH=str(cache_dir/'covdecomp_aligned_sessions.pkl'),
+                )
             current.update(FIG3_FIG_DIR=str(out),FIG3_STAT_DIR=str(out/'stats'),
                            FIG3_REUSE_EXISTING_CACHES='1',VISIONCORE_MIN_FIGURE_FONT_PT='8.5')
             command=[sys.executable,ROOT/'paper/fig3/generate_figure3.py',
@@ -117,12 +127,17 @@ def main():
             if not (example/'selected_example.npz').exists():
                 raise FileNotFoundError('Run with --replay-example to create the current Figure 4A example')
             manifest=json.loads((BUNDLE/'figure4/production_figure4/run_manifest.json').read_text())
-            command=shlex.split(manifest['commands'][0]);command[0]=sys.executable
+            recorded=shlex.split(manifest['commands'][0])
+            command=[sys.executable,ROOT/'paper/fig4/spatiotemporal_tuning/build_figure4.py']
+            command.extend(
+                str(source_path(value)) if Path(value).is_absolute() else value
+                for value in recorded[2:]
+            )
             command[command.index('--out-dir')+1]=str(out)
             command[command.index('--panel-a-audit')+1]=str(example)
             update=spectrum_update(BUNDLE)
             if update:
-                command[command.index('--rucci-ensemble')+1]=str(ROOT/update['rucci_ensemble'])
+                command[command.index('--rucci-ensemble')+1]=str(SOURCE_ROOT/update['rucci_ensemble'])
             command.extend(['--layout','manuscript'])
             zero_tests=HERE/'analysis/figure4_zero_tests/summary.json'
             if not zero_tests.exists():

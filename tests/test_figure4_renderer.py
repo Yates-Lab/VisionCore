@@ -4,7 +4,13 @@ import pandas as pd
 import pytest
 from matplotlib.figure import Figure
 from paper.fig4.spatiotemporal_tuning.build_panel_b_population_path_length import summarize, summarize_unit_distributions, unit_level_effects
+from paper.fig4.spatiotemporal_tuning import _figure4_renderer as renderer
 from paper.fig4.spatiotemporal_tuning._figure4_renderer import PANEL_LAYOUT, _direct_mechanism_values, _draw_panel_c_power, _draw_panel_e_population, _draw_panel_h_normalized
+
+def test_provenance_sources_resolve_from_external_artifact_root(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(renderer, "ARTIFACT_ROOT", tmp_path)
+    assert renderer._source_file("outputs/run/summary.json") == tmp_path / "outputs/run/summary.json"
+
 
 def _matrix_arrays() -> dict[str, np.ndarray]:
     moving_spikes = np.asarray([[[1.1, 2.2], [1.2, 2.4], [1.3, 2.6], [1.4, 2.8]], [[1.1, 2.2], [1.2, 2.4], [1.3, 2.6], [1.4, 2.8]]], dtype=float)

@@ -6,12 +6,12 @@ import json
 import re
 import pymupdf as fitz
 from figure4_selection import SPECTRUM_SELECTION, EXAMPLE_SELECTION, spectrum_update, selected_example_dir
-from analysis_selection import SELECTION, selected_analysis
+from analysis_selection import SOURCE_ROOT, SELECTION, selected_analysis
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 SELECTED=selected_analysis()
-BUNDLE=ROOT/SELECTED['bundle']
+BUNDLE=SOURCE_ROOT/SELECTED['bundle']
 FIGURES = [HERE/'figures'/f'figure{i}.pdf' for i in range(1,5)] + [
     HERE/'figures/supplement1.pdf', HERE/'old_figures/extended_fig2.pdf',
     HERE/'figures/stabilization_control.pdf']
@@ -113,7 +113,7 @@ def main():
     new4=json.loads((HERE/'build/figure4/summary.json').read_text())
     update=spectrum_update(BUNDLE)
     if update:
-        spectral_figure=json.loads((ROOT/update['figure_summary']).read_text())
+        spectral_figure=json.loads((SOURCE_ROOT/update['figure_summary']).read_text())
         for key in update['updated_panels']:
             base4['panels'][key]=spectral_figure['panels'][key]
     # Allow only declared display changes; preserve every population estimate.
@@ -202,7 +202,7 @@ def main():
     if control['checkpoint_sha256']!=SELECTED['checkpoint_sha256']:
         errors.append('Stabilization control uses a different model')
     for key in ('local_cache','global_cache'):
-        if digest(ROOT/control[key])!=control[key+'_sha256']:
+        if digest(SOURCE_ROOT/control[key])!=control[key+'_sha256']:
             errors.append(f'Stabilization control {key} source changed')
     if digest(HERE/'analysis/stabilization_control/paired_scores.npz')!=control['paired_scores_sha256']:
         errors.append('Stabilization-control paired scores changed')

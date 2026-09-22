@@ -11,6 +11,8 @@ import os
 from pathlib import Path
 import sys
 
+from analysis_selection import SOURCE_ROOT, source_path
+
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 
@@ -42,12 +44,22 @@ def statistics_tex(metrics):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--inference-dir", type=Path, default=ROOT / "outputs/stabilization_control_20260915")
+    parser.add_argument("--inference-dir", type=Path, default=SOURCE_ROOT / "outputs/stabilization_control_20260915")
     parser.add_argument("--out-dir", type=Path, default=HERE / "build/stabilization_control")
     args = parser.parse_args()
     selection = json.loads((HERE / "analysis/selected_model_bundle.json").read_text())
-    manifest = json.loads((ROOT / selection["bundle"] / "figure3/run_manifest.json").read_text())
-    os.environ.update(manifest["environment"])
+    manifest = json.loads((SOURCE_ROOT / selection["bundle"] / "figure3/run_manifest.json").read_text())
+    os.environ.update({
+        key: str(source_path(value)) if Path(value).is_absolute() else value
+        for key, value in manifest["environment"].items()
+    })
+    if cache_dir := os.environ.get("VISIONCORE_MANUSCRIPT_EMPIRICAL_CACHE_DIR"):
+        cache_dir = Path(cache_dir).expanduser().resolve()
+        os.environ.update(
+            FIG3_COVDECOMP_CACHE_PATH=str(cache_dir / "covdecomp_empirical.pkl"),
+            FIG3_COVDECOMP_DERIVED_CACHE_PATH=str(cache_dir / "covdecomp_derived.pkl"),
+            COVDECOMP_ALIGNED_CACHE_PATH=str(cache_dir / "covdecomp_aligned_sessions.pkl"),
+        )
     os.environ["MPLCONFIGDIR"] = str(HERE / "build/mpl")
     sys.path[:0] = [str(ROOT / "paper/fig3"), str(ROOT)]
     import dill
@@ -63,7 +75,7 @@ def main():
     if run_manifest["selection"] != selection or digest(local_path) != run_manifest["local_cache_sha256"]:
         raise ValueError("Control replay provenance differs from selected model or completed cache")
     local_payload = dill.load(local_path.open("rb"))
-    global_path = Path(manifest["environment"]["FIG3_ABLATION_CACHE_PATH"])
+    global_path = source_path(manifest["environment"]["FIG3_ABLATION_CACHE_PATH"])
     global_payload = dill.load(global_path.open("rb"))
     if local_payload.get("schema_version") != global_payload.get("schema_version"):
         raise ValueError("Control and main-figure caches use different scoring schemas")
@@ -169,7 +181,7 @@ def main():
     for suffix in ("pdf", "png"):
         fig.savefig(args.out_dir / f"stabilization_control.{suffix}", dpi=180)
     plt.close(fig)
-    main_stats = json.loads((ROOT / selection["bundle"] / "figure3/figures/figure3_manifest.json").read_text())
+    main_stats = json.loads((SOURCE_ROOT / selection["bundle"] / "figure3/figures/figure3_manifest.json").read_text())
     for name, panel in (("ccnorm", "panel_c_stats"), ("fraction", "panel_d_stats")):
         original = main_stats[panel]
         if reports[name]["n_units"] != original["n_units"]:
@@ -181,8 +193,8 @@ def main():
                 raise AssertionError(f"Supplement {name}/{key} does not reproduce the main-figure median")
     np.savez_compressed(archive / "paired_scores.npz", **arrays)
     report = {"checkpoint_sha256": selection["checkpoint_sha256"],
-              "global_cache": str(global_path.relative_to(ROOT)), "global_cache_sha256": digest(global_path),
-              "local_cache": str(local_path.resolve().relative_to(ROOT)), "local_cache_sha256": digest(local_path),
+              "global_cache": str(global_path.relative_to(SOURCE_ROOT)), "global_cache_sha256": digest(global_path),
+              "local_cache": str(local_path.resolve().relative_to(SOURCE_ROOT)), "local_cache_sha256": digest(local_path),
               "data_identity_checks": data_checks, "unchanged_input_replay": replay_checks,
               "history_render_audits": run_manifest["sessions"], "metrics": reports,
               "ablation_cost_comparison": {

@@ -7,18 +7,19 @@ import argparse
 import csv
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 
 # Also support bundle drivers loading this exporter with importlib.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from analysis_selection import SELECTION, selected_analysis
+from analysis_selection import SOURCE_ROOT, SELECTION, selected_analysis, source_path
 from figure4_selection import SPECTRUM_SELECTION, EXAMPLE_SELECTION, spectrum_update, selected_example_dir
 
 ROOT = Path(__file__).resolve().parents[1]
 MANUSCRIPT = Path(__file__).resolve().parent
 SELECTED = selected_analysis()
-BUNDLE = ROOT / SELECTED['bundle']
+BUNDLE = SOURCE_ROOT / SELECTED['bundle']
 CHECKPOINT = SELECTED['checkpoint_sha256']
 
 
@@ -26,17 +27,25 @@ def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def provenance_name(path: Path) -> str:
+    path = path.resolve()
+    for root in (ROOT, SOURCE_ROOT):
+        if path.is_relative_to(root):
+            return str(path.relative_to(root))
+    return str(path)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="Fail if generated_stats.tex is stale, without changing it")
     args = parser.parse_args()
     sources = {}
-    if SELECTION.exists() and BUNDLE.resolve() == (ROOT / SELECTED['bundle']).resolve():
-        sources[str(SELECTION.relative_to(ROOT))] = digest(SELECTION)
+    if SELECTION.exists():
+        sources[provenance_name(SELECTION)] = digest(SELECTION)
 
     def read(relative: str) -> dict:
         path = BUNDLE / relative
-        sources[str(path.relative_to(ROOT))] = digest(path)
+        sources[provenance_name(path)] = digest(path)
         return json.loads(path.read_text())
 
     final = read("FINAL_MANIFEST.json")
@@ -49,11 +58,11 @@ def main() -> None:
     if four["checkpoint_sha256"] != CHECKPOINT or not four["release_ready"]:
         raise ValueError("Figure 4 checkpoint mismatch or failed release")
     for record in four["sources"].values():
-        path = Path(record["path"])
+        path = source_path(record["path"])
         actual = digest(path)
         if actual != record["sha256"]:
             raise ValueError(f"Figure 4 source changed: {path}")
-        sources[str(path.relative_to(ROOT))] = actual
+        sources[provenance_name(path)] = actual
 
     values = {}
 
@@ -77,10 +86,13 @@ def main() -> None:
 
     empirical_path = MANUSCRIPT / "analysis/empirical_stats.json"
     empirical = json.loads(empirical_path.read_text())
-    if digest(Path(empirical["source"])) != empirical["sha256"]:
+    empirical_source = source_path(empirical["source"])
+    if cache_dir := os.environ.get("VISIONCORE_MANUSCRIPT_EMPIRICAL_CACHE_DIR"):
+        empirical_source = Path(cache_dir).expanduser().resolve() / "covdecomp_derived.pkl"
+    if digest(empirical_source) != empirical["sha256"]:
         raise ValueError("The empirical analysis cache changed; regenerate the Figure 2 statistics")
-    sources[str(empirical_path.relative_to(ROOT))] = digest(empirical_path)
-    sources[str(Path(empirical["source"]).relative_to(ROOT))] = empirical["sha256"]
+    sources[provenance_name(empirical_path)] = digest(empirical_path)
+    sources[provenance_name(empirical_source)] = empirical["sha256"]
     def interval(name, pair, decimals=3):
         values[name] = f"[{pair[0]:.{decimals}f}, {pair[1]:.{decimals}f}]"
     value("FigTwoFemMedian", empirical["alpha"]["median"], 2)
@@ -158,7 +170,7 @@ def main() -> None:
         comparison = json.loads(comparison_path.read_text())
         if comparison["checkpoint_sha256"] != CHECKPOINT:
             raise ValueError("Passband text comparison uses a different checkpoint")
-        sources[str(comparison_path.relative_to(ROOT))] = digest(comparison_path)
+        sources[provenance_name(comparison_path)] = digest(comparison_path)
         report_path = ROOT / comparison["summary"]
         if digest(report_path) != comparison["summary_sha256"]:
             raise ValueError("Passband text comparison summary changed")
@@ -169,8 +181,8 @@ def main() -> None:
         audit = json.loads(audit_path.read_text())
         if not audit["passed"] or report["checkpoint_sha256"] != CHECKPOINT:
             raise ValueError("Passband text comparison failed its audit")
-        sources[str(report_path.relative_to(ROOT))] = digest(report_path)
-        sources[str(audit_path.relative_to(ROOT))] = digest(audit_path)
+        sources[provenance_name(report_path)] = digest(report_path)
+        sources[provenance_name(audit_path)] = digest(audit_path)
         pairs = (
             ("primary", "class_path_engagement__over__class_path", "Compare"),
             ("primary", "class_path_dynamic_engagement__over__class_path_dynamic", "ComparePower"),
@@ -206,10 +218,10 @@ def main() -> None:
                 raise ValueError("Normalized-overlap parent comparison changed")
             for name, expected in {**shape_design["source_sha256"],
                                    **shape["source_code_sha256"]}.items():
-                if digest(ROOT / name) != expected:
+                if digest(source_path(name)) != expected:
                     raise ValueError("Normalized-overlap source changed: " + name)
-            sources[str(shape_path.relative_to(ROOT))] = digest(shape_path)
-            sources[str(design_path.relative_to(ROOT))] = digest(design_path)
+            sources[provenance_name(shape_path)] = digest(shape_path)
+            sources[provenance_name(design_path)] = digest(design_path)
             contrast = shape["contrasts"]["class_path_dynamic_normalized_overlap__over__class_path_dynamic"]
             for index, label in enumerate(("Rate", "SSI")):
                 for prefix, key in (("", ""), ("Strict", "strict_")):
@@ -225,7 +237,7 @@ def main() -> None:
     if update:
         spectral_figure = json.loads((ROOT / update['figure_summary']).read_text())
         sources.update(update['source_sha256'])
-        sources[str(SPECTRUM_SELECTION.relative_to(ROOT))] = digest(SPECTRUM_SELECTION)
+        sources[provenance_name(SPECTRUM_SELECTION)] = digest(SPECTRUM_SELECTION)
     regimes = spectral_figure['panels']['C']['regimes']
     if [entry['name'] for entry in regimes] != ['drift', 'microsaccades']:
         raise ValueError('Drift/microsaccade counts require event-defined spectra')
@@ -238,16 +250,16 @@ def main() -> None:
     value("FigFourPassbandPercent", 100 * figure["panels"]["E"]["passband_response_fraction"], 0)
     example_dir = selected_example_dir(BUNDLE)
     example = json.loads((example_dir/'summary.json').read_text())
-    sources[str((example_dir/'summary.json').relative_to(ROOT))] = digest(example_dir/'summary.json')
+    sources[provenance_name(example_dir/'summary.json')] = digest(example_dir/'summary.json')
     if EXAMPLE_SELECTION.exists():
-        sources[str(EXAMPLE_SELECTION.relative_to(ROOT))] = digest(EXAMPLE_SELECTION)
+        sources[provenance_name(EXAMPLE_SELECTION)] = digest(EXAMPLE_SELECTION)
     if example['checkpoint_sha256'] != CHECKPOINT:
         raise ValueError('Figure 4 example uses a different checkpoint')
     lag = example['model_peak_lag']['resolved_rounded_peak_lag_frames']
     value('FigFourExampleLagFrames', lag, 0)
     value('FigFourExampleLagMs', 1000 * lag / 240, 1)
     fit_path = BUNDLE / 'figure4/all_available_yu_tuning/all_yu_fits.csv'
-    sources[str(fit_path.relative_to(ROOT))] = digest(fit_path)
+    sources[provenance_name(fit_path)] = digest(fit_path)
     with fit_path.open() as stream:
         fits = list(csv.DictReader(stream))
     if len(fits) != int(b['n_units']):

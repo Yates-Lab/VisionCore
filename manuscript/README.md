@@ -47,7 +47,7 @@ ranges that include the displayed unit-distribution whiskers. Annotations test
 each population effect against zero improvement using its existing paired
 bootstrap scheme, with Holm correction across all 32 displayed comparisons.
 The retained draws and probabilities are in `analysis/figure4_zero_tests/`;
-regenerate with `python manuscript/export_figure4_zero_tests.py` in `yatesfv`.
+regenerate with `uv run --project .. --no-sync python manuscript/export_figure4_zero_tests.py`.
 
 A and B share the top row, with B's rate and SSI axes stacked. A gives more
 space to the complete response maps, displayed on one shared linear color
@@ -66,9 +66,9 @@ summary, and shortlist in `analysis/figure4_example/`. Reproduce the bounded
 review and install its highest-ranked candidate with:
 
 ```sh
-conda run --no-capture-output -n yatesfv python manuscript/review_figure4_examples.py
-conda run --no-capture-output -n yatesfv python manuscript/review_figure4_examples.py --install-reviewed
-conda run --no-capture-output -n yatesfv python manuscript/render_figures.py 4
+uv run --project .. --no-sync python manuscript/review_figure4_examples.py
+uv run --project .. --no-sync python manuscript/review_figure4_examples.py --install-reviewed
+uv run --project .. --no-sync python manuscript/render_figures.py 4
 ```
 
 ## Build the PDF
@@ -96,6 +96,31 @@ make -C manuscript clean
 
 This removes LaTeX build products, retaining the figure replay caches.
 
+## Use an external artifact tree
+
+Set the source root when the selected bundle is stored in another VisionCore
+checkout. The scripts read artifacts from that tree and do not write to it.
+Manuscript products stay under this checkout's `manuscript/build/`,
+`manuscript/figures/`, and `manuscript/analysis/` directories. Figure 3 may
+refresh derived caches under this checkout's `outputs/cache/`.
+
+```sh
+export VISIONCORE_MANUSCRIPT_SOURCE_ROOT=/home/jake/repos/VisionCore
+```
+
+The recorded Figure 2 cache is not readable in that checkout on this machine.
+Point the workflow at the existing local cache directory; `sync_stats.py`
+checks its recorded SHA-256 before using it.
+
+```sh
+export VISIONCORE_MANUSCRIPT_EMPIRICAL_CACHE_DIR="$PWD/outputs/cache"
+```
+
+Keep both variables set for statistics and Figure 3 rendering. Figure 4 uses
+the selected external bundle directly. The manuscript selection remains
+`analysis/selected_model_bundle.json`; repository-wide production defaults do
+not replace it.
+
 ## Update statistics
 
 ```sh
@@ -118,8 +143,8 @@ To recompute them through the current Figure 2 code and refresh the macros:
 make -C manuscript empirical-stats
 ```
 
-This requires the local `yatesfv` Conda environment and the selected empirical
-cache. Methods settings and recording counts are documented in the audit;
+This requires the workspace uv environment and the selected empirical cache.
+Methods settings and recording counts are documented in the audit;
 the generated macros cover the principal reported Figure 2–4 results.
 
 ## Regenerate figures and audit the PDF
@@ -129,7 +154,7 @@ the generated macros cover the principal reported Figure 2–4 results.
 make -C manuscript figures
 
 # Or select individual figures.
-conda run --no-capture-output -n yatesfv python manuscript/render_figures.py 3 4
+uv run --project .. --no-sync python manuscript/render_figures.py 3 4
 
 # Verify generated numbers, compile, and audit the installed figures.
 make -C manuscript audit
@@ -142,7 +167,7 @@ Figure 4 copies the exact illustrative replay from the selected completed
 bundle; rendering does not select a new example. A fresh checkout needs that
 bundle and its referenced local inputs to regenerate the figures. `SCI_PYTHON`
 can override the Makefile's default
-`conda run --no-capture-output -n yatesfv python`.
+`uv run --project ../.. --no-sync python` command.
 
 The driver writes intermediate products to `build/` and installs final PDFs
 under `figures/`. It leaves the completed analysis bundle intact. The first
@@ -184,14 +209,14 @@ are retained in `analysis/stabilization_control/`; the summary is bound by
 `analysis/stabilization_control.json`. Re-render without model inference:
 
 ```sh
-conda run --no-capture-output -n yatesfv python manuscript/render_figures.py stabilization
+uv run --project .. --no-sync python manuscript/render_figures.py stabilization
 ```
 
 For a new replay, use a new output directory and a CUDA-enabled environment:
 
 ```sh
-OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 conda run --no-capture-output -n yatesfv python paper/fig3/run_history_stabilization.py --out-dir outputs/stabilization_control_new --gpu 0
-conda run --no-capture-output -n yatesfv python manuscript/render_stabilization_control.py --inference-dir outputs/stabilization_control_new
+OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 uv run --project .. --no-sync python paper/fig3/run_history_stabilization.py --out-dir outputs/stabilization_control_new --gpu 0
+uv run --project .. --no-sync python manuscript/render_stabilization_control.py --inference-dir outputs/stabilization_control_new
 ```
 
 The replay resumes from a per-session partial cache and checks every current

@@ -23,7 +23,11 @@ class _Stub(Dataset):
         return self.n
 
     def __getitem__(self, i):
-        return {"robs": torch.zeros(self.n_units), "stim": torch.zeros(1, 2, 2)}
+        return {
+            "robs": torch.zeros(self.n_units),
+            "stim": torch.zeros(1, 2, 2),
+            "row": torch.tensor(i),
+        }
 
     def cast(self, dtype, target_keys=None):
         """No-op stand-in for DictDataset.cast."""
@@ -74,6 +78,37 @@ def test_setup_without_test_split_exposes_no_test_datasets(stub_data):
 
     assert dm.train_dsets and dm.val_dsets
     assert dm.test_dsets == {}
+
+
+@pytest.mark.parametrize("distributed", [False, True])
+def test_limited_mixed_validation_represents_every_session(monkeypatch, distributed):
+    dm = _make_dm()
+    dm.name2idx = {f"session{i}": i for i in range(3)}
+    dm.val_dsets = {name: _Stub(100) for name in dm.name2idx}
+
+    monkeypatch.setattr(torch.distributed, "is_initialized", lambda: distributed)
+    if distributed:
+        monkeypatch.setattr(torch.distributed, "get_world_size", lambda: 2)
+        monkeypatch.setattr(torch.distributed, "get_rank", lambda: 0)
+
+    loader = dm.val_dataloader()
+
+    def prefix():
+        items = []
+        for batch_number, groups in enumerate(loader):
+            for group in groups:
+                items.extend(zip(
+                    group["dataset_idx"].tolist(),
+                    group["row"].tolist(),
+                ))
+            if batch_number == 2:
+                break
+        return items
+
+    first = prefix()
+    assert {dataset_idx for dataset_idx, _row in first} == {0, 1, 2}
+    assert len(first) == len(set(first))
+    assert prefix() == first
 
 
 def test_test_dataloader_fails_loudly_when_no_test_split_was_configured(stub_data):

@@ -440,8 +440,32 @@ class MultiDatasetDM(pl.LightningDataModule):
         tagd = [Tag(ds, self.name2idx[n]) for n, ds in dsets.items()]
         cat = torch.utils.data.ConcatDataset(tagd)
 
-        # Distributed path (unchanged)
+        # Validation/test use one seeded permutation without replacement. This
+        # keeps limited prefixes representative while making repeated scoring
+        # deterministic; distributed ranks receive disjoint shards of it.
+        fixed_indices = None
+        if fixed_random:
+            generator = torch.Generator().manual_seed(0)
+            fixed_indices = torch.randperm(len(cat), generator=generator).tolist()
+
         if torch.distributed.is_initialized():
+            if fixed_indices is not None:
+                world_size = torch.distributed.get_world_size()
+                rank = torch.distributed.get_rank()
+                usable = len(fixed_indices) - len(fixed_indices) % world_size
+                sampler = fixed_indices[rank:usable:world_size]
+                return DataLoader(
+                    cat,
+                    batch_size=self.batch,
+                    sampler=sampler,
+                    shuffle=False,
+                    num_workers=self.workers,
+                    pin_memory=True,
+                    drop_last=True,
+                    persistent_workers=self.persistent_workers,
+                    prefetch_factor=self.prefetch_factor,
+                    collate_fn=group_collate,
+                )
             if shuffle and self.enable_curriculum and self.contrast_scores is not None:
                 from torch.utils.data.distributed import DistributedSampler
                 # Keep DistributedSampler for sharding; curriculum weighting handled inside ContrastWeightedSampler
@@ -513,12 +537,13 @@ class MultiDatasetDM(pl.LightningDataModule):
                 collate_fn=None,
             )
         else:
-            # Mixed batches (legacy behavior), no curriculum on 1 GPU
+            # Mixed training keeps ordinary epoch shuffling. Evaluation uses
+            # the fixed nonrepeating permutation built above.
             return DataLoader(
                 cat,
                 batch_size=self.batch,
-                sampler=None,
-                shuffle=shuffle,
+                sampler=fixed_indices,
+                shuffle=shuffle if fixed_indices is None else False,
                 num_workers=self.workers,
                 pin_memory=True,
                 drop_last=True,
