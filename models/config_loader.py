@@ -230,6 +230,8 @@ def validate_config(config: ConfigDict) -> None:
     for component in ['frontend', 'convnet', 'recurrent', 'readout']:
         if component in config:
             validate_component_config(component, config[component])
+    if 'phase_readout' in config:
+        validate_component_config('readout', config['phase_readout'])
 
 def validate_component_config(component_name: str, component_config: ConfigDict) -> None:
     """
@@ -253,9 +255,12 @@ def validate_component_config(component_name: str, component_config: ConfigDict)
     # Validate component types
     valid_types = {
         'frontend': {'da', 'conv', 'temporal_basis', 'adapter', 'none'},
-        'convnet': {'densenet', 'conv', 'resnet', 'none'},
+        'convnet': {'densenet', 'conv', 'resnet', 'dekel', 'none'},
         'recurrent': {'convlstm', 'convgru', 'none'},
-        'readout': {'gaussian', 'gaussianei', 'linear'}
+        'readout': {
+            'gaussian', 'sparse_gaussian', 'sparse_gaussian_low_rank',
+            'gaussianei', 'linear'
+        }
     }
     
     if component_name in valid_types:

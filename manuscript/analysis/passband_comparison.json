@@ -1,0 +1,11 @@
+{
+  "checkpoint_sha256": "e70f287462155607a96c7d23d9d56e347111319aa48cafd3f54fe88dd4484cb9",
+  "summary": "manuscript/analysis/passband_results/summary.json",
+  "summary_sha256": "a9e53a11a5b389f3f789f39b869767ac5bc7ab1851c1e3ade57c12a56bab1316",
+  "scope": "Text-only comparison on existing Figure 4 caches; no change to figures or selected twin.",
+  "interpretation": "Raw engagement adds predictive value beyond movement class and flexible path length. On the fixed image ensemble, total-power-normalized overlap adds a modest SSI increment beyond class, path and total dynamic power; the rate interval includes zero. Tuning specificity and generalization across scenes remain unresolved.",
+  "normalized_overlap": {
+    "summary": "manuscript/analysis/passband_results/normalized_overlap/summary.json",
+    "summary_sha256": "4d43f586927d794298a0cbbf745817fae5fe042158a99ba66e28e17d337e1a0c"
+  }
+}

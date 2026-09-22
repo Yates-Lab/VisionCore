@@ -61,7 +61,18 @@ def resolve_split_fractions(dataset_config):
     return train_fraction, test_fraction
 
 
-def get_embedded_datasets(sess, types=None, keys_lags=None, train_val_split=None, cids=None, seed=1002, pre_func=None, test_split=None, **kwargs):
+def get_embedded_datasets(
+    sess,
+    types=None,
+    keys_lags=None,
+    train_val_split=None,
+    cids=None,
+    seed=1002,
+    pre_func=None,
+    test_split=None,
+    train_all_types=None,
+    **kwargs,
+):
     """
     Create train and validation datasets from multiple dataset types with time embedding.
 
@@ -91,6 +102,12 @@ def get_embedded_datasets(sess, types=None, keys_lags=None, train_val_split=None
         Fraction of trials to hold out as a third, test split. When None
         (default) the two-way splitter runs and only train/val are returned,
         which is the path every existing checkpoint was trained under.
+    train_all_types : sequence of str, optional
+        Physical stimulus-bank names whose complete valid index set should be
+        exposed to the training dataset. Validation/test indices are left
+        unchanged, so this is an explicit descriptive-fit diagnostic rather
+        than a generalization protocol. The default is empty and leaves every
+        historical split byte-identical.
 
     Returns
     -------
@@ -139,6 +156,19 @@ def get_embedded_datasets(sess, types=None, keys_lags=None, train_val_split=None
     for iD, dset in enumerate(dsets):
         print(f'{types[iD]} dataset size: {len(dset_inds[iD])} / {len(dset)} ({len(dset_inds[iD])/len(dset)*100:.2f}%)')
 
+    train_all_types = {str(name) for name in (train_all_types or [])}
+    available_names = {
+        str(dset.metadata.get("name"))
+        for dset in dsets
+        if dset.metadata.get("name") is not None
+    }
+    unknown_train_all = train_all_types - available_names
+    if unknown_train_all:
+        raise ValueError(
+            "train_all_types names are absent from the loaded stimulus banks: "
+            f"{sorted(unknown_train_all)}"
+        )
+
     # Split indices into training and validation sets by trial
     train_inds, val_inds, test_inds = [], [], []
     for iD, dset in enumerate(dsets):
@@ -150,6 +180,11 @@ def get_embedded_datasets(sess, types=None, keys_lags=None, train_val_split=None
             train_inds_, val_inds_, test_inds_ = split_inds_by_trial_train_val_test(
                 dset, dset_inds[iD], train_val_split, val_split, seed)
             test_inds.append(test_inds_)
+        if str(dset.metadata.get("name")) in train_all_types:
+            # Deliberate leakage for a descriptive capture assay: fit all
+            # physical repeats but retain the ordinary validation/test views
+            # as diagnostics. Never enable this in a generalization claim.
+            train_inds_ = dset_inds[iD]
         train_inds.append(train_inds_)
         val_inds.append(val_inds_)
 
@@ -435,6 +470,16 @@ def prepare_data(dataset_config: Dict[str, Any], strict: bool = True,
     # -- unpack ----------------------------------------------------------------
     sess_name  = dataset_config["session"]
     dset_types = dataset_config["types"]
+    train_all_types = {
+        str(name)
+        for name in dataset_config.get("train_all_stimulus_types", [])
+    }
+    unknown_train_all = train_all_types - {str(name) for name in dset_types}
+    if unknown_train_all:
+        raise ValueError(
+            "train_all_stimulus_types names are absent from the configured "
+            f"stimulus banks: {sorted(unknown_train_all)}"
+        )
     transforms  = dataset_config.get("transforms", {})
     datafilters = dataset_config.get("datafilters", {})
     keys_lags  = dataset_config["keys_lags"]
@@ -608,6 +653,15 @@ def prepare_data(dataset_config: Dict[str, Any], strict: bool = True,
             f"config for session {sess_name!r}; found none. Add one (the "
             f"model-selection protocol declares 0.15) or drop return_test.")
 
+    # A stimulus bank can legitimately be absent from an individual session
+    # (several sessions have no gratings).  Configuration-level validation
+    # above still catches typos, while this intersection applies the all-repeat
+    # override only to banks that were actually loaded for this session.
+    loaded_names = {
+        str(dset.metadata.get("name"))
+        for dset in preprocessed_dsets
+        if dset.metadata.get("name") is not None
+    }
     splits = get_embedded_datasets(
         sess,
         types            = preprocessed_dsets,           # pass in the preprocessed datasets
@@ -617,6 +671,7 @@ def prepare_data(dataset_config: Dict[str, Any], strict: bool = True,
         seed             = dataset_config.get("seed", 1002),
         pre_func         = lambda x: x,          # preprocessing already done
         test_split       = test_fraction,
+        train_all_types  = sorted(train_all_types & loaded_names),
     )
     train_dset, val_dset = splits[0], splits[1]
     test_dset = splits[2] if test_fraction is not None else None

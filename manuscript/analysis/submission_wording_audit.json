@@ -1,0 +1,43 @@
+{
+  "status": "passed",
+  "reviewed_utc": "2026-09-11T16:47:04.899887+00:00",
+  "checkpoint_sha256": "e70f287462155607a96c7d23d9d56e347111319aa48cafd3f54fe88dd4484cb9",
+  "readout_rank": 1,
+  "phase_readout_rank": 0,
+  "verified_generated_statistics": 95,
+  "figure3_checks": {
+    "panel_c_stats": true,
+    "panel_d_stats": true,
+    "panel_e_stats": true
+  },
+  "figure4_checks": {
+    "B": true,
+    "C": true,
+    "D": true,
+    "E": true,
+    "F": true,
+    "G": true,
+    "H": true
+  },
+  "model_parameters": "5,295,486",
+  "statistical_values_unchanged_by_wording_edits": true,
+  "requested_sentence_removed": true,
+  "internal_model_comparison_language_removed": true,
+  "main_tex_sha256": "c562e4871248432d3cb1a66bf8f67323fa4115973c3f791f256817f7d329bf62",
+  "pdf": {
+    "sha256": "b8bf879604ce14a90d52a8c66acfbfa56a8f530072b1721afb6c17efacaaf673",
+    "pages": 40
+  },
+  "figure_audit_sha256": "bdf3955107b7cd99276eb03a28de40af9f30ea68047f1a1fe12cbba63ffcc661",
+  "visual_review_pages": [
+    13,
+    31
+  ],
+  "build_audit_log": "manuscript/build/submission_wording_followup/build_audit.log",
+  "edits": "manuscript/build/submission_wording_followup/edits.json",
+  "wording_replacements_this_review": 13,
+  "previous_editorial_audit": "manuscript/build/submission_wording_followup/before/analysis/submission_wording_audit.json",
+  "scientific_controls_and_limitations_preserved": true,
+  "statistical_macro_occurrences_unchanged": true,
+  "subsequent_coauthor_review": "manuscript/analysis/coauthor_edits.json"
+}

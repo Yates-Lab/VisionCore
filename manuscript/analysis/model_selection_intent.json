@@ -1,0 +1,11 @@
+{
+  "bundle": "outputs/no_phase_readout_comparison_20260910/rank1",
+  "checkpoint_sha256": "e70f287462155607a96c7d23d9d56e347111319aa48cafd3f54fe88dd4484cb9",
+  "readout_rank": 1,
+  "phase_readout_rank": 0,
+  "authorization": "User requested migration of all model-dependent manuscript analyses to completed rank 1 and removal of draft flags after verification.",
+  "status": "completed_and_installed",
+  "requested_utc": "2026-09-11T04:33:26.993698+00:00",
+  "completed_utc": "2026-09-11T07:55:06.367157+00:00",
+  "completion_audit": "manuscript/analysis/model_migration_audit.json"
+}

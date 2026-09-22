@@ -233,6 +233,8 @@ def create_modulator(
 
 READOUTS = {
     'gaussian': readout_modules.DynamicGaussianReadout,
+    'sparse_gaussian': readout_modules.SparseGaussianReadout,
+    'sparse_gaussian_low_rank': readout_modules.SparseGaussianLowRankReadout,
     'linear': readout_modules.FlattenedLinearReadout,
 }
 

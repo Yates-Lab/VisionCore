@@ -26,6 +26,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
@@ -35,8 +36,15 @@ import numpy as np
 from scipy.stats import wilcoxon
 
 from VisionCore.paths import VISIONCORE_ROOT
+from VisionCore.figure_typography import apply_font_floor
 
-from _fig3_data import FIG_DIR, configure_matplotlib, _load_fig2_included_sessions
+from _fig3_data import (
+    CHECKPOINT_PATH,
+    DATASET_CONFIGS_PATH,
+    FIG_DIR,
+    configure_matplotlib,
+    _load_fig2_included_sessions,
+)
 from _fig3_ablation_data import CACHE_PATH as ABLATION_CACHE_PATH
 from _fig3_ablation_data import load_ablation_data
 from _fig3_femfraction import compute_femfraction_data, CONDITIONS as FEM_CONDITIONS
@@ -48,7 +56,7 @@ from generate_fig3a import plot_panel_a
 # stabilized-retina (extraretinal retained) = purple, PSTH = grey.
 INTACT_COLOR = "#1f77b4"
 ABLATED_COLOR = "#d62728"
-STABILIZED_COLOR = "#9467bd"
+STABILIZED_COLOR = "#b97800"
 PSTH_COLOR = "0.55"
 SCATTER_COLOR = "0.35"
 ACCENT = "#c0392b"
@@ -154,23 +162,13 @@ def _box_whisker(ax, groups, positions, colors, *, width=0.55):
     return bp
 
 
-def _sig_bracket(ax, x1, x2, y, p, *, h, gap, color="k", fontsize=7.5,
-                 delta=None):
-    """Significance bracket at height y. Reading upward from the bracket line:
-    optional `delta` (effect-size string; may contain a newline to add a second
-    line below it), then the significance stars. The p-value is intentionally
-    omitted — it is redundant with the stars. `delta` carries the same weight as
-    the stars (matched font/colour). `gap` is the per-line vertical step; the
-    stars clear a multi-line delta. Returns the top y."""
+def _sig_bracket(ax, x1, x2, y, p, *, h, color="k", fontsize=7.5):
+    """Draw significance stars; effect sizes and tests belong in the caption."""
     ax.plot([x1, x1, x2, x2], [y, y + h, y + h, y],
             color=color, lw=0.9, clip_on=False)
     xc = (x1 + x2) / 2
     yc = y + h
-    if delta is not None:
-        ax.text(xc, yc, delta, ha="center", va="bottom",
-                fontsize=fontsize - 0.5, color=color, clip_on=False)
-        yc += gap * (delta.count("\n") + 1)
-    ax.text(xc, yc, _stars(p), ha="center", va="bottom",
+    ax.text(xc, yc, _stars(p), ha="center", va="bottom", linespacing=1.05,
             fontsize=fontsize, color=color, clip_on=False)
     return yc
 
@@ -193,13 +191,6 @@ def _plot_ccnorm_violins(ax, abl):
     m = pop & _finite_mask(intact, ablated, stab)
     gi, ga, gs = intact[m], ablated[m], stab[m]
 
-    # Horizontal dashed guide at each condition's median, spanning the panel so
-    # the three medians can be read off against one another at a glance.
-    for grp, color in zip((gi, ga, gs),
-                          (INTACT_COLOR, ABLATED_COLOR, STABILIZED_COLOR)):
-        ax.axhline(float(np.median(grp)), color=color, lw=0.9,
-                   ls=(0, (4, 3)), alpha=0.55, zorder=1)
-
     _box_whisker(ax, [gi, ga, gs], [0, 1, 2],
                  [INTACT_COLOR, ABLATED_COLOR, STABILIZED_COLOR])
 
@@ -210,18 +201,15 @@ def _plot_ccnorm_violins(ax, abl):
     d_s = float(np.median(gs - gi))   # reafferent ablation cost (stabilized retina)
     pct_z = 100.0 * abs(d_z) / intact_med if intact_med != 0 else np.nan
     pct_s = 100.0 * abs(d_s) / intact_med if intact_med != 0 else np.nan
-    # ccnorm is bounded at 1: keep 1.0 as the top tick but extend the axis so the
-    # two stacked significance connectors sit clear above the distributions.
-    ax.set_ylim(0, 1.42)
-    ax.set_yticks(np.arange(0, 1.001, 0.2))
-    _sig_bracket(ax, 0, 1, 1.02, p_z, h=0.014, gap=0.058,
-                 delta=f"Δ={d_z:+.3f}\n({pct_z:.0f}% of total)")
-    _sig_bracket(ax, 0, 2, 1.24, p_s, h=0.014, gap=0.058,
-                 delta=f"Δ={d_s:+.3f}\n({pct_s:.0f}% of total)")
+    # Zoom to the displayed whiskers and reserve only a narrow bracket band.
+    ax.set_ylim(0.20, 0.97)
+    ax.set_yticks(np.arange(0.2, 0.901, 0.1))
+    _sig_bracket(ax, 0, 1, 0.875, p_z, h=0.009)
+    _sig_bracket(ax, 0, 2, 0.93, p_s, h=0.009)
 
     ax.set_xlim(-0.6, 2.9)
     ax.set_xticks([0, 1, 2])
-    ax.set_xticklabels(["Full", "Retinal\nonly", "Stabilized\nretina"],
+    ax.set_xticklabels(["Full", "Retinal", "Stabilized"], rotation=25, ha="right",
                        fontsize=5.3)
     ax.set_ylabel("Held-out prediction\n(ccnorm)")
     ax.spines["top"].set_visible(False)
@@ -229,6 +217,27 @@ def _plot_ccnorm_violins(ax, abl):
     print(f"Panel C — ccnorm (N={m.sum()}): intact med={intact_med:.3f}, "
           f"zeroed med={np.median(ga):.3f} (Δ={d_z:+.3f}, p={p_z:.2e}), "
           f"stabilized med={np.median(gs):.3f} (Δ={d_s:+.3f}, p={p_s:.2e})")
+    return {
+        "n_units": int(m.sum()),
+        "n_sessions": int(len(np.unique(np.asarray(abl["sessions"])[m]))),
+        "medians": {
+            "intact": intact_med,
+            "zeroed": float(np.median(ga)),
+            "stabilized": float(np.median(gs)),
+        },
+        "contrasts": {
+            "zeroed_vs_intact": {
+                "median_difference": d_z,
+                "percent_of_intact_median": float(pct_z),
+                "wilcoxon_p": float(p_z),
+            },
+            "stabilized_vs_intact": {
+                "median_difference": d_s,
+                "percent_of_intact_median": float(pct_s),
+                "wilcoxon_p": float(p_s),
+            },
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -343,10 +352,9 @@ def _plot_explainable_variance_boxes(ax, abl):
 
     _box_whisker(ax, groups, positions, colors)
 
-    # Panel C's frame and tick spacing, extended downward so the PSTH and
-    # stabilized whisker feet stay inside the axes.
-    ax.set_ylim(-0.3, 1.42)
-    ax.set_yticks(np.arange(-0.2, 1.001, 0.2))
+    # Include all displayed whiskers, with compact headroom for the brackets.
+    ax.set_ylim(-0.25, 0.84)
+    ax.set_yticks(np.arange(-0.2, 0.801, 0.2))
     # Zero is the constant-prediction reference: no captured rate variance.
     # Solid, so it reads as the panel's zero-variance-explained baseline (the
     # dashed grey line above it is the trial-average median).
@@ -356,31 +364,26 @@ def _plot_explainable_variance_boxes(ax, abl):
     # one sits above it.
     psth_median = float(np.median(vals["psth"][m]))
     ax.axhline(psth_median, color="0.55", lw=0.8, ls="--", alpha=0.8, zorder=0)
-    ax.text(3.72, psth_median + 0.02, "trial-average\nmedian", color="0.5",
-            fontsize=4.9, va="bottom", ha="right", clip_on=False)
+    ax.annotate("PSTH median", xy=(3.60, psth_median), xytext=(3.60, .47),
+                ha="right", va="bottom", fontsize=5.3, color="0.4",
+                arrowprops={"arrowstyle": "-", "lw": .6, "color": ".55"})
 
     # Nothing is clipped or folded onto one. The above-reference tail is left off
     # the panel to keep it readable and is disclosed in the caption, the manifest,
     # and the console diagnostics instead.
     above_one = {key: int(np.sum(group > 1)) for key, group in zip(keys, groups)}
 
-    # Stacked just above the whisker tops (~0.75), lowest first. The n.s.
-    # full-vs-ablated bracket carries stars only, so it needs one line of room;
-    # the two significant brackets carry a two-line Δ / % annotation. Each
-    # percentage is scaled by the contrast's own reference condition: the gain
-    # over the trial average is signed and read against the PSTH median, the
-    # stabilization cost against the full twin's median (panel C's convention).
+    # Stars sit above the whiskers; effect sizes and their reference medians
+    # remain in the numerical report and caption.
     ref_median = {key: float(np.median(vals[key][m])) for key in keys}
     contrasts = [
-        # name, x1, x2, first, second, y, reference key, reference label, signed
-        ("ablated_vs_full", 1, 2, "intact", "zeroed", 0.85, None, None, False),
-        ("full_vs_psth", 0, 1, "psth", "intact", 0.98, "psth", "PSTH", True),
-        ("stabilized_vs_full", 1, 3, "intact", "stabilized", 1.19,
-         "intact", "total", False),
+        # name, x1, x2, first, second, y, reference key
+        ("ablated_vs_full", 1, 2, "intact", "zeroed", 0.68, None),
+        ("full_vs_psth", 0, 1, "psth", "intact", 0.735, "psth"),
+        ("stabilized_vs_full", 1, 3, "intact", "stabilized", 0.79, "intact"),
     ]
     contrast_stats = {}
-    for (name, x1, x2, first_key, second_key, y_bracket,
-         ref_key, ref_label, signed) in contrasts:
+    for (name, x1, x2, first_key, second_key, y_bracket, ref_key) in contrasts:
         p_wilcoxon, session_differences = _session_paired_test(
             vals[first_key], vals[second_key], sessions, m
         )
@@ -396,13 +399,10 @@ def _plot_explainable_variance_boxes(ax, abl):
         p = boot["p_boot"]
         delta = float(np.median(vals[second_key][m] - vals[first_key][m]))
         pct = np.nan
-        label = None
         if ref_key is not None:
             denom = ref_median[ref_key]
             pct = 100.0 * delta / denom if denom != 0 else np.nan
-            shown = f"{pct:+.0f}" if signed else f"{abs(pct):.0f}"
-            label = f"Δ={delta:+.3f}\n({shown}% of {ref_label})"
-        _sig_bracket(ax, x1, x2, y_bracket, p, h=0.014, gap=0.058, delta=label)
+        _sig_bracket(ax, x1, x2, y_bracket, p, h=0.014)
         contrast_stats[name] = {
             "median_unit_difference": delta,
             "percent_reference": ref_key,
@@ -417,11 +417,11 @@ def _plot_explainable_variance_boxes(ax, abl):
     ax.set_xlim(-0.6, 3.75)
     ax.set_xticks(positions)
     ax.set_xticklabels([
-        "Trial average\n(LOO PSTH)",
+        "PSTH",
         "Full",
-        "Retinal\nonly",
-        "Stabilized\nretina",
-    ], fontsize=4.9)
+        "Retinal",
+        "Stabilized",
+    ], fontsize=4.9, rotation=25, ha="right")
     ax.set_ylabel("Fraction of conditional rate\nvariance explained")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -630,7 +630,7 @@ def _plot_femfraction(ax, femdata, *, margin=TOST_MARGIN):
     for xb in (band_lo, band_hi):
         ax.plot([xb, xb], [yb0, yb1], color="0.55", lw=0.8, zorder=3)
     ax.text(band_hi + 0.015, 0.5 * (yb0 + yb1),
-            "TOST equiv.\n" rf"zone ($\pm${margin:g})",
+            f"±{margin:g} from\nemp. median",
             ha="left", va="center", fontsize=4.8, color="0.4", linespacing=1.1)
 
     # Median triangles (replacing the empirical dashed line): one per
@@ -653,7 +653,7 @@ def _plot_femfraction(ax, femdata, *, margin=TOST_MARGIN):
     p_stab = float(wilcoxon(d_stab).pvalue) if d_stab.size >= 3 else np.nan
     y_sig = ceiling + 0.26 * head
     _sig_bracket(ax, med["stabilized"], med["emp"], y_sig, p_stab,
-                 h=0.035 * head, gap=0.10 * head, fontsize=7.5)
+                 h=0.035 * head, fontsize=7.5)
     print(f"Panel E — empirical vs Model (stabilized): paired Wilcoxon "
           f"p={p_stab:.2e} (n={int(d_stab.size)}, "
           f"median difference={float(np.median(d_stab)):+.3f})")
@@ -661,7 +661,7 @@ def _plot_femfraction(ax, femdata, *, margin=TOST_MARGIN):
     ax.set_xlim(0, 1)
     ax.set_ylim(0, ylim_top)
     ax.set_yticks(np.arange(0, ceiling + 0.5 * step, step))
-    ax.set_xlabel("Fraction of rate modulation\ndue to FEM ($f_{\\mathrm{FEM}}$)")
+    ax.set_xlabel("FEM fraction of rate modulation")
     ax.set_ylabel("Units")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -670,11 +670,25 @@ def _plot_femfraction(ax, femdata, *, margin=TOST_MARGIN):
                Line2D([0], [0], color=INTACT_COLOR, lw=1.6),
                Line2D([0], [0], color=ABLATED_COLOR, lw=1.6),
                Line2D([0], [0], color=STABILIZED_COLOR, lw=1.6)]
-    labels = ["Empirical", "Model (full)", "Model (retinal-only)", "Model (stabilized)"]
+    labels = ["Empirical", "Full", "Retinal", "Stabilized"]
     leg = ax.legend(handles, labels, frameon=False, fontsize=7.2, loc="upper left",
                     handlelength=1.3, handletextpad=0.5, labelspacing=0.35,
-                    borderaxespad=0.2)
+                    borderaxespad=0.2, ncol=2, columnspacing=0.7)
     leg.set_zorder(7)
+    return {
+        "n_empirical_in_unit_interval": int(e.size),
+        "medians": med,
+        "equivalence_margin": float(margin),
+        "tost": {
+            key: {"p": float(tost[key][0]), "equivalent": bool(tost[key][1])}
+            for key, _label, _color in conds
+        },
+        "stabilized_vs_empirical": {
+            "n": int(d_stab.size),
+            "median_empirical_minus_model": float(np.median(d_stab)),
+            "wilcoxon_p": float(p_stab),
+        },
+    }
 
 
 def _restrict_femdata_to_floor(femdata, included):
@@ -713,11 +727,117 @@ def _load_ablation_cache():
     return load_ablation_data(recompute=False)
 
 
-def _write_sidecars(out_dir, manifest: dict):
-    caption = """Figure 3. A retinal-input digital twin captures FEM-linked V1 response variability.
+def _caption_p(value):
+    value = float(value)
+    if not np.isfinite(value):
+        return "p=n/a"
+    if value < 0.001:
+        return f"p={value:.1e}"
+    return f"p={value:.3f}"
 
-(A) The twin was trained on gaze-contingent gratings, Gabors, and natural images and evaluated on the held-out fixated flashed-image dataset. (B) The convolutional-recurrent twin receives a moving retinal stimulus and separate extraretinal eye-position and eye-velocity inputs. The retinal-only condition zeroes the extraretinal inputs. The stabilized-retina condition retains them but freezes the retinal input for every trial at one session-global gaze centroid. (C) Held-out trial-averaged prediction across 984 cells from 19 sessions. The full and retinal-only twins had median ccnorm values of 0.664 and 0.643 (paired delta -0.014, 2%; Wilcoxon p=1.6e-44). Stabilization reduced the median to 0.504 (delta -0.143, 21%; p=1.2e-136). (D) Single-trial prediction as a fraction of Figure 2's explainable rate variance. Captured count variance, Var(Y)-Var(Y-Yhat), was measured on Figure 2-matched, model-valid bins and divided by each cell's diag(Sigma_rate). Across 972 cells, the trial average, full, retinal-only, and stabilized medians were 0.157, 0.269, 0.246, and 0.042. The full twin exceeded the trial average (delta +0.106, +67% of the trial-average median; session-level Wilcoxon p=0.032); retinal-only prediction did not differ from full (delta -0.014, p=0.35); and stabilization reduced the full score by 72% (delta -0.193, p=3.8e-6). Values above one were retained because the denominator is an estimate rather than a hard bound. (E) FEM modulation fraction, f_FEM (=1-alpha), for the neurons and each twin condition. The empirical, full, retinal-only, and stabilized medians were 0.652, 0.618, 0.631, and 0.196. Paired TOST with a +/-0.1 margin supported equivalence for the full and retinal-only twins (p<1e-29) but not the stabilized twin. The empirical and stabilized estimates differed by a paired median of 0.402 (Wilcoxon p=3.8e-93). Boxes in C and D show the interquartile range with 10th-90th percentile whiskers; triangles in E mark medians.
-"""
+
+def _build_caption(manifest: dict) -> str:
+    model = manifest.get("model", {})
+    family = model.get("family", "unknown")
+    if family == "dekel":
+        architecture = "nonrecurrent, anti-aliased Dekel convolutional twin"
+    else:
+        architecture = "convolutional-recurrent twin"
+    parts = [
+        "Figure 3. A retinal-input digital twin captures FEM-linked V1 response variability.",
+        "(A) The twin was trained on gaze-contingent gratings, Gabors, and natural "
+        "images and evaluated on the held-out fixated flashed-image dataset. "
+        f"(B) The {architecture} receives a moving retinal stimulus and separate "
+        "extraretinal eye-position and eye-velocity inputs. The retinal-only "
+        "condition zeroes the extraretinal inputs; the stabilized-retina condition "
+        "retains them but freezes the retinal input at one session-global gaze centroid.",
+    ]
+    c = manifest.get("panel_c_stats")
+    if c:
+        med = c["medians"]
+        dz = c["contrasts"]["zeroed_vs_intact"]
+        ds = c["contrasts"]["stabilized_vs_intact"]
+        parts.append(
+            f"(C) Held-out trial-averaged prediction across {c['n_units']} cells "
+            f"from {c['n_sessions']} sessions. Median ccnorm was {med['intact']:.3f} "
+            f"for the full twin, {med['zeroed']:.3f} retinal-only "
+            f"(median Δ={dz['median_difference']:+.3f}; "
+            f"{_caption_p(dz['wilcoxon_p'])}), and {med['stabilized']:.3f} after "
+            f"retinal stabilization (Δ={ds['median_difference']:+.3f}; "
+            f"{_caption_p(ds['wilcoxon_p'])})."
+        )
+    d = manifest.get("panel_d_stats")
+    if d:
+        med = {key: value["median"] for key, value in d["conditions"].items()}
+        parts.append(
+            "(D) Single-trial prediction was measured as captured count variance, "
+            "Var(Y)-Var(Y-Yhat), on Figure 2-matched model-valid bins, divided by "
+            "each cell's diag(Sigma_rate). "
+            f"Across {d['n_units']} cells, median fractions for the trial average, "
+            f"full, retinal-only, and stabilized predictions were {med['psth']:.3f}, "
+            f"{med['intact']:.3f}, {med['zeroed']:.3f}, and "
+            f"{med['stabilized']:.3f}, respectively. Values above one were retained "
+            "because the denominator is estimated rather than a hard bound."
+        )
+        for key, label in (("full_vs_psth", "Full minus PSTH"),
+                           ("ablated_vs_full", "Retinal minus full"),
+                           ("stabilized_vs_full", "Stabilized minus full")):
+            contrast = d["contrasts"][key]
+            boot = contrast["bootstrap"]
+            parts.append(
+                f"{label}: median paired Δ={contrast['median_unit_difference']:+.3f}, "
+                f"95% session-cluster bootstrap CI [{boot['ci_low']:+.3f}, {boot['ci_high']:+.3f}], "
+                f"{_caption_p(boot['p_boot'])}."
+            )
+        parts.append("Brackets: * p<0.05, ** p<0.01, *** p<0.001; paired Wilcoxon in C and session-cluster bootstrap in D.")
+    e = manifest.get("panel_e_stats")
+    if e:
+        med = e["medians"]
+        condition_labels = {
+            "intact": "full",
+            "zeroed": "retinal-only",
+            "stabilized": "stabilized",
+        }
+        equivalent = [
+            condition_labels.get(key, key)
+            for key, result in e["tost"].items()
+            if result["equivalent"]
+        ]
+        not_equivalent = [
+            condition_labels.get(key, key)
+            for key, result in e["tost"].items()
+            if not result["equivalent"]
+        ]
+
+        def condition_phrase(labels):
+            if not labels:
+                return "no model prediction"
+            joined = (
+                labels[0]
+                if len(labels) == 1
+                else " and ".join(labels)
+                if len(labels) == 2
+                else f"{', '.join(labels[:-1])}, and {labels[-1]}"
+            )
+            noun = "prediction" if len(labels) == 1 else "predictions"
+            return f"the {joined} {noun}"
+
+        parts.append(
+            "(E) FEM modulation fraction, f_FEM (=1-alpha), had empirical, full, "
+            f"retinal-only, and stabilized medians of {med['emp']:.3f}, "
+            f"{med['intact']:.3f}, {med['zeroed']:.3f}, and "
+            f"{med['stabilized']:.3f}. Paired TOST with a "
+            f"±{e['equivalence_margin']:.2g} margin classified "
+            f"{condition_phrase(equivalent)} as equivalent to the empirical "
+            f"distribution and {condition_phrase(not_equivalent)} as not equivalent. "
+            "Boxes in C and D show the interquartile range with 10th–90th "
+            "percentile whiskers; triangles in E mark medians."
+        )
+    return "\n\n".join(parts) + "\n"
+
+
+def _write_sidecars(out_dir, manifest: dict):
+    caption = _build_caption(manifest)
     (out_dir / "figure3_caption.md").write_text(caption, encoding="utf-8")
 
     readme = """# Figure 3
@@ -747,7 +867,7 @@ fig2 inclusion population.
         json.dump(manifest, f, indent=2, default=str)
 
 
-def compose(*, recompute: bool = False, out_dir=FIG_DIR, dpi: int = 300):
+def compose(*, recompute: bool = False, out_dir=FIG_DIR, dpi: int = 300, layout: str = "production", schematic_no_phase: bool = False):
     configure_matplotlib()
     # Font sizes tuned for the final 8.5-inch-wide (page-width) render. Applied
     # after configure_matplotlib() so only figure 3's main composite is
@@ -760,6 +880,9 @@ def compose(*, recompute: bool = False, out_dir=FIG_DIR, dpi: int = 300):
         "xtick.labelsize": 6.5,
         "ytick.labelsize": 6.5,
         "legend.fontsize": 6.0,
+        # Keep separate input cubes separate in vector exports, so transparent
+        # space between them remains measurable by the manuscript overlap audit.
+        "image.composite_image": False,
     })
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -768,67 +891,77 @@ def compose(*, recompute: bool = False, out_dir=FIG_DIR, dpi: int = 300):
 
     # Panel A is a two-row schematic (aspect ≈ 1.1), so it needs a taller top
     # slot to render wide enough for its architecture labels to breathe.
-    fig = plt.figure(figsize=(8.5, 9.7), constrained_layout=False)
+    fig = plt.figure(figsize=(8.5, 9.6 if layout == "manuscript" else 9.7), constrained_layout=False)
     gs = GridSpec(
         2, 1,
         figure=fig,
         left=0.055,
         right=0.985,
-        bottom=0.052,
-        top=0.955,
-        height_ratios=[2.4, 1.0],
-        hspace=0.11,
+        bottom=0.090,
+        top=0.990,
+        height_ratios=[2.15 if layout == "manuscript" else 2.4, 1.0],
+        hspace=0.095 if layout == "manuscript" else 0.11,
     )
 
     # Row 1. Native schematic (stimulus + architecture), fitted into the slot.
     # The A/B panel letters and the grey divider are drawn inside the schematic
     # (see generate_fig3a._draw_all), so no composite letter is placed here.
     ax_a = fig.add_subplot(gs[0, 0])
-    plot_panel_a(ax=ax_a, assets=assets)
+    if layout == "manuscript":
+        from manuscript_schematic import plot_panel_ab
+        plot_panel_ab(ax_a, assets, no_phase_preview=schematic_no_phase)
+    else:
+        plot_panel_a(ax=ax_a, assets=assets)
 
     # Row 2. Three analysis panels: C/D box-and-whisker, E the FEM-fraction
     # distribution overlay (no marginal axis).
     gs_mid = gs[1, 0].subgridspec(
         1, 5,
-        width_ratios=[0.08, 1.0, 1.28, 1.25, 0.08],
-        wspace=0.5,
+        width_ratios=[0.01, 1.0, 1.28, 1.25, 0.01],
+        wspace=0.65 if layout == "manuscript" else 0.5,
     )
 
     ax_c = fig.add_subplot(gs_mid[0, 1])
     ax_d = fig.add_subplot(gs_mid[0, 2])
     ax_e = fig.add_subplot(gs_mid[0, 3])
 
+    panel_c_stats = None
     panel_d_stats = None
+    panel_e_stats = None
     if abl is not None:
-        _plot_ccnorm_violins(ax_c, abl)
+        panel_c_stats = _plot_ccnorm_violins(ax_c, abl)
         panel_d_stats = _plot_explainable_variance_boxes(ax_d, abl)
         # Panel E on the same fig2 session floor as C/D (>=10 analyzed units).
         included = _load_fig2_included_sessions()
         femdata = {c: _restrict_femdata_to_floor(
-                       compute_femfraction_data(condition=c), included)
+                       compute_femfraction_data(condition=c, refresh=recompute),
+                       included)
                    for c in FEM_CONDITIONS}
-        _plot_femfraction(ax_e, femdata)
+        panel_e_stats = _plot_femfraction(ax_e, femdata)
     else:
         for a in (ax_c, ax_d, ax_e):
             _plot_missing_cache(a)
 
     _standard_panel_heading(ax_c, "C", "Ablations modestly reduce\ntrial-averaged predictions")
-    _standard_panel_heading(ax_d, "D", "Single-trial prediction depends\non retinal image motion")
-    _standard_panel_heading(ax_e, "E", "Reafference reproduces the\nempirical FEM modulation")
+    _standard_panel_heading(ax_d, "D", "Retinal input predicts\nsingle-trial responses")
+    _standard_panel_heading(ax_e, "E", "Retinal input reproduces\nempirical FEM modulation")
 
     # No bbox_inches="tight": keep the canvas at exactly the intended
     # page-width figsize (8.5 in) rather than cropping to the ink bounds.
+    apply_font_floor(fig)
     for ext in ("png", "pdf", "svg"):
         fig.savefig(out_dir / f"figure3.{ext}", dpi=dpi)
 
     manifest = {
         "figure": "figure3",
+        "layout": layout,
+        "schematic_no_phase_preview": schematic_no_phase,
         "analysis_row_cache": str(ABLATION_CACHE_PATH),
         "analysis_row_cache_present": abl is not None,
         "source_script": str(__file__),
         "panel_mapping": {
             "A": "training and test stimuli (schematic provenance row)",
-            "B": "digital-twin architecture schematic",
+            "B": "digital-twin architecture and fixed-weight input interventions",
             "C": "trial-averaged held-out ccnorm: full vs retinal-only (zeroed) "
                  "vs stabilized-retina (extraretinal retained)",
             "D": "captured variance over fig. 2 diag(Crate): leave-one-out "
@@ -836,7 +969,19 @@ def compose(*, recompute: bool = False, out_dir=FIG_DIR, dpi: int = 300):
             "E": "FEM modulation fraction (f_FEM = 1-alpha): neuron distribution "
                  "vs each within-model twin condition, paired TOST equivalence test",
         },
+        "model": {
+            "checkpoint_path": str(CHECKPOINT_PATH),
+            "checkpoint_sha256": hashlib.sha256(
+                Path(CHECKPOINT_PATH).read_bytes()
+            ).hexdigest(),
+            "dataset_configs_path": str(DATASET_CONFIGS_PATH),
+            "family": assets.arch.get("model_family", "unknown"),
+            "sampling_rate_hz": assets.arch.get("sampling_rate"),
+            "history_frames": assets.arch.get("frontend_k"),
+        },
+        "panel_c_stats": panel_c_stats,
         "panel_d_stats": panel_d_stats,
+        "panel_e_stats": panel_e_stats,
     }
     _write_sidecars(out_dir, manifest)
     return fig, manifest
@@ -849,13 +994,19 @@ def parse_args():
     p.add_argument("--out-dir", type=str, default=None,
                    help="Directory for figure outputs (default: canonical fig3 dir).")
     p.add_argument("--dpi", type=int, default=300)
+    p.add_argument("--layout", choices=("production", "manuscript"), default="production")
+    p.add_argument("--schematic-no-phase", action="store_true",
+                   help="Preview the revised no-branch schematic while retaining the selected model's results.")
     return p.parse_args()
 
 
 def main():
     args = parse_args()
     out_dir = FIG_DIR if args.out_dir is None else Path(args.out_dir)
-    fig, _manifest = compose(recompute=args.recompute, out_dir=out_dir, dpi=args.dpi)
+    if args.schematic_no_phase and args.layout != "manuscript":
+        raise ValueError("--schematic-no-phase requires --layout manuscript")
+    fig, _manifest = compose(recompute=args.recompute, out_dir=out_dir, dpi=args.dpi, layout=args.layout,
+                            schematic_no_phase=args.schematic_no_phase)
     plt.close(fig)
     print(f"Saved Figure 3 to: {out_dir}")
 

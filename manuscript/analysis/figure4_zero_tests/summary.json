@@ -1,0 +1,601 @@
+{
+  "checkpoint_sha256": "e70f287462155607a96c7d23d9d56e347111319aa48cafd3f54fe88dd4484cb9",
+  "null": "zero measured-minus-stabilized population effect in each displayed bin or stage",
+  "method": "two-sided percentile-bootstrap sign-tail probabilities; 2*(min(n<=0,n>=0)+1)/(B+1), capped at 1",
+  "multiplicity": "Holm familywise correction across all 32 displayed effects in B, F, and G",
+  "scope": "conditional on the fitted twin, with the same resampling units as the plotted confidence intervals; not training or between-animal uncertainty",
+  "records": [
+    {
+      "panel": "B",
+      "outcome": "rate",
+      "index": 0,
+      "x": 6.806010824802219,
+      "estimate": 2.4352975316967482,
+      "p_raw": 0.0006664445184938354,
+      "ci95": [
+        1.492086839063946,
+        3.476343453248129
+      ],
+      "n_bootstrap": 3000,
+      "seed": "20260823 + 1000*bin",
+      "resampling": "crossed images, fixation histories, and units; measured/stabilized pairing retained",
+      "draws_key": "B_rate",
+      "p_holm": 0.01279744051189762,
+      "significant_positive": true
+    },
+    {
+      "panel": "B",
+      "outcome": "rate",
+      "index": 1,
+      "x": 8.068287080621673,
+      "estimate": 2.994649479457657,
+      "p_raw": 0.0006664445184938354,
+      "ci95": [
+        1.7968887346932647,
+        4.410613016827426
+      ],
+      "n_bootstrap": 3000,
+      "seed": "20260823 + 1000*bin",
+      "resampling": "crossed images, fixation histories, and units; measured/stabilized pairing retained",
+      "draws_key": "B_rate",
+      "p_holm": 0.01279744051189762,
+      "significant_positive": true
+    },
+    {
+      "panel": "B",
+      "outcome": "rate",
+      "index": 2,
+      "x": 8.975602742975392,
+      "estimate": 6.58587012311051,
+      "p_raw": 0.0006664445184938354,
+      "ci95": [
+        4.677379731952832,
+        8.769698034961893
+      ],
+      "n_bootstrap": 3000,
+      "seed": "20260823 + 1000*bin",
+      "resampling": "crossed images, fixation histories, and units; measured/stabilized pairing retained",
+      "draws_key": "B_rate",
+      "p_holm": 0.01279744051189762,
+      "significant_positive": true
+    },
+    {
+      "panel": "B",
+      "outcome": "rate",
+      "index": 3,
+      "x": 10.122840418771922,
+      "estimate": 6.2922162886740605,
+      "p_raw": 0.0006664445184938354,
+      "ci95": [
+        3.9379524556280283,
+        8.965978279244373
+      ],
+      "n_bootstrap": 3000,
+      "seed": "20260823 + 1000*bin",
+      "resampling": "crossed images, fixation histories, and units; measured/stabilized pairing retained",
+      "draws_key": "B_rate",
+      "p_holm": 0.01279744051189762,
+      "significant_positive": true
+    },
+    {
+      "panel": "B",
+      "outcome": "rate",
+      "index": 4,
+      "x": 13.281381303278922,
+      "estimate": 9.491282297016369,
+      "p_raw": 0.0006664445184938354,
+      "ci95": [
+        6.561873342563632,
+        12.66678191070486
+      ],
+      "n_bootstrap": 3000,
+      "seed": "20260823 + 1000*bin",
+      "resampling": "crossed images, fixation histories, and units; measured/stabilized pairing retained",
+      "draws_key": "B_rate",
+      "p_holm": 0.01279744051189762,
+      "significant_positive": true
+    },
+    {
+      "panel": "B",
+      "outcome": "rate",
+      "index": 5,
+      "x": 21.99813358318868,
+      "estimate": 23.159037794441282,
+      "p_raw": 0.0006664445184938354,
+      "ci95": [
+        17.477845661910724,
+        29.68419593799828
+      ],
+      "n_bootstrap": 3000,
+      "seed": "20260823 + 1000*bin",
+      "resampling": "crossed images, fixation histories, and units; measured/stabilized pairing retained",
+      "draws_key": "B_rate",
+      "p_holm": 0.01279744051189762,
+      "significant_positive": true
+    },
+    {
+      "panel": "B",
+      "outcome": "rate",
+      "index": 6,
+      "x": 45.2006809206908,
+      "estimate": 49.58935968283114,
+      "p_raw": 0.0006664445184938354,
+      "ci95": [
+        43.13045491235836,
+        56.20990699946647
+      ],
+      "n_bootstrap": 3000,
+      "seed": "20260823 + 1000*bin",
+      "resampling": "crossed images, fixation histories, and units; measured/stabilized pairing retained",
+      "draws_key": "B_rate",
+      "p_holm": 0.01279744051189762,
+      "significant_positive": true
+    },
+    {
+      "panel": "B",
+      "outcome": "rate",
+      "index": 7,
+      "x": 66.2732017789533,
+      "estimate": 52.3501601231828,
+      "p_raw": 0.0006664445184938354,
+      "ci95": [
+        46.09812465084699,
+        58.80715922990226
+      ],
+      "n_bootstrap": 3000,
+      "seed": "20260823 + 1000*bin",
+      "resampling": "crossed images, fixation histories, and units; measured/stabilized pairing retained",
+      "draws_key": "B_rate",
+      "p_holm": 0.01279744051189762,
+      "significant_positive": true
+    },
+    {
+      "panel": "B",
+      "outcome": "SSI",
+      "index": 0,
+      "x": 6.806010824802219,
+      "estimate": 0.78701751597821,
+      "p_raw": 0.005331556147950683,
+      "ci95": [
+        0.2506019180877739,
+        1.3912078120674838
+      ],
+      "n_bootstrap": 3000,
+      "seed": "20260823 + 1000*bin",
+      "resampling": "crossed images, fixation histories, and units; measured/stabilized pairing retained",
+      "draws_key": "B_SSI",
+      "p_holm": 0.01279744051189762,
+      "significant_positive": true
+    },
+    {
+      "panel": "B",
+      "outcome": "SSI",
+      "index": 1,
+      "x": 8.068287080621673,
+      "estimate": 1.0157252951731253,
+      "p_raw": 0.001999333555481506,
+      "ci95": [
+        0.325738861554799,
+        1.858388866404919
+      ],
+      "n_bootstrap": 3000,
+      "seed": "20260823 + 1000*bin",
+      "resampling": "crossed images, fixation histories, and units; measured/stabilized pairing retained",
+      "draws_key": "B_SSI",
+      "p_holm": 0.01279744051189762,
+      "significant_positive": true
+    },
+    {
+      "panel": "B",
+      "outcome": "SSI",
+      "index": 2,
+      "x": 8.975602742975392,
+      "estimate": 2.1702151000907293,
+      "p_raw": 0.0006664445184938354,
+      "ci95": [
+        1.0568924889529323,
+        3.32881310863844
+      ],
+      "n_bootstrap": 3000,
+      "seed": "20260823 + 1000*bin",
+      "resampling": "crossed images, fixation histories, and units; measured/stabilized pairing retained",
+      "draws_key": "B_SSI",
+      "p_holm": 0.01279744051189762,
+      "significant_positive": true
+    },
+    {
+      "panel": "B",
+      "outcome": "SSI",
+      "index": 3,
+      "x": 10.122840418771922,
+      "estimate": 2.392007344671008,
+      "p_raw": 0.0006664445184938354,
+      "ci95": [
+        1.1411961556831671,
+        3.886542115821858
+      ],
+      "n_bootstrap": 3000,
+      "seed": "20260823 + 1000*bin",
+      "resampling": "crossed images, fixation histories, and units; measured/stabilized pairing retained",
+      "draws_key": "B_SSI",
+      "p_holm": 0.01279744051189762,
+      "significant_positive": true
+    },
+    {
+      "panel": "B",
+      "outcome": "SSI",
+      "index": 4,
+      "x": 13.281381303278922,
+      "estimate": 3.3358235647042163,
+      "p_raw": 0.0006664445184938354,
+      "ci95": [
+        1.7785078150241465,
+        5.321630406875774
+      ],
+      "n_bootstrap": 3000,
+      "seed": "20260823 + 1000*bin",
+      "resampling": "crossed images, fixation histories, and units; measured/stabilized pairing retained",
+      "draws_key": "B_SSI",
+      "p_holm": 0.01279744051189762,
+      "significant_positive": true
+    },
+    {
+      "panel": "B",
+      "outcome": "SSI",
+      "index": 5,
+      "x": 21.99813358318868,
+      "estimate": 8.958072458739782,
+      "p_raw": 0.0006664445184938354,
+      "ci95": [
+        5.360988611742595,
+        13.1910217961547
+      ],
+      "n_bootstrap": 3000,
+      "seed": "20260823 + 1000*bin",
+      "resampling": "crossed images, fixation histories, and units; measured/stabilized pairing retained",
+      "draws_key": "B_SSI",
+      "p_holm": 0.01279744051189762,
+      "significant_positive": true
+    },
+    {
+      "panel": "B",
+      "outcome": "SSI",
+      "index": 6,
+      "x": 45.2006809206908,
+      "estimate": 18.16258851799222,
+      "p_raw": 0.0006664445184938354,
+      "ci95": [
+        11.718582685725854,
+        25.44239789015737
+      ],
+      "n_bootstrap": 3000,
+      "seed": "20260823 + 1000*bin",
+      "resampling": "crossed images, fixation histories, and units; measured/stabilized pairing retained",
+      "draws_key": "B_SSI",
+      "p_holm": 0.01279744051189762,
+      "significant_positive": true
+    },
+    {
+      "panel": "B",
+      "outcome": "SSI",
+      "index": 7,
+      "x": 66.2732017789533,
+      "estimate": 18.778383906775147,
+      "p_raw": 0.0006664445184938354,
+      "ci95": [
+        12.206012844035143,
+        26.367297964659873
+      ],
+      "n_bootstrap": 3000,
+      "seed": "20260823 + 1000*bin",
+      "resampling": "crossed images, fixation histories, and units; measured/stabilized pairing retained",
+      "draws_key": "B_SSI",
+      "p_holm": 0.01279744051189762,
+      "significant_positive": true
+    },
+    {
+      "panel": "F",
+      "outcome": "rate",
+      "index": 0,
+      "x": 10.0,
+      "estimate": 1.7226743577965433,
+      "p_raw": 0.0003999200159968006,
+      "ci95": [
+        1.6231222484847667,
+        1.8437990727494242
+      ],
+      "n_bootstrap": 5000,
+      "seed": 20260825,
+      "resampling": "units, then fixation histories within each unit; fixed image ensemble",
+      "draws_key": "F_rate",
+      "p_holm": 0.01279744051189762,
+      "significant_positive": true
+    },
+    {
+      "panel": "F",
+      "outcome": "rate",
+      "index": 1,
+      "x": 30.0,
+      "estimate": 3.8914433840675304,
+      "p_raw": 0.0003999200159968006,
+      "ci95": [
+        3.7267115650456746,
+        4.174941491096547
+      ],
+      "n_bootstrap": 5000,
+      "seed": 20260825,
+      "resampling": "units, then fixation histories within each unit; fixed image ensemble",
+      "draws_key": "F_rate",
+      "p_holm": 0.01279744051189762,
+      "significant_positive": true
+    },
+    {
+      "panel": "F",
+      "outcome": "rate",
+      "index": 2,
+      "x": 50.0,
+      "estimate": 8.991711381932925,
+      "p_raw": 0.0003999200159968006,
+      "ci95": [
+        8.42233412539435,
+        9.48699728158854
+      ],
+      "n_bootstrap": 5000,
+      "seed": 20260825,
+      "resampling": "units, then fixation histories within each unit; fixed image ensemble",
+      "draws_key": "F_rate",
+      "p_holm": 0.01279744051189762,
+      "significant_positive": true
+    },
+    {
+      "panel": "F",
+      "outcome": "rate",
+      "index": 3,
+      "x": 70.0,
+      "estimate": 29.41576676779851,
+      "p_raw": 0.0003999200159968006,
+      "ci95": [
+        27.525797162059106,
+        31.21322206365199
+      ],
+      "n_bootstrap": 5000,
+      "seed": 20260825,
+      "resampling": "units, then fixation histories within each unit; fixed image ensemble",
+      "draws_key": "F_rate",
+      "p_holm": 0.01279744051189762,
+      "significant_positive": true
+    },
+    {
+      "panel": "F",
+      "outcome": "rate",
+      "index": 4,
+      "x": 90.0,
+      "estimate": 63.82505845481799,
+      "p_raw": 0.0003999200159968006,
+      "ci95": [
+        59.12410815227452,
+        67.81954422887286
+      ],
+      "n_bootstrap": 5000,
+      "seed": 20260825,
+      "resampling": "units, then fixation histories within each unit; fixed image ensemble",
+      "draws_key": "F_rate",
+      "p_holm": 0.01279744051189762,
+      "significant_positive": true
+    },
+    {
+      "panel": "F",
+      "outcome": "SSI",
+      "index": 0,
+      "x": 10.0,
+      "estimate": 0.43463692219552313,
+      "p_raw": 0.0003999200159968006,
+      "ci95": [
+        0.3053069806405125,
+        0.5336731847167161
+      ],
+      "n_bootstrap": 5000,
+      "seed": 20260826,
+      "resampling": "units, then fixation histories within each unit; fixed image ensemble",
+      "draws_key": "F_SSI",
+      "p_holm": 0.01279744051189762,
+      "significant_positive": true
+    },
+    {
+      "panel": "F",
+      "outcome": "SSI",
+      "index": 1,
+      "x": 30.0,
+      "estimate": 1.1770425881635562,
+      "p_raw": 0.0003999200159968006,
+      "ci95": [
+        0.8567762418745158,
+        1.3047071171206783
+      ],
+      "n_bootstrap": 5000,
+      "seed": 20260826,
+      "resampling": "units, then fixation histories within each unit; fixed image ensemble",
+      "draws_key": "F_SSI",
+      "p_holm": 0.01279744051189762,
+      "significant_positive": true
+    },
+    {
+      "panel": "F",
+      "outcome": "SSI",
+      "index": 2,
+      "x": 50.0,
+      "estimate": 2.3532942669314107,
+      "p_raw": 0.0003999200159968006,
+      "ci95": [
+        1.7181520053310266,
+        2.674446435699262
+      ],
+      "n_bootstrap": 5000,
+      "seed": 20260826,
+      "resampling": "units, then fixation histories within each unit; fixed image ensemble",
+      "draws_key": "F_SSI",
+      "p_holm": 0.01279744051189762,
+      "significant_positive": true
+    },
+    {
+      "panel": "F",
+      "outcome": "SSI",
+      "index": 3,
+      "x": 70.0,
+      "estimate": 8.11591595004585,
+      "p_raw": 0.0003999200159968006,
+      "ci95": [
+        6.895779124171452,
+        9.493384292351006
+      ],
+      "n_bootstrap": 5000,
+      "seed": 20260826,
+      "resampling": "units, then fixation histories within each unit; fixed image ensemble",
+      "draws_key": "F_SSI",
+      "p_holm": 0.01279744051189762,
+      "significant_positive": true
+    },
+    {
+      "panel": "F",
+      "outcome": "SSI",
+      "index": 4,
+      "x": 90.0,
+      "estimate": 16.556086051308032,
+      "p_raw": 0.0003999200159968006,
+      "ci95": [
+        14.42495873947302,
+        19.182921622971776
+      ],
+      "n_bootstrap": 5000,
+      "seed": 20260826,
+      "resampling": "units, then fixation histories within each unit; fixed image ensemble",
+      "draws_key": "F_SSI",
+      "p_holm": 0.01279744051189762,
+      "significant_positive": true
+    },
+    {
+      "panel": "G",
+      "outcome": "temporal",
+      "index": 0,
+      "x": 0.0,
+      "estimate": 8.923971801996231,
+      "p_raw": 0.0003999200159968006,
+      "ci95": [
+        8.639551773667336,
+        9.23843938857317
+      ],
+      "n_bootstrap": 5000,
+      "seed": 20260845,
+      "resampling": "units; fixed high-engagement movie ensemble",
+      "draws_key": "G_temporal",
+      "p_holm": 0.01279744051189762,
+      "significant_positive": true
+    },
+    {
+      "panel": "G",
+      "outcome": "temporal",
+      "index": 1,
+      "x": 1.0,
+      "estimate": 34.788725994285414,
+      "p_raw": 0.0003999200159968006,
+      "ci95": [
+        33.51065088269024,
+        35.81589587887947
+      ],
+      "n_bootstrap": 5000,
+      "seed": 20260845,
+      "resampling": "units; fixed high-engagement movie ensemble",
+      "draws_key": "G_temporal",
+      "p_holm": 0.01279744051189762,
+      "significant_positive": true
+    },
+    {
+      "panel": "G",
+      "outcome": "temporal",
+      "index": 2,
+      "x": 2.0,
+      "estimate": 66.62102283917193,
+      "p_raw": 0.0003999200159968006,
+      "ci95": [
+        63.57635711503462,
+        70.13189590746151
+      ],
+      "n_bootstrap": 5000,
+      "seed": 20260845,
+      "resampling": "units; fixed high-engagement movie ensemble",
+      "draws_key": "G_temporal",
+      "p_holm": 0.01279744051189762,
+      "significant_positive": true
+    },
+    {
+      "panel": "G",
+      "outcome": "SSI",
+      "index": 0,
+      "x": 0.0,
+      "estimate": 0.0006490917876362801,
+      "p_raw": 0.0003999200159968006,
+      "ci95": [
+        0.0004786213394254446,
+        0.0008150488603860124
+      ],
+      "n_bootstrap": 5000,
+      "seed": 20261845,
+      "resampling": "units; fixed high-engagement movie ensemble",
+      "draws_key": "G_SSI",
+      "p_holm": 0.01279744051189762,
+      "significant_positive": true
+    },
+    {
+      "panel": "G",
+      "outcome": "SSI",
+      "index": 1,
+      "x": 1.0,
+      "estimate": 0.019862137734889984,
+      "p_raw": 0.0003999200159968006,
+      "ci95": [
+        0.01832636073231697,
+        0.021582096815109253
+      ],
+      "n_bootstrap": 5000,
+      "seed": 20261845,
+      "resampling": "units; fixed high-engagement movie ensemble",
+      "draws_key": "G_SSI",
+      "p_holm": 0.01279744051189762,
+      "significant_positive": true
+    },
+    {
+      "panel": "G",
+      "outcome": "SSI",
+      "index": 2,
+      "x": 2.0,
+      "estimate": 0.03279036656022072,
+      "p_raw": 0.0003999200159968006,
+      "ci95": [
+        0.0293656587600708,
+        0.036138296127319336
+      ],
+      "n_bootstrap": 5000,
+      "seed": 20261845,
+      "resampling": "units; fixed high-engagement movie ensemble",
+      "draws_key": "G_SSI",
+      "p_holm": 0.01279744051189762,
+      "significant_positive": true
+    }
+  ],
+  "draws_sha256": "5eddb52c7bc5e59a0dcad8541aeb271912a67ed1e2776e788fc58090744529af",
+  "source_sha256": {
+    "manuscript/analysis/selected_model_bundle.json": "bb7001b1ddcce8633c51331d96e30f4ed035cf845c9586dad1e3fb709265d670",
+    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/production_figure4/figure/summary.json": "370ccc113e3336b52fb70ff70552c351af55b375204e3370cd55f47c5761bd26",
+    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/response_matrix_40img_x_200fix/merged/summary.json": "bb4275ea68559e620b17e38657759d457f54efe4df5d4647f98822facb00ee4b",
+    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/response_matrix_40img_x_200fix/merged/mean_rate_matrix.npy": "973a2ded0e18862549c2d8bb1713ade7ad1b888a41e064cc412aaddd5a7b8d88",
+    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/response_matrix_40img_x_200fix/merged/ssi_matrix.npy": "e76c81c71e86af87e55142a7893571a5aa2ddcfdcf3c869a25ad0e7e6ce9752a",
+    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/response_matrix_40img_x_200fix/merged/expected_spikes_matrix.npy": "9b3ec5287bc2217cc7627af3002c2c4e8cf242a72a9b0ca01db1906d747565fe",
+    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/response_matrix_40img_x_200fix/merged/stabilized_mean_rate_by_image.npy": "0b15a03f388e9825217918e1583e0f250052c3171b31bcbff91f4acad6f7add8",
+    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/response_matrix_40img_x_200fix/merged/stabilized_ssi_by_image.npy": "434ee8861af6709130527af11ee08a3d9eed44d01dd7135df6e0b177222e3b85",
+    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/response_matrix_40img_x_200fix/merged/stabilized_expected_spikes_by_image.npy": "8f59a64c9fbe18058f853dd6192fa82416ab973ab88fd50db71e473b15bcbe01",
+    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/response_matrix_40img_x_200fix/merged/trace_feature_table.csv": "5efba6029e6e86db9d121dc5cf4bad3885167b1384da3c06f81f88332f72f0c9",
+    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/matrix_spectral_replay/shard_00/causal_chain_shard.npz": "f54463df8ea4b9e41f78b87c15387014c1124d09f5dfbc55879aecae56fd80d2",
+    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/matrix_spectral_replay/shard_01/causal_chain_shard.npz": "5182d84dddf51b87daa56da18bad497b526fea568977b72973c613800391d488",
+    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/top_passband_stage_trajectory_10img_x_10fix/top_passband_stage_trajectory.npz": "e9acf077b4c1c178c330a51d0470d5266b1c9fbb81db7429e4c20238f43e3afe"
+  }
+}

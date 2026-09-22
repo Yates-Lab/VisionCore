@@ -76,7 +76,10 @@ class MultiDatasetDM(pl.LightningDataModule):
     def __init__(self, cfg_dir: str, max_ds: int, batch: int,
                  workers: int, steps_per_epoch: int, enable_curriculum: bool = False,
                  dset_dtype: str = 'uint8', homogeneous_batches: bool = False,
-                 persistent_workers: Optional[bool] = None, prefetch_factor: Optional[int] = None):
+                 persistent_workers: Optional[bool] = None, prefetch_factor: Optional[int] = None,
+                 stimulus_sampling_weights: Optional[Dict[str, float]] = None,
+                 dataset_sampling: str = "proportional",
+                 selected_sessions: Optional[list[str]] = None):
         super().__init__()
         self.cfg_dir = cfg_dir
         self.max_ds = max_ds
@@ -88,6 +91,20 @@ class MultiDatasetDM(pl.LightningDataModule):
         self.contrast_scores = None
         self.name2idx = None
         self.homogeneous_batches = bool(homogeneous_batches)
+        self.dataset_sampling = str(dataset_sampling)
+        if self.dataset_sampling not in {"proportional", "uniform"}:
+            raise ValueError(
+                "dataset_sampling must be 'proportional' or 'uniform'"
+            )
+        self.selected_sessions = (
+            None if selected_sessions is None else list(selected_sessions)
+        )
+        self.stimulus_sampling_weights = {
+            str(name): float(weight)
+            for name, weight in (stimulus_sampling_weights or {}).items()
+        }
+        if any(weight <= 0 for weight in self.stimulus_sampling_weights.values()):
+            raise ValueError("stimulus sampling weights must all be positive")
 
         # Loader performance knobs (sane defaults for single-GPU throughput)
         if persistent_workers is None:
@@ -127,7 +144,7 @@ class MultiDatasetDM(pl.LightningDataModule):
         # Transforms that are safe to use with uint8 storage
         # - pixelnorm: will be removed and applied on-the-fly during serving
         # - unsqueeze: just adds a dimension, doesn't modify data
-        ALLOWED_TRANSFORMS = {'pixelnorm', 'unsqueeze'}
+        ALLOWED_TRANSFORMS = {'pixelnorm', 'center_crop', 'unsqueeze'}
 
         transforms = cfg['transforms']
         for transform_key, transform_spec in transforms.items():
@@ -167,6 +184,15 @@ class MultiDatasetDM(pl.LightningDataModule):
         # cfg_dir should now point to a parent config file (e.g., multi_basic_120_backimage_all.yaml)
         self.cfgs = load_dataset_configs(self.cfg_dir)
 
+        if self.selected_sessions is not None:
+            requested = list(dict.fromkeys(self.selected_sessions))
+            available = {str(cfg["session"]) for cfg in self.cfgs}
+            missing = sorted(set(requested) - available)
+            if missing:
+                raise ValueError(f"Requested sessions are absent: {missing}")
+            by_name = {str(cfg["session"]): cfg for cfg in self.cfgs}
+            self.cfgs = [by_name[name] for name in requested]
+
         # Limit to max_ds datasets
         self.cfgs = self.cfgs[:self.max_ds]
 
@@ -185,11 +211,12 @@ class MultiDatasetDM(pl.LightningDataModule):
 
             if self.dset_dtype == 'uint8':
                 # Path 1: uint8 storage (current behavior)
-                # Check for non-pixelnorm/unsqueeze transforms
+                # Center-cropping is dtype preserving and safe before the
+                # on-the-fly pixel normalization.
                 if self._check_for_non_pixelnorm_transforms(cfg):
                     raise ValueError(
-                        f"Dataset '{name}' has transforms other than pixelnorm/unsqueeze, "
-                        f"but dset_dtype='uint8' only supports pixelnorm and unsqueeze. "
+                        f"Dataset '{name}' has transforms outside pixelnorm/center_crop/unsqueeze, "
+                        f"but dset_dtype='uint8' only supports those operations. "
                         f"Use dset_dtype='bfloat16' or 'float32' to enable other transforms."
                     )
 
@@ -201,6 +228,14 @@ class MultiDatasetDM(pl.LightningDataModule):
                 else:
                     tr, va, _ = prepare_data(cfg, strict=True)
                     te = None
+
+                # Session files may store integer-valued pixels as float32.
+                # Convert the shared backing tensors so uint8 mode actually
+                # receives its intended memory reduction.
+                tr.cast(torch.uint8, target_keys=['stim'])
+                va.cast(torch.uint8, target_keys=['stim'])
+                if te is not None:
+                    te.cast(torch.uint8, target_keys=['stim'])
 
                 # Wrap with Float32View for on-the-fly normalization
                 self.train_dsets[name] = Float32View(tr, norm_removed, float16=False)
@@ -239,10 +274,64 @@ class MultiDatasetDM(pl.LightningDataModule):
             self.name2idx[name] = idx
 
         print(f"✓ loaded {len(self.train_dsets)} datasets (dtype: {self.dset_dtype})")
+        if self.homogeneous_batches:
+            print(f"Training dataset sampling: {self.dataset_sampling}")
+
+        self.stimulus_sampling_scores = self._build_stimulus_sampling_scores()
+        if self.stimulus_sampling_scores is not None:
+            print(
+                "Training stimulus sampling weights: "
+                f"{self.stimulus_sampling_weights}"
+            )
 
         # Precompute contrast scores for curriculum learning
         if self.enable_curriculum:
             self._precompute_contrast_scores()
+
+    def _build_stimulus_sampling_scores(self):
+        """Return per-row weights for named physical stimulus banks.
+
+        ``CombinedEmbeddedDataset.inds[:, 0]`` stores the bank identity for
+        every exposed sample.  Using it here changes how often a bank is seen,
+        unlike a loss multiplier, while leaving validation sampling untouched.
+        """
+        if not self.stimulus_sampling_weights:
+            return None
+
+        available_types = {
+            str(type_name)
+            for cfg in self.cfgs
+            for type_name in cfg.get("types", [])
+        }
+        unknown = set(self.stimulus_sampling_weights) - available_types
+        if unknown:
+            raise ValueError(
+                "stimulus_sampling_weights names are absent from every dataset: "
+                f"{sorted(unknown)}"
+            )
+
+        scores = {}
+        for cfg, name in zip(self.cfgs, self.names):
+            types = [str(value) for value in cfg.get("types", [])]
+
+            dataset = self.train_dsets[name]
+            base = getattr(dataset, "base", dataset)
+            inds = getattr(base, "inds", None)
+            if inds is None or inds.ndim != 2 or inds.shape[1] < 1:
+                raise TypeError(
+                    f"Dataset {name!r} does not expose CombinedEmbeddedDataset.inds"
+                )
+
+            bank_weights = torch.ones(len(types), dtype=torch.float32)
+            for type_index, type_name in enumerate(types):
+                bank_weights[type_index] = self.stimulus_sampling_weights.get(
+                    type_name, 1.0
+                )
+            bank_index = inds[:, 0].to(dtype=torch.long, device="cpu")
+            if bank_index.numel() and int(bank_index.max()) >= len(bank_weights):
+                raise IndexError(f"Stimulus bank index exceeds types for {name!r}")
+            scores[name] = bank_weights[bank_index]
+        return scores
 
     def _precompute_contrast_scores(self):
         """
@@ -311,7 +400,13 @@ class MultiDatasetDM(pl.LightningDataModule):
         print(f"Computed contrast for {total_frames:,} frames in {elapsed:.2f} seconds")
         print(f"Global median contrast: {global_median:.3f}, normalized to 1.0")
 
-    def _mk_loader(self, dsets: Dict[str, Dataset], shuffle: bool):
+    def _mk_loader(
+        self,
+        dsets: Dict[str, Dataset],
+        shuffle: bool,
+        *,
+        fixed_random: bool = False,
+    ):
         """
         Create a DataLoader for the given datasets.
 
@@ -400,10 +495,13 @@ class MultiDatasetDM(pl.LightningDataModule):
                 self.name2idx,
                 self.batch,
                 contrast_scores=(self.contrast_scores if (shuffle and self.enable_curriculum and self.contrast_scores is not None) else None),
+                sample_scores=(self.stimulus_sampling_scores if shuffle else None),
                 warmup_steps=8000,
                 shuffle=shuffle,
                 drop_last=True,
                 seed=0,
+                fixed_random=fixed_random,
+                dataset_sampling=self.dataset_sampling,
             )
             return DataLoader(
                 cat,
@@ -436,13 +534,11 @@ class MultiDatasetDM(pl.LightningDataModule):
     def val_dataloader(self):
         """Create validation dataloader.
 
-        Note: Validation data is shuffled to ensure all datasets are represented
-        proportionally when using limit_val_batches. This is important when training
-        on multiple datasets with different sizes - without shuffling, datasets that
-        appear later in the concatenated dataset may never be validated if
-        limit_val_batches is set to a small fraction.
+        The homogeneous sampler interleaves a fixed random permutation from
+        every session. Consequently a partial validation prefix is
+        representative, nonrepeating, and unchanged between epochs/re-scores.
         """
-        return self._mk_loader(self.val_dsets, shuffle=True)
+        return self._mk_loader(self.val_dsets, shuffle=False, fixed_random=True)
 
     def test_dataloader(self):
         """Create the held-out test dataloader.
@@ -457,5 +553,4 @@ class MultiDatasetDM(pl.LightningDataModule):
                 "dataset configs (the model-selection protocol declares 0.15) "
                 "and re-run setup(). Refusing to fall back to the validation "
                 "split, which would report selection data as a test score.")
-        return self._mk_loader(self.test_dsets, shuffle=True)
-
+        return self._mk_loader(self.test_dsets, shuffle=False, fixed_random=True)

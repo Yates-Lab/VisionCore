@@ -1,0 +1,82 @@
+# Stage 1 of the production native-240-Hz curriculum.
+#
+# The visual core, behavior pathway, and ordinary Gaussian readouts are trained
+# from scratch using only Poisson spike likelihood, AdamW weight decay, and a
+# weak early-layer spatial Laplacian.  The temporal and stem-spatial frequency
+# masks are architectural anti-aliasing constraints, not fitted targets.
+model_type: v1multi
+sampling_rate: 240
+initial_input_channels: 1
+
+adapter: {type: none, params: {}}
+frontend: {type: none, params: {}}
+
+convnet:
+  type: dekel
+  params:
+    temporal_support: 60
+    temporal_channels: 14
+    spatial_channels: [84, 84, 84]
+    spatial_kernels: [15, 11, 9]
+    norm_groups: [14, 28, 21, 14]
+    normalization:
+      type: groupnorm_lrn_presplit
+      lrn_size: 5
+      lrn_alpha: 0.1
+      lrn_beta: 0.75
+      lrn_k: 1.0
+    input_size: [35, 35]
+    scaffold_size: 9
+    scaffold_mode: nearest
+    pool_norm: 5
+    strict_input_size: true
+    frequency_mask:
+      temporal: true
+      stem_spatial: true
+      hidden_spatial: false
+      window: hann
+      fft_pad: 2
+
+modulator:
+  type: mlp_behavior
+  params:
+    behavior_dim: 42
+    hidden_dims: [128]
+    additive_dim: 64
+    activation: gelu
+    dropout: 0.0
+    input_norm: false
+    use_film: true
+    film_max_gain: 0.5
+
+recurrent: {type: none, params: {}}
+
+readout:
+  type: gaussian
+  params:
+    n_units: 8
+    bias: true
+    initial_std: 0.5
+    initial_mean_scale: 0.1
+
+output_activation: softplus
+
+regularization:
+  - name: first_layer_spatial_smoothness
+    type: laplacian
+    lambda: 1.0e-4
+    apply_to: ["convnet/temporal_conv/conv/weight"]
+    dims: [-2, -1]
+    padding_mode: constant
+    reduction: dekel
+    schedule: {kind: ramp_then_constant, start_epoch: 4, end_epoch: 20}
+  - name: gaussian_width_ceiling
+    type: proximal_clamp_positive
+    lambda: 2.0
+    apply_to: ["readouts/std"]
+    schedule: {kind: constant}
+  - name: gaussian_width_floor
+    type: proximal_clamp_min
+    lambda: 0.5
+    apply_to: ["readouts/std"]
+    schedule: {kind: constant}

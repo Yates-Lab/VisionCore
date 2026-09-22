@@ -5,6 +5,7 @@ These tests avoid loading real sessions: they drive `setup` with a stubbed
 """
 import sys
 import types
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -102,3 +103,38 @@ def test_test_dataloader_is_built_when_configured(stub_data):
 
     loader = dm.test_dataloader()
     assert len(next(iter(loader))) > 0
+
+
+def test_setup_can_select_an_exact_session(stub_data):
+    dm = _make_dm(selected_sessions=["Logan_2020-01-06"])
+    dm.setup()
+    assert dm.names == ["Logan_2020-01-06"]
+    assert set(dm.train_dsets) == {"Logan_2020-01-06"}
+
+
+def test_setup_rejects_unknown_selected_session(stub_data):
+    dm = _make_dm(selected_sessions=["Allen_2099-01-01"])
+    with pytest.raises(ValueError, match="absent"):
+        dm.setup()
+
+
+def test_named_sampling_weight_allows_sessions_without_that_bank():
+    dm = _make_dm(stimulus_sampling_weights={"gratings": 4.0})
+    dm.cfgs = [
+        {"types": ["backimage", "gratings"]},
+        {"types": ["backimage"]},
+    ]
+    dm.names = ["with_gratings", "without_gratings"]
+    dm.train_dsets = {
+        "with_gratings": SimpleNamespace(
+            inds=torch.tensor([[0, 1], [1, 2], [1, 3]])
+        ),
+        "without_gratings": SimpleNamespace(
+            inds=torch.tensor([[0, 4], [0, 5]])
+        ),
+    }
+
+    scores = dm._build_stimulus_sampling_scores()
+
+    assert scores["with_gratings"].tolist() == [1.0, 4.0, 4.0]
+    assert scores["without_gratings"].tolist() == [1.0, 1.0]

@@ -4,6 +4,7 @@ PyTorch Lightning module for multi-dataset neural encoding models.
 
 import os
 import contextlib
+import re
 from pathlib import Path
 
 import torch
@@ -14,6 +15,11 @@ from models.losses import MaskedLoss, PoissonBPSAggregator
 from training.regularizers import create_regularizers, get_excluded_params_for_weight_decay
 from training.schedulers import LinearWarmupCosineAnnealingLR, LinearWarmupCosineAnnealingWarmRestartsLR
 # from schedulefree import AdamWScheduleFree
+
+
+_DATASET_COMPONENT_KEY = re.compile(
+    r"^(adapters|readouts|phase_readouts)\.(\d+)(\..+)$"
+)
 
 def _adamw_param_groups_named(named_params, wd, excluded_names, core_keys=("frontend","convnet","modulator"),
                               core_lr=None, head_lr=1e-3):
@@ -42,6 +48,50 @@ def _adamw_param_groups_named(named_params, wd, excluded_names, core_keys=("fron
     if head_wd: param_groups.append({"params": head_wd, "lr": head_lr,             "weight_decay": wd})
     if head_no: param_groups.append({"params": head_no, "lr": head_lr,             "weight_decay": 0.0})
     return param_groups
+
+
+def set_trainable_model_components(
+    model: nn.Module, component_names
+) -> tuple[int, int]:
+    """Make only the named top-level model components trainable.
+
+    This is intentionally explicit for calibration fits.  In particular, a
+    joint ``readouts`` + ``phase_readouts`` fit can let the established deep
+    head compensate for a stronger phase-preserving branch without changing
+    the visual core or behavior modulator.
+    """
+    if isinstance(component_names, str):
+        component_names = [component_names]
+    requested = tuple(dict.fromkeys(str(value) for value in component_names))
+    allowed = {
+        "adapters",
+        "frontend",
+        "convnet",
+        "modulator",
+        "recurrent",
+        "readouts",
+        "phase_readouts",
+    }
+    unknown = sorted(set(requested) - allowed)
+    if unknown:
+        raise ValueError(f"Unknown trainable model components: {unknown}")
+    if not requested:
+        raise ValueError("trainable_components must not be empty")
+    for component in requested:
+        if not hasattr(model, component) or getattr(model, component) is None:
+            raise ValueError(
+                f"Requested trainable component {component!r} is absent"
+            )
+
+    trainable_count = 0
+    frozen_count = 0
+    for name, parameter in model.named_parameters():
+        root = name.split(".", 1)[0]
+        trainable = root in requested
+        parameter.requires_grad = trainable
+        trainable_count += int(trainable)
+        frozen_count += int(not trainable)
+    return trainable_count, frozen_count
 
 class MultiDatasetModel(pl.LightningModule):
     """
@@ -106,7 +156,10 @@ class MultiDatasetModel(pl.LightningModule):
     def __init__(self, model_cfg: str, cfg_dir: str, lr: float, wd: float,
                  max_ds: int, pretrained_checkpoint: str = None,
                  freeze_vision: bool = False, compile_model: bool = False,
-                 model_config_dict: dict = None):
+                 model_config_dict: dict = None,
+                 pretrained_load_heads: bool = False,
+                 core_lr_scale: float = 1.0,
+                 selected_sessions: list[str] = None):
         super().__init__()
 
         from models.config_loader import load_dataset_configs, load_config
@@ -122,8 +175,10 @@ class MultiDatasetModel(pl.LightningModule):
             self.model_config = load_config(model_cfg)
             print(f"Loading model config from: {model_cfg}")
 
-        # Save hyperparameters - this will save all __init__ arguments
-        self.save_hyperparameters()
+        # The warm-start checkpoint is an initialization input, not a runtime
+        # dependency of the resulting checkpoint.  The complete trained state
+        # is saved below, so do not make future loads re-open the parent file.
+        self.save_hyperparameters(ignore=["pretrained_checkpoint"])
 
         # Override model_config_dict in hparams with the actual config
         # This ensures checkpoints are self-contained
@@ -132,6 +187,15 @@ class MultiDatasetModel(pl.LightningModule):
         # Load dataset configurations from parent config
         # cfg_dir should now point to a parent config file (e.g., multi_basic_120_backimage_all.yaml)
         self.cfgs = load_dataset_configs(cfg_dir)
+
+        if selected_sessions is not None:
+            requested = list(dict.fromkeys(selected_sessions))
+            available = {str(cfg["session"]) for cfg in self.cfgs}
+            missing = sorted(set(requested) - available)
+            if missing:
+                raise ValueError(f"Requested sessions are absent: {missing}")
+            by_name = {str(cfg["session"]): cfg for cfg in self.cfgs}
+            self.cfgs = [by_name[name] for name in requested]
 
         # Limit to max_ds datasets
         self.cfgs = self.cfgs[:max_ds]
@@ -182,14 +246,34 @@ class MultiDatasetModel(pl.LightningModule):
         self.model = base_model
 
         # Load pretrained vision components if specified
+        self._loaded_pretrained_heads = False
+        self._restored_from_checkpoint = False
         if pretrained_checkpoint is not None:
-            self._load_pretrained_components(pretrained_checkpoint, freeze_vision)
+            self._load_pretrained_components(
+                pretrained_checkpoint,
+                freeze_vision,
+                load_heads=pretrained_load_heads,
+            )
+
+        trainable_components = self.model_config.get("trainable_components")
+        if trainable_components is not None:
+            trainable_count, frozen_count = set_trainable_model_components(
+                self.model, trainable_components
+            )
+            label = (
+                "Selected-component fit "
+                f"({', '.join(str(v) for v in trainable_components)})"
+            )
+            print(
+                f"✓ {label}: {trainable_count} trainable and "
+                f"{frozen_count} frozen tensors"
+            )
 
         # Initialize regularization system
         named_params = list(self.model.named_parameters())
         self.reg_terms = create_regularizers(self.model_config, named_params)
 
-        self.core_lr_scaled = lr * self.hparams.get("core_lr_scale", 1.0)
+        self.core_lr_scaled = lr * core_lr_scale
         self.head_lr = lr  # unchanged for dataset heads
         self.log_input = isinstance(self.model.activation, nn.Identity)
 
@@ -207,7 +291,332 @@ class MultiDatasetModel(pl.LightningModule):
             subj = name.split("_")[0]
             self._subject_ds.setdefault(subj, []).append(i)
 
-    def _load_pretrained_components(self, pretrained_checkpoint: str, freeze_vision: bool = False):
+    @staticmethod
+    def _canonical_pretrained_state_dict(state_dict):
+        """Map Lightning/compiled checkpoint keys to inner-model key names."""
+        canonical = {}
+        for key, value in state_dict.items():
+            if key.startswith("model._orig_mod."):
+                key = key[len("model._orig_mod."):]
+            elif key.startswith("model."):
+                key = key[len("model."):]
+            canonical[key] = value
+        return canonical
+
+    @staticmethod
+    def _remap_pretrained_dataset_components(
+        source,
+        source_sessions=None,
+        target_sessions=None,
+    ):
+        """Map indexed per-session tensors by session identity, not list index.
+
+        A selected-session calibration constructs a one-head target model even
+        when its source checkpoint contains all sessions.  Numeric index 0 in
+        those two models generally names different sessions.  Silently using
+        that index can load another animal's readout when unit counts happen to
+        agree, or produce a tensor-size failure when they do not.
+        """
+        if source_sessions is None or target_sessions is None:
+            return dict(source)
+        source_sessions = [str(value) for value in source_sessions]
+        target_sessions = [str(value) for value in target_sessions]
+        if len(source_sessions) != len(set(source_sessions)):
+            raise ValueError("pretrained checkpoint contains duplicate session names")
+        if len(target_sessions) != len(set(target_sessions)):
+            raise ValueError("target model contains duplicate session names")
+        source_index = {session: index for index, session in enumerate(source_sessions)}
+        missing = [session for session in target_sessions if session not in source_index]
+        if missing:
+            raise ValueError(
+                "target sessions are absent from the pretrained checkpoint: "
+                f"{missing}"
+            )
+        target_index = {session: index for index, session in enumerate(target_sessions)}
+
+        remapped = {}
+        for key, value in source.items():
+            match = _DATASET_COMPONENT_KEY.match(key)
+            if match is None:
+                remapped[key] = value
+                continue
+            old_index = int(match.group(2))
+            if old_index >= len(source_sessions):
+                raise IndexError(
+                    f"pretrained key {key!r} exceeds its session table"
+                )
+            session = source_sessions[old_index]
+            if session not in target_index:
+                continue
+            new_key = (
+                f"{match.group(1)}.{target_index[session]}{match.group(3)}"
+            )
+            if new_key in remapped:
+                raise ValueError(f"pretrained remapping produced duplicate key {new_key}")
+            remapped[new_key] = value
+        return remapped
+
+    def _compatible_pretrained_state(
+        self,
+        state_dict,
+        load_heads=False,
+        source_sessions=None,
+        target_sessions=None,
+    ):
+        """Select compatible tensors and migrate Gaussian readouts exactly."""
+        source = MultiDatasetModel._canonical_pretrained_state_dict(state_dict)
+        source = MultiDatasetModel._remap_pretrained_dataset_components(
+            source,
+            source_sessions=source_sessions,
+            target_sessions=target_sessions,
+        )
+        target = self.model.state_dict()
+        prefixes = ["adapters", "frontend", "convnet"]
+        if load_heads:
+            # ``phase_readouts`` is included so a converged shallow branch can
+            # be refined under a new optimizer/sampling schedule.  When the
+            # source predates that branch, the migration below still creates
+            # the exact zero-output initialization from the deep RF location.
+            prefixes.extend([
+                "modulator",
+                "readouts",
+                "phase_readouts",
+            ])
+
+        selected = {}
+        migrated_readouts = set()
+        migrated_low_rank_readouts = set()
+        for key, value in source.items():
+            if not any(key == prefix or key.startswith(prefix + ".") for prefix in prefixes):
+                continue
+            if key not in target or target[key].shape != value.shape:
+                continue
+
+            migrated = value
+            if load_heads and key.startswith("readouts.") and key.endswith("features.weight"):
+                readout_prefix = key.rsplit(".features.weight", 1)[0]
+                target_spatial_key = readout_prefix + ".spatial_weights"
+                source_spatial_key = readout_prefix + ".spatial_weights"
+                if target_spatial_key in target and source_spatial_key not in source:
+                    migrated_readouts.add(readout_prefix)
+            selected[key] = migrated
+
+        # A lower-rank sparse Gaussian is exactly the first factors of a
+        # higher-rank readout. Populate those factors and zero the new channel
+        # factors so an architectural expansion starts with equivalent logits.
+        if load_heads:
+            from models.modules.readout import SparseGaussianLowRankReadout
+
+            for component_name in ("readouts", "phase_readouts"):
+                modules = getattr(self.model, component_name, None)
+                if modules is None:
+                    continue
+                for readout_index, readout in enumerate(modules):
+                    if not isinstance(readout, SparseGaussianLowRankReadout):
+                        continue
+                    prefix = f"{component_name}.{readout_index}"
+                    feature_key = prefix + ".features.weight"
+                    spatial_key = prefix + ".spatial_weights"
+                    if feature_key in selected and spatial_key in selected:
+                        continue
+                    if feature_key not in source:
+                        continue
+                    source_feature = source[feature_key]
+                    if spatial_key in source:
+                        source_spatial = source[spatial_key]
+                    elif component_name == "readouts" and source_feature.shape[0] == readout.n_units:
+                        # Embed an ordinary Gaussian as one sparse factor before
+                        # expanding its rank. Broaden its envelope, compensating
+                        # exactly in the spatial factor and channel weights.
+                        height, width = readout.spatial_shape
+                        std_key = prefix + ".std"
+                        old_std = source[std_key]
+                        new_std = old_std.clamp_min(readout.migration_std_floor)
+                        masks = [
+                            MultiDatasetModel._gaussian_mask_from_parameters(
+                                source[prefix + ".mean"], std,
+                                source[prefix + ".theta"], height, width,
+                            )
+                            for std in (old_std, new_std)
+                        ]
+                        ratio = masks[0] / masks[1].clamp_min(torch.finfo(new_std.dtype).tiny)
+                        norm = ratio.square().sum((-2, -1), keepdim=True).sqrt().clamp_min(1e-12)
+                        source_spatial = (ratio / norm).unsqueeze(1)
+                        source_feature = source_feature * norm.reshape(-1, 1, 1, 1) / readout.output_scale
+                        selected[std_key] = new_std
+                    else:
+                        continue
+                    target_feature = target[feature_key]
+                    target_spatial = target[spatial_key]
+                    if (
+                        source_feature.shape[0] % readout.n_units != 0
+                        or target_feature.shape[0]
+                        != readout.n_units * readout.rank
+                        or source_feature.shape[1:] != target_feature.shape[1:]
+                        or target_spatial.shape
+                        != (readout.n_units, readout.rank, *readout.spatial_shape)
+                    ):
+                        continue
+                    source_rank = source_feature.shape[0] // readout.n_units
+                    if (
+                        source_rank >= readout.rank
+                        or source_spatial.shape
+                        != (readout.n_units, source_rank, *readout.spatial_shape)
+                    ):
+                        continue
+                    embedded_feature = torch.zeros_like(target_feature).reshape(
+                        readout.n_units,
+                        readout.rank,
+                        *target_feature.shape[1:],
+                    )
+                    embedded_spatial = torch.zeros_like(target_spatial)
+                    # Leave a small, distinct spatial seed in dormant factors.
+                    # Their zero channel weights preserve the old logits while
+                    # the nonzero maps give them a gradient on the first update.
+                    # Rescale every retained factor inversely so its product and
+                    # the joint spatial unit norm are both preserved.
+                    source_feature = source_feature.reshape(
+                        readout.n_units,
+                        source_rank,
+                        *source_feature.shape[1:],
+                    )
+                    seed_fraction = 0.05
+                    extras = target_spatial[:, source_rank:].clone()
+                    extras = extras / torch.linalg.vector_norm(
+                        extras, dim=(1, 2, 3), keepdim=True
+                    ).clamp_min(1.0e-12)
+                    extras.mul_(seed_fraction)
+                    source_norm = torch.linalg.vector_norm(
+                        source_spatial, dim=(1, 2, 3), keepdim=True
+                    ).clamp_min(1.0e-12)
+                    retained_norm = (1.0 - seed_fraction ** 2) ** 0.5
+                    scale = retained_norm / source_norm
+                    embedded_spatial[:, :source_rank].copy_(
+                        source_spatial * scale
+                    )
+                    embedded_spatial[:, source_rank:].copy_(extras)
+                    embedded_feature[:, :source_rank].copy_(
+                        source_feature / scale.unsqueeze(-1)
+                    )
+                    selected[feature_key] = embedded_feature.reshape_as(
+                        target_feature
+                    )
+                    selected[spatial_key] = embedded_spatial
+                    migrated_low_rank_readouts.add(prefix)
+
+        # Reparameterize every ordinary Gaussian readout as A(y,x) * G(y,x).
+        # With no requested floor, a unit-norm constant A reproduces the old
+        # implementation.  With a broader target Gaussian G_new, initialize
+        # A proportional to G_old/G_new and compensate its norm in the channel
+        # weights.  In either case C_new*A*G_new == C_old*G_old at step zero.
+        for readout_prefix in migrated_readouts:
+            readout_index = int(readout_prefix.split(".")[1])
+            readout = self.model.readouts[readout_index]
+            spatial_key = readout_prefix + ".spatial_weights"
+            feature_key = readout_prefix + ".features.weight"
+            mean_key = readout_prefix + ".mean"
+            std_key = readout_prefix + ".std"
+            theta_key = readout_prefix + ".theta"
+            height, width = target[spatial_key].shape[-2:]
+            floor = float(getattr(readout, "migration_std_floor", 0.0))
+
+            if floor <= 0:
+                scale = float(height * width) ** 0.5
+                selected[spatial_key] = torch.full_like(
+                    target[spatial_key], 1.0 / scale
+                )
+                selected[feature_key] = source[feature_key] * scale
+                continue
+
+            old_std = source[std_key]
+            new_std = old_std.clamp_min(floor)
+            old_mask = MultiDatasetModel._gaussian_mask_from_parameters(
+                source[mean_key], old_std, source[theta_key], height, width
+            )
+            new_mask = MultiDatasetModel._gaussian_mask_from_parameters(
+                source[mean_key], new_std, source[theta_key], height, width
+            )
+            ratio = old_mask / new_mask.clamp_min(torch.finfo(new_mask.dtype).tiny)
+            ratio_norm = ratio.square().sum((-2, -1), keepdim=True).sqrt().clamp_min(1e-12)
+            selected[spatial_key] = (ratio / ratio_norm).unsqueeze(1)
+            selected[feature_key] = source[feature_key] * ratio_norm.squeeze(-1).squeeze(-1)[:, None, None, None]
+            selected[std_key] = new_std
+
+        # A newly added shallow branch must contribute exactly zero, but its
+        # learned location can inherit the corresponding deep neuron's RF.
+        # Readout coordinates are in pixels relative to map center, so scale
+        # means/stds from the 9x9 scaffold to the 35x35 signed stage-1 map.
+        initialized_phase_readouts = set()
+        for component_name in ("phase_readouts",):
+            phase_readouts = getattr(self.model, component_name, None)
+            if not load_heads or phase_readouts is None:
+                continue
+            for readout_index, phase_readout in enumerate(phase_readouts):
+                phase_prefix = f"{component_name}.{readout_index}"
+                deep_prefix = f"readouts.{readout_index}"
+                phase_mean_key = phase_prefix + ".mean"
+                deep_mean_key = deep_prefix + ".mean"
+                deep_std_key = deep_prefix + ".std"
+                deep_theta_key = deep_prefix + ".theta"
+                # A source model that already owns a compatible shallow
+                # branch is authoritative.  Do not replace its learned
+                # location/width (or zero its learned feature weights) with
+                # the deep-readout migration intended only for old models.
+                if phase_mean_key in selected:
+                    continue
+                if deep_mean_key not in source or phase_mean_key not in target:
+                    continue
+                deep_readout = self.model.readouts[readout_index]
+                deep_shape = tuple(getattr(deep_readout, "spatial_shape", (9, 9)))
+                phase_shape = tuple(
+                    getattr(phase_readout, "spatial_shape", deep_shape)
+                )
+                scale = source[deep_mean_key].new_tensor(
+                    [
+                        (phase_shape[0] - 1) / max(deep_shape[0] - 1, 1),
+                        (phase_shape[1] - 1) / max(deep_shape[1] - 1, 1),
+                    ]
+                )
+                selected[phase_mean_key] = source[deep_mean_key] * scale
+                phase_std_key = phase_prefix + ".std"
+                if deep_std_key in source and phase_std_key in target:
+                    selected[phase_std_key] = source[deep_std_key] * scale
+                phase_theta_key = phase_prefix + ".theta"
+                if deep_theta_key in source and phase_theta_key in target:
+                    selected[phase_theta_key] = source[deep_theta_key]
+                initialized_phase_readouts.add(phase_prefix)
+        self._low_rank_migrated_readouts = migrated_low_rank_readouts
+        self._phase_position_initialized_readouts = initialized_phase_readouts
+        return selected, migrated_readouts
+
+    @staticmethod
+    def _gaussian_mask_from_parameters(mean, std, theta, height, width):
+        """Pure-state equivalent of DynamicGaussianReadout's normalized mask."""
+        device, dtype = mean.device, mean.dtype
+        y = torch.linspace(-(height - 1) / 2.0, (height - 1) / 2.0, height, device=device, dtype=dtype)
+        x = torch.linspace(-(width - 1) / 2.0, (width - 1) / 2.0, width, device=device, dtype=dtype)
+        grid_y, grid_x = torch.meshgrid(y, x, indexing="ij")
+        grid = torch.stack((grid_y, grid_x), dim=-1).unsqueeze(0)
+        centered = grid - mean[:, None, None]
+        cos_theta, sin_theta = torch.cos(theta), torch.sin(theta)
+        rotation = torch.stack(
+            (
+                torch.stack((cos_theta, -sin_theta), dim=-1),
+                torch.stack((sin_theta, cos_theta), dim=-1),
+            ),
+            dim=-2,
+        )
+        rotated = torch.einsum("nhwi,nij->nhwj", centered, rotation)
+        exponent = -0.5 * ((rotated / std.clamp_min(1e-3)[:, None, None]) ** 2).sum(-1)
+        mask = torch.exp(exponent)
+        return mask / (mask.sum((-2, -1), keepdim=True) + 1e-8)
+
+    def _load_pretrained_components(
+        self,
+        pretrained_checkpoint: str,
+        freeze_vision: bool = False,
+        load_heads: bool = False,
+    ):
         """
         Load pretrained vision components from a checkpoint.
         
@@ -232,46 +641,57 @@ class MultiDatasetModel(pl.LightningModule):
         else:
             pretrained_state_dict = checkpoint
 
-        # Check for torch.compile key mismatch and fix if needed
-        state_dict_keys = list(pretrained_state_dict.keys())
-        has_orig_mod_prefix = any(key.startswith('model._orig_mod.') for key in state_dict_keys)
+        source_cids = checkpoint.get("hyper_parameters", {}).get("dataset_cids")
+        source_sessions = list(source_cids) if isinstance(source_cids, dict) else None
+        if load_heads and isinstance(source_cids, dict):
+            target_cids = self.hparams.dataset_cids
+            for session in self.names:
+                if session not in source_cids:
+                    raise ValueError(
+                        f"Pretrained checkpoint has no head for session {session!r}"
+                    )
+                if list(source_cids[session]) != list(target_cids[session]):
+                    raise ValueError(
+                        f"Pretrained and target cids differ for session {session!r}"
+                    )
 
-        if has_orig_mod_prefix:
-            print("   Detected torch.compile checkpoint - fixing key mismatch...")
-            # Fix the state dict keys by removing model._orig_mod. prefix
-            fixed_state_dict = {}
-            for key, value in pretrained_state_dict.items():
-                if key.startswith('model._orig_mod.'):
-                    # Remove the model._orig_mod. prefix
-                    new_key = key[len('model._orig_mod.'):]
-                    fixed_state_dict[new_key] = value
-                else:
-                    fixed_state_dict[key] = value
-            pretrained_state_dict = fixed_state_dict
+        selected_state, migrated_readouts = self._compatible_pretrained_state(
+            pretrained_state_dict,
+            load_heads=load_heads,
+            source_sessions=source_sessions,
+            target_sessions=self.names if source_sessions is not None else None,
+        )
+        self.model.load_state_dict(selected_state, strict=False)
+        self._loaded_pretrained_heads = bool(load_heads)
 
-        # Filter to vision components (everything except modulator and readouts)
-        vision_prefixes = ['model.adapters', 'model.frontend', 'model.convnet']
-        vision_state_dict = {}
-        for key, value in pretrained_state_dict.items():
-            if any(key.startswith(prefix) for prefix in vision_prefixes):
-                vision_state_dict[key] = value
+        print(f"✓ Loaded {len(selected_state)} compatible pretrained parameters")
+        if migrated_readouts:
+            print(
+                f"✓ Exactly embedded {len(migrated_readouts)} Gaussian readouts "
+                "inside factorized sparse spatial maps"
+            )
+        if getattr(self, "_low_rank_migrated_readouts", None):
+            print(
+                f"✓ Exactly embedded {len(self._low_rank_migrated_readouts)} "
+                "lower-rank sparse readouts in expanded low-rank heads"
+            )
+        if getattr(self, "_phase_position_initialized_readouts", None):
+            print(
+                f"✓ Initialized {len(self._phase_position_initialized_readouts)} "
+                "zero-output shallow readouts at the pretrained RF locations"
+            )
 
-        # Load the vision components
-        missing_keys, unexpected_keys = self.model.load_state_dict(vision_state_dict, strict=False)
-
-        # Filter missing keys to only show vision components that should have been loaded
-        relevant_missing = [k for k in missing_keys if any(k.startswith(prefix) for prefix in vision_prefixes)]
-
-        print(f"✓ Loaded {len(vision_state_dict)} pretrained vision parameters")
-        if relevant_missing:
-            print(f"⚠ Missing {len(relevant_missing)} expected vision parameters")
-            print(f"   Missing keys: {relevant_missing[:5]}...")  # Show first 5 missing keys
-
-        # Show breakdown by component
+        prefixes = ["adapters", "frontend", "convnet"]
+        if load_heads:
+            prefixes.extend([
+                "modulator",
+                "readouts",
+                "phase_readouts",
+            ])
         component_counts = {}
-        for key in vision_state_dict.keys():
-            for prefix in vision_prefixes:
-                if key.startswith(prefix):
+        for key in selected_state:
+            for prefix in prefixes:
+                if key == prefix or key.startswith(prefix + "."):
                     component_counts[prefix] = component_counts.get(prefix, 0) + 1
                     break
         print(f"   Breakdown: {component_counts}")
@@ -280,12 +700,15 @@ class MultiDatasetModel(pl.LightningModule):
         if freeze_vision:
             frozen_count = 0
             for name, param in self.model.named_parameters():
-                if any(name.startswith(prefix.replace('model.', '')) for prefix in vision_prefixes):
+                if any(
+                    name == prefix or name.startswith(prefix + ".")
+                    for prefix in ["adapters", "frontend", "convnet"]
+                ):
                     param.requires_grad = False
                     frozen_count += 1
             print(f"✓ Froze {frozen_count} vision parameters")
 
-        return len(vision_state_dict)
+        return len(selected_state)
 
     def _compute_auxiliary_loss(self):
         """
@@ -313,9 +736,17 @@ class MultiDatasetModel(pl.LightningModule):
 
         return None
 
+    def on_load_checkpoint(self, checkpoint):
+        """Remember that learned heads, including their biases, were restored."""
+        self._restored_from_checkpoint = True
+
     def on_fit_start(self):
         """Initialize readout biases from empirical firing rates."""
         super().on_fit_start()
+        if self._loaded_pretrained_heads or self._restored_from_checkpoint:
+            if self.global_rank == 0:
+                print("Keeping restored readout biases")
+            return
         dm = self.trainer.datamodule
         if not hasattr(dm, 'train_dsets') or not dm.train_dsets:
             return
@@ -441,10 +872,11 @@ class MultiDatasetModel(pl.LightningModule):
                 stimulus = None if self.is_modulator_only else b["stim"]
                 rhat = self(stimulus, b["dataset_idx"][0], b.get("behavior"), b.get("history"))
 
+            dfs = b.get("dfs").float()
             batch_loss = {
                 'rhat': rhat.float(),
                 'robs': b["robs"].float(),
-                'dfs': b.get("dfs").float()
+                'dfs': dfs,
             }
 
             loss = self.loss_fn(batch_loss)
@@ -737,14 +1169,14 @@ class MultiDatasetModel(pl.LightningModule):
         # Standard optimizer step
         loss = optimizer_closure()
         optimizer.step()
+
+        # Apply every proximal operator exactly once, after the optimizer step
+        # and before gradients are cleared.  The gradient-presence check is how
+        # homogeneous multisession training identifies the one active readout;
+        # clearing gradients first silently disabled proximal sparsity.
+        for reg in self.reg_terms:
+            reg.prox(epoch, optimizer=optimizer)
+
         optimizer.zero_grad()
 
-        # Apply proximal updates for regularization
-        # Pass optimizer for Adam-aware per-parameter learning rates
-        for group in optimizer.param_groups:
-            lr = group["lr"]
-            for reg in self.reg_terms:
-                reg.prox(epoch, lr, optimizer=optimizer)
-
         return loss
-

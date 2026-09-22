@@ -1,5 +1,12 @@
 # Model selection and validation
 
+> **Production note:** the retained native-240 model is defined only by
+> [`production_model.yaml`](production_model.yaml). The three-stage fitting and
+> Figure 3/4 handoff is documented in
+> [`../../PRODUCTION_PIPELINE_HANDOFF.md`](../../PRODUCTION_PIPELINE_HANDOFF.md).
+> Historical capacity-ladder material below remains useful background but is
+> not a selector for the current manuscript model.
+
 Reproducible training, capacity selection, and validation for the digital twin
 used in Figures 3 and 4.
 

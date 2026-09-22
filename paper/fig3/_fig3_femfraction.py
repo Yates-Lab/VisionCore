@@ -16,14 +16,19 @@ fixation frame (|eye| < 0.5 deg):
 Both are returned UNCLIPPED (`*_uncl`); callers apply fig2's [0, 1] inclusion
 (exclude out-of-range cells rather than clip them onto the boundary).
 
-Inputs come entirely from on-disk caches -- the fig2-frame twin inference cache
-(`supp_twin_fig2frame_conditions.pkl`) and the aligned covariance cache -- so no
+Inputs come entirely from on-disk caches.  The preferred source is Figure 3's
+unified schema-v7 ablation cache, which stores the Figure-2-matched
+decomposition while the exact condition predictions are resident.  Older runs
+fall back to the fig2-frame twin inference cache
+(`supp_twin_fig2frame_conditions.pkl`) plus the aligned covariance cache.  No
 GPU/model pass runs here. Results are cached per condition; a one-time migration
 reuses the legacy `supp_panel_c_{cond}.pkl` cache bit-for-bit if present.
 """
 from __future__ import annotations
 
+import os
 import sys
+from pathlib import Path
 
 import numpy as np
 import dill
@@ -53,6 +58,12 @@ FIG2_FIXATION_RADIUS = FIXATION_RADIUS      # 0.5 deg
 _TWIN_CONDITIONS_CACHE = CACHE_DIR / "supp_twin_fig2frame_conditions.pkl"
 _TWIN_INTACT_CACHE = CACHE_DIR / "supp_twin_fig2frame.pkl"
 _TWIN_FIG3_CACHE = CACHE_DIR / "fig3_digitaltwin.pkl"
+_ABLATION_CACHE = Path(
+    os.environ.get(
+        "FIG3_ABLATION_CACHE_PATH",
+        str(CACHE_DIR / "fig3_ablation_inference.pkl"),
+    )
+)
 
 # Legacy cache (identical computation) reused on first run to skip recompute.
 _LEGACY_CACHE = {c: CACHE_DIR / f"supp_panel_c_{c}.pkl" for c in CONDITIONS}
@@ -88,6 +99,49 @@ def _twin_source_path():
     return _TWIN_FIG3_CACHE
 
 
+def _load_ablation_femfraction_source():
+    """Return the unified panel-C/D/E cache when it contains panel-E data."""
+    if not _ABLATION_CACHE.exists():
+        return None
+    with open(_ABLATION_CACHE, "rb") as f:
+        payload = dill.load(f)
+    if not isinstance(payload, dict) or payload.get("schema_version", 0) < 7:
+        return None
+    if payload.get("complete") is False:
+        return None
+    if payload.get("femfraction_count_bins") != FIG2_REPORTED_WINDOW_BINS:
+        return None
+    results = payload.get("results")
+    if not isinstance(results, list) or not results:
+        return None
+    if any("femfraction" not in record for record in results):
+        return None
+    if any(record.get("stabilization_reference", "session_global") != "session_global"
+           for record in results):
+        return None  # The history-local prediction control is not the main FEM assay.
+    return payload
+
+
+def _femfraction_source_path():
+    if _load_ablation_femfraction_source() is not None:
+        return _ABLATION_CACHE
+    return _twin_source_path()
+
+
+def _source_identity(count_bins=None):
+    """Cheap cache identity that changes whenever inference is replaced."""
+    if count_bins is None or count_bins == FIG2_REPORTED_WINDOW_BINS:
+        src = _femfraction_source_path()
+    else:
+        src = _twin_source_path()
+    stat = src.stat()
+    return {
+        "path": str(src.resolve()),
+        "size_bytes": int(stat.st_size),
+        "mtime_ns": int(stat.st_mtime_ns),
+    }
+
+
 def _load_twin_source(context=""):
     src = _twin_source_path()
     note = ""
@@ -115,6 +169,56 @@ def _select_rhat(sr, condition):
     return np.asarray(rhat)
 
 
+def _base_valid_mask(sr, eyepos):
+    """Load legacy trial/bin validity or derive its exact eye-finite meaning."""
+    eyepos = np.asarray(eyepos)
+    expected_shape = eyepos.shape[:2]
+    if "valid_mask" not in sr:
+        return np.isfinite(eyepos).all(axis=-1)
+    valid = np.asarray(sr["valid_mask"], dtype=bool)
+    if valid.shape != expected_shape:
+        raise ValueError(
+            f"valid_mask shape {valid.shape} does not match eye grid "
+            f"{expected_shape}"
+        )
+    return valid
+
+
+def _aggregate_ablation_femfraction(payload, condition, aligned_by):
+    """Flatten schema-v7 FEM decompositions on Figure 2's cell population."""
+    B_obs, B_model, B_obs_uncl, B_model_uncl, subj, sess_list = (
+        [], [], [], [], [], []
+    )
+    for sr in payload["results"]:
+        sess = sr["session"]
+        if sess not in aligned_by:
+            continue
+        included = _fig2_included(aligned_by[sess])
+        tnm = np.asarray(sr["neuron_mask"])
+        cols = np.array(
+            [j for j, original in enumerate(tnm) if int(original) in included],
+            dtype=int,
+        )
+        if cols.size < 3:
+            continue
+        comp = sr["femfraction"][condition]
+        B_obs.extend(np.asarray(comp["B_obs"])[cols])
+        B_model.extend(np.asarray(comp["B_model"])[cols])
+        B_obs_uncl.extend(np.asarray(comp["B_obs_uncl"])[cols])
+        B_model_uncl.extend(np.asarray(comp["B_model_uncl"])[cols])
+        subj.extend([sr["subject"]] * cols.size)
+        sess_list.extend([sess] * cols.size)
+        print(f"[fig3.femfrac]   {sess}: {cols.size} cells")
+    return {
+        "B_obs": np.asarray(B_obs, float),
+        "B_model": np.asarray(B_model, float),
+        "B_obs_uncl": np.asarray(B_obs_uncl, float),
+        "B_model_uncl": np.asarray(B_model_uncl, float),
+        "subj": np.asarray(subj, dtype=object).astype(str),
+        "session": np.asarray(sess_list, dtype=object).astype(str),
+    }
+
+
 def compute_femfraction_data(condition="intact", refresh=False, count_bins=None):
     """Per-cell 1-alpha (unclipped) for the neurons (B_obs) and the twin
     ``condition`` (B_model), matched per cell on the fig2-frame intersection.
@@ -136,7 +240,16 @@ def compute_femfraction_data(condition="intact", refresh=False, count_bins=None)
     cache = _cache_path(condition, count_bins)
     if cache.exists() and not refresh:
         with open(cache, "rb") as f:
-            return dill.load(f)
+            cached = dill.load(f)
+        cached_identity = cached.get(
+            "source_identity", cached.get("twin_source_identity")
+        )
+        if cached_identity == _source_identity(count_bins):
+            return cached
+        print(
+            f"[fig3.femfrac] invalidating {cache.name}: twin inference "
+            "source was replaced or lacks provenance"
+        )
 
     # The legacy supp caches hold the INSTANTANEOUS single-bin estimator, which
     # is not this computation at any counting window (it is biased low against
@@ -151,8 +264,33 @@ def compute_femfraction_data(condition="intact", refresh=False, count_bins=None)
             dill.dump(out, f)
         return out
 
-    twin = _load_twin_source(context=f"[{condition}] ")
     aligned_by = {a["session"]: a for a in load_aligned_cache()}
+
+    ablation_payload = (
+        _load_ablation_femfraction_source()
+        if count_bins == FIG2_REPORTED_WINDOW_BINS
+        else None
+    )
+    if ablation_payload is not None:
+        print(
+            f"[fig3.femfrac] [{condition}] inference source: "
+            f"{_ABLATION_CACHE.name} (unified schema-v7 cache)"
+        )
+        out = _aggregate_ablation_femfraction(
+            ablation_payload, condition, aligned_by
+        )
+        out["count_bins"] = int(count_bins)
+        out["source_identity"] = _source_identity(count_bins)
+        out["twin_source_identity"] = out["source_identity"]
+        with open(cache, "wb") as f:
+            dill.dump(out, f)
+        print(
+            f"[fig3.femfrac]   cached [{condition}] "
+            f"({out['B_obs'].size} cells) -> {cache}"
+        )
+        return out
+
+    twin = _load_twin_source(context=f"[{condition}] ")
 
     B_obs, B_model, B_obs_uncl, B_model_uncl, subj, sess_list = [], [], [], [], [], []
     for sr in twin:
@@ -168,7 +306,7 @@ def compute_femfraction_data(condition="intact", refresh=False, count_bins=None)
         robs = np.asarray(sr["robs_used"])[:, :, cols]
         dfs = np.asarray(sr["dfs_used"])[:, :, cols]
         eyepos = np.asarray(sr["eyepos_used"], np.float64)
-        base_valid = np.asarray(sr["valid_mask"], bool)
+        base_valid = _base_valid_mask(sr, eyepos)
         r_eye = np.hypot(eyepos[..., 0], eyepos[..., 1])
         valid_mask = base_valid & np.isfinite(r_eye) & (r_eye < FIG2_FIXATION_RADIUS)
 
@@ -190,6 +328,8 @@ def compute_femfraction_data(condition="intact", refresh=False, count_bins=None)
         "subj": np.asarray(subj, dtype=object).astype(str),
         "session": np.asarray(sess_list, dtype=object).astype(str),
         "count_bins": int(count_bins),
+        "source_identity": _source_identity(count_bins),
+        "twin_source_identity": _source_identity(count_bins),
     }
     with open(cache, "wb") as f:
         dill.dump(out, f)

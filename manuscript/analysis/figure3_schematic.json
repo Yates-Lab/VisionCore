@@ -1,0 +1,136 @@
+{
+  "checkpoint_sha256": "e70f287462155607a96c7d23d9d56e347111319aa48cafd3f54fe88dd4484cb9",
+  "history_sha256": "5312bd1565f48781f553397e605c31b0ea1dfefadccf69f4a4571bddeefc1785",
+  "history_order": "lag 0 first, reversed from cached chronological FixRSVP lag_cube",
+  "history_source": {
+    "condition": "fixrsvp",
+    "session": "Allen_2022-04-08",
+    "base_assets_cache": "/home/jake/repos/VisionCore/outputs/no_phase_readout_comparison_20260910/rank1/figure3/cache/fig3a_assets.pkl",
+    "base_assets_cache_sha256": "d6d34913634c3216d233cd2cfd47c233c8f59d9be9275c163a29b79bd8272577",
+    "movie_source": "native FixRSVP recording; window and exact rendering recorded in example_selection",
+    "display_alignment": "unaltered measured history paired with the production session-global stabilization",
+    "stabilized_history_sha256": "1a75cc187e7e201155dbf2fc2bc1ac27ff36d09abf957a63ac540bab065456d3"
+  },
+  "behavior_source": "separate cached FixRSVP eye-position and speed example from the same session",
+  "preprocessing": "35-pixel cached crop; production pixelnorm: (pixel - 127) / 255",
+  "feature_channels": [
+    [
+      49,
+      90,
+      48,
+      91
+    ],
+    [
+      111,
+      44,
+      146,
+      17
+    ],
+    [
+      64,
+      0,
+      126,
+      15
+    ]
+  ],
+  "filter_channels": [
+    0,
+    5,
+    10
+  ],
+  "selection": "four channels with greatest spatial variance at each stage",
+  "display": "each displayed feature map independently contrast-normalized",
+  "readout_glyphs": "schematic spatial and feature weights, not fitted coefficients",
+  "example_psth": {
+    "session": "Logan_2020-01-07",
+    "neuron_id": 16
+  },
+  "architecture": {
+    "stage_shapes": [
+      [
+        168,
+        35,
+        35
+      ],
+      [
+        168,
+        18,
+        18
+      ],
+      [
+        168,
+        9,
+        9
+      ]
+    ],
+    "readout_rank": 1,
+    "phase_readout_rank": 0
+  },
+  "hypothesis_tests": {
+    "weights": "same fitted weights for all three input conditions",
+    "full": {
+      "color": "#1f77b4",
+      "retinal": "measured motion",
+      "extraretinal": "retained"
+    },
+    "retinal_only": {
+      "color": "#d62728",
+      "retinal": "measured motion",
+      "extraretinal": "input zeroed before the behavioral MLP"
+    },
+    "stabilized": {
+      "color": "#b97800",
+      "retinal": "gaze-induced motion removed",
+      "extraretinal": "retained"
+    },
+    "stabilized_cube": "paired FixRSVP history with image flashes preserved and ROI held at the session-global gaze centroid, matching the quantified ablation",
+    "shared_input_arrows": "one neutral retinal arrow and one behavioral arrow; colors mark condition labels and the two input interventions"
+  },
+  "example_selection": {
+    "session": "Allen_2022-04-08",
+    "trial": 115,
+    "native_endpoint": 12947,
+    "history_frames": 60,
+    "sample_rate_hz": 240,
+    "selection": "24 largest contrast-times-excursion candidates; largest moving/stabilized pixel RMS",
+    "n_eligible_windows": 742,
+    "n_finalists": 24,
+    "moving_stabilized_rms_pixel_levels": 56.87070083618164,
+    "stabilization": "session-global centroid ROI from the production ablation; RSVP flashes preserved",
+    "current_frame_identical": false,
+    "display_frame_replacement": false,
+    "psth_selection": "largest predicted transient/mean among three cached high-CCnorm examples",
+    "psth_candidate_scores": [
+      1.0442084488468248,
+      1.1768196085801836,
+      0.9437533215906355
+    ],
+    "psth_selected_index": 1,
+    "render_audit": {
+      "anchor": "session_global",
+      "alignment_maxabs": 0,
+      "n_trials_stabilized": 83
+    }
+  },
+  "schematic_architecture": {
+    "stage_shapes": [
+      [
+        168,
+        35,
+        35
+      ],
+      [
+        168,
+        18,
+        18
+      ],
+      [
+        168,
+        9,
+        9
+      ]
+    ],
+    "readout_rank": 1,
+    "phase_readout_rank": 0
+  }
+}

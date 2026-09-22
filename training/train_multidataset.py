@@ -22,6 +22,7 @@ Example:
 import os
 import sys
 import argparse
+import copy
 from pathlib import Path
 
 import torch
@@ -47,6 +48,37 @@ torch.set_float32_matmul_precision("medium")
 torch.backends.cudnn.benchmark = True
 
 
+def apply_stimulus_sampling_weight_overrides(model_config, overrides):
+    """Return a copied config with ``NAME=WEIGHT`` sampling overrides.
+
+    Sampling and loss weighting are deliberately separate controls: sampling
+    changes how often distinct examples from a stimulus bank enter optimizer
+    updates, whereas loss weighting only rescales an example already drawn.
+    """
+    resolved = copy.deepcopy(model_config)
+    weights = resolved.setdefault("stimulus_sampling_weights", {})
+    for specification in overrides or ():
+        if "=" not in specification:
+            raise ValueError(
+                "--stimulus_sampling_weight must use NAME=WEIGHT, got "
+                f"{specification!r}"
+            )
+        name, raw_weight = specification.split("=", 1)
+        name = name.strip()
+        if not name:
+            raise ValueError("stimulus sampling-weight name cannot be empty")
+        try:
+            weight = float(raw_weight)
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid stimulus sampling weight {raw_weight!r}"
+            ) from exc
+        if weight <= 0:
+            raise ValueError("stimulus sampling weights must be positive")
+        weights[name] = weight
+    return resolved
+
+
 
 
 
@@ -67,7 +99,12 @@ def main():
                    help="Path to parent dataset configuration YAML file (specifies sessions)")
     p.add_argument("--max_datasets", type=int, default=30,
                    help="Maximum number of datasets/sessions to load")
-
+    p.add_argument(
+        "--session",
+        action="append",
+        default=None,
+        help="Use only this exact session (repeatable).",
+    )
     # Training hyperparameters
     p.add_argument("--batch_size", type=int, default=64,
                    help="Batch size")
@@ -77,6 +114,17 @@ def main():
                    help="Learning rate scale for core (frontend/convnet/modulator)")
     p.add_argument("--weight_decay", type=float, default=1e-5,
                    help="Weight decay coefficient")
+    p.add_argument(
+        "--stimulus_sampling_weight",
+        action="append",
+        default=[],
+        metavar="NAME=WEIGHT",
+        help=(
+            "Override how often a named stimulus bank is sampled during "
+            "training. May be repeated; resolved values are saved in the "
+            "checkpoint and do not alter validation sampling."
+        ),
+    )
     p.add_argument("--max_epochs", type=int, default=100,
                    help="Maximum number of training epochs")
     p.add_argument("--gradient_clip_val", type=float, default=1.0,
@@ -109,6 +157,15 @@ def main():
                    help="Path to pretrained checkpoint for vision components")
     p.add_argument("--freeze_vision", action="store_true", default=False,
                    help="Freeze pretrained vision components")
+    p.add_argument(
+        "--pretrained_load_heads",
+        action="store_true",
+        default=False,
+        help=(
+            "Also warm-start compatible behavior/readout parameters. An ordinary "
+            "Gaussian readout is exactly embedded in a sparse-Gaussian readout."
+        ),
+    )
 
     # Model compilation
     p.add_argument("--compile", action="store_true", default=False,
@@ -199,6 +256,13 @@ def main():
     # ---------------------------------------------------------------------
     # Create DataModule and Model
     # ---------------------------------------------------------------------
+    from models.config_loader import load_config
+    model_config_dict = load_config(args.model_config)
+    if args.stimulus_sampling_weight:
+        model_config_dict = apply_stimulus_sampling_weight_overrides(
+            model_config_dict, args.stimulus_sampling_weight
+        )
+
     # Single-GPU DataModule
     dm = MultiDatasetDM(
         cfg_dir=args.dataset_configs_path,
@@ -209,6 +273,13 @@ def main():
         enable_curriculum=args.enable_curriculum,
         dset_dtype=args.dset_dtype,
         homogeneous_batches=args.homogeneous_batches,
+        stimulus_sampling_weights=model_config_dict.get(
+            "stimulus_sampling_weights", {}
+        ),
+        dataset_sampling=model_config_dict.get(
+            "dataset_sampling", "proportional"
+        ),
+        selected_sessions=args.session,
     )
 
     model = MultiDatasetModel(
@@ -219,7 +290,11 @@ def main():
         max_ds=args.max_datasets,
         pretrained_checkpoint=args.pretrained_checkpoint,
         freeze_vision=args.freeze_vision,
-        compile_model=args.compile
+        compile_model=args.compile,
+        pretrained_load_heads=args.pretrained_load_heads,
+        core_lr_scale=args.core_lr_scale,
+        model_config_dict=model_config_dict,
+        selected_sessions=args.session,
     )
 
     # Pass additional hyperparameters to model
@@ -330,6 +405,7 @@ def main():
     print(f"Num training batches: {trainer.num_training_batches}")
     print(f"Curriculum learning: {args.enable_curriculum}")
     print(f"Pretrained checkpoint: {args.pretrained_checkpoint or 'None'}")
+    print(f"Pretrained compatible heads: {args.pretrained_load_heads}")
     print(f"Freeze vision: {args.freeze_vision}")
     print("=" * 60, flush=True)
 
@@ -341,4 +417,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

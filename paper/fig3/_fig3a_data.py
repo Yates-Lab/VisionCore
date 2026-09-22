@@ -9,6 +9,7 @@ panel are fast.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -19,7 +20,9 @@ from _fig3_data import CACHE_DIR, DT
 from _fig3_helpers import PANEL_B_SESSION
 
 
-PANEL_A_CACHE_PATH = CACHE_DIR / "fig3a_assets.pkl"
+PANEL_A_CACHE_PATH = Path(
+    os.environ.get("FIG3_PANEL_A_CACHE_PATH", str(CACHE_DIR / "fig3a_assets.pkl"))
+)
 
 # Preferred fixRSVP image IDs, tried in order. The first one with frames in
 # the session is used. Edit if the chosen image is unappealing (some IDs in
@@ -80,36 +83,65 @@ class PanelAAssets:
     train_behavior_eyepos: Optional[np.ndarray] = None  # (T, 2) deg
     train_behavior_speed: Optional[np.ndarray] = None   # (T,) deg/s
     train_raster: Optional[np.ndarray] = None        # (n_units, T) observed spikes/bin
+    checkpoint_path: Optional[str] = None             # cache provenance
 
 
 # ----------------------------------------------------------------------------
 # Architecture introspection (from the YAML; cheap, no GPU)
 # ----------------------------------------------------------------------------
 def _load_arch_info():
-    """Return a compact summary of the model architecture from its YAML."""
-    import yaml
-    from VisionCore.paths import VISIONCORE_ROOT
+    """Return a compact summary of the architecture saved in the checkpoint."""
+    import torch
+    from _fig3_data import CHECKPOINT_PATH
 
-    cfg_path = (VISIONCORE_ROOT / "experiments" / "model_configs"
-                / "learned_resnet_concat_convgru_gaussian.yaml")
-    with open(cfg_path) as f:
-        cfg = yaml.safe_load(f)
+    checkpoint = torch.load(CHECKPOINT_PATH, map_location="cpu", weights_only=False)
+    cfg = (checkpoint.get("hyper_parameters", {}) or {}).get("model_config_dict")
+    if not isinstance(cfg, dict):
+        raise KeyError("Checkpoint does not contain hyper_parameters.model_config_dict")
+
+    conv_type = str((cfg.get("convnet") or {}).get("type", "unknown"))
+    conv_params = (cfg.get("convnet") or {}).get("params", {}) or {}
+    mod_params = (cfg.get("modulator") or {}).get("params", {}) or {}
+    recurrent = cfg.get("recurrent") or {}
+    recurrent_params = recurrent.get("params", {}) or {}
+    if conv_type == "dekel":
+        spatial_channels = [int(v) for v in conv_params["spatial_channels"]]
+        spatial_kernels = [int(v) for v in conv_params["spatial_kernels"]]
+        return {
+            "model_family": "dekel",
+            "sampling_rate": int(cfg.get("sampling_rate", 240)),
+            "input_size": list(conv_params.get("input_size", [35, 35])),
+            "adapter_grid": list(conv_params.get("input_size", [35, 35])),
+            "frontend_k": int(conv_params["temporal_support"]),
+            "frontend_spatial_k": 7,
+            "frontend_channels": int(conv_params["temporal_channels"]),
+            "convnet_channels": spatial_channels,
+            "convnet_kernels": [(1, k, k) for k in spatial_kernels],
+            "scaffold_channels": int(2 * sum(spatial_channels)),
+            "scaffold_size": int(conv_params.get("scaffold_size", 9)),
+            "behavior_dim": int(mod_params.get("behavior_dim", 0)),
+            "feature_dim": int(mod_params.get("additive_dim", 0)),
+            "gru_hidden": 0,
+            "gru_kernel": 0,
+        }
 
     block_kernels = []
-    for blk in cfg["convnet"]["params"]["block_configs"]:
-        k = blk["conv_params"]["kernel_size"]
-        block_kernels.append(tuple(k))
-
+    for block in conv_params["block_configs"]:
+        block_kernels.append(tuple(block["conv_params"]["kernel_size"]))
+    frontend_params = (cfg.get("frontend") or {}).get("params", {}) or {}
+    adapter_params = (cfg.get("adapter") or {}).get("params", {}) or {}
     return {
-        "adapter_grid": cfg["adapter"]["params"]["grid_size"],
-        "frontend_k": cfg["frontend"]["params"]["kernel_size"],
-        "frontend_channels": cfg["frontend"]["params"]["num_channels"],
-        "convnet_channels": cfg["convnet"]["params"]["channels"],
+        "model_family": "resnet_convgru",
+        "sampling_rate": int(cfg.get("sampling_rate", 120)),
+        "adapter_grid": adapter_params["grid_size"],
+        "frontend_k": frontend_params["kernel_size"],
+        "frontend_channels": frontend_params["num_channels"],
+        "convnet_channels": conv_params["channels"],
         "convnet_kernels": block_kernels,
-        "behavior_dim": cfg["modulator"]["params"]["behavior_dim"],
-        "feature_dim": cfg["modulator"]["params"]["feature_dim"],
-        "gru_hidden": cfg["recurrent"]["params"]["hidden_dim"],
-        "gru_kernel": cfg["recurrent"]["params"]["kernel_size"],
+        "behavior_dim": mod_params["behavior_dim"],
+        "feature_dim": mod_params["feature_dim"],
+        "gru_hidden": recurrent_params["hidden_dim"],
+        "gru_kernel": recurrent_params["kernel_size"],
     }
 
 
@@ -147,9 +179,24 @@ def _load_frontend_weights():
     from _fig3_data import CHECKPOINT_PATH
     ckpt = torch.load(CHECKPOINT_PATH, map_location="cpu", weights_only=False)
     sd = ckpt["state_dict"] if "state_dict" in ckpt else ckpt
-    key = "model.frontend.temporal_conv.conv.parametrizations.weight.original"
-    w = sd[key].detach().cpu().numpy()
-    return np.ascontiguousarray(w.squeeze(axis=(1, 3, 4)))   # (C, K)
+    legacy_key = "model.frontend.temporal_conv.conv.parametrizations.weight.original"
+    dekel_key = "model.convnet.temporal_conv.conv.weight"
+    if legacy_key in sd:
+        w = sd[legacy_key].detach().cpu().numpy()
+        return np.ascontiguousarray(w.squeeze(axis=(1, 3, 4)))   # (C, K)
+    if dekel_key in sd:
+        w = sd[dekel_key].detach().cpu().float().numpy()[:, 0]   # (C,T,H,W)
+        profiles = []
+        for filt in w:
+            temporal, singular, spatial = np.linalg.svd(
+                filt.reshape(filt.shape[0], -1), full_matrices=False
+            )
+            profile = temporal[:, 0] * singular[0]
+            if spatial[0, np.argmax(np.abs(spatial[0]))] < 0:
+                profile = -profile
+            profiles.append(profile)
+        return np.ascontiguousarray(np.stack(profiles))
+    raise KeyError("Checkpoint has neither the legacy frontend nor Dekel temporal-conv weights")
 
 
 def _load_example_neurons(n=3, window_s=0.5, min_rho=0.85):
@@ -267,7 +314,9 @@ def _load_example_neurons(n=3, window_s=0.5, min_rho=0.85):
 
         mean = sd[f"model.readouts.{di}.mean"][neuron_id].detach().cpu().numpy().astype(np.float32)
         std  = sd[f"model.readouts.{di}.std"][neuron_id].detach().cpu().numpy().astype(np.float32)
-        feats = (sd[f"model.readouts.{di}.features.weight"][neuron_id]
+        # Feature rows are unit-major [unit, rank, channel], including rank > 1.
+        n_units = len(sd[f"model.readouts.{di}.mean"])
+        feats = (sd[f"model.readouts.{di}.features.weight"].reshape(n_units, -1)[neuron_id]
                  .detach().cpu().numpy().squeeze().astype(np.float32))
 
         # Trial-averaged PSTH (already computed during inference); spikes/bin.
@@ -477,7 +526,7 @@ def _load_readout_example():
     means = sd["model.readouts.0.mean"].detach().cpu().numpy()
     stds  = sd["model.readouts.0.std"].detach().cpu().numpy()
     feats = sd["model.readouts.0.features.weight"].detach().cpu().numpy()
-    feats = feats.squeeze(axis=(2, 3))   # (N_neurons, n_feat)
+    feats = feats.reshape(len(means), -1)  # (N_neurons, rank * n_feat)
     # Score by L4/L2 ratio (high → energy concentrated in few features)
     norm2 = np.sqrt((feats ** 2).sum(axis=1) + 1e-12)
     norm4 = np.power((feats ** 4).sum(axis=1) + 1e-12, 0.25)
@@ -709,7 +758,28 @@ def _pick_lag_window(stim, trial_inds, n_lags):
     return best
 
 
-def _lag_cube_from_fixrsvp(session_dir: Path, n_lags: int = 33):
+def _crop_model_aperture(array, spatial_size=None):
+    if spatial_size is None:
+        return np.asarray(array)
+    if np.isscalar(spatial_size):
+        target_h = target_w = int(spatial_size)
+    else:
+        target_h, target_w = (int(spatial_size[0]), int(spatial_size[1]))
+    arr = np.asarray(array)
+    height, width = arr.shape[-2:]
+    if target_h > height or target_w > width:
+        raise ValueError(f"Model aperture {(target_h, target_w)} exceeds {(height, width)}")
+    top = (height - target_h) // 2
+    left = (width - target_w) // 2
+    return arr[..., top : top + target_h, left : left + target_w]
+
+
+def _lag_cube_from_fixrsvp(
+    session_dir: Path,
+    n_lags: int = 33,
+    fs: float = 120.0,
+    spatial_size=None,
+):
     """Pull the exact stimulus context the model sees at one inference time.
 
     The training config uses 33 lags (`keys_lags.stim: [0..32]`) at 120 Hz —
@@ -728,14 +798,14 @@ def _lag_cube_from_fixrsvp(session_dir: Path, n_lags: int = 33):
 
     trial_inds = np.asarray(dset.covariates["trial_inds"]).ravel().astype(int)
     chosen_trial, win_idxs = _pick_lag_window(stim, trial_inds, n_lags)
-    cube = stim[win_idxs]
+    cube = _crop_model_aperture(stim[win_idxs], spatial_size)
     lag_indices = list(range(n_lags))
     print(f"    lag cube: trial {chosen_trial}, {n_lags} frames "
-          f"({n_lags / 120 * 1000:.0f} ms at 120 Hz)")
+          f"({n_lags / fs * 1000:.0f} ms at {fs:g} Hz)")
     return cube.astype(np.float32), lag_indices
 
 
-def _stabilized_lag_cube_from_fixrsvp(sess, n_lags: int = 33):
+def _stabilized_lag_cube_from_fixrsvp(sess, n_lags: int = 33, spatial_size=None):
     """Reafferent-ablated ("stabilized") counterpart of the moving lag cube.
 
     Re-renders the SAME window of RSVP frames with the retinal ROI held fixed, so
@@ -791,14 +861,17 @@ def _stabilized_lag_cube_from_fixrsvp(sess, n_lags: int = 33):
     stab_trial = np.asarray(trial.get_rois(hist_idx, roi=roi_const))
 
     pos = np.searchsorted(np.where(m)[0], win_idxs)
-    stab_cube = stab_trial[pos].astype(np.float32)
+    stab_cube = _crop_model_aperture(
+        stab_trial[pos].astype(np.float32), spatial_size
+    )
     print(f"    stabilized lag cube: trial {chosen_trial}, ROI frozen at this "
           f"trial's medoid gaze (flashes preserved, reafferent motion removed)")
     return stab_cube
 
 
 def _train_model_input_and_raster(session_dir: Path, *, n_lags: int = 33,
-                                  n_future: int = 30, fs: float = 120.0):
+                                  n_future: int = 30, fs: float = 120.0,
+                                  spatial_size=None):
     """Build panel A's natural-image training objective from the pinned
     backimage free-viewing window.
 
@@ -845,7 +918,9 @@ def _train_model_input_and_raster(session_dir: Path, *, n_lags: int = 33,
     t = TRAIN_CUR_FRAME_LOCAL
 
     g0 = pin_start + t - n_lags + 1                      # global start of cube
-    cube = stim[g0:g0 + n_lags].astype(np.float32)       # (n_lags, H, W) oldest→newest
+    cube = _crop_model_aperture(
+        stim[g0:g0 + n_lags].astype(np.float32), spatial_size
+    )                                                    # oldest→newest
     cur_roi = roi_all[pin_start + t].astype(int)         # (2, 2)
 
     r0 = g0                                              # raster window start (global)
@@ -1079,10 +1154,40 @@ def _behavior_segment(session_dir: Path, fs: float = 120.0,
 # Top-level entry point
 # ----------------------------------------------------------------------------
 def load_panel_a_assets(recompute: bool = False) -> PanelAAssets:
+    from _fig3_data import CHECKPOINT_PATH
+
     if PANEL_A_CACHE_PATH.exists() and not recompute:
         print(f"Loading fig3a assets from {PANEL_A_CACHE_PATH}")
         with open(PANEL_A_CACHE_PATH, "rb") as f:
             assets = dill.load(f)
+        current_checkpoint = str(Path(CHECKPOINT_PATH).expanduser().resolve())
+        cached_checkpoint = getattr(assets, "checkpoint_path", None)
+        if cached_checkpoint is not None:
+            if str(Path(cached_checkpoint).expanduser().resolve()) != current_checkpoint:
+                raise ValueError(
+                    f"{PANEL_A_CACHE_PATH} was produced from {cached_checkpoint}, "
+                    f"but the selected checkpoint is {current_checkpoint}. Re-run "
+                    "Figure 3 with --recompute."
+                )
+        else:
+            # Legacy panel caches predate explicit provenance.  A compact
+            # architecture signature still prevents a ConvGRU schematic from
+            # being silently reused for a Dekel checkpoint (or vice versa).
+            current_arch = _load_arch_info()
+            signature_keys = (
+                "model_family", "sampling_rate", "frontend_k",
+                "frontend_channels", "scaffold_size",
+            )
+            cached_signature = {key: assets.arch.get(key) for key in signature_keys}
+            current_signature = {key: current_arch.get(key) for key in signature_keys}
+            checkpoint_overridden = bool(os.environ.get("FIG3_MODEL_CHECKPOINT"))
+            if checkpoint_overridden or cached_signature != current_signature:
+                raise ValueError(
+                    f"Legacy {PANEL_A_CACHE_PATH} lacks checkpoint provenance "
+                    f"(cached architecture {cached_signature}; selected "
+                    f"architecture {current_signature}). Re-run Figure 3 with "
+                    "--recompute."
+                )
         # One-time backfills so existing caches gain fields added after they
         # were written, without a full raw-session recompute.
         dirty = False
@@ -1132,6 +1237,9 @@ def load_panel_a_assets(recompute: bool = False) -> PanelAAssets:
     protocols = get_trial_protocols(exp)
     screen_shape = _screen_shape_from_settings(exp["S"])
     pix_per_deg = float(exp["S"]["pixPerDeg"])
+    arch = _load_arch_info()
+    model_n_lags = int(arch["frontend_k"])
+    model_fs = float(arch.get("sampling_rate", 120))
 
     print("  rendering backimage...")
     screens = {"backimage": _render_backimage(exp, protocols)}
@@ -1178,10 +1286,16 @@ def load_panel_a_assets(recompute: bool = False) -> PanelAAssets:
         print(f"    fixrsvp ROI recentered on chosen frame: rows {new_roi[0]}, cols {new_roi[1]}")
 
     print("  loading lag-cube from fixrsvp.dset...")
-    cube, lag_idx = _lag_cube_from_fixrsvp(sess_dir, n_lags=33)
+    model_spatial_size = arch.get("input_size")
+    cube, lag_idx = _lag_cube_from_fixrsvp(
+        sess_dir, n_lags=model_n_lags, fs=model_fs,
+        spatial_size=model_spatial_size,
+    )
 
     print("  rendering stabilized (reafferent-ablated) lag cube...")
-    stab_cube = _stabilized_lag_cube_from_fixrsvp(sess)
+    stab_cube = _stabilized_lag_cube_from_fixrsvp(
+        sess, n_lags=model_n_lags, spatial_size=model_spatial_size
+    )
 
     # Align both cubes' most-recent frame (last in the lag stack) with the actual
     # test-screen ROI content, so their shared "current frame" (the cube front
@@ -1194,10 +1308,15 @@ def load_panel_a_assets(recompute: bool = False) -> PanelAAssets:
               f"{cube.shape[2]}) for moving + stabilized cubes")
 
     print("  extracting behavior segment...")
-    beh_t, beh_eye, beh_speed, beh_roi_seq = _behavior_segment(sess_dir)
+    beh_t, beh_eye, beh_speed, beh_roi_seq = _behavior_segment(
+        sess_dir, fs=model_fs
+    )
 
     print("  building natural-image model input + prediction-target raster...")
-    train_objective = _train_model_input_and_raster(sess_dir)
+    train_objective = _train_model_input_and_raster(
+        sess_dir, n_lags=model_n_lags, fs=model_fs,
+        spatial_size=model_spatial_size,
+    )
 
     print("  extracting free-viewing eye trace...")
     freeview_result = _real_freeview_trace(sess_dir, pix_per_deg, screen_shape)
@@ -1208,7 +1327,6 @@ def load_panel_a_assets(recompute: bool = False) -> PanelAAssets:
     else:
         freeview_trace_px, freeview_roi_seq = freeview_result
 
-    arch = _load_arch_info()
     arch["n_trained_units"] = _load_n_trained_units()
 
     print("  loading frontend weights from checkpoint...")
@@ -1242,6 +1360,7 @@ def load_panel_a_assets(recompute: bool = False) -> PanelAAssets:
         freeview_roi_seq_px=freeview_roi_seq,
         example_neurons=example_neurons,
         psth_neurons=psth_neurons,
+        checkpoint_path=str(Path(CHECKPOINT_PATH).expanduser().resolve()),
         **train_objective,
     )
 

@@ -5,24 +5,24 @@ and, at inference, remove one of the two FEM information routes:
 
   - intact     : full retinal stimulus + full behavior input (reference)
   - zeroed     : behavior set to 0 (extraretinal route removed; "retinal only")
-  - stabilized : retinal input frozen at ONE session-global centroid gaze so the
-                 image no longer moves with the eye (reafferent route removed;
-                 "extraretinal only"), behavior intact.
+  - stabilized : gaze frozen at ONE session-global centroid, preserving image
+                 flashes while removing gaze-dependent retinal displacements;
+                 behavior intact.
 
-The two ablations are symmetric counterfactuals. The fixRSVP stimulus is rendered
+The fixRSVP stimulus is rendered
 in retinal (eye-referenced) coordinates, so fixational eye movements are already
 in the visual stream; the behavior tensor is the only *separate* extraretinal
-route. `zeroed` removes the extraretinal route; `stabilized` removes the reafferent
-(retinal-image-motion) route. If single-trial prediction survives `zeroed` but
-collapses under `stabilized`, the trial-to-trial variability the twin captures is
-carried by the moving retinal image, not by extraretinal modulation of V1.
+route. The interventions measure predictive dependence on these model inputs;
+they do not identify the independent biological contributions of covarying
+retinal and extraretinal signals. Global stabilization also changes the current
+retinal position. The separate `history_stabilized` prediction control retains
+that position while removing gaze displacement within each input history.
 
 The stabilized retinal input is rendered pixel-exactly with DataYatesV1
 `FixRsvpTrial.get_rois` at a constant session-global centroid ROI (validated
-against the native grid_sample renderer), in the raw 240 Hz frame, then decimated
-to the model's
-120 Hz frame exactly as the training pipeline does (`downsample_stimulus` =
-decimation). A per-session alignment gate asserts decimate(raw stored stim) ==
+against the native grid_sample renderer), on the raw 240-Hz grid. Legacy models
+use the training pipeline's stimulus decimation; the selected native-rate model
+keeps all samples. A per-session alignment gate asserts decimate(raw stored stim) ==
 embedded `dset['stim']` bit-exactly, so the substitution is frame-aligned and the
 intact re-render carries zero rendering artifact.
 
@@ -34,8 +34,9 @@ draws on the same sessions, neurons, and `cd_population` mask (fig2 inclusion):
   - panel D : captured count variance on Figure 2-matched, model-valid windows
               divided by Figure 2's own diag(Crate) at the one-bin window, for
               the leave-one-out PSTH and all three twin conditions.
-  - panel E : empirical FEM modulation (1 - `alpha`) vs single-trial r^2 gain
-              over the PSTH baseline (`ve[zeroed]` / `ve_psth`).
+  - panel E : empirical and within-model FEM-modulation fractions from the
+              Figure-2-matched close-pair estimator, on the same aligned
+              sessions and neurons as the other analysis panels.
 
 Two stages, deliberately split so the expensive one is not held hostage by the
 cheap one:
@@ -43,7 +44,8 @@ cheap one:
   1. INFERENCE (`_run_inference`, cache `outputs/cache/fig3_ablation_inference.pkl`)
      Everything that needs the model or the raw dataset: `ve`, `ve_psth`,
      `ccnorm`/`ccmax`, `captured_variance`, `matched_var_y`, the `matched_*`
-     rate-variance diagnostic, `model_one_minus_alpha`, and the example payload.
+     rate-variance diagnostic, `model_one_minus_alpha`, the Figure-2-matched
+     `femfraction` decomposition for every condition, and the example payload.
      Tens of minutes on a GPU. Re-run only when the checkpoint, the conditions,
      the rendering, or the scoring windows change -- bump
      `INFERENCE_SCHEMA_VERSION` when the stored schema or its semantics change.
@@ -66,7 +68,9 @@ manuscript number and never the score.
 No dependency on the behavior-vs-vision within-model cache or the fig3 top-row
 cache.
 """
+import os
 import sys
+from pathlib import Path
 
 import numpy as np
 import dill
@@ -77,8 +81,14 @@ from VisionCore.covariance import rate_variance_components
 from _fig3_data import (
     DT, VALID_TIME_BINS, MIN_FIX_DUR, MIN_TOTAL_SPIKES,
     SUBJECTS, CHECKPOINT_PATH,
+    CACHE_PATH as FIG3_DATA_CACHE_PATH,
     COVDECOMP_CACHE_PATH, COVDECOMP_TARGET,
-    subject_from_session, _load_fig2_alpha_by_session,
+    subject_from_session, analysis_endpoint_mask_and_psth,
+    analysis_endpoint_block_filter, analysis_endpoint_block_mean,
+    analysis_endpoint_block_sum, analysis_model_indices,
+    analysis_reduce_model_output, figure3_analysis_grid,
+    load_reference_sessions, align_native_trial_arrays_to_reference,
+    _load_fig2_alpha_by_session,
     _load_fig2_included_sessions,
 )
 from _fig3_helpers import (
@@ -94,7 +104,70 @@ from _fig3_explainable_variance import (
 )
 
 
-CACHE_PATH = CACHE_DIR / "fig3_ablation_inference.pkl"
+CACHE_PATH = Path(
+    os.environ.get(
+        "FIG3_ABLATION_CACHE_PATH",
+        str(CACHE_DIR / "fig3_ablation_inference.pkl"),
+    )
+)
+
+
+def _partial_cache_path(cache_path):
+    """Return the resumable sidecar used by the expensive inference pass."""
+    cache_path = Path(cache_path)
+    return cache_path.with_name(f"{cache_path.stem}.partial{cache_path.suffix}")
+
+
+def _inference_cache_payload(results, *, complete):
+    """Build one versioned cache payload for atomic progress/final writes."""
+    return {
+        "schema_version": INFERENCE_SCHEMA_VERSION,
+        "checkpoint_path": CHECKPOINT_PATH,
+        "femfraction_count_bins": FIG2_REPORTED_WINDOW_BINS,
+        "complete": bool(complete),
+        "n_sessions": int(len(results)),
+        "results": results,
+    }
+
+
+def _write_inference_cache_atomic(path, payload):
+    """Write a cache without exposing a truncated pickle to another process."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f"{path.name}.tmp")
+    with open(temporary, "wb") as stream:
+        dill.dump(payload, stream)
+    os.replace(temporary, path)
+
+
+def _load_partial_inference_cache(cache_path):
+    """Load a compatible schema-v7 progress sidecar, if one exists."""
+    partial_path = _partial_cache_path(cache_path)
+    if not partial_path.exists():
+        return [], partial_path
+    with open(partial_path, "rb") as stream:
+        payload = dill.load(stream)
+    if not isinstance(payload, dict):
+        raise ValueError(f"Invalid partial Figure-3 cache: {partial_path}")
+    expected_checkpoint = str(Path(CHECKPOINT_PATH).resolve())
+    observed_checkpoint = str(Path(payload.get("checkpoint_path", "")).resolve())
+    if (
+        int(payload.get("schema_version", -1)) != INFERENCE_SCHEMA_VERSION
+        or int(payload.get("femfraction_count_bins", -1))
+        != FIG2_REPORTED_WINDOW_BINS
+        or observed_checkpoint != expected_checkpoint
+    ):
+        raise ValueError(
+            "Partial Figure-3 cache is incompatible with the requested "
+            f"checkpoint/schema: {partial_path}"
+        )
+    results = payload.get("results")
+    if not isinstance(results, list):
+        raise ValueError(f"Partial Figure-3 cache lacks a results list: {partial_path}")
+    sessions = [str(record.get("session")) for record in results]
+    if len(sessions) != len(set(sessions)):
+        raise ValueError(f"Partial Figure-3 cache has duplicate sessions: {partial_path}")
+    return results, partial_path
 
 # Bumped when the *inference* stage's output schema or semantics change (new
 # condition, different rendering, different scoring windows). Figure 2-derived
@@ -104,14 +177,30 @@ CACHE_PATH = CACHE_DIR / "fig3_ablation_inference.pkl"
 # v2: scored windows now carry Figure 2's fixed 3-bin matching history (was 1 bin
 # at W=1), and every window in `SCORED_COUNT_BINS` is stored under
 # `scored_by_window`. A v1 cache's numerator is not comparable to a v2 one.
-INFERENCE_SCHEMA_VERSION = 2
+# v3: native-240-Hz twins use causal block-start coordinates, reject blocks that
+# cross trial boundaries, average continuous covariates over each supervised
+# pair, and align observations/neurons/validity to the canonical Figure-3 cache.
+# v4: true native-240-Hz counts and predictions are summed on the exact causal
+# 120-Hz grid, and CCnorm eligibility uses a shared, data-only ceiling mask.
+# v5: affine fits and every downstream metric use that same finite Boolean
+# support, and per-condition CCabs is retained for an explicit identity audit.
+# v6: all ablation conditions are divided by the selected intact trace's exact
+# CCmax and use its data-only stability mask.
+# v7: retain the Figure-2-matched FEM-fraction decomposition for every
+# condition.  Panel E can now consume the same inference sweep as panels C/D
+# instead of depending on a second, easily stale prediction cache.
+INFERENCE_SCHEMA_VERSION = 7
 
 # Counting window (in 120 Hz bins) that panel D's numerator is scored on, and
 # the denominator window `_attach_fig2_derived` reads to match it. Panel D uses
 # the twin's native resolution; see covariance_decomposition/fig3_windows.py for
 # why it differs from the window panel E and Figure 2 report.
 sys.path.insert(0, str(VISIONCORE_ROOT / "paper" / "covariance_decomposition"))
-from fig3_windows import FIG3_SINGLETRIAL_WINDOW_BINS  # noqa: E402
+from fig3_windows import (  # noqa: E402
+    FIG2_REPORTED_WINDOW_BINS,
+    FIG3_SINGLETRIAL_WINDOW_BINS,
+)
+from model_decompose import decompose_model_session  # noqa: E402
 
 PRODUCTION_COUNT_BINS = FIG3_SINGLETRIAL_WINDOW_BINS
 # Every window scored in the same inference pass, on identical predictions, so
@@ -144,10 +233,24 @@ def build_behavior_modifiers():
     return {"intact": None, "zeroed": zeroed}
 
 
+def _center_crop_spatial(array, target_hw):
+    """Center-crop the final two dimensions to a model's embedded aperture."""
+    arr = np.asarray(array)
+    target_h, target_w = (int(target_hw[0]), int(target_hw[1]))
+    height, width = arr.shape[-2:]
+    if target_h > height or target_w > width:
+        raise ValueError(
+            f"Cannot crop spatial shape {(height, width)} to {(target_h, target_w)}."
+        )
+    top = (height - target_h) // 2
+    left = (width - target_w) // 2
+    return arr[..., top : top + target_h, left : left + target_w]
+
+
 def build_stabilized_stim(session_name, embedded_stim, factor):
     """Return (stab_stim, align_maxabs, n_trials_stab) for the reafferent ablation.
 
-    stab_stim: float32 array shaped like `embedded_stim` (N_emb, 1, 51, 51),
+    stab_stim: float32 array shaped like `embedded_stim` (N_emb, 1, H, W),
     pixel-normalized ((raw-127)/255), a drop-in for dset['stim']; the retinal image
     is frozen at ONE common (session-global) gaze for every trial while the RSVP
     images still flash.
@@ -194,8 +297,9 @@ def build_stabilized_stim(session_name, embedded_stim, factor):
 
     # alignment gate: decimate(raw stored) must equal embedded stim
     emb = np.asarray(embedded_stim)
+    embedded_hw = emb.shape[-2:]
     emb_px = np.rint(emb.reshape(emb.shape[0], *emb.shape[-2:]) * 255 + 127).astype(int)
-    dec = raw_stim[:keep:factor].astype(int)
+    dec = _center_crop_spatial(raw_stim[:keep:factor], embedded_hw).astype(int)
     n = min(len(dec), len(emb_px))
     align_maxabs = int(np.abs(dec[:n] - emb_px[:n]).max())
 
@@ -228,8 +332,8 @@ def build_stabilized_stim(session_name, embedded_stim, factor):
         stab_raw[m] = trial.get_rois(hist_idx, roi=roi_const)
         n_trials_stab += 1
 
-    stab_dec = stab_raw[:keep:factor].astype(np.float32)
-    stab_stim = ((stab_dec - 127.0) / 255.0)[:, None]    # (Nemb,1,51,51)
+    stab_dec = _center_crop_spatial(stab_raw[:keep:factor], embedded_hw).astype(np.float32)
+    stab_stim = ((stab_dec - 127.0) / 255.0)[:, None]    # (Nemb,1,H,W)
     stab_stim = stab_stim[:emb.shape[0]]
     return stab_stim.astype(np.float32), align_maxabs, n_trials_stab
 
@@ -243,43 +347,90 @@ def _compute_ccnorm_by_condition(robs, rhat_rs, dfs, n_splits=CCNORM_N_SPLITS):
 
     ccmax is the split-half reliability of the observed responses, so it is a
     property of `robs` alone and identical across conditions; we compute it once
-    and return it alongside a {cond: ccnorm} dict. Each condition's ccnorm is
-    averaged over two split-half seeds and neurons whose two estimates disagree
-    (squared diff > 0.01) are dropped, mirroring the fig3 top-row loader.
+    and return it alongside the per-condition CCabs values. Eligibility is
+    determined only by disagreement between the two data-only CCmax estimates;
+    every reported CCnorm is then formed explicitly as CCabs / CCmax.
     """
     from eval.eval_stack_utils import ccnorm_split_half_variable_trials
 
+    support = np.isfinite(robs) & np.isfinite(dfs) & (dfs != 0)
     ccnorm = {}
+    ccabs_by_condition = {}
     ccmax = None
+    unstable = None
     for c, r in rhat_rs.items():
-        cn1, _, cm1, _, _ = ccnorm_split_half_variable_trials(
-            robs, r, dfs, n_splits=n_splits, return_components=True, rng=42)
-        cn2, _, cm2, _, _ = ccnorm_split_half_variable_trials(
-            robs, r, dfs, n_splits=n_splits, return_components=True, rng=43)
-        cn = 0.5 * (cn1 + cn2)
-        cn[(cn1 - cn2) ** 2 > 0.01] = np.nan
-        ccnorm[c] = cn
+        r = np.asarray(r)
+        missing = support & ~np.isfinite(r)
+        if missing.any():
+            raise RuntimeError(
+                f"{c}: {int(missing.sum())} predictions missing on CCnorm support"
+            )
+        _, ca1, cm1, _, _ = ccnorm_split_half_variable_trials(
+            robs, r, support, n_splits=n_splits, return_components=True, rng=42)
+        _, ca2, cm2, _, _ = ccnorm_split_half_variable_trials(
+            robs, r, support, n_splits=n_splits, return_components=True, rng=43)
+        if not np.allclose(ca1, ca2, rtol=0, atol=1e-12, equal_nan=True):
+            raise AssertionError(f"{c}: CCabs changed across split-half seeds")
         if ccmax is None:
             ccmax = 0.5 * (cm1 + cm2)
-    return ccnorm, ccmax
+            unstable = (cm1 - cm2) ** 2 > 0.01
+        else:
+            if not np.allclose(ccmax, 0.5 * (cm1 + cm2), rtol=0, atol=1e-12, equal_nan=True):
+                raise AssertionError(f"{c}: data-only CCmax changed across conditions")
+        ccabs = 0.5 * (ca1 + ca2)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            cn = ccabs / ccmax
+        cn[unstable] = np.nan
+        ccnorm[c] = cn
+        ccabs_by_condition[c] = ccabs
+    return ccnorm, ccmax, ccabs_by_condition, unstable
 
 
 def _compute_model_one_minus_alpha_by_condition(rhat_rs, dfs):
     """Per-neuron model 1-alpha for each behavior condition."""
     n_neurons = dfs.shape[2]
+    valid = np.isfinite(dfs) & (dfs != 0)
     out = {c: np.full(n_neurons, np.nan, dtype=float) for c in CONDS}
     for c, rates in rhat_rs.items():
         for ni in range(n_neurons):
             comp = rate_variance_components(
                 rates[:, :, ni],
-                valid=dfs[:, :, ni] != 0,
+                valid=valid[:, :, ni],
                 min_trials_per_phase=MIN_TRIALS_PER_PHASE,
             )
             out[c][ni] = comp["one_minus_alpha"]
     return out
 
 
-def _run_inference(session_filter=None, cache_path=CACHE_PATH):
+def _renormalize_ccnorm_to_intact_anchor(ccabs, anchor):
+    """Put every counterfactual on one exact, data-only noise ceiling."""
+    ccmax = np.asarray(anchor["ccmax"], dtype=np.float64).copy()
+    unstable = np.asarray(
+        anchor.get("ccnorm_unstable", ~np.isfinite(anchor["ccnorm"])),
+        dtype=bool,
+    )
+    anchored_ccabs = {
+        condition: np.asarray(value, dtype=np.float64).copy()
+        for condition, value in ccabs.items()
+    }
+    anchored_ccabs["intact"] = np.asarray(anchor["ccabs"], dtype=np.float64).copy()
+    ccnorm = {}
+    for condition, value in anchored_ccabs.items():
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ccnorm[condition] = value / ccmax
+        ccnorm[condition][unstable] = np.nan
+    if not np.allclose(
+        ccnorm["intact"],
+        np.asarray(anchor["ccnorm"]),
+        rtol=0,
+        atol=1e-12,
+        equal_nan=True,
+    ):
+        raise AssertionError("anchored CCnorm identity does not reproduce intact trace")
+    return ccnorm, ccmax, anchored_ccabs, unstable
+
+
+def _run_inference(session_filter=None, cache_path=CACHE_PATH, *, history_stabilized=False):
     """Run the twin under all three conditions and write a summary cache.
 
     ``session_filter`` and ``cache_path`` support an off-cache alignment smoke
@@ -307,13 +458,51 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH):
     from data_loading import load_cache as load_aligned_cache
     fig2_sessions = {a["session"] for a in load_aligned_cache()}
 
-    device = get_free_device()
+    # See _fig3_data._run_inference: allow production jobs to avoid racing an
+    # independent GPU workload while preserving automatic selection by default.
+    device = get_free_device(os.environ.get("FIG3_GPU"))
     print(f"Loading model from: {CHECKPOINT_PATH}")
     model, model_info = load_model(checkpoint_path=CHECKPOINT_PATH, device=str(device))
     model.model.eval()
     print(f"Model loaded: {model_info['experiment']}, epoch {model_info['epoch']}")
+    # Loaded lazily only if this checkpoint uses native-rate supervision.
+    native_reference = None
+    # The selected model's independently evaluated intact trace is the metric
+    # anchor for Panel C.  The ablation forward pass is numerically equivalent
+    # in VE, but changing batch shape can amplify tiny mixed-precision changes
+    # in the split-half normalized-correlation estimator.
+    with open(FIG3_DATA_CACHE_PATH, "rb") as stream:
+        selected_intact = {row["session"]: row for row in dill.load(stream)}
 
-    results = []
+    cache_path = Path(cache_path)
+    resume_enabled = str(
+        os.environ.get("FIG3_ABLATION_RESUME", "1")
+    ).strip().lower() not in {"0", "false", "no"}
+    if resume_enabled:
+        results, partial_cache_path = _load_partial_inference_cache(cache_path)
+    else:
+        results = []
+        partial_cache_path = _partial_cache_path(cache_path)
+    completed_sessions = {str(record["session"]) for record in results}
+    reference = "history_endpoint" if history_stabilized else "session_global"
+    if any(record.get("stabilization_reference", "session_global") != reference
+           for record in results):
+        raise ValueError("Partial cache uses a different stabilization reference")
+    if completed_sessions:
+        print(
+            f"Resuming schema-v{INFERENCE_SCHEMA_VERSION} ablation inference "
+            f"with {len(completed_sessions)} completed sessions from "
+            f"{partial_cache_path}"
+        )
+
+    eligible_sessions = {
+        session_name
+        for session_name in model.names
+        if subject_from_session(session_name) in SUBJECTS
+        and (session_filter is None or session_name in session_filter)
+        and session_name in fig2_sessions
+        and session_name in selected_intact
+    }
     for dataset_idx, session_name in enumerate(model.names):
         subject = subject_from_session(session_name)
         if subject not in SUBJECTS:
@@ -322,6 +511,12 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH):
             continue
         if session_name not in fig2_sessions:
             print(f"Skipping {session_name}: absent from the Figure 2 decomposition")
+            continue
+        if session_name not in selected_intact:
+            print(f"Skipping {session_name}: absent from the canonical Figure-3 population")
+            continue
+        if session_name in completed_sessions:
+            print(f"Skipping {session_name}: already present in resumable schema-v7 cache")
             continue
         print(f"\n--- {session_name} ({subject}) ---")
 
@@ -335,18 +530,37 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH):
             print(f"  Skipping: {e}")
             continue
 
+        analysis_grid = figure3_analysis_grid(dataset_config)
+        if analysis_grid["align_to_reference"] and native_reference is None:
+            native_reference = load_reference_sessions()
+
         dset_idx_local = fixrsvp_inds[:, 0].unique().item()
         dset = train_data.dsets[dset_idx_local]
 
         trial_inds = np.asarray(dset.covariates['trial_inds']).ravel()
         psth_inds_flat = np.asarray(dset.covariates['psth_inds']).ravel()
+        analysis_endpoints, psth_inds_analysis = analysis_endpoint_mask_and_psth(
+            dataset_config, psth_inds_flat, trial_inds
+        )
         robs_flat = np.asarray(dset['robs'])
+        dfs_flat = np.asarray(dset['dfs'])
+        robs_analysis = analysis_endpoint_block_sum(
+            dataset_config, robs_flat, analysis_endpoints
+        )
+        dfs_analysis = analysis_endpoint_block_filter(
+            dataset_config, dfs_flat, analysis_endpoints
+        )
         eyepos_flat = np.asarray(dset['eyepos'])
-        fixation = np.hypot(eyepos_flat[:, 0], eyepos_flat[:, 1]) < 1.0
+        eyepos_analysis = analysis_endpoint_block_mean(
+            dataset_config, eyepos_flat, analysis_endpoints
+        )
+        fixation = np.hypot(
+            eyepos_analysis[:, 0], eyepos_analysis[:, 1]
+        ) < 1.0
 
         trials = np.unique(trial_inds)
         NT, NC = len(trials), robs_flat.shape[1]
-        T = int(psth_inds_flat.max()) + 1
+        T = int(psth_inds_analysis[analysis_endpoints].max()) + 1
         stim_lags = np.array(dataset_config['keys_lags']['stim'])
 
         beh_mod = build_behavior_modifiers()
@@ -355,16 +569,26 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH):
         # centroid gaze, rendered from raw data and decimated to the model frame.
         # The alignment gate must pass (== 0) or the substitution is not frame-aligned.
         samp = dataset_config.get('sampling', {})
-        factor = (int(samp['source_rate']) // int(samp['target_rate'])) if samp else 1
-        stab_stim_np, align_maxabs, n_tr_stab = build_stabilized_stim(
-            session_name, dset['stim'].numpy(), factor)
-        print(f"  stabilized render: {n_tr_stab} trials, factor={factor}, "
+        render_factor = (
+            int(samp['source_rate']) // int(samp['target_rate']) if samp else 1
+        )
+        history_renderer = None
+        if history_stabilized:
+            from history_stabilization import HistoryStabilizer
+            history_renderer = HistoryStabilizer(
+                session_name, dset['stim'].numpy(), render_factor)
+            align_maxabs = history_renderer.align_maxabs
+            n_tr_stab = len(np.unique(trial_inds))
+        else:
+            stab_stim_np, align_maxabs, n_tr_stab = build_stabilized_stim(
+                session_name, dset['stim'].numpy(), render_factor)
+        print(f"  stabilized render: {n_tr_stab} trials, factor={render_factor}, "
               f"alignment max-abs(decimate(raw)-embedded)={align_maxabs}")
         if align_maxabs != 0:
             print(f"  Skipping: stabilized-stim alignment gate failed "
                   f"(max-abs={align_maxabs})")
             continue
-        stab_stim = torch.from_numpy(stab_stim_np)
+        stab_stim = None if history_stabilized else torch.from_numpy(stab_stim_np)
 
         robs = np.full((NT, T, NC), np.nan)
         dfs = np.full((NT, T, NC), np.nan)
@@ -373,28 +597,62 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH):
         rhat = {c: np.full((NT, T, NC), np.nan) for c in CONDS}
 
         for itrial in tqdm(range(NT), desc=f"  {session_name}"):
-            ix = (trial_inds == trials[itrial]) & fixation
-            if not np.any(ix):
+            ix_obs = (trial_inds == trials[itrial]) & fixation & analysis_endpoints
+            if not np.any(ix_obs):
                 continue
-            stim_indices = np.where(ix)[0]
-            stim_lag_indices = stim_indices[:, None] - stim_lags[None, :]
+            t_obs = psth_inds_analysis[ix_obs].astype(int)
+            fix_dur[itrial] = len(t_obs)
+            robs[itrial, t_obs] = robs_analysis[ix_obs]
+            dfs[itrial, t_obs] = dfs_analysis[ix_obs]
+            eyepos[itrial, t_obs] = eyepos_analysis[ix_obs]
+
+            endpoint_indices, model_indices = analysis_model_indices(
+                dataset_config, ix_obs, int(stim_lags.max(initial=0))
+            )
+            if not len(endpoint_indices):
+                continue
+            stim_lag_indices = model_indices[:, None] - stim_lags[None, :]
             stim = dset['stim'][stim_lag_indices].permute(0, 2, 1, 3, 4)
-            stim_stab = stab_stim[stim_lag_indices].permute(0, 2, 1, 3, 4)
-            behavior0 = dset['behavior'][ix]
-            t_inds = psth_inds_flat[ix].astype(int)
-            fix_dur[itrial] = len(t_inds)
-            robs[itrial, t_inds] = robs_flat[ix]
-            dfs[itrial, t_inds] = np.asarray(dset['dfs'][ix])
-            eyepos[itrial, t_inds] = eyepos_flat[ix]
+            if history_renderer is None:
+                stim_stab = stab_stim[stim_lag_indices].permute(0, 2, 1, 3, 4)
+            else:
+                stim_stab = torch.from_numpy(history_renderer.render(
+                    model_indices, stim_lags))
+            behavior0 = dset['behavior'][model_indices]
+            output_behavior0 = (
+                dset['output_behavior'][model_indices]
+                if 'output_behavior' in dset
+                else None
+            )
+            t_inds = psth_inds_analysis[endpoint_indices].astype(int)
             for c in CONDS:
                 if c in STIM_CONDS:            # replace stim, keep behavior intact
                     batch = {'stim': stim_stab, 'behavior': behavior0}
+                    if output_behavior0 is not None:
+                        batch['output_behavior'] = output_behavior0
                 else:                          # keep stored stim, modify behavior
                     behavior = (behavior0 if beh_mod[c] is None
                                 else beh_mod[c](behavior0, itrial))
                     batch = {'stim': stim, 'behavior': behavior}
-                out = run_model(model, batch, dataset_idx=dataset_idx)
-                rhat[c][itrial, t_inds] = out['rhat'].detach().cpu().numpy()
+                    if output_behavior0 is not None:
+                        output_behavior = (
+                            output_behavior0
+                            if beh_mod[c] is None
+                            else beh_mod[c](output_behavior0, itrial)
+                        )
+                        batch['output_behavior'] = output_behavior
+                with torch.autocast(
+                    device_type="cuda",
+                    dtype=torch.bfloat16,
+                    enabled=torch.cuda.is_available(),
+                ):
+                    out = run_model(model, batch, dataset_idx=dataset_idx)
+                prediction = analysis_reduce_model_output(
+                    dataset_config,
+                    out['rhat'].detach().cpu().numpy(),
+                    len(endpoint_indices),
+                )
+                rhat[c][itrial, t_inds] = prediction
 
         good_trials = fix_dur > MIN_FIX_DUR
         if good_trials.sum() < 10:
@@ -406,34 +664,100 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH):
         eyepos = eyepos[good_trials][:, iix]
         rhat = {c: r[good_trials][:, iix] for c, r in rhat.items()}
 
-        neuron_mask = np.where(np.nansum(robs, axis=(0, 1)) > MIN_TOTAL_SPIKES)[0]
-        if len(neuron_mask) < 3:
-            print(f"  Skipping: only {len(neuron_mask)} neurons pass spike threshold")
-            continue
-        robs = robs[:, :, neuron_mask]
-        dfs = dfs[:, :, neuron_mask]
-        rhat = {c: r[:, :, neuron_mask] for c, r in rhat.items()}
+        if analysis_grid["align_to_reference"]:
+            if native_reference is None or session_name not in native_reference:
+                # The production figure is defined on the canonical reference
+                # population.  Newer training manifests can include sessions
+                # with FixRSVP trials that are not members of that population,
+                # so there is no native neuron/time intersection to score.
+                print(
+                    "  Skipping: missing from canonical Figure-3 reference "
+                    "cache"
+                )
+                continue
+            robs, rhat, dfs, neuron_mask = align_native_trial_arrays_to_reference(
+                robs,
+                rhat,
+                native_reference[session_name],
+                label=f"{session_name} ablation",
+            )
+        else:
+            neuron_mask = np.where(
+                np.nansum(robs, axis=(0, 1)) > MIN_TOTAL_SPIKES
+            )[0]
+            if len(neuron_mask) < 3:
+                print(f"  Skipping: only {len(neuron_mask)} neurons pass spike threshold")
+                continue
+            robs = robs[:, :, neuron_mask]
+            dfs = dfs[:, :, neuron_mask]
+            rhat = {c: r[:, :, neuron_mask] for c, r in rhat.items()}
         n_trials, n_time, n_neurons = robs.shape
         print(f"  {n_trials} trials, {n_time} bins, {n_neurons} neurons")
+        score_support = np.isfinite(robs) & np.isfinite(dfs) & (dfs != 0)
+        score_filter = score_support.astype(np.float32)
+        for condition, prediction in rhat.items():
+            missing = score_support & ~np.isfinite(prediction)
+            if missing.any():
+                raise RuntimeError(
+                    f"{session_name}/{condition}: {int(missing.sum())} "
+                    "predictions missing on data-only support"
+                )
 
         def rescale(r):
             rr, _ = rescale_rhat(
                 torch.from_numpy(robs.reshape(-1, n_neurons)),
                 torch.from_numpy(r.reshape(-1, n_neurons)),
-                torch.from_numpy(dfs.reshape(-1, n_neurons)),
+                torch.from_numpy(score_filter.reshape(-1, n_neurons)),
                 mode='affine',
             )
             return rr.reshape(n_trials, n_time, n_neurons).detach().cpu().numpy()
 
         rhat_rs = {c: rescale(r) for c, r in rhat.items()}
 
-        robs_m = robs.copy(); robs_m[dfs == 0] = np.nan
-        rhat_m = {c: r.copy() for c, r in rhat_rs.items()}
-        for c in CONDS:
-            rhat_m[c][dfs == 0] = np.nan
+        # Figure 3 panel E reports the same matched close-pair FEM fraction as
+        # Figure 2, on the central |eye| < 0.5-deg frame.  Compute it while the
+        # exact condition predictions are resident rather than requiring a
+        # second inference cache with an independent masking contract.
+        fem_valid_mask = (
+            np.isfinite(eyepos).all(axis=-1)
+            & (np.hypot(eyepos[..., 0], eyepos[..., 1]) < CENTROID_RADIUS)
+        )
+        femfraction = {
+            condition: decompose_model_session(
+                prediction,
+                robs,
+                eyepos,
+                fem_valid_mask,
+                score_filter,
+                count_bins=FIG2_REPORTED_WINDOW_BINS,
+            )
+            for condition, prediction in rhat_rs.items()
+            if not history_stabilized  # Supplement tests prediction (C/D), not the FEM decomposition.
+        }
+        observed_anchor = femfraction.get("intact")
+        for condition in ([] if history_stabilized else ABLATIONS):
+            for key in ("B_obs", "B_obs_uncl"):
+                if not np.allclose(
+                    femfraction[condition][key],
+                    observed_anchor[key],
+                    rtol=0,
+                    atol=0,
+                    equal_nan=True,
+                ):
+                    raise AssertionError(
+                        f"{session_name}/{condition}: data-only {key} changed "
+                        "across model conditions"
+                    )
+
+        robs_m = np.where(score_support, robs, np.nan)
+        rhat_m = {
+            c: np.where(score_support, r, np.nan) for c, r in rhat_rs.items()
+        }
 
         ve = {c: _var_explained(rhat_m[c], robs_m, axis=(0, 1)) for c in CONDS}
-        model_one_minus_alpha = _compute_model_one_minus_alpha_by_condition(rhat_rs, dfs)
+        model_one_minus_alpha = _compute_model_one_minus_alpha_by_condition(
+            rhat_rs, score_filter
+        )
 
         rbar = np.zeros_like(robs_m)
         for i in range(n_trials):
@@ -441,7 +765,37 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH):
             rbar[i] = np.nanmean(robs_m[other], axis=0)
         ve_psth = _var_explained(rbar, robs_m, axis=(0, 1))
 
-        ccnorm, ccmax = _compute_ccnorm_by_condition(robs, rhat_rs, dfs)
+        ccnorm, ccmax, ccabs, ccnorm_unstable = _compute_ccnorm_by_condition(
+            robs, rhat_rs, score_filter
+        )
+        if analysis_grid["align_to_reference"]:
+            anchor = selected_intact.get(session_name)
+            if anchor is None or not np.array_equal(
+                neuron_mask, np.asarray(anchor["neuron_mask"])
+            ):
+                raise ValueError(
+                    f"{session_name}: selected intact metric anchor population mismatch."
+                )
+            # Every counterfactual must use the exact same data-only ceiling
+            # and stability mask as the selected intact trace. Mixing the
+            # ablation sweep's 200-split ceiling with the intact evaluator's
+            # 500-split ceiling makes CCnorm differ even when CCabs does not.
+            ccnorm, ccmax, ccabs, ccnorm_unstable = (
+                _renormalize_ccnorm_to_intact_anchor(ccabs, anchor)
+            )
+            ve["intact"] = np.asarray(anchor["ve_model"]).copy()
+            ve_psth = np.asarray(anchor["ve_psth"]).copy()
+
+        for condition in CONDS:
+            with np.errstate(divide="ignore", invalid="ignore"):
+                identity = ccabs[condition] / ccmax
+            identity[ccnorm_unstable] = np.nan
+            if not np.allclose(
+                ccnorm[condition], identity, rtol=0, atol=1e-12, equal_nan=True
+            ):
+                raise AssertionError(
+                    f"{session_name}/{condition}: CCnorm != CCabs / shared CCmax"
+                )
 
         # Captured count variance on Figure 2's one-bin windows intersected with
         # the twin's valid support. Only the numerator is computed here; the
@@ -450,7 +804,11 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH):
         # so they track the current decomposition cache without re-inference.
         scored_by_window = {
             cb: compute_matched_captured_variance(
-                robs, {"psth": rbar, **rhat_m}, eyepos, dfs, count_bins=cb
+                robs,
+                {"psth": rbar, **rhat_m},
+                eyepos,
+                score_filter,
+                count_bins=cb,
             )
             for cb in SCORED_COUNT_BINS
         }
@@ -471,7 +829,7 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH):
         # figure can report how far it drifts from Figure 2's estimate. This one
         # needs `dfs`, so it stays inference-side; its drift-vs-Figure-2 ratio is
         # reported by `_attach_fig2_derived` once the denominators are attached.
-        matched = estimate_matched_rate_variance(robs, eyepos, dfs)
+        matched = estimate_matched_rate_variance(robs, eyepos, score_filter)
         print(
             f"  [diagnostic] matched Crate: "
             f"{int(np.sum(matched['c_rate'] > 0))}/{n_neurons} units positive, "
@@ -485,7 +843,7 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH):
             matches = np.where(neuron_mask == PANEL_B_NEURON_ID)[0]
             if len(matches):
                 ni = int(matches[0])
-                dfs_n = dfs[:, :, ni]
+                dfs_n = score_filter[:, :, ni]
                 robs_n = robs[:, :, ni]
                 _, _, order, _ = order_single_neuron_by_seriation(
                     robs_n, rhat_rs['intact'][:, :, ni], dfs_n)
@@ -511,8 +869,12 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH):
 
         results.append({
             "session": session_name, "subject": subject,
+            "stabilization_reference": reference,
+            "history_render_audit": history_renderer.audit if history_renderer else None,
             "neuron_mask": neuron_mask, "n_neurons": n_neurons,
-            "ve": ve, "ve_psth": ve_psth, "ccnorm": ccnorm, "ccmax": ccmax,
+            "ve": ve, "ve_psth": ve_psth,
+            "ccnorm": ccnorm, "ccabs": ccabs, "ccmax": ccmax,
+            "ccnorm_unstable": ccnorm_unstable,
             "captured_variance": scored["captured_variance"],
             "var_residual": scored["var_residual"],
             "matched_var_y": scored["var_y"],
@@ -539,19 +901,28 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH):
                 "n_validity_groups_excluded"
             ],
             "model_one_minus_alpha": model_one_minus_alpha,
+            "femfraction": femfraction,
             "example": example,
         })
-
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    with open(cache_path, "wb") as f:
-        dill.dump(
-            {
-                "schema_version": INFERENCE_SCHEMA_VERSION,
-                "checkpoint_path": CHECKPOINT_PATH,
-                "results": results,
-            },
-            f,
+        completed_sessions.add(session_name)
+        _write_inference_cache_atomic(
+            partial_cache_path,
+            _inference_cache_payload(results, complete=False),
         )
+
+    completed_sessions = {str(record["session"]) for record in results}
+    if completed_sessions != eligible_sessions:
+        missing = sorted(eligible_sessions - completed_sessions)
+        extra = sorted(completed_sessions - eligible_sessions)
+        raise RuntimeError(
+            "Figure-3 ablation inference did not complete its exact production "
+            f"session set; missing={missing}, extra={extra}. Resumable progress "
+            f"is retained at {partial_cache_path}."
+        )
+    _write_inference_cache_atomic(
+        cache_path,
+        _inference_cache_payload(results, complete=True),
+    )
     print(f"\nCached {len(results)} sessions to {cache_path}")
     return results
 
@@ -808,6 +1179,8 @@ def load_ablation_data(recompute=False):
                     f"{payload.get('checkpoint_path')}, but CHECKPOINT_PATH is "
                     f"{CHECKPOINT_PATH}. Re-run inference."
                 )
+            if any(r.get("stabilization_reference", "session_global") != "session_global" for r in results):
+                raise ValueError("History-local control must not replace the main Figure-3 ablation cache")
         else:  # pre-split cache: a bare list, no provenance recorded
             print("  (legacy cache format: no schema/checkpoint provenance)")
             results = payload

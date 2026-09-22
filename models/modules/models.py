@@ -189,7 +189,7 @@ class ModularV1Model(nn.Module):
             # For concat modulators, add the modulator output channels
             # For FiLM modulators, channel count stays the same
             modulator_type = modulator_config.get('type', 'none')
-            if modulator_type == 'concat':
+            if modulator_type in ['concat', 'mlp_behavior']:
                 current_channels += modulator_dim
             else:
                 pass
@@ -395,7 +395,7 @@ class MultiDatasetV1Model(ModularV1Model):
         # Calculate channels after modulation
         current_channels = convnet_output_channels
         if self.modulator is not None and modulator_dim > 0:
-            if modulator_type == 'concat':
+            if modulator_type in ['concat', 'mlp_behavior']:
                 current_channels += modulator_dim
             elif modulator_type in ['film', 'stn']:
                 # FiLM and STN don't change channel count
@@ -451,6 +451,35 @@ class MultiDatasetV1Model(ModularV1Model):
             )
             self.readouts.append(readout)
 
+        # Optional full-resolution signed stage-1 branch.  It is deliberately
+        # separate from the established deep scaffold readout so a pretrained
+        # twin can be embedded exactly: phase-readout feature weights start at
+        # zero and its raw output is added before the final softplus.
+        phase_readout_config = self.model_config.get('phase_readout')
+        self.phase_readouts = None
+        if phase_readout_config is not None:
+            phase_forward = getattr(self.convnet, 'forward_with_phase', None)
+            phase_channels_fn = getattr(self.convnet, 'get_phase_channels', None)
+            if phase_forward is None or phase_channels_fn is None:
+                raise ValueError(
+                    "phase_readout requires a convnet with forward_with_phase() "
+                    "and get_phase_channels()"
+                )
+            phase_readout_type = phase_readout_config['type']
+            phase_readout_params = phase_readout_config.get('params') or {}
+            phase_channels = int(phase_channels_fn())
+            self.phase_readouts = nn.ModuleList()
+            for dataset_config in self.dataset_configs:
+                params = phase_readout_params.copy()
+                params['n_units'] = len(dataset_config.get('cids', []))
+                self.phase_readouts.append(
+                    create_readout(
+                        readout_type=phase_readout_type,
+                        in_channels=phase_channels,
+                        **params,
+                    )
+                )
+
         # Set up per-dataset baseline parameters if enabled
         if self.baseline_enabled:
             self.baselines = nn.ParameterList()
@@ -490,8 +519,65 @@ class MultiDatasetV1Model(ModularV1Model):
         x_recurrent = self.recurrent(feats)
 
         return x_recurrent
+
+    def core_forward_with_phase(self, stimulus=None, behavior=None):
+        """Return the deep behavior-aware scaffold and signed shallow map."""
+        feats = self.frontend(stimulus)
+        feats, phase_feats = self.convnet.forward_with_phase(feats)
+        require_behavior(
+            self.modulator,
+            behavior,
+            where="MultiDatasetModel.core_forward_with_phase",
+        )
+        if self.modulator is not None:
+            feats = self.modulator(feats, behavior)
+        return self.recurrent(feats), phase_feats
+
+    def core_forward_spatial_map(self, stimulus=None, behavior=None):
+        """Run a translation-preserving core path for large-field analyses."""
+        feats = self.frontend(stimulus)
+        spatial_forward = getattr(self.convnet, "forward_spatial_map", None)
+        feats = (
+            spatial_forward(feats)
+            if spatial_forward is not None
+            else self.convnet(feats)
+        )
+        require_behavior(
+            self.modulator,
+            behavior,
+            where="MultiDatasetModel.core_forward_spatial_map",
+        )
+        if self.modulator is not None:
+            feats = self.modulator(feats, behavior)
+        return self.recurrent(feats)
+
+    def core_forward_spatial_map_with_phase(self, stimulus=None, behavior=None):
+        """Translation-preserving core path including the signed phase tap."""
+        feats = self.frontend(stimulus)
+        spatial_forward = getattr(
+            self.convnet, "forward_spatial_map_with_phase", None
+        )
+        if spatial_forward is None:
+            raise ValueError(
+                "The configured core does not expose a spatial phase replay"
+            )
+        feats, phase_feats = spatial_forward(feats)
+        require_behavior(
+            self.modulator,
+            behavior,
+            where="MultiDatasetModel.core_forward_spatial_map_with_phase",
+        )
+        if self.modulator is not None:
+            feats = self.modulator(feats, behavior)
+        return self.recurrent(feats), phase_feats
     
-    def forward(self, stimulus=None, dataset_idx: int = 0, behavior=None, history=None):
+    def forward(
+        self,
+        stimulus=None,
+        dataset_idx: int = 0,
+        behavior=None,
+        history=None,
+    ):
         """
         Forward pass through the model for a specific dataset.
 
@@ -513,10 +599,14 @@ class MultiDatasetV1Model(ModularV1Model):
             device = next(self.parameters()).device
             x = torch.ones(B, 1, 1, 1, 1, device=device, dtype=behavior.dtype)
 
-        x = self.core_forward(x, behavior)
-
-        # Route through appropriate readout
-        output = self.readouts[dataset_idx](x)
+        if self.phase_readouts is None:
+            x = self.core_forward(x, behavior)
+            output = self.readouts[dataset_idx](x)
+        else:
+            x, phase_x = self.core_forward_with_phase(x, behavior)
+            output = self.readouts[dataset_idx](x)
+            if self.phase_readouts is not None:
+                output = output + self.phase_readouts[dataset_idx](phase_x)
 
         # Apply activation function
         output = self.activation(output)

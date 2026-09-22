@@ -5,6 +5,7 @@
 *.ckpt
 *.log
 *.wandb
+/wandb/
 *.json
 *.txt
 *.npz

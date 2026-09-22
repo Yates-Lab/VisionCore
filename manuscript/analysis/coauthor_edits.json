@@ -1,0 +1,376 @@
+{
+  "status": "applied_for_user_review",
+  "applied_utc": "2026-09-13T21:17:04.417190+00:00",
+  "base_commit": "b2c603393c90a3324f7bd5ccdc0bfc97031ca877",
+  "summary": {
+    "active_manuscript_changed": true,
+    "source_locations": 27,
+    "prose_or_disclosure_locations": 21,
+    "citation_only_locations": 6,
+    "individual_replacements_or_insertions": 33,
+    "approx_words_removed": 301,
+    "approx_words_added": 387,
+    "approx_net_words_added": 86,
+    "statistic_references_unchanged": true,
+    "bibliography_additions": [
+      "assa2026temporal"
+    ],
+    "user_requested_corrections": 1
+  },
+  "red_markup_command": "reviewedit",
+  "new_reference_key": "assa2026temporal",
+  "before_main_sha256": "c562e4871248432d3cb1a66bf8f67323fa4115973c3f791f256817f7d329bf62",
+  "review_directory": "manuscript/build/coauthor_red_review",
+  "edits": [
+    {
+      "id": 1,
+      "line": 96,
+      "purpose": "Define FEMs at first use",
+      "before": "fixational eye movements (FEMs) continually",
+      "after": "fixational eye movements (FEMs), including drift and microsaccades, continually",
+      "citation_only": false,
+      "marked_after": "fixational eye movements \\reviewedit{(FEMs), including drift and microsaccades,} continually"
+    },
+    {
+      "id": 2,
+      "line": 96,
+      "purpose": "Retain Anderson and add the recent Ahissar-group computational result",
+      "before": "\\cite{anderson2020high}",
+      "after": "\\cite{anderson2020high,assa2026temporal}",
+      "citation_only": false,
+      "marked_after": "\\reviewedit{\\cite{anderson2020high,assa2026temporal}}"
+    },
+    {
+      "id": 3,
+      "line": 96,
+      "purpose": "Acknowledge earlier V1 physiology in the introduction",
+      "before": "\\cite{baudot2013animation, mcfarland2016variability}",
+      "after": "\\cite{snodderly2001selective, kagan2008saccades, baudot2013animation, mcfarland2016variability}",
+      "citation_only": false,
+      "marked_after": "\\reviewedit{\\cite{snodderly2001selective, kagan2008saccades, baudot2013animation, mcfarland2016variability}}"
+    },
+    {
+      "id": 4,
+      "line": 98,
+      "purpose": "Describe what the conventional residual includes",
+      "before": "However, sensory physiology has long treated repeated presentations of the same stimulus as repeated deliveries of the same input (i.e., without explicitly modeling possible effects of FEMs), thus assigning all trial-to-trial differences in response to internal noise \\cite{tolhurst1983statistical, shadlen1998variable}.",
+      "after": "Conventional analyses quantify variability across repetitions of the displayed stimulus, leaving differences in retinal input within the residual alongside internally generated variability \\cite{tolhurst1983statistical, shadlen1998variable}.",
+      "citation_only": false,
+      "marked_after": "\\reviewedit{Conventional analyses quantify variability across repetitions of the displayed stimulus, leaving differences in retinal input within the residual alongside internally generated variability} \\cite{tolhurst1983statistical, shadlen1998variable}."
+    },
+    {
+      "id": 5,
+      "line": 105,
+      "purpose": "Motivate repeated flashed images",
+      "before": "We sought to resolve these unanswered questions about FEMs and neuronal variability in the important context of high-acuity vision and the viewing of naturalistic images.",
+      "after": "We presented repeated sequences of flashed natural images to quantify how differences in retinal input contribute to response variability while holding the displayed stimulus sequence fixed.",
+      "citation_only": false,
+      "marked_after": "We \\reviewedit{presented repeated sequences of flashed natural images to quantify how differences in retinal input contribute to response variability while holding the displayed stimulus sequence fixed.}"
+    },
+    {
+      "id": 6,
+      "line": 105,
+      "purpose": "Explain the need for precise tracking",
+      "before": "Resolving the cortical response and the eye's trajectory on the same trials",
+      "after": "This required resolving eye movements small enough to shift image features across foveal receptive fields. Measuring the cortical response and the eye's trajectory on the same trials",
+      "citation_only": false,
+      "marked_after": "\\reviewedit{This required resolving eye movements small enough to shift image features across foveal receptive fields. Measuring} the cortical response and the eye's trajectory on the same trials"
+    },
+    {
+      "id": 7,
+      "line": 105,
+      "purpose": "Avoid labeling the entire remaining residual as internal",
+      "before": "residual internal components",
+      "after": "residual components.",
+      "citation_only": false,
+      "marked_after": "residual \\reviewedit{components.}"
+    },
+    {
+      "id": 8,
+      "line": 107,
+      "purpose": "Qualify dimensionality in the introduction",
+      "before": "the structure of the variability induced by FEMs was low-dimensional and aligned with stimulus-driven population activity",
+      "after": "FEM-driven variance was concentrated in a few dominant dimensions that overlapped those of the stimulus-driven response",
+      "citation_only": false,
+      "marked_after": "\\reviewedit{FEM-driven variance was concentrated in a few dominant dimensions that overlapped those of the stimulus-driven response}"
+    },
+    {
+      "id": 9,
+      "line": 109,
+      "purpose": "Explain counterfactual stabilization once",
+      "before": "Real FEMs produced more informative activations than counterfactually stabilized input.",
+      "after": "Real FEMs produced more informative activations than counterfactually stabilized input, reconstructed at a fixed gaze position to preserve stimulus changes while removing eye-induced retinal motion.",
+      "citation_only": false,
+      "marked_after": "Real FEMs produced more informative activations than counterfactually stabilized \\reviewedit{input, reconstructed at a fixed gaze position to preserve stimulus changes while removing eye-induced retinal motion.}"
+    },
+    {
+      "id": 10,
+      "line": 121,
+      "purpose": "DDPI citation consistency in the Figure 1 caption",
+      "before": "high-precision digital dual Purkinje image eye tracker.",
+      "after": "high-precision digital dual Purkinje image eye tracker \\cite{wu2023high, ressmeyer2025openirisdpi, yates2023detailed}.",
+      "citation_only": true,
+      "marked_after": "high-precision digital dual Purkinje image eye \\reviewedit{tracker \\cite{wu2023high, ressmeyer2025openirisdpi, yates2023detailed}.}"
+    },
+    {
+      "id": 11,
+      "line": 146,
+      "purpose": "DDPI citation consistency in Results",
+      "before": "eye tracker \\cite{yates2023detailed}",
+      "after": "eye tracker \\cite{wu2023high, ressmeyer2025openirisdpi, yates2023detailed}",
+      "citation_only": true,
+      "marked_after": "eye tracker \\reviewedit{\\cite{wu2023high, ressmeyer2025openirisdpi, yates2023detailed}}"
+    },
+    {
+      "id": 12,
+      "line": 291,
+      "purpose": "Tracking citation consistency in Discussion",
+      "before": "\\cite{yates2023detailed, wu2023high}",
+      "after": "\\cite{wu2023high, ressmeyer2025openirisdpi, yates2023detailed}",
+      "citation_only": true,
+      "marked_after": "\\reviewedit{\\cite{wu2023high, ressmeyer2025openirisdpi, yates2023detailed}}"
+    },
+    {
+      "id": 13,
+      "line": 295,
+      "purpose": "Tracking citation consistency in Discussion",
+      "before": "\\cite{ressmeyer2025openirisdpi}",
+      "after": "\\cite{wu2023high, ressmeyer2025openirisdpi, yates2023detailed}",
+      "citation_only": true,
+      "marked_after": "\\reviewedit{\\cite{wu2023high, ressmeyer2025openirisdpi, yates2023detailed}}"
+    },
+    {
+      "id": 14,
+      "line": 625,
+      "purpose": "DDPI citation consistency in filtering Methods",
+      "before": "continuous free-viewing DDPI records.",
+      "after": "continuous free-viewing DDPI records \\cite{wu2023high, ressmeyer2025openirisdpi, yates2023detailed}.",
+      "citation_only": true,
+      "marked_after": "continuous free-viewing DDPI \\reviewedit{records \\cite{wu2023high, ressmeyer2025openirisdpi, yates2023detailed}.}"
+    },
+    {
+      "id": 15,
+      "line": 627,
+      "purpose": "DDPI citation consistency in event-alignment Methods",
+      "before": "aligned to the continuous DDPI records,",
+      "after": "aligned to the continuous DDPI records \\cite{wu2023high, ressmeyer2025openirisdpi, yates2023detailed},",
+      "citation_only": true,
+      "marked_after": "aligned to the continuous DDPI \\reviewedit{records \\cite{wu2023high, ressmeyer2025openirisdpi, yates2023detailed},}"
+    },
+    {
+      "id": 16,
+      "line": 181,
+      "purpose": "Qualify dimensionality in the Figure 2 caption",
+      "before": "The stimulus and FEM components are comparably low-dimensional and far more compact than the residual.",
+      "after": "Variance in the stimulus and FEM components is concentrated in comparably few dominant dimensions relative to the residual.",
+      "citation_only": false,
+      "marked_after": "\\reviewedit{Variance in the stimulus and FEM components is concentrated in comparably few dominant dimensions relative to} the residual."
+    },
+    {
+      "id": 17,
+      "line": 195,
+      "purpose": "Describe dominant variance rather than a strictly limited rank",
+      "before": "The FEM-driven covariance was also low-dimensional.",
+      "after": "FEM-driven variance was concentrated in a few dominant population dimensions.",
+      "citation_only": false,
+      "marked_after": "\\reviewedit{FEM-driven variance was concentrated in a few dominant population dimensions.}"
+    },
+    {
+      "id": 18,
+      "line": 195,
+      "purpose": "Keep the interpretation consistent with the participation ratio",
+      "before": "With both components confined to a few dimensions,",
+      "after": "With much of the variance in both components concentrated in a few dimensions,",
+      "citation_only": false,
+      "marked_after": "With \\reviewedit{much of the variance in both components concentrated in} a few dimensions,"
+    },
+    {
+      "id": 19,
+      "line": 197,
+      "purpose": "Correct the pooling/projection and information-limit argument",
+      "before": "Variability confined to the stimulus-encoding dimensions cannot be averaged away by pooling more units, because it grows with the population the same way the signal does, and it therefore bounds the information the population carries \\cite{zohary1994correlated, moreno2014information}. Variability in orthogonal dimensions, however, would be removed by that same pooling operation.",
+      "after": "A readout that projects onto stimulus-coding dimensions can reject variability orthogonal to those dimensions. Variability overlapping those dimensions cannot be removed by this projection without also discarding stimulus-related responses; its effect on information depends on the decoding task and the detailed covariance structure \\cite{zohary1994correlated, moreno2014information}.",
+      "citation_only": false,
+      "marked_after": "\\reviewedit{A readout that projects onto stimulus-coding dimensions can reject variability orthogonal to those dimensions. Variability overlapping those dimensions cannot be removed by this projection without also discarding stimulus-related responses; its effect on information depends on the decoding task and the detailed covariance structure \\cite{zohary1994correlated, moreno2014information}.}"
+    },
+    {
+      "id": 20,
+      "line": 199,
+      "purpose": "Qualify the conclusion of the subspace analysis",
+      "before": "FEM-driven modulation is therefore largely confined to the same low-dimensional subspace that carries the population's stimulus response.",
+      "after": "FEM-driven modulation therefore overlaps the dominant dimensions of the stimulus-driven population response.",
+      "citation_only": false,
+      "marked_after": "FEM-driven modulation \\reviewedit{therefore overlaps the dominant dimensions of the stimulus-driven population} response."
+    },
+    {
+      "id": 21,
+      "line": 229,
+      "purpose": "Carry the same dimensionality wording into the Figure 3 transition",
+      "before": "modulation associated with FEMs occupies the same low-dimensional subspace as the stimulus response",
+      "after": "modulation associated with FEMs overlaps the dominant dimensions of the stimulus response",
+      "citation_only": false,
+      "marked_after": "modulation associated with FEMs \\reviewedit{overlaps the dominant dimensions of} the stimulus response"
+    },
+    {
+      "id": 22,
+      "line": 235,
+      "purpose": "Lead the trial-average comparison with the retinal-only result",
+      "before": "The full model predicted trial-averaged responses",
+      "after": "The full and retinal-only models achieved similar trial-averaged accuracy. The full model predicted trial-averaged responses",
+      "citation_only": false,
+      "marked_after": "\\reviewedit{The full and retinal-only models achieved similar trial-averaged accuracy.} The full model predicted trial-averaged responses"
+    },
+    {
+      "id": 23,
+      "line": 240,
+      "purpose": "Lead the single-trial comparison with the retinal-only result",
+      "before": "We then tested whether this gain was driven primarily by retinal or extraretinal input.",
+      "after": "Most of the model's single-trial predictive advantage persisted when the explicit extraretinal inputs were removed.",
+      "citation_only": false,
+      "marked_after": "\\reviewedit{Most of the model's single-trial predictive advantage persisted when the explicit extraretinal inputs were removed.}"
+    },
+    {
+      "id": 24,
+      "line": 283,
+      "purpose": "Define passband in the Results text",
+      "before": "These units occupied a broad range of SF$\\times$TF passbands (Fig.~4E).",
+      "after": "These units occupied a broad range of SF$\\times$TF passbands---the combinations of spatial and temporal frequencies that strongly drive each unit (Fig.~4E).",
+      "citation_only": false,
+      "marked_after": "These units occupied a broad range of SF$\\times$TF \\reviewedit{passbands---the combinations of spatial and temporal frequencies that strongly drive each unit} (Fig.~4E)."
+    },
+    {
+      "id": 25,
+      "line": 293,
+      "purpose": "Align the Discussion definition of residual variability with the introduction",
+      "before": "Repeated presentations of stimuli are conventionally treated as repeated deliveries of the same input to the visual system. Deviations from the trial-averaged response are then thought to represent internal variability \\cite{tolhurst1983statistical, shadlen1998variable}.",
+      "after": "Conventional residual variability combines internally generated fluctuations with effects of differences in retinal input that are not captured by the trial-averaged response \\cite{tolhurst1983statistical, shadlen1998variable}.",
+      "citation_only": false,
+      "marked_after": "\\reviewedit{Conventional residual variability combines internally generated fluctuations with effects of differences in retinal input that are not captured by the trial-averaged response} \\cite{tolhurst1983statistical, shadlen1998variable}."
+    },
+    {
+      "id": 26,
+      "line": 297,
+      "purpose": "Qualify dimensionality in the Discussion",
+      "before": "The eye-driven covariance was low-dimensional and lay largely within the subspace carrying the stimulus-driven response, in both directions of the alignment test.",
+      "after": "Eye-driven variance was concentrated in a few dominant dimensions that overlapped those of the stimulus-driven response, in both directions of the alignment test.",
+      "citation_only": false,
+      "marked_after": "\\reviewedit{Eye-driven variance was concentrated in a few dominant dimensions that overlapped those of} the stimulus-driven response, in both directions of the alignment test."
+    },
+    {
+      "id": 27,
+      "line": 297,
+      "purpose": "Clarify what subspace overlap implies for a downstream reader",
+      "before": "Shared variability aligned with neuronal tuning is conventionally read as a limit on the information a population carries, because a decoder cannot distinguish it from a change in the stimulus \\cite{moreno2014information, kohn2016correlations}. That reading assumes the modulating variable is internal and unavailable to the readout, which fixational eye movements are not. The alignment we measured therefore specifies what a downstream stage must either know or infer to read the population correctly, rather than bounding what the population encodes.",
+      "after": "The consequence of this overlap depends on what a downstream circuit reads out and whether it has access to signals that distinguish retinal displacement from changes in the external scene \\cite{moreno2014information, kohn2016correlations}. Our measurements characterize this overlap without determining how downstream circuits use eye-movement information.",
+      "citation_only": false,
+      "marked_after": "\\reviewedit{The consequence of this overlap depends on what a downstream circuit reads out and whether it has access to signals that distinguish retinal displacement from changes in the external scene \\cite{moreno2014information, kohn2016correlations}. Our measurements characterize this overlap without determining how downstream circuits use eye-movement information.}"
+    },
+    {
+      "id": 28,
+      "line": 299,
+      "purpose": "Explain the connection to prior physiology while retaining the retinal conclusion",
+      "before": "even though extraretinal modulation is present in some V1 neurons \\cite{snodderly2001selective,kagan2008saccades}.",
+      "after": "consistent with earlier physiological work. Kagan and colleagues showed that retinal image motion and position account for distinct V1 responses to saccades and drifts, alongside extraretinal modulation in a subset of neurons \\cite{snodderly2001selective,kagan2008saccades}. Our population analysis extends this account by quantifying how strongly retinal input predicts single-trial responses and FEM-dependent rate modulation.",
+      "citation_only": false,
+      "marked_after": "\\reviewedit{consistent with earlier physiological work. Kagan and colleagues showed that retinal image motion and position account for distinct V1 responses to saccades and drifts, alongside extraretinal modulation in a subset of neurons \\cite{snodderly2001selective,kagan2008saccades}. Our population analysis extends this account by quantifying how strongly retinal input predicts single-trial responses and FEM-dependent rate modulation.}"
+    },
+    {
+      "id": 29,
+      "line": 305,
+      "purpose": "End on the demonstrated contribution and its broader relevance",
+      "before": "Foveal vision is therefore a continuous sensorimotor process in which sensor motion and neural computation operate together: the eye transforms the retinal input, cortical circuits transform the resulting spatiotemporal signal, and neural activity can in turn guide subsequent sampling \\cite{vonholst1950reafferenzprinzip,gibson2014ecological,ahissar2016perception}.",
+      "after": "Our results show that accounting for retinal image motion changes how cortical variability is interpreted and reveals a visual signal that can sharpen spatial representations.",
+      "citation_only": false,
+      "marked_after": "\\reviewedit{Our results show that accounting for retinal image motion changes how cortical variability is interpreted and reveals a visual signal that can sharpen spatial representations.}"
+    },
+    {
+      "id": 30,
+      "line": 686,
+      "purpose": "State finite-window spectral resolution explicitly",
+      "before": "Positive and negative temporal frequencies were folded together and motion directions were averaged.",
+      "after": "The finite observation window and tapers broaden spectral estimates, limiting temporal-frequency resolution. Positive and negative temporal frequencies were folded together and motion directions were averaged.",
+      "citation_only": false,
+      "marked_after": "\\reviewedit{The finite observation window and tapers broaden spectral estimates, limiting temporal-frequency resolution.} Positive and negative temporal frequencies were folded together and motion directions were averaged."
+    },
+    {
+      "id": 31,
+      "line": 692,
+      "purpose": "Explain what a microsaccade-containing spectrum represents",
+      "before": "Complete trajectories were retained within each window;",
+      "after": "For microsaccade-containing windows, the spectra characterize the frequency content of transient retinal motion. Complete trajectories were retained within each window;",
+      "citation_only": false,
+      "marked_after": "\\reviewedit{For microsaccade-containing windows, the spectra characterize the frequency content of transient retinal motion.} Complete trajectories were retained within each window;"
+    },
+    {
+      "id": 32,
+      "line": 698,
+      "purpose": "Make the shorter movie-matched estimation interval explicit",
+      "before": "Each movie underwent a spatial Fourier transform,",
+      "after": "Here the estimation window was 250~ms, matching the movies used to predict responses. Each movie underwent a spatial Fourier transform,",
+      "citation_only": false,
+      "marked_after": "\\reviewedit{Here the estimation window was 250~ms, matching the movies used to predict responses.} Each movie underwent a spatial Fourier transform,"
+    },
+    {
+      "id": 33,
+      "line": 777,
+      "purpose": "Add the supplied competing-interest disclosure before Acknowledgments",
+      "before": "",
+      "after": "\\section*{Competing interests}\nM.R. is an inventor on a patent related to the digital Dual Purkinje Image eye-tracking method.\n",
+      "citation_only": false,
+      "marked_after": "\\section*{\\reviewedit{Competing interests}}\n\\reviewedit{M.R. is an inventor on a patent related to the digital Dual Purkinje Image eye-tracking method.}\n"
+    }
+  ],
+  "verified_utc": "2026-09-13T22:23:13.042417+00:00",
+  "main_tex_sha256": "7fadc5d1e4f274685775ada9a7efc182032c29a93d91826d50a8a75cb7832b73",
+  "refs_bib_sha256": "bc85d06eb5bd96170352c837100d77d36d18b99d040613690ea96cd3b0bfa2e3",
+  "pdf": {
+    "path": "manuscript/build/coauthor_red_review/main-red-review.pdf",
+    "sha256": "026b1cf39c575de8bddbcbea288f10629b164848481e5822926f0c260e8225bd",
+    "pages": 40
+  },
+  "validation": {
+    "status": "passed",
+    "red_inline_groups": 35,
+    "generated_statistics_unchanged": true,
+    "verified_generated_statistics": 95,
+    "figure_assets_unchanged": true,
+    "figure3_checks": {
+      "panel_c_stats": true,
+      "panel_d_stats": true,
+      "panel_e_stats": true
+    },
+    "figure4_checks": {
+      "B": true,
+      "C": true,
+      "D": true,
+      "E": true,
+      "F": true,
+      "G": true,
+      "H": true
+    },
+    "visual_review_pages": [
+      1,
+      2,
+      14,
+      32,
+      33
+    ],
+    "new_bibliography_entry_red": true,
+    "subsequent_bibliography_entry_black": true,
+    "latex_warnings": [],
+    "build_audit_log": "manuscript/build/coauthor_red_review/build_audit.log",
+    "proposal_and_user_corrections_applied": true,
+    "latest_correction_verified_on_pdf_page": 1,
+    "latest_correction_verified_red": true
+  },
+  "formatting_cleanup": "Removed inherited trailing whitespace from the edited Figure 1 Results paragraph.",
+  "user_corrections": [
+    {
+      "applied_utc": "2026-09-13T22:23:13.042417+00:00",
+      "pdf_page": 1,
+      "before": "image landing on the retina",
+      "after": "retinal image",
+      "marked_after": "\\reviewedit{retinal image}"
+    }
+  ]
+}

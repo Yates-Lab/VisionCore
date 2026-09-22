@@ -135,7 +135,8 @@ def load_model(model_type=None, model_index=None, checkpoint_path=None,
                 model = MultiDatasetModel.load_from_checkpoint(
                     str(checkpoint_path),
                     strict=False,
-                    map_location='cpu'
+                    map_location='cpu',
+                    pretrained_checkpoint=None,
                 )
 
                 # Fix the state dict keys
@@ -164,7 +165,8 @@ def load_model(model_type=None, model_index=None, checkpoint_path=None,
                 model = MultiDatasetModel.load_from_checkpoint(
                     str(checkpoint_path),
                     strict=False,
-                    map_location='cpu'
+                    map_location='cpu',
+                    pretrained_checkpoint=None,
                 )
         else:
             if verbose:
@@ -172,7 +174,8 @@ def load_model(model_type=None, model_index=None, checkpoint_path=None,
             model = MultiDatasetModel.load_from_checkpoint(
                 str(checkpoint_path),
                 strict=False,
-                map_location='cpu'
+                map_location='cpu',
+                pretrained_checkpoint=None,
             )
 
         model.to(device)
