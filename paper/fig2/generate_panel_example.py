@@ -472,15 +472,11 @@ def plot_unaccounted_variance_panel(ax, decomp=None, caption=True):
     # 1 -> 0, so "left" on screen is the large-Δe end.
     ax.text(0.99, Ctotal + 0.015 * y_hi, "Total variability",
             fontsize=7.5, ha="left", va="bottom")
-    # Residual floor label (just above its line at mid-x).
-    ax.text(0.30, sigma_int + 0.012 * y_hi, r"$\sigma^2_{\mathrm{res}}$",
-            color="0.35", fontsize=7.5, ha="right", va="bottom")
-    # Uncorrected residual: the eye-blind asymptote. Labelled at the strict-
-    # threshold end (screen-right under the reversed axis), where the band
-    # between this line and the total is clear of the decomposition bar.
-    ax.text(0.02, U_naive + 0.015 * y_hi,
-            "Uncorrected",
-            fontsize=7.5, ha="right", va="bottom")
+    # Uncorrected residual: label the eye-blind asymptote just below its dashed
+    # line at the strict-threshold end (screen-right under the reversed axis).
+    ax.text(1.0, U_naive - 0.02 * y_hi,
+            "Uncorrected\nresidual", transform=ax.get_yaxis_transform(),
+            fontsize=7.5, ha="right", va="top")
 
     # Decomposition bar at x = xa (the loose-threshold end, screen-left under
     # the reversed axis): FEM (internal floor -> eye-blind level) in blue,
@@ -493,18 +489,24 @@ def plot_unaccounted_variance_panel(ax, decomp=None, caption=True):
     ax.annotate("", xy=(xa, Ctotal), xytext=(xa, U_naive),
                 arrowprops=dict(arrowstyle="<->", color=DIVERGENT_COLOR, lw=2.0),
                 zorder=4)
-    ax.text(xa - 0.02, 0.5 * (sigma_int + U_naive),
-            "FEM variability",
-            color="k", fontsize=7.5, ha="left", va="center")
-    ax.text(xa - 0.02, 0.5 * (U_naive + Ctotal),
-            "Stimulus variability",
+    ax.annotate("", xy=(xa, sigma_int), xytext=(xa, 0),
+                arrowprops=dict(arrowstyle="<->", color="0.55", lw=2.0),
+                zorder=4)
+    label_x = xa - 0.02
+    ax.text(label_x, 0.5 * (U_naive + Ctotal),
+            r"Stimulus variability ($\sigma^2_{\mathrm{PSTH}}$)",
+            fontsize=7.5, ha="left", va="center")
+    ax.text(label_x, 0.5 * (sigma_int + U_naive),
+            "FEM variability\n" + r"($\sigma^2_{\mathrm{FEM}}$)",
+            fontsize=7.5, ha="left", va="center")
+    ax.text(label_x, 0.5 * sigma_int,
+            "Corrected residual\n" + r"variability ($\sigma^2_{\mathrm{res}}$)",
             color="k", fontsize=7.5, ha="left", va="center")
 
     # Matched end sits on the internal floor (eye position fully accounted for);
     # under the reversed axis that end is at screen-right. Set two lines above
     # the internal-variability line at the right of the panel, pointing straight
-    # down at the Δe -> 0 point, which keeps it out of both that line's label
-    # (which ends near mid-panel) and the f_FEM equation along the bottom.
+    # down at the Δe -> 0 point, clear of the variance labels and rate equation.
     ax.annotate("Trajectories\nmatched",
                 xy=(x[0], U[0]),
                 xytext=(0.925, sigma_int + 0.14 * y_hi),
@@ -515,11 +517,10 @@ def plot_unaccounted_variance_panel(ax, decomp=None, caption=True):
                 linespacing=1.15)
 
     if caption:
-        # Take-home: descriptive phrase bottom-left, fraction equation
-        # bottom-right (larger so it reads clearly).
-        ax.text(0.02, 0.04,
-                "FEM fraction of\nconditional rate variance",
-                transform=ax.transAxes, fontsize=7.0, ha="left", va="bottom")
+        ax.text(0.5, sigma_int + 0.025 * y_hi,
+                r"$\sigma^2_{\mathrm{rate}} = \sigma^2_{\mathrm{PSTH}} + "
+                r"\sigma^2_{\mathrm{FEM}}$", transform=ax.get_yaxis_transform(),
+                fontsize=7.0, ha="center", va="bottom")
 
     # Reversed: threshold gets stricter to the right (1 -> 0).
     ax.set_xlim(1.03, -0.05)

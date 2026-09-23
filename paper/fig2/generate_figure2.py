@@ -899,7 +899,10 @@ def compose(refresh=False, split_subjects=False, *,
         _, c_primary = plot_fem_fraction(ax=c_ax, data=data)
         _normalize_axis_text(c_primary)
         _label(c_primary, "C")
-        c_primary.set_xlabel("FEM fraction of rate modulation")
+        c_primary.set_xlabel(
+            "FEM fraction of rate variance "
+            r"($\sigma^2_{\mathrm{FEM}} / \sigma^2_{\mathrm{rate}}$)"
+        )
 
         # --- Row 1: D covariance decomposition (~55% width), with the two
         # decomposition results side by side to its right: E Fano, F noise corr.
@@ -952,6 +955,15 @@ def compose(refresh=False, split_subjects=False, *,
 
     from VisionCore.figure_typography import apply_font_floor
     apply_font_floor(fig)
+    # Panel B symbols name the adjacent components: keep their base size equal
+    # to the prose, allowing normal smaller superscripts and subscripts.
+    for text in b_ax.texts:
+        if "$" in text.get_text():
+            text.set_fontsize(b_ax.yaxis.label.get_fontsize())
+        elif text.get_text() == "Uncorrected\nresidual":
+            text.set_fontsize(0.9 * b_ax.yaxis.label.get_fontsize())
+    # The ratio defines the axis label; it should not enlarge the whole label.
+    c_primary.xaxis.label.set_fontsize(b_ax.yaxis.label.get_fontsize())
     if return_png_bytes:
         import io
         buf = io.BytesIO()
