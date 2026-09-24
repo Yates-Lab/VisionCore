@@ -5,7 +5,7 @@ uses the completed rank-one model without the separate first-stage readout.
 Figures 3 and 4, their model-dependent statistics, feature-map illustrations,
 and Methods use the same selected checkpoint. Figures 1 and 2 and the first two
 supplements retain their empirical analyses. A third supplement compares
-session-global and history-local retinal stabilization in the selected model. See [POSTING_AUDIT.md](POSTING_AUDIT.md)
+session-global, trial-centroid, and history-local retinal stabilization in the selected model. See [POSTING_AUDIT.md](POSTING_AUDIT.md)
 for the completed migration and earlier revision history.
 
 `analysis/selected_model_bundle.json` pins the completed analysis and result
@@ -186,14 +186,15 @@ source/result hashes and final font sizes, and page previews under
 `build/page_previews/`. Font checks complement visual inspection; after
 changing layout, inspect the compiled figure pages for collisions as well.
 
-## History-local stabilization control
+## Stabilization controls
 
-The additional replay fixes gaze within each 60-frame history at its latest
-input position. It preserves the RSVP sequence and current retinal frame;
-gaze may vary across predictions. This tests removal of within-history motion
-while retaining current retinal position. It uses the same Figure 3 C/D scoring
-pipeline, population, affine calibration, correlation ceilings, and variance
-denominators. It does not estimate a new FEM variance decomposition.
+The history-local replay fixes gaze within each 60-frame history at its latest
+input position. The trial replay fixes each source frame at the centroid of its
+own trial, using valid samples within 0.5 degrees and falling back to valid
+fixation samples within 1 degree. Both controls preserve the recorded RSVP
+sequence and use the Figure 3 C/D scoring pipeline, population, affine
+calibration, correlation ceilings, and variance denominators. Neither replay
+estimates a new FEM variance decomposition.
 
 Both controls preserve temporal modulation from the 20-Hz flashed images.
 The supplement also compares the within-unit costs of removing recent retinal
@@ -212,17 +213,24 @@ are retained in `analysis/stabilization_control/`; the summary is bound by
 uv run --project .. --no-sync python manuscript/render_figures.py stabilization
 ```
 
-For a new replay, use a new output directory and a CUDA-enabled environment:
+For a trial-centroid replay, use a new output directory and a CUDA-enabled
+environment. The renderer accepts the retained history-local cache separately.
 
 ```sh
-OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 uv run --project .. --no-sync python paper/fig3/run_history_stabilization.py --out-dir outputs/stabilization_control_new --gpu 0
-uv run --project .. --no-sync python manuscript/render_stabilization_control.py --inference-dir outputs/stabilization_control_new
+VISIONCORE_MANUSCRIPT_SOURCE_ROOT=/path/to/source \
+VISIONCORE_MANUSCRIPT_EMPIRICAL_CACHE_DIR="$PWD/outputs/cache" \
+uv run --project .. --no-sync python paper/fig3/run_history_stabilization.py \
+  --out-dir outputs/trial_stabilization_control --reference trial_centroid --gpu 0
+uv run --project .. --no-sync python manuscript/render_stabilization_control.py \
+  --inference-dir /path/to/source/outputs/stabilization_control_20260915 \
+  --trial-inference-dir outputs/trial_stabilization_control
 ```
 
-The replay resumes from a per-session partial cache and checks every current
-frame against the recorded retinal image. `test_history_stabilization.py`
-independently checks historical image identities and integer ROI extraction
-against the native renderer, without running the model.
+Each replay resumes from a per-session partial cache. The history-local replay
+checks every current frame against the recorded retinal image.
+`test_history_stabilization.py` checks history-local image identities and the
+trial-centroid primary and fallback anchors against the native renderer without
+running the model.
 
 ## Selected analysis and files
 

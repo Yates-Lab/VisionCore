@@ -23,7 +23,8 @@ RENDER_SOURCES = [
     'paper/fig3/manuscript_schematic.py',
     'paper/fig3/manuscript_examples.py', 'paper/fig3/history_stabilization.py',
     'paper/fig3/run_history_stabilization.py', 'paper/fig3/_fig3_ablation_data.py',
-    'paper/fig3/_fig3_femfraction.py',
+    'paper/fig3/_fig3_data.py', 'paper/fig3/_fig3_femfraction.py',
+    'eval/eval_stack_multidataset.py',
     'manuscript/render_stabilization_control.py',
     'models/modules/dekel.py', 'models/data/transforms.py',
     'paper/fig4/spatiotemporal_tuning/_figure4_renderer.py',
@@ -201,16 +202,31 @@ def main():
         errors.append('Stabilization-control summary differs from its binding')
     if control['checkpoint_sha256']!=SELECTED['checkpoint_sha256']:
         errors.append('Stabilization control uses a different model')
-    for key in ('local_cache','global_cache'):
-        if digest(SOURCE_ROOT/control[key])!=control[key+'_sha256']:
+    for key in ('local_cache','trial_cache','global_cache'):
+        path=Path(control[key])
+        if not path.is_absolute():path=SOURCE_ROOT/path
+        if digest(path)!=control[key+'_sha256']:
             errors.append(f'Stabilization control {key} source changed')
+    trial_provenance=control.get('trial_input_provenance') or {}
+    for key,expected in trial_provenance.get('input_sha256',{}).items():
+        path=Path(trial_provenance['resolved_environment'][key])
+        if digest(path)!=expected:
+            errors.append(f'Trial-stabilization input changed: {key}')
+    boundary=control.get('trial_boundary_audit',{}).get('totals',{})
+    expected_boundary={'candidate_trial_time_bins':145164,
+                       'crossing_trial_time_bins':43982,
+                       'canonical_supported_trial_time_bins':97405,
+                       'canonical_supported_crossing_bins':0}
+    if boundary!=expected_boundary:
+        errors.append(f'Trial-boundary audit differs: {boundary}')
     if digest(HERE/'analysis/stabilization_control/paired_scores.npz')!=control['paired_scores_sha256']:
         errors.append('Stabilization-control paired scores changed')
     if (HERE/'stabilization_stats.tex').read_text()!=statistics_tex(control['metrics']):
         errors.append('Stabilization-control manuscript numbers are stale')
     if digest(HERE/'figures/stabilization_control.pdf')!=digest(HERE/'build/stabilization_control/stabilization_control.pdf'):
         errors.append('Installed stabilization supplement differs from its render')
-    if not all(all(checks.values()) for checks in control['data_identity_checks'].values()):
+    if not all(all(all(values.values()) for values in checks.values())
+               for checks in control['data_identity_checks'].values()):
         errors.append('Stabilization controls do not share data-only scoring quantities')
     out={'passed':not errors,'errors':errors,'figure_sources':sources,'compiled_pages':pages,
          'compiled_pdf':{'sha256':digest(HERE/'build/main.pdf'),'pages':len(doc)},

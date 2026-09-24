@@ -288,6 +288,29 @@ def analysis_model_indices(dataset_config, endpoint_mask, minimum_index):
     return endpoints, endpoints.copy()
 
 
+def history_crosses_trial_boundary(
+    model_indices, stim_lags, trial_inds, *, n_endpoints
+):
+    """Flag 120-Hz endpoints containing a native prediction history from >1 trial."""
+    model_indices = np.asarray(model_indices, dtype=np.int64).ravel()
+    stim_lags = np.asarray(stim_lags, dtype=np.int64).ravel()
+    trial_inds = np.asarray(trial_inds).ravel()
+    n_endpoints = int(n_endpoints)
+    if n_endpoints < 0 or (n_endpoints == 0 and len(model_indices)):
+        raise ValueError("Invalid endpoint count")
+    if n_endpoints == 0:
+        return np.zeros(0, dtype=bool)
+    if len(model_indices) % n_endpoints:
+        raise ValueError("Ordered model indices do not divide into endpoints")
+    history = model_indices[:, None] - stim_lags[None, :]
+    if history.min(initial=0) < 0 or history.max(initial=-1) >= len(trial_inds):
+        raise ValueError("Prediction history falls outside trial_inds")
+    per_prediction = np.any(
+        trial_inds[history] != trial_inds[model_indices, None], axis=1
+    )
+    return per_prediction.reshape(n_endpoints, -1).any(axis=1)
+
+
 def analysis_reduce_model_output(dataset_config, prediction, n_endpoints):
     """Sum ordered true-240 model outputs, or preserve endpoint predictions."""
     prediction = np.asarray(prediction)

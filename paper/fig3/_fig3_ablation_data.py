@@ -87,6 +87,7 @@ from _fig3_data import (
     analysis_endpoint_block_filter, analysis_endpoint_block_mean,
     analysis_endpoint_block_sum, analysis_model_indices,
     analysis_reduce_model_output, figure3_analysis_grid,
+    history_crosses_trial_boundary,
     load_reference_sessions, align_native_trial_arrays_to_reference,
     _load_fig2_alpha_by_session,
     _load_fig2_included_sessions,
@@ -247,13 +248,15 @@ def _center_crop_spatial(array, target_hw):
     return arr[..., top : top + target_h, left : left + target_w]
 
 
-def build_stabilized_stim(session_name, embedded_stim, factor):
-    """Return (stab_stim, align_maxabs, n_trials_stab) for the reafferent ablation.
+def build_stabilized_stim(
+    session_name, embedded_stim, factor, *, stabilization_reference="session_global"
+):
+    """Return (stab_stim, align_maxabs, n_trials_stab) for a frozen-gaze control.
 
     stab_stim: float32 array shaped like `embedded_stim` (N_emb, 1, H, W),
     pixel-normalized ((raw-127)/255), a drop-in for dset['stim']; the retinal image
-    is frozen at ONE common (session-global) gaze for every trial while the RSVP
-    images still flash.
+    is frozen either at one session-global gaze or at each source trial's own
+    centroid gaze while the RSVP images still flash.
 
     A per-trial medoid would anchor each trial to a different frozen point, so the
     frozen image would still vary trial-to-trial and leave a spurious across-trial
@@ -303,32 +306,45 @@ def build_stabilized_stim(session_name, embedded_stim, factor):
     n = min(len(dec), len(emb_px))
     align_maxabs = int(np.abs(dec[:n] - emb_px[:n]).max())
 
-    # Session-global stabilization gaze: centroid of dpi_pix over all valid samples
-    # inside the central CENTROID_RADIUS deg, realized as the ROI of the single bin
-    # nearest that centroid. Reused for every trial so the frozen retinal image is
-    # identical across trials (stabilized-retina control). Falls back to the
-    # fixation window only if no sample lands inside CENTROID_RADIUS.
-    central = np.hypot(eyepos[:, 0], eyepos[:, 1]) < CENTROID_RADIUS
-    global_valid = central & dpi_valid
-    if not np.any(global_valid):
-        global_valid = fixation & dpi_valid
-    gidx = np.where(global_valid)[0]
-    centroid = dpi_pix[gidx].mean(axis=0)
-    med_global = int(gidx[np.argmin(((dpi_pix[gidx] - centroid) ** 2).sum(1))])
-    roi_global = roi_all[med_global]
+    if stabilization_reference not in {"session_global", "trial_centroid"}:
+        raise ValueError(f"Unknown stabilization reference: {stabilization_reference}")
 
-    # Global-centroid-stabilized render (raw frame): freeze every trial at roi_global.
+    central = np.hypot(eyepos[:, 0], eyepos[:, 1]) < CENTROID_RADIUS
+
+    def centroid_roi(valid):
+        indices = np.flatnonzero(valid)
+        if not len(indices):
+            return None
+        centroid = dpi_pix[indices].mean(axis=0)
+        nearest = indices[np.argmin(((dpi_pix[indices] - centroid) ** 2).sum(axis=1))]
+        return roi_all[nearest]
+
+    roi_global = None
+    if stabilization_reference == "session_global":
+        roi_global = centroid_roi(central & dpi_valid)
+        if roi_global is None:
+            roi_global = centroid_roi(fixation & dpi_valid)
+        if roi_global is None:
+            raise ValueError("No valid sample for session-global stabilization")
+
     stab_raw = raw_stim.copy()
     n_trials_stab = 0
     for iT in np.unique(trial_inds):
         m = trial_inds == iT
         if not np.any(m & fixation & dpi_valid):
             continue
+        roi_frozen = roi_global
+        if stabilization_reference == "trial_centroid":
+            roi_frozen = centroid_roi(m & central & dpi_valid)
+            if roi_frozen is None:
+                roi_frozen = centroid_roi(m & fixation & dpi_valid)
+            if roi_frozen is None:
+                continue
         trial = FixRsvpTrial(exp["D"][iT], exp["S"])
         start_idx = np.where(trial.image_ids == 2)[0][0]
         flip_times = ptb2ephys(trial.flip_times[start_idx:])
         hist_idx = np.searchsorted(flip_times, t_bins[m], side="right") - 1 + start_idx
-        roi_const = np.repeat(roi_global[None], m.sum(), axis=0)
+        roi_const = np.repeat(roi_frozen[None], m.sum(), axis=0)
         stab_raw[m] = trial.get_rois(hist_idx, roi=roi_const)
         n_trials_stab += 1
 
@@ -430,7 +446,13 @@ def _renormalize_ccnorm_to_intact_anchor(ccabs, anchor):
     return ccnorm, ccmax, anchored_ccabs, unstable
 
 
-def _run_inference(session_filter=None, cache_path=CACHE_PATH, *, history_stabilized=False):
+def _run_inference(
+    session_filter=None,
+    cache_path=CACHE_PATH,
+    *,
+    history_stabilized=False,
+    stabilization_reference="session_global",
+):
     """Run the twin under all three conditions and write a summary cache.
 
     ``session_filter`` and ``cache_path`` support an off-cache alignment smoke
@@ -462,7 +484,11 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH, *, history_stabil
     # independent GPU workload while preserving automatic selection by default.
     device = get_free_device(os.environ.get("FIG3_GPU"))
     print(f"Loading model from: {CHECKPOINT_PATH}")
-    model, model_info = load_model(checkpoint_path=CHECKPOINT_PATH, device=str(device))
+    model, model_info = load_model(
+        checkpoint_path=CHECKPOINT_PATH,
+        device=str(device),
+        dataset_config_path=os.environ.get("FIG3_DATASET_CONFIGS"),
+    )
     model.model.eval()
     print(f"Model loaded: {model_info['experiment']}, epoch {model_info['epoch']}")
     # Loaded lazily only if this checkpoint uses native-rate supervision.
@@ -484,7 +510,11 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH, *, history_stabil
         results = []
         partial_cache_path = _partial_cache_path(cache_path)
     completed_sessions = {str(record["session"]) for record in results}
-    reference = "history_endpoint" if history_stabilized else "session_global"
+    reference = "history_endpoint" if history_stabilized else stabilization_reference
+    if reference not in {"session_global", "history_endpoint", "trial_centroid"}:
+        raise ValueError(f"Unknown stabilization reference: {reference}")
+    if history_stabilized != (reference == "history_endpoint"):
+        raise ValueError("history_stabilized and stabilization_reference disagree")
     if any(record.get("stabilization_reference", "session_global") != reference
            for record in results):
         raise ValueError("Partial cache uses a different stabilization reference")
@@ -581,7 +611,11 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH, *, history_stabil
             n_tr_stab = len(np.unique(trial_inds))
         else:
             stab_stim_np, align_maxabs, n_tr_stab = build_stabilized_stim(
-                session_name, dset['stim'].numpy(), render_factor)
+                session_name,
+                dset['stim'].numpy(),
+                render_factor,
+                stabilization_reference=reference,
+            )
         print(f"  stabilized render: {n_tr_stab} trials, factor={render_factor}, "
               f"alignment max-abs(decimate(raw)-embedded)={align_maxabs}")
         if align_maxabs != 0:
@@ -595,6 +629,8 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH, *, history_stabil
         eyepos = np.full((NT, T, 2), np.nan)
         fix_dur = np.full(NT, np.nan)
         rhat = {c: np.full((NT, T, NC), np.nan) for c in CONDS}
+        prediction_candidates = np.zeros((NT, T), dtype=bool)
+        crossing_histories = np.zeros((NT, T), dtype=bool)
 
         for itrial in tqdm(range(NT), desc=f"  {session_name}"):
             ix_obs = (trial_inds == trials[itrial]) & fixation & analysis_endpoints
@@ -625,6 +661,13 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH, *, history_stabil
                 else None
             )
             t_inds = psth_inds_analysis[endpoint_indices].astype(int)
+            prediction_candidates[itrial, t_inds] = True
+            crossing_histories[itrial, t_inds] = history_crosses_trial_boundary(
+                model_indices,
+                stim_lags,
+                trial_inds,
+                n_endpoints=len(endpoint_indices),
+            )
             for c in CONDS:
                 if c in STIM_CONDS:            # replace stim, keep behavior intact
                     batch = {'stim': stim_stab, 'behavior': behavior0}
@@ -663,6 +706,8 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH, *, history_stabil
         dfs = dfs[good_trials][:, iix]
         eyepos = eyepos[good_trials][:, iix]
         rhat = {c: r[good_trials][:, iix] for c, r in rhat.items()}
+        prediction_candidates = prediction_candidates[good_trials][:, iix]
+        crossing_histories = crossing_histories[good_trials][:, iix]
 
         if analysis_grid["align_to_reference"]:
             if native_reference is None or session_name not in native_reference:
@@ -695,6 +740,17 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH, *, history_stabil
         print(f"  {n_trials} trials, {n_time} bins, {n_neurons} neurons")
         score_support = np.isfinite(robs) & np.isfinite(dfs) & (dfs != 0)
         score_filter = score_support.astype(np.float32)
+        supported_bins = score_support.any(axis=2)
+        boundary_audit = {
+            "candidate_trial_time_bins": int(prediction_candidates.sum()),
+            "crossing_trial_time_bins": int((prediction_candidates & crossing_histories).sum()),
+            "canonical_supported_trial_time_bins": int((prediction_candidates & supported_bins).sum()),
+            "canonical_supported_crossing_bins": int((prediction_candidates & supported_bins & crossing_histories).sum()),
+        }
+        if boundary_audit["canonical_supported_crossing_bins"]:
+            raise AssertionError(
+                f"{session_name}: canonical support includes a trial-boundary-crossing history"
+            )
         for condition, prediction in rhat.items():
             missing = score_support & ~np.isfinite(prediction)
             if missing.any():
@@ -732,10 +788,10 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH, *, history_stabil
                 count_bins=FIG2_REPORTED_WINDOW_BINS,
             )
             for condition, prediction in rhat_rs.items()
-            if not history_stabilized  # Supplement tests prediction (C/D), not the FEM decomposition.
+            if reference == "session_global"  # Supplements test prediction (C/D), not FEM decomposition.
         }
         observed_anchor = femfraction.get("intact")
-        for condition in ([] if history_stabilized else ABLATIONS):
+        for condition in ([] if reference != "session_global" else ABLATIONS):
             for key in ("B_obs", "B_obs_uncl"):
                 if not np.allclose(
                     femfraction[condition][key],
@@ -871,6 +927,14 @@ def _run_inference(session_filter=None, cache_path=CACHE_PATH, *, history_stabil
             "session": session_name, "subject": subject,
             "stabilization_reference": reference,
             "history_render_audit": history_renderer.audit if history_renderer else None,
+            "stabilization_render_audit": (
+                history_renderer.audit if history_renderer else {
+                    "anchor": reference,
+                    "alignment_maxabs": align_maxabs,
+                    "n_trials": n_tr_stab,
+                }
+            ),
+            "trial_boundary_audit": boundary_audit,
             "neuron_mask": neuron_mask, "n_neurons": n_neurons,
             "ve": ve, "ve_psth": ve_psth,
             "ccnorm": ccnorm, "ccabs": ccabs, "ccmax": ccmax,
