@@ -364,8 +364,8 @@ def _plot_explainable_variance_boxes(ax, abl):
     # one sits above it.
     psth_median = float(np.median(vals["psth"][m]))
     ax.axhline(psth_median, color="0.55", lw=0.8, ls="--", alpha=0.8, zorder=0)
-    ax.annotate("PSTH median", xy=(3.60, psth_median), xytext=(3.60, .47),
-                ha="right", va="bottom", fontsize=5.3, color="0.4",
+    ax.annotate("PSTH\nmedian", xy=(3.60, psth_median), xytext=(3.50, .47),
+                ha="center", va="bottom", fontsize=5.3, color="0.4",
                 arrowprops={"arrowstyle": "-", "lw": .6, "color": ".55"})
 
     # Nothing is clipped or folded onto one. The above-reference tail is left off
