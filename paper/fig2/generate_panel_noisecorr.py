@@ -56,7 +56,7 @@ def plot_nc_violin(ax=None, refresh=False, data=None, window_ms=25.0):
         mean_u=mean_u, mean_c=mean_c, err_u=err_u, err_c=err_c,
         null_lo=null_lo, null_hi=null_hi,
         p=s["p_emp_dr"], n_shuff=s.get("n_shuff_dr"),
-        ref=0.0, ylabel="Noise correlation (ρ)",
+        ref=0.0, ylabel=r"Noise correlation ($r_{\mathrm{sc}}$)",
     )
     return fig, ax
 
