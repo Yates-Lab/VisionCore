@@ -198,6 +198,21 @@ def main() -> None:
         for index, label in enumerate(("Rate", "SSI")):
             result = report["primary"]["contrasts"]["class_path_engagement__over__class_path"]
             value("FigFourCompareStrict" + label + "Reduction", 100 * result["strict_median_error_reduction"][index], 1)
+        # Specificity controls: own passband versus other neurons' passbands and the population-average passband,
+        # each with total dynamic power in both models.
+        own = report["primary"]["contrasts"]["class_path_dynamic_engagement__over__class_path_dynamic"]
+        shuffled = report["primary"]["shuffled_assignment_error_reductions"]
+        value("FigFourShuffleAssignments", len(shuffled), 0)
+        for control, prefix in (("class_path_dynamic_shuffled", "Shuffle"),
+                                ("class_path_dynamic_population_passband", "PopulationPassband")):
+            result = report["primary"]["contrasts"]["class_path_dynamic_engagement__over__" + control]
+            for index, label in enumerate(("Rate", "SSI")):
+                name = "FigFour" + prefix + label
+                value(name + "Reduction", 100 * result["median_error_reduction"][index], 1)
+                interval(name + "CI", [100 * v for v in result["error_reduction_ci95"][index]], 1)
+        for index, label in enumerate(("Rate", "SSI")):
+            value("FigFourShuffleOwnExceeds" + label,
+                  sum(own["median_error_reduction"][index] > s[index] for s in shuffled), 0)
         estimator = report["estimator_diagnostics"]
         value("FigFourEngagementPredictorRho", estimator["actual_predictors"]["median_pairwise_rank_correlation"])
         value("FigFourCarrierResolutionCosine", estimator["60"]["known_carrier_pairs"][0]["estimated_spectrum_cosine"])

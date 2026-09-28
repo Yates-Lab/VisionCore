@@ -71,6 +71,19 @@ uv run --project .. --no-sync python manuscript/review_figure4_examples.py --ins
 uv run --project .. --no-sync python manuscript/render_figures.py 4
 ```
 
+## Orientation-corrected Figure 4 (2026-09-28)
+
+The released spectral replay paired image orientation 180−θ with tuning
+orientation θ. `figures/figure4.pdf` and `generated_stats.tex` are now built
+from orientation-corrected predictors by
+`declan/fig4_orientation_fix/manuscript_outputs.py`, which runs the scripts here
+unmodified against a local overlay of the selected bundle (Jake's artifacts are
+read only; rebuilt artifacts live in `outputs/stats/fig4_orientation_fix/`).
+Panels F and G and the passband-comparison macros change; A--E do not. Running
+`make stats`, `make check-stats`, or `render_figures.py 4` directly still reads
+the released bundle and would restore, or report as stale, the uncorrected
+values. See `declan/fig4_orientation_fix/README.md`.
+
 ## Build the PDF
 
 From the repository root:
