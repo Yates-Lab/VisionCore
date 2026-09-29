@@ -1,25 +1,28 @@
 {
   "passed": false,
   "errors": [
-    "Page 5: 'Uncorrected' is 5.487 pt",
-    "Page 5: 'residual' is 5.487 pt",
-    "Page 5: '2' is 4.267 pt",
-    "Page 5: 'PSTH' is 4.267 pt",
-    "Page 5: '2' is 4.267 pt",
-    "Page 5: 'FEM' is 4.267 pt",
-    "Page 5: '2' is 4.267 pt",
-    "Page 5: 'res' is 4.267 pt",
-    "Page 5: '2' is 4.267 pt",
-    "Page 5: 'rate' is 4.267 pt",
-    "Page 5: '2' is 4.267 pt",
-    "Page 5: 'PSTH' is 4.267 pt",
-    "Page 5: '2' is 4.267 pt",
-    "Page 5: 'FEM' is 4.267 pt",
-    "Page 5: '2' is 4.267 pt",
-    "Page 5: 'FEM' is 4.267 pt",
-    "Page 5: '2' is 4.267 pt",
-    "Page 5: 'rate' is 4.267 pt",
-    "Figure 3 numerical results changed"
+    "Installed figures differ from the audited render outputs",
+    "Page 6: 'Uncorrected' is 5.487 pt",
+    "Page 6: 'residual' is 5.487 pt",
+    "Page 6: '2' is 4.267 pt",
+    "Page 6: 'PSTH' is 4.267 pt",
+    "Page 6: '2' is 4.267 pt",
+    "Page 6: 'FEM' is 4.267 pt",
+    "Page 6: '2' is 4.267 pt",
+    "Page 6: 'res' is 4.267 pt",
+    "Page 6: '2' is 4.267 pt",
+    "Page 6: 'rate' is 4.267 pt",
+    "Page 6: '2' is 4.267 pt",
+    "Page 6: 'PSTH' is 4.267 pt",
+    "Page 6: '2' is 4.267 pt",
+    "Page 6: 'FEM' is 4.267 pt",
+    "Page 6: '2' is 4.267 pt",
+    "Page 6: 'FEM' is 4.267 pt",
+    "Page 6: '2' is 4.267 pt",
+    "Page 6: 'rate' is 4.267 pt",
+    "Page 6: 'sc' is 4.267 pt",
+    "Figure 3 numerical results changed",
+    "Installed stabilization supplement differs from its render"
   ],
   "figure_sources": [
     {
@@ -30,8 +33,8 @@
     },
     {
       "file": "figures/figure2.pdf",
-      "sha256": "b72b90f9576a39a6c511099328da83bbc28c3b6e05917d9ddc7a6742a4bae79f",
-      "text_spans": 197,
+      "sha256": "ef8f8c45352e5106feb58a1e330640b701eff0173135823d54dbad1cd9b91b53",
+      "text_spans": 200,
       "minimum_source_pt": 6.159999847412109
     },
     {
@@ -53,15 +56,15 @@
       "minimum_source_pt": 7.0
     },
     {
-      "file": "old_figures/extended_fig2.pdf",
+      "file": "figures/extended_fig2.pdf",
       "sha256": "625effb84a78e72c6aa4c38b2566eb75cb7940ed8e02f6c95ef89804f8d28611",
       "text_spans": 112,
       "minimum_source_pt": 7.0
     },
     {
       "file": "figures/stabilization_control.pdf",
-      "sha256": "b5ca9bff9b4a3e37d2e7e310c0e241df5172e714c5f5d04902b4d212163d47b7",
-      "text_spans": 31,
+      "sha256": "72c3de5c7524b5a3fa1de3318210472ca531936aba39d097d5c126ad773a4893",
+      "text_spans": 33,
       "minimum_source_pt": 8.0
     }
   ],
@@ -72,9 +75,9 @@
       "text_spans": 145
     },
     {
-      "pdf_page": 5,
+      "pdf_page": 6,
       "minimum_figure_font_pt": 4.267339706420898,
-      "text_spans": 197
+      "text_spans": 200
     },
     {
       "pdf_page": 9,
@@ -87,28 +90,28 @@
       "text_spans": 135
     },
     {
-      "pdf_page": 41,
+      "pdf_page": 40,
       "minimum_figure_font_pt": 6.087270259857178,
       "text_spans": 165
     },
     {
-      "pdf_page": 43,
+      "pdf_page": 42,
       "minimum_figure_font_pt": 6.148800373077393,
       "text_spans": 112
     },
     {
-      "pdf_page": 44,
-      "minimum_figure_font_pt": 8.0,
-      "text_spans": 31
+      "pdf_page": 43,
+      "minimum_figure_font_pt": 7.324240207672119,
+      "text_spans": 33
     }
   ],
   "compiled_pdf": {
-    "sha256": "50c9d9b99442d13d152810d1adaa6884f9e0b9a822ed62998403493ae3e50196",
-    "pages": 44
+    "sha256": "46e8db57b8584f205643c1381b0690aaab62625ea8443a6b5f89dd7c57b52d19",
+    "pages": 43
   },
   "installed_figures_match_rendered": {
     "1": true,
-    "2": true,
+    "2": false,
     "3": true,
     "4": true
   },
@@ -128,7 +131,7 @@
   },
   "stabilization_control": {
     "summary": "manuscript/analysis/stabilization_control/summary.json",
-    "summary_sha256": "c60fb20fefdc4883cd86e7f2785ffc537b67ae17a43ff70c70614cf27bf1a4aa"
+    "summary_sha256": "7cebc92bc6501e87cf778645cff4d8d89bd36f99d9289007d5e74bb479d0d556"
   },
   "selected_analysis_bundle": "/home/ryanress/v1-fovea/VisionCore/outputs/stats/fig4_orientation_fix/bundle",
   "figure4_interim_spectrum_selection": null,
@@ -156,7 +159,7 @@
       "/home/jake/repos/VisionCore/outputs/no_phase_readout_comparison_20260910/rank1/audits/production_model.json": "6e9273c95ee389fbc44d7e10be2c4af532e9f405a54cac56178011b0a66f7556",
       "manuscript/analysis/empirical_stats.json": "20d96d7609ff207d954e34026a0e30a15b3d673c203d1623b31b8578a09e79ba",
       "outputs/cache/covdecomp_derived.pkl": "b9c058c9c3d99bc18826c1b4177c1f680af3eae6a4c815c70f546dea7b3a5fd2",
-      "manuscript/analysis/passband_comparison.json": "fb40b33c36d16f1037540e56ff3a8c1adfbde0353f8518685186c82ec3687d49",
+      "manuscript/analysis/passband_comparison.json": "4a7f3a337913146b1ffccef33c594c522a3f97242e311c521faab32d6378ec68",
       "outputs/stats/fig4_orientation_fix/passband_comparison_corrected/summary.json": "9267659f0eca13e19b127d6e07b353bfda1001c1f815a1e40aa4d0218954e6be",
       "outputs/stats/fig4_orientation_fix/passband_comparison_corrected/audit.json": "8f424d74f40d4e5c6252adbaa495087bdaabc58a3283496ec8372966c658e043",
       "outputs/stats/fig4_orientation_fix/passband_comparison_corrected/normalized_overlap/summary.json": "e9c38258cea911261bbf11ea13c2e12b39cd92331502e9e70ded08005f417905",
@@ -306,17 +309,19 @@
     "VisionCore/figure_typography.py": "39da6cde069ff527fab1a3096ea6a4ded00069604ce771303c63062b340741f2",
     "paper/fig1/generate_fig1.py": "386dcb42b742fa4357d4c9c6b9b75b210ab9161e94976f22dca82b6dacc8de58",
     "paper/fig1/fig1a.svg": "0adff6fcf54c4048c1a601cc46036039ffcba58555d30d86d86994fbd2c6ce5e",
-    "paper/fig2/generate_figure2.py": "3e68c4b24a5d8c875a0d3051f2f5cd66139e6b393ceac18f4a9c1217462b52d9",
+    "paper/fig2/generate_figure2.py": "de832ada2bc652ea1db7e8de29f3a713369d2e827fa736527bf318e86f9029af",
     "paper/fig2/generate_panel_example.py": "f4c78686d08fe32e0f09303def03a15d8b3f9910cf645a30b9134f021b59be66",
     "paper/fig3/generate_fig3a.py": "179260a316b467b0ebb60f0cc7dc32b01760104c461f4a4137f6ac58400a42dc",
     "paper/fig3/generate_figure3.py": "074f7327c9494c60d3b4e1b1ea9e4ab3692cd2ab82c0437318f091e882e553f4",
     "paper/fig3/manuscript_schematic.py": "df2d134ffa562a8daeac47015834342db436e259720dcc2e266a33bf7e5b4918",
     "paper/fig3/manuscript_examples.py": "271a86e9356c30f94d86fd0214733af4e4757a9c50fb0961abffc895925bd35c",
     "paper/fig3/history_stabilization.py": "e3b262a87818f816a70cc1f246efd997d90c30180e9bcb543b6a742735b8444d",
-    "paper/fig3/run_history_stabilization.py": "48f10d12912def510887da6ca9760a4c9a3159c7f653838265caeb3b2b0ce97d",
-    "paper/fig3/_fig3_ablation_data.py": "fc783362c07f9a2f4e82bc2cf51105f5e402edd4dde88773ee7ecab48b0ce445",
+    "paper/fig3/run_history_stabilization.py": "d04eeb5d339dbdacce39a4af66a111d7caac644ac18f02e1cbe77cf4ffa00f3e",
+    "paper/fig3/_fig3_ablation_data.py": "1fd4f49edecb8e94cb39269b5b34c275143500444a9f0142d49a3d0410a88bd8",
+    "paper/fig3/_fig3_data.py": "67bf266bd44e0ebaf5a916fd68f873b87bf6daa63460b232763dd33e164e12a0",
     "paper/fig3/_fig3_femfraction.py": "8615846ba3f10d51db4067ecf53812d130c3678a162b6296c6d6304e366e8f25",
-    "manuscript/render_stabilization_control.py": "1df61a7fcd39fc77442815cbd3a3d125ae9293e183eebf3aecdf254d47723345",
+    "eval/eval_stack_multidataset.py": "6d80b830fb447501cad1a567db218623f97f148259ebe10b024feb7bd04cedf5",
+    "manuscript/render_stabilization_control.py": "202c465e05e97806bce2100dcc40413f6137cb2573377635ad684e4581a04d0f",
     "models/modules/dekel.py": "2682f5594c287478b4440713a30c49180c121a8be0566b9633e88cfdd4864e17",
     "models/data/transforms.py": "1f4f4f4aeee5d79b859c312a7ead93a0ba21773e4b8d9c545363ec4a1cfc32d5",
     "paper/fig4/spatiotemporal_tuning/_figure4_renderer.py": "c1265ac207fd9371b5d4b6272ccbe10a26b7940ccbc886431643971200c7d414",
@@ -326,7 +331,7 @@
     "manuscript/render_figures.py": "04ccd416e9e0c1e6f368fb97d819d28f1ea473ae9d88b257e70906e4e99da513",
     "manuscript/sync_stats.py": "6e846ba37e712f75068d104521a841f64715bde294a320f2ae5fd7db2ea7e4fd",
     "manuscript/export_empirical_stats.py": "e3bbdf793d72d07340992f7baeb82c493c8dfbc507111ae411b174ade307cd4d",
-    "manuscript/audit_figures.py": "96b6b92796b2a8cb4166a79b7e82cdb78fbba7782c4e40ce89d3b7b0d98b9184",
+    "manuscript/audit_figures.py": "605067dd305978d377d022612622600c69b5ec6f842e46d5c37ee2fddc16c313",
     "manuscript/Makefile": "274735d894ad11fa32621bd2426b50ef2c5291b7ad401604223d026984a3102f",
     "manuscript/figure4_selection.py": "d4bbdfec143809f0c4beb266b24686025882157e84a29fd9a54071ade6abf3ac",
     "manuscript/review_figure4_examples.py": "79cebb4eb74f7d836511c2562640588fadbec2560a27655794172592dddcb486",
@@ -335,13 +340,13 @@
     "manuscript/analysis_selection.py": "39ed9d959528902fe94a693de915d79e35f9ab190d40489bdab7c371f36735ce"
   },
   "manuscript_sha256": {
-    "main.tex": "2dc46f5d771ab503d5df66221fc50b4f8001eeb0cc6ab21e784a8f7bfd263c31",
-    "refs.bib": "d457ddc2d2bb3674a5f112580c1a7611813c9bedd8be103f502272a603b18eaf",
+    "main.tex": "263ca3765b5a0b8a788229fd774bfbf4404b109e022790aa1656d8996c648fe9",
+    "refs.bib": "e713d5527a0b9dff685f8365fed90fdf32b601e918a8d21357a98883166a5966",
     "lite.cls": "9700d568283012b961f79f08fe496f0da2591fdd0eff571e27931cecfc6edded",
     "generated_stats.tex": "055071b181a8c1e8cc1882b5fa2cb243da1779f699449255e203f39a6a9d9711",
     "analysis/panel_a_selection.json": "86b78d5a79f2ef83c7a85f32821ba1fe93a3cdd7d997add675bc07a5fc6ed40d",
     "analysis/figure3_schematic.json": "d3507f79445e8fbd74846cd5b5c7175b8726af29ec852223a616206142fcf01d",
-    "stabilization_stats.tex": "baf4be896428aa1c69a111435dcca7babf4e593ee25f042fd0bd16c77460c1ff"
+    "stabilization_stats.tex": "1fc895107126ae17bfcf4e1a804f9bb3944bdc00a66442eb675631ffc6c7964d"
   },
   "outlined_text_note": "Figure 1 schematic labels were restored from SVG aria-label paths; all other main-figure text exported as measurable fonts. Supplement 1 vector text re-typeset at the original baselines."
 }

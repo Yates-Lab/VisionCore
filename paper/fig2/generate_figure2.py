@@ -964,6 +964,7 @@ def compose(refresh=False, split_subjects=False, *,
             text.set_fontsize(0.9 * b_ax.yaxis.label.get_fontsize())
     # The ratio defines the axis label; it should not enlarge the whole label.
     c_primary.xaxis.label.set_fontsize(b_ax.yaxis.label.get_fontsize())
+    f_ax.yaxis.label.set_fontsize(e_ax.yaxis.label.get_fontsize())
     if return_png_bytes:
         import io
         buf = io.BytesIO()

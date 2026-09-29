@@ -9,6 +9,7 @@ sys.path.insert(0, str(MANUSCRIPT))
 
 import analysis_selection  # noqa: E402
 import export_figure4_zero_tests  # noqa: E402
+import audit_figures  # noqa: E402
 
 
 def test_selected_analysis_reads_bundle_from_configured_source_root(tmp_path, monkeypatch):
@@ -49,6 +50,11 @@ def test_zero_tests_resolve_bundle_and_provenance_from_source_root(tmp_path, mon
     (bundle / "figure4").mkdir(parents=True)
     (bundle / "figure4/summary.json").symlink_to(external)
     assert export_figure4_zero_tests.source_name(bundle / "figure4/summary.json") == "outputs/selected/figure4/summary.json"
+
+
+def test_figure_audit_reads_installed_extended_figure():
+    assert MANUSCRIPT / "figures/extended_fig2.pdf" in audit_figures.FIGURES
+    assert MANUSCRIPT / "old_figures/extended_fig2.pdf" not in audit_figures.FIGURES
 
 
 def test_source_path_relocates_recorded_repository_paths(tmp_path, monkeypatch):

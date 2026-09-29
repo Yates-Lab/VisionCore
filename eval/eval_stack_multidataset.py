@@ -42,7 +42,8 @@ from .eval_stack_utils import (
 def load_model(model_type=None, model_index=None, checkpoint_path=None,
                checkpoint_dir="/mnt/ssd/YatesMarmoV1/conv_model_fits/experiments/multidataset/checkpoints",
                device='cuda',
-               verbose=True):
+               verbose=True,
+               dataset_config_path=None):
     """
     Load a model either by type (with automatic best selection) or by specific checkpoint path.
     
@@ -58,6 +59,9 @@ def load_model(model_type=None, model_index=None, checkpoint_path=None,
         Directory containing checkpoints
     device : str
         Device to load model on
+    dataset_config_path : path-like, optional
+        Dataset parent config to use instead of the checkpoint's recorded
+        ``cfg_dir``. This is needed when the original config tree is unavailable.
         
     Returns
     -------
@@ -119,6 +123,9 @@ def load_model(model_type=None, model_index=None, checkpoint_path=None,
 
         # First, examine the checkpoint to detect key mismatch issues
         checkpoint = torch.load(str(checkpoint_path), map_location='cpu', weights_only=False)
+        load_overrides = {}
+        if dataset_config_path is not None:
+            load_overrides["cfg_dir"] = str(Path(dataset_config_path).expanduser().resolve())
 
         if 'state_dict' in checkpoint:
             state_dict = checkpoint['state_dict']
@@ -137,6 +144,7 @@ def load_model(model_type=None, model_index=None, checkpoint_path=None,
                     strict=False,
                     map_location='cpu',
                     pretrained_checkpoint=None,
+                    **load_overrides,
                 )
 
                 # Fix the state dict keys
@@ -167,6 +175,7 @@ def load_model(model_type=None, model_index=None, checkpoint_path=None,
                     strict=False,
                     map_location='cpu',
                     pretrained_checkpoint=None,
+                    **load_overrides,
                 )
         else:
             if verbose:
@@ -176,6 +185,7 @@ def load_model(model_type=None, model_index=None, checkpoint_path=None,
                 strict=False,
                 map_location='cpu',
                 pretrained_checkpoint=None,
+                **load_overrides,
             )
 
         model.to(device)

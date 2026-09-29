@@ -1,6 +1,7 @@
 # Imported figure assets are manuscript inputs; override the repository PDF rule.
 !/figures/*.pdf
 !/old_figures/*.pdf
+!/old_manuscript/**/*.pdf
 !/analysis/*.json
 !/analysis/passband_results/*.json
 !/analysis/passband_results/normalized_overlap/*.json
