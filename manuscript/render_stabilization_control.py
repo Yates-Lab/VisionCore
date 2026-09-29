@@ -13,7 +13,7 @@ import sys
 
 import numpy as np
 
-from analysis_selection import SOURCE_ROOT, source_path
+from analysis_selection import SOURCE_ROOT, source_path, selected_analysis
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -21,6 +21,19 @@ ROOT = HERE.parent
 
 def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def validate_replay_provenance(control_path, run_manifest, reference, selection):
+    """Keep model and Figure 3 identity fixed across Figure 4-only selection changes."""
+    recorded = run_manifest.get("selection")
+    protected = ("checkpoint_sha256", "model_spec_sha256",
+                 "final_manifest_sha256", "figure3_manifest_sha256")
+    if (not isinstance(recorded, dict)
+            or any(key not in recorded or key not in selection or recorded[key] != selection[key]
+                   for key in protected)
+            or run_manifest.get("stabilization_reference", "history_endpoint") != reference
+            or digest(control_path) != run_manifest.get("local_cache_sha256")):
+        raise ValueError(f"{reference} replay provenance differs from selected model or completed cache")
 
 
 def validate_trial_replay_acceptance(trial_cache, accepted_sha256):
@@ -160,8 +173,15 @@ def main():
         help="Accept numerical replay drift only for this exact trial cache",
     )
     args = parser.parse_args()
-    selection = json.loads((HERE / "analysis/selected_model_bundle.json").read_text())
-    manifest = json.loads((SOURCE_ROOT / selection["bundle"] / "figure3/run_manifest.json").read_text())
+    selection = selected_analysis()
+    bundle = SOURCE_ROOT / selection["bundle"]
+    final = json.loads((bundle / "FINAL_MANIFEST.json").read_text())
+    manifest = json.loads((bundle / "figure3/run_manifest.json").read_text())
+    if (final.get("model_spec_sha256") != selection.get("model_spec_sha256")
+            or digest(source_path(final["model_spec"])) != selection["model_spec_sha256"]
+            or manifest.get("model_spec_sha256") != selection["model_spec_sha256"]
+            or manifest.get("checkpoint_sha256") != selection["checkpoint_sha256"]):
+        raise ValueError("Selected Figure 3 model identity changed")
     os.environ.update({
         key: str(source_path(value)) if Path(value).is_absolute() else value
         for key, value in manifest["environment"].items()
@@ -197,12 +217,7 @@ def main():
         (history_path, history_manifest, "history_endpoint"),
         (trial_path, trial_manifest, "trial_centroid"),
     ):
-        if (
-            run_manifest["selection"] != selection
-            or run_manifest.get("stabilization_reference", "history_endpoint") != reference
-            or digest(control_path) != run_manifest["local_cache_sha256"]
-        ):
-            raise ValueError(f"{reference} replay provenance differs from selected model or completed cache")
+        validate_replay_provenance(control_path, run_manifest, reference, selection)
     history_payload = dill.load(history_path.open("rb"))
     trial_payload = dill.load(trial_path.open("rb"))
     global_path = source_path(manifest["environment"]["FIG3_ABLATION_CACHE_PATH"])

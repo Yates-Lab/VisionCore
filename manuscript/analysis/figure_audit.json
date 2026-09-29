@@ -21,8 +21,7 @@
     "Page 6: '2' is 4.267 pt",
     "Page 6: 'rate' is 4.267 pt",
     "Page 6: 'sc' is 4.267 pt",
-    "Figure 3 numerical results changed",
-    "Installed stabilization supplement differs from its render"
+    "Figure 3 numerical results changed"
   ],
   "figure_sources": [
     {
@@ -63,7 +62,7 @@
     },
     {
       "file": "figures/stabilization_control.pdf",
-      "sha256": "72c3de5c7524b5a3fa1de3318210472ca531936aba39d097d5c126ad773a4893",
+      "sha256": "c82620b49245947e9d2719ce2b59637de3bc1cbf5d9a82bacfe5239aa657827e",
       "text_spans": 33,
       "minimum_source_pt": 8.0
     }
@@ -106,7 +105,7 @@
     }
   ],
   "compiled_pdf": {
-    "sha256": "46e8db57b8584f205643c1381b0690aaab62625ea8443a6b5f89dd7c57b52d19",
+    "sha256": "2019e8485dccdeda27aab9c0be50b53dc67554c078ea9c65351c4eb5df766043",
     "pages": 43
   },
   "installed_figures_match_rendered": {
@@ -131,7 +130,7 @@
   },
   "stabilization_control": {
     "summary": "manuscript/analysis/stabilization_control/summary.json",
-    "summary_sha256": "7cebc92bc6501e87cf778645cff4d8d89bd36f99d9289007d5e74bb479d0d556"
+    "summary_sha256": "51d1653ceab569a30f9ae0cfc3526f06f14ee49dc1e40ee433856c467f37e7bc"
   },
   "selected_analysis_bundle": "/home/ryanress/v1-fovea/VisionCore/outputs/stats/fig4_orientation_fix/bundle",
   "figure4_interim_spectrum_selection": null,
@@ -321,7 +320,7 @@
     "paper/fig3/_fig3_data.py": "67bf266bd44e0ebaf5a916fd68f873b87bf6daa63460b232763dd33e164e12a0",
     "paper/fig3/_fig3_femfraction.py": "8615846ba3f10d51db4067ecf53812d130c3678a162b6296c6d6304e366e8f25",
     "eval/eval_stack_multidataset.py": "6d80b830fb447501cad1a567db218623f97f148259ebe10b024feb7bd04cedf5",
-    "manuscript/render_stabilization_control.py": "202c465e05e97806bce2100dcc40413f6137cb2573377635ad684e4581a04d0f",
+    "manuscript/render_stabilization_control.py": "674321572fe010f74c741da04df54212119641d8b62ef643d5dbe636af60bd66",
     "models/modules/dekel.py": "2682f5594c287478b4440713a30c49180c121a8be0566b9633e88cfdd4864e17",
     "models/data/transforms.py": "1f4f4f4aeee5d79b859c312a7ead93a0ba21773e4b8d9c545363ec4a1cfc32d5",
     "paper/fig4/spatiotemporal_tuning/_figure4_renderer.py": "c1265ac207fd9371b5d4b6272ccbe10a26b7940ccbc886431643971200c7d414",

@@ -219,6 +219,51 @@ class TrialStabilizationInputTest(unittest.TestCase):
         self.assertEqual(set(checks), {"history_endpoint", "trial_centroid"})
         self.assertTrue(all(all(values.values()) for control in checks.values() for values in control.values()))
 
+    def test_renderer_uses_model_identity_not_figure4_selection_metadata(self):
+        manuscript = ROOT / "manuscript"
+        sys.path.insert(0, str(manuscript))
+        import render_stabilization_control as render
+
+        self.assertTrue(hasattr(render, "validate_replay_provenance"))
+        protected = ("checkpoint_sha256", "model_spec_sha256",
+                     "final_manifest_sha256", "figure3_manifest_sha256")
+        current = {key: key for key in protected}
+        current.update(bundle="corrected", figure4_results_sha256="corrected",
+                       reason="updated manuscript", selected_utc="later")
+        recorded = {key: key for key in protected}
+        recorded.update(bundle="released", figure4_results_sha256="released",
+                        reason="original manuscript", selected_utc="earlier")
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory) / "control.pkl"
+            cache.write_bytes(b"retained replay")
+            manifest = {"selection": recorded, "stabilization_reference": "trial_centroid",
+                        "local_cache_sha256": hashlib.sha256(cache.read_bytes()).hexdigest()}
+            render.validate_replay_provenance(cache, manifest, "trial_centroid", current)
+            for key in protected:
+                with self.subTest(key=key, mutation="changed"):
+                    bad = {**manifest, "selection": {**recorded, key: "other"}}
+                    with self.assertRaises(ValueError):
+                        render.validate_replay_provenance(cache, bad, "trial_centroid", current)
+                with self.subTest(key=key, mutation="missing"):
+                    bad = {**manifest, "selection": {k: v for k, v in recorded.items() if k != key}}
+                    with self.assertRaises(ValueError):
+                        render.validate_replay_provenance(cache, bad, "trial_centroid", current)
+            for key in protected:
+                with self.subTest(key=key, mutation="selected_missing"):
+                    selected = {k: v for k, v in current.items() if k != key}
+                    with self.assertRaises(ValueError):
+                        render.validate_replay_provenance(cache, manifest, "trial_centroid", selected)
+            with self.assertRaises(ValueError):
+                render.validate_replay_provenance(cache, manifest, "history_endpoint", current)
+            for key in ("stabilization_reference", "local_cache_sha256"):
+                with self.subTest(missing=key):
+                    missing = {k: v for k, v in manifest.items() if k != key}
+                    with self.assertRaises(ValueError):
+                        render.validate_replay_provenance(cache, missing, "trial_centroid", current)
+            with self.assertRaises(ValueError):
+                render.validate_replay_provenance(cache, {**manifest, "local_cache_sha256": "wrong"},
+                                                  "trial_centroid", current)
+
     def test_renderer_rejects_trial_replay_drift_by_default(self):
         manuscript = ROOT / "manuscript"
         sys.path.insert(0, str(manuscript))

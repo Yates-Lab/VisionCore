@@ -1,10 +1,10 @@
 {
   "checkpoint_sha256": "e70f287462155607a96c7d23d9d56e347111319aa48cafd3f54fe88dd4484cb9",
-  "global_cache": "outputs/no_phase_readout_comparison_20260910/rank1/figure3/cache/fig3_ablation_inference.pkl",
+  "global_cache": "/home/jake/repos/VisionCore/outputs/no_phase_readout_comparison_20260910/rank1/figure3/cache/fig3_ablation_inference.pkl",
   "global_cache_sha256": "bff98cae492bd395326371868a3b8d61913d46c77d6be47c96e8f321be65c717",
-  "local_cache": "outputs/stabilization_control_20260915/history_stabilized.pkl",
+  "local_cache": "/home/jake/repos/VisionCore/outputs/stabilization_control_20260915/history_stabilized.pkl",
   "local_cache_sha256": "1c1f8c7a8b32d25abcb696d4788752aee024c6e21712f94ef331b70acdb41776",
-  "trial_cache": "/home/ryanress/v1-fovea/VisionCore/outputs/trial_stabilization_control/trial_stabilized.pkl",
+  "trial_cache": "outputs/trial_stabilization_control/trial_stabilized.pkl",
   "trial_cache_sha256": "d2fa9cc255dc9e0ac442ecda310fd05275eec15426acea7390d5892070096d2d",
   "accepted_trial_replay_sha256": "d2fa9cc255dc9e0ac442ecda310fd05275eec15426acea7390d5892070096d2d",
   "data_identity_checks": {
