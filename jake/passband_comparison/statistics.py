@@ -1,7 +1,10 @@
 """Training-only spline regression, blocked folds, and paired evaluation."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
+import pandas as pd
 from scipy.interpolate import BSpline
 from scipy.stats import rankdata
 from sklearn.model_selection import StratifiedGroupKFold
@@ -18,6 +21,34 @@ def trial_folds(table, seed, n_splits=5):
         folds[test]=k
     assert np.all(folds>=0)
     return folds
+
+
+def validate_fold_assignments(table, folds, repeats=3, n_splits=5):
+    """Require released folds to match the ordered eye-trial table without leakage."""
+    folds=np.asarray(folds)
+    if folds.shape!=(repeats,len(table)) or not np.issubdtype(folds.dtype,np.integer):
+        raise ValueError('Released fold shape or dtype differs from the analysis contract')
+    groups=(table.session.astype(str)+'|'+table.trial_idx.astype(str)).to_numpy()
+    strata=(table.session.str.split('_').str[0]+'|'+table.event_class).to_numpy()
+    for row in folds:
+        if not np.array_equal(np.unique(row),np.arange(n_splits)):
+            raise ValueError('Released fold labels do not cover all splits')
+        for k in range(n_splits):
+            train=row!=k;test=~train
+            if set(groups[train]) & set(groups[test]):
+                raise ValueError('Released fold splits a source trial group')
+            if set(strata[train])!=set(strata):
+                raise ValueError('Released fold omits a training stratum')
+    return folds
+
+
+def load_released_folds(table, archive):
+    archive=Path(archive)
+    released_table=pd.read_csv(archive.parent/'traces.csv')
+    if not table.reset_index(drop=True).equals(released_table):
+        raise ValueError('Released folds refer to a different ordered trace table')
+    with np.load(archive,allow_pickle=False) as z:
+        return validate_fold_assignments(table,z['fold_assignments'])
 
 
 def spline_features(x, train):

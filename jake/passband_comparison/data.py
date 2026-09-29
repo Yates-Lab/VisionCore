@@ -1,5 +1,6 @@
 """Read and verify selected Figure 4 caches without importing the twin."""
 from __future__ import annotations
+import argparse
 import hashlib
 import json
 from pathlib import Path
@@ -25,6 +26,95 @@ def write_json(path,value):
         if isinstance(x,np.generic): return x.item()
         raise TypeError(type(x))
     Path(path).write_text(json.dumps(value,indent=2,allow_nan=False,default=convert)+'\n')
+
+
+def prepare_cached_inputs(released, original_shards, corrected_shards, out, *, source_root=ROOT, image_fallback=None):
+    """Rebind released responses/design to independently rerun canonical spectral shards."""
+    released=Path(released).resolve();out=Path(out);source_root=Path(source_root)
+    original=json.loads((released/'design.json').read_text())
+    if not json.loads((released/'input_audit.json').read_text())['passed']:
+        raise ValueError('Released input audit did not pass')
+    replacements={}
+    for before,after in zip(original_shards,corrected_shards,strict=True):
+        before=Path(before).resolve();after=Path(after).resolve()
+        replacements[before]=after
+        if (before.parent/'summary.json').exists():
+            replacements[(before.parent/'summary.json').resolve()]=(after.parent/'summary.json').resolve()
+    sources={}
+    for name,expected in original['source_sha256'].items():
+        path=source_root/name
+        if image_fallback is not None and name.endswith('/image_feature_table.csv'):
+            path=Path(image_fallback)
+        if digest(path)!=expected:
+            raise ValueError('Released source changed: '+name)
+        new=replacements.get(path.resolve(),path.resolve())
+        sources[str(new)]=digest(new)
+    scenes=[];power=[];dynamic=[]
+    for before,after in zip(original_shards,corrected_shards,strict=True):
+        with np.load(before,allow_pickle=False) as old, np.load(after,allow_pickle=False) as new:
+            for key in ('image_indices','trace_indices','unit_indices','motion_scales',
+                        'spatial_cpd','temporal_hz','orientation_deg',
+                        'mean_rate','expected_spikes','map_ssi'):
+                if not np.array_equal(old[key],new[key]):
+                    raise ValueError('Corrected shard response or identity differs: '+key)
+            scenes.extend(new['image_indices'].tolist())
+            power.append(new['joint_passband_power'])
+            dynamic.append(new['total_dynamic_power'][...,0])
+    order=np.argsort(scenes)
+    if len(set(scenes))!=len(scenes):
+        raise ValueError('Duplicated scene identities')
+    power=np.concatenate(power)[order].astype(np.float64)
+    dynamic=np.concatenate(dynamic)[order].astype(np.float64)
+    movie=power[:,:,1]-power[:,:,0]
+    total=dynamic[:,:,1]-dynamic[:,:,0]
+    with np.load(released/'analysis_inputs.npz',allow_pickle=False) as z:
+        inputs={key:z[key] for key in z.files}
+    if movie.shape!=inputs['movie_engagement'].shape or total.shape!=inputs['movie_dynamic'].shape:
+        raise ValueError('Corrected shard axes differ from released inputs')
+    # Old shards must reproduce the released cache before any corrected predictions run.
+    baseline=[];baseline_total=[];old_scenes=[]
+    for path in original_shards:
+        with np.load(path,allow_pickle=False) as z:
+            old_scenes.extend(z['image_indices'].tolist())
+            baseline.append(z['joint_passband_power'][:,:,1].astype(np.float64)-z['joint_passband_power'][:,:,0].astype(np.float64))
+            baseline_total.append(z['total_dynamic_power'][:,:,1,0].astype(np.float64)-z['total_dynamic_power'][:,:,0,0].astype(np.float64))
+    old_order=np.argsort(old_scenes)
+    if not np.array_equal(np.asarray(old_scenes)[old_order],np.asarray(scenes)[order]):
+        raise ValueError('Released and corrected scenes differ')
+    if not np.array_equal(np.concatenate(baseline)[old_order],inputs['movie_engagement']):
+        raise ValueError('Released engagement cache differs from original shards')
+    if not np.array_equal(np.concatenate(baseline_total)[old_order],inputs['movie_dynamic']):
+        raise ValueError('Released power cache differs from original shards')
+    if not np.array_equal(np.median(inputs['movie_engagement'],axis=0),inputs['primary_engagement']):
+        raise ValueError('Released primary engagement differs from movie cache')
+    if not np.allclose(total,inputs['movie_dynamic'],rtol=1e-5,atol=1e-8):
+        raise ValueError('Corrected spectral replay changed total dynamic power')
+    if not np.all(np.isfinite(movie)) or not np.all(np.isfinite(total)):
+        raise ValueError('Corrected spectral predictor is nonfinite')
+    inputs.update(movie_engagement=movie,primary_engagement=np.median(movie,axis=0),
+                  movie_dynamic=total,primary_dynamic=np.median(total,axis=0))
+    out.mkdir(parents=True,exist_ok=True)
+    for name in ('traces.csv','images.csv','units.csv','input_audit.json'):
+        (out/name).write_bytes((released/name).read_bytes())
+    np.savez_compressed(out/'analysis_inputs.npz',**inputs)
+    original['released_source_sha256']=original['source_sha256']
+    original['source_sha256']=sources
+    original['released_input_sha256']={name:digest(released/name) for name in
+        ('design.json','analysis_inputs.npz','traces.csv','images.csv','units.csv','input_audit.json')}
+    write_json(out/'design.json',original)
+
+
+def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--released-input-dir',type=Path,required=True)
+    parser.add_argument('--original-shards',type=Path,nargs='+',required=True)
+    parser.add_argument('--corrected-shards',type=Path,nargs='+',required=True)
+    parser.add_argument('--source-root',type=Path,default=ROOT)
+    parser.add_argument('--image-table-fallback',type=Path)
+    parser.add_argument('--out-dir',type=Path,required=True)
+    args=parser.parse_args()
+    prepare_cached_inputs(args.released_input_dir,args.original_shards,args.corrected_shards,
+                          args.out_dir,source_root=args.source_root,image_fallback=args.image_table_fallback)
 
 
 def load_data(out):
@@ -126,3 +216,6 @@ def load_data(out):
         'inference_scope':'Conditional on fitted twin; no measured neural noise or animal-population inference.'}
     write_json(out/'design.json',design)
     return design,traces,images,tuning,primary_y,movie_y,ep,engagement,np.median(dynamic,axis=0),dynamic
+
+
+if __name__=='__main__': main()

@@ -1,5 +1,5 @@
 {
-  "model_bundle": "outputs/no_phase_readout_comparison_20260910/rank1",
+  "model_bundle": "outputs/stats/fig4_orientation_fix/bundle",
   "checkpoint_sha256": "e70f287462155607a96c7d23d9d56e347111319aa48cafd3f54fe88dd4484cb9",
   "audit_dir": "manuscript/analysis/figure4_example",
   "source_sha256": {

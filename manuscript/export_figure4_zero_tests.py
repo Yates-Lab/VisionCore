@@ -15,6 +15,20 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 sys.path.insert(0, str(ROOT))
 os.environ.setdefault("MPLCONFIGDIR", str(HERE / "build/mpl"))
+from analysis_selection import SOURCE_ROOT
+
+
+def selected_bundle(selection):
+    return SOURCE_ROOT / selection["bundle"]
+
+
+def source_name(path):
+    # Keep the staged source-root path even when an unchanged input is symlinked.
+    path = Path(path).absolute()
+    for root in (ROOT, SOURCE_ROOT):
+        if path.is_relative_to(root):
+            return str(path.relative_to(root))
+    return str(path)
 
 
 def bootstrap_zero_p(draws):
@@ -44,7 +58,7 @@ def main():
     from paper.fig4.spatiotemporal_tuning._figure4_renderer import _direct_mechanism_values, _clustered_curve
 
     selection = json.loads((HERE / "analysis/selected_model_bundle.json").read_text())
-    bundle = ROOT / selection["bundle"]
+    bundle = selected_bundle(selection)
     original = json.loads((bundle / "figure4/production_figure4/figure/summary.json").read_text())
     out = HERE / "analysis/figure4_zero_tests"
     out.mkdir(exist_ok=True)
@@ -120,7 +134,7 @@ def main():
               "multiplicity": "Holm familywise correction across all 32 displayed effects in B, F, and G",
               "scope": "conditional on the fitted twin, with the same resampling units as the plotted confidence intervals; not training or between-animal uncertainty",
               "records": records, "draws_sha256": digest(out / "bootstrap_draws.npz"),
-              "source_sha256": {str(p.relative_to(ROOT)): digest(p) for p in source_paths}}
+              "source_sha256": {source_name(p): digest(p) for p in source_paths}}
     (out / "summary.json").write_text(json.dumps(report, indent=2)+"\n")
     print(pd.DataFrame(records)[["panel", "outcome", "index", "p_raw", "p_holm", "significant_positive"]].to_string(index=False))
 

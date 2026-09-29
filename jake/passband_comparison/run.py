@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 from jake.passband_comparison.data import ROOT,SEED,digest,write_json,load_data
 from jake.passband_comparison.statistics import (
-    trial_folds,make_features,fit_predict,animal_weights,bootstrap_weights,
+    trial_folds,load_released_folds,make_features,fit_predict,animal_weights,bootstrap_weights,
     paired_scores,partial_rank_correlations)
 
 
@@ -24,7 +24,7 @@ def shuffled_assignments(n,repeats):
     return np.stack(result)
 
 
-def primary_predictions(out,table,y,engagement,dynamic,penalty=.01,shuffles=32,repeats=3):
+def primary_predictions(out,table,y,engagement,dynamic,penalty=.01,shuffles=32,repeats=3,fold_assignments=None):
     n,u,o=y.shape
     animal=(table.session.str.startswith('Logan')).to_numpy(dtype=float)
     event=table.event_class.eq('microsaccade').to_numpy(dtype=float)
@@ -34,7 +34,7 @@ def primary_predictions(out,table,y,engagement,dynamic,penalty=.01,shuffles=32,r
     predictions={}; shuffle_errors=np.zeros((shuffles,n,u,o),dtype=np.float32)
     assignments=[]
     for repeat in range(repeats):
-        folds=trial_folds(table,SEED+repeat)
+        folds=fold_assignments[repeat] if fold_assignments is not None else trial_folds(table,SEED+repeat)
         assignments.append(folds)
         for k in range(5):
             train=np.flatnonzero(folds!=k); test=np.flatnonzero(folds==k)
@@ -56,13 +56,13 @@ def primary_predictions(out,table,y,engagement,dynamic,penalty=.01,shuffles=32,r
     return error,shuffle_errors,np.stack(assignments)
 
 
-def secondary_predictions(out,table,images,y,engagement,dynamic):
+def secondary_predictions(out,table,images,y,engagement,dynamic,fold_assignments=None):
     s,t,u,o=y.shape; target=y.reshape(-1,u,o)
     animal=np.tile(table.session.str.startswith('Logan').to_numpy(dtype=float),s)
     event=np.tile(table.event_class.eq('microsaccade').to_numpy(dtype=float),s)
     path=np.tile(table.rendered_path_length_arcmin.to_numpy(),s)
     weights=animal_weights(animal)
-    ef=trial_folds(table,SEED)
+    ef=fold_assignments[0] if fold_assignments is not None else trial_folds(table,SEED)
     unique,inv=np.unique(images.source_canvas_sha256.to_numpy(),return_inverse=True)
     rng=np.random.default_rng(SEED+70)
     cf_unique=np.empty(len(unique),int); cf_unique[rng.permutation(len(unique))]=np.arange(len(unique))%5
@@ -126,6 +126,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--out-dir',type=Path,required=True)
     parser.add_argument('--stage',choices=['all','primary','secondary'],default='all')
+    parser.add_argument('--released-folds',type=Path,help='Released primary prediction archive with audited eye-trial folds')
     args=parser.parse_args();out=args.out_dir;out.mkdir(parents=True,exist_ok=True)
     started=time.monotonic()
     if not (out/'analysis_inputs.npz').exists(): load_data(out)
@@ -133,11 +134,25 @@ def main():
     for name,expected in design['source_sha256'].items():
         if digest(ROOT/name)!=expected: raise ValueError('Changed source: '+name)
     table=pd.read_csv(out/'traces.csv');images=pd.read_csv(out/'images.csv');units=pd.read_csv(out/'units.csv')
+    released_folds=None
+    if args.released_folds is not None:
+        archive=args.released_folds.resolve()
+        released_folds=load_released_folds(table,archive)
+        design['released_folds']={'path':str(archive),'sha256':digest(archive),
+                                  'traces_sha256':digest(archive.parent/'traces.csv')}
+        design['source_sha256'][str(archive)]=digest(archive)
+        design['source_sha256'][str(archive.parent/'traces.csv')]=digest(archive.parent/'traces.csv')
+        write_json(out/'design.json',design)
+    elif 'released_folds' in design:
+        record=design['released_folds'];archive=Path(record['path'])
+        if digest(archive)!=record['sha256'] or digest(archive.parent/'traces.csv')!=record['traces_sha256']:
+            raise ValueError('Released fold archive or trace table changed')
+        released_folds=load_released_folds(table,archive)
     strict=units.validated_for_figure4.to_numpy(dtype=bool)
     inputs=np.load(out/'analysis_inputs.npz')
     if args.stage in ['all','primary']:
         y=inputs['primary_y'];ep=inputs['primary_engagement'];dynamic=inputs['primary_dynamic']
-        errors,shuffle_errors,folds=primary_predictions(out,table,y,ep,dynamic)
+        errors,shuffle_errors,folds=primary_predictions(out,table,y,ep,dynamic,fold_assignments=released_folds)
         weights=animal_weights(table.session.str.split('_').str[0].to_numpy())
         boot=bootstrap_weights(table,np.array(['fixed_image_ensemble']),1000,SEED+100)
         report,r2,contrasts=paired_scores(y,errors,weights,boot,strict)
@@ -161,12 +176,12 @@ def main():
         save_per_unit(out,'primary',units,r2,contrasts)
         write_json(out/'primary_summary.json',report)
         for penalty in [.001,.1]:
-            errs,_,_=primary_predictions(out,table,y,ep,dynamic,penalty=penalty,shuffles=0)
+            errs,_,_=primary_predictions(out,table,y,ep,dynamic,penalty=penalty,shuffles=0,fold_assignments=released_folds)
             report_sensitivity=paired_scores(y,errs,weights,None,strict)[0]
             write_json(out/f'primary_sensitivity_lambda_{penalty:g}.json',report_sensitivity)
     if args.stage in ['all','secondary']:
         y=inputs['movie_y']
-        errors=secondary_predictions(out,table,images,y,inputs['movie_engagement'],inputs['movie_dynamic'])
+        errors=secondary_predictions(out,table,images,y,inputs['movie_engagement'],inputs['movie_dynamic'],fold_assignments=released_folds)
         target=y.reshape(-1,*y.shape[-2:])
         weights=np.tile(animal_weights(table.session.str.split('_').str[0].to_numpy()),len(images))/len(images)
         boot=bootstrap_weights(table,images.source_canvas_sha256.to_numpy(),1000,SEED+101)

@@ -8,6 +8,7 @@ MANUSCRIPT = Path(__file__).resolve().parents[1] / "manuscript"
 sys.path.insert(0, str(MANUSCRIPT))
 
 import analysis_selection  # noqa: E402
+import export_figure4_zero_tests  # noqa: E402
 
 
 def test_selected_analysis_reads_bundle_from_configured_source_root(tmp_path, monkeypatch):
@@ -34,6 +35,20 @@ def test_selected_analysis_reads_bundle_from_configured_source_root(tmp_path, mo
     monkeypatch.setattr(analysis_selection, "SOURCE_ROOT", tmp_path)
 
     assert analysis_selection.selected_analysis()["bundle"] == "outputs/selected"
+
+
+def test_zero_tests_resolve_bundle_and_provenance_from_source_root(tmp_path, monkeypatch):
+    monkeypatch.setattr(export_figure4_zero_tests, "SOURCE_ROOT", tmp_path)
+    bundle = export_figure4_zero_tests.selected_bundle({"bundle": "outputs/selected"})
+    assert bundle == tmp_path / "outputs/selected"
+    local = export_figure4_zero_tests.HERE / "analysis/selected_model_bundle.json"
+    assert export_figure4_zero_tests.source_name(local) == "manuscript/analysis/selected_model_bundle.json"
+    assert export_figure4_zero_tests.source_name(bundle / "figure4/summary.json") == "outputs/selected/figure4/summary.json"
+    external = tmp_path / "external.json"
+    external.write_text("{}")
+    (bundle / "figure4").mkdir(parents=True)
+    (bundle / "figure4/summary.json").symlink_to(external)
+    assert export_figure4_zero_tests.source_name(bundle / "figure4/summary.json") == "outputs/selected/figure4/summary.json"
 
 
 def test_source_path_relocates_recorded_repository_paths(tmp_path, monkeypatch):

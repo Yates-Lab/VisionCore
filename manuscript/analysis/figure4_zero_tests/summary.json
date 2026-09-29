@@ -298,11 +298,11 @@
       "outcome": "rate",
       "index": 0,
       "x": 10.0,
-      "estimate": 1.7226743577965433,
+      "estimate": 1.6841520610971799,
       "p_raw": 0.0003999200159968006,
       "ci95": [
-        1.6231222484847667,
-        1.8437990727494242
+        1.5844986725545482,
+        1.8048305899215762
       ],
       "n_bootstrap": 5000,
       "seed": 20260825,
@@ -316,11 +316,11 @@
       "outcome": "rate",
       "index": 1,
       "x": 30.0,
-      "estimate": 3.8914433840675304,
+      "estimate": 3.885284096615808,
       "p_raw": 0.0003999200159968006,
       "ci95": [
-        3.7267115650456746,
-        4.174941491096547
+        3.68206172525173,
+        4.143164971173029
       ],
       "n_bootstrap": 5000,
       "seed": 20260825,
@@ -334,11 +334,11 @@
       "outcome": "rate",
       "index": 2,
       "x": 50.0,
-      "estimate": 8.991711381932925,
+      "estimate": 8.936952958092808,
       "p_raw": 0.0003999200159968006,
       "ci95": [
-        8.42233412539435,
-        9.48699728158854
+        8.366011177628964,
+        9.422579652646519
       ],
       "n_bootstrap": 5000,
       "seed": 20260825,
@@ -352,11 +352,11 @@
       "outcome": "rate",
       "index": 3,
       "x": 70.0,
-      "estimate": 29.41576676779851,
+      "estimate": 29.2523269244656,
       "p_raw": 0.0003999200159968006,
       "ci95": [
-        27.525797162059106,
-        31.21322206365199
+        27.66846197547137,
+        31.260070779076543
       ],
       "n_bootstrap": 5000,
       "seed": 20260825,
@@ -370,11 +370,11 @@
       "outcome": "rate",
       "index": 4,
       "x": 90.0,
-      "estimate": 63.82505845481799,
+      "estimate": 63.930082041593124,
       "p_raw": 0.0003999200159968006,
       "ci95": [
-        59.12410815227452,
-        67.81954422887286
+        59.24390700725215,
+        67.88569746658744
       ],
       "n_bootstrap": 5000,
       "seed": 20260825,
@@ -388,11 +388,11 @@
       "outcome": "SSI",
       "index": 0,
       "x": 10.0,
-      "estimate": 0.43463692219552313,
+      "estimate": 0.3884949482983232,
       "p_raw": 0.0003999200159968006,
       "ci95": [
-        0.3053069806405125,
-        0.5336731847167161
+        0.26829567706784513,
+        0.5088205587404764
       ],
       "n_bootstrap": 5000,
       "seed": 20260826,
@@ -406,11 +406,11 @@
       "outcome": "SSI",
       "index": 1,
       "x": 30.0,
-      "estimate": 1.1770425881635562,
+      "estimate": 1.1779479818881007,
       "p_raw": 0.0003999200159968006,
       "ci95": [
-        0.8567762418745158,
-        1.3047071171206783
+        0.876843199131089,
+        1.3150753603334244
       ],
       "n_bootstrap": 5000,
       "seed": 20260826,
@@ -424,11 +424,11 @@
       "outcome": "SSI",
       "index": 2,
       "x": 50.0,
-      "estimate": 2.3532942669314107,
+      "estimate": 2.3098737647005168,
       "p_raw": 0.0003999200159968006,
       "ci95": [
-        1.7181520053310266,
-        2.674446435699262
+        1.687365254824036,
+        2.5885541584370535
       ],
       "n_bootstrap": 5000,
       "seed": 20260826,
@@ -442,11 +442,11 @@
       "outcome": "SSI",
       "index": 3,
       "x": 70.0,
-      "estimate": 8.11591595004585,
+      "estimate": 8.204512548768507,
       "p_raw": 0.0003999200159968006,
       "ci95": [
-        6.895779124171452,
-        9.493384292351006
+        7.0691422491205245,
+        9.770743448047806
       ],
       "n_bootstrap": 5000,
       "seed": 20260826,
@@ -460,11 +460,11 @@
       "outcome": "SSI",
       "index": 4,
       "x": 90.0,
-      "estimate": 16.556086051308032,
+      "estimate": 16.719552487215452,
       "p_raw": 0.0003999200159968006,
       "ci95": [
-        14.42495873947302,
-        19.182921622971776
+        14.47554062385364,
+        19.181042341114004
       ],
       "n_bootstrap": 5000,
       "seed": 20260826,
@@ -478,11 +478,11 @@
       "outcome": "temporal",
       "index": 0,
       "x": 0.0,
-      "estimate": 8.923971801996231,
+      "estimate": 8.771688118577003,
       "p_raw": 0.0003999200159968006,
       "ci95": [
-        8.639551773667336,
-        9.23843938857317
+        8.550925385206938,
+        9.111014306545258
       ],
       "n_bootstrap": 5000,
       "seed": 20260845,
@@ -496,11 +496,11 @@
       "outcome": "temporal",
       "index": 1,
       "x": 1.0,
-      "estimate": 34.788725994285414,
+      "estimate": 34.15738791227341,
       "p_raw": 0.0003999200159968006,
       "ci95": [
-        33.51065088269024,
-        35.81589587887947
+        32.959719225764275,
+        35.38461521267891
       ],
       "n_bootstrap": 5000,
       "seed": 20260845,
@@ -514,11 +514,11 @@
       "outcome": "temporal",
       "index": 2,
       "x": 2.0,
-      "estimate": 66.62102283917193,
+      "estimate": 64.26078975200653,
       "p_raw": 0.0003999200159968006,
       "ci95": [
-        63.57635711503462,
-        70.13189590746151
+        61.07012838125229,
+        67.0216092467308
       ],
       "n_bootstrap": 5000,
       "seed": 20260845,
@@ -532,11 +532,11 @@
       "outcome": "SSI",
       "index": 0,
       "x": 0.0,
-      "estimate": 0.0006490917876362801,
+      "estimate": 0.0006157150492072105,
       "p_raw": 0.0003999200159968006,
       "ci95": [
-        0.0004786213394254446,
-        0.0008150488603860124
+        0.00046919286251068115,
+        0.000767869409173727
       ],
       "n_bootstrap": 5000,
       "seed": 20261845,
@@ -550,11 +550,11 @@
       "outcome": "SSI",
       "index": 1,
       "x": 1.0,
-      "estimate": 0.019862137734889984,
+      "estimate": 0.021337073296308517,
       "p_raw": 0.0003999200159968006,
       "ci95": [
-        0.01832636073231697,
-        0.021582096815109253
+        0.019288547337055206,
+        0.023527566343545914
       ],
       "n_bootstrap": 5000,
       "seed": 20261845,
@@ -568,11 +568,11 @@
       "outcome": "SSI",
       "index": 2,
       "x": 2.0,
-      "estimate": 0.03279036656022072,
+      "estimate": 0.031047210097312927,
       "p_raw": 0.0003999200159968006,
       "ci95": [
-        0.0293656587600708,
-        0.036138296127319336
+        0.027440499514341354,
+        0.03469901531934738
       ],
       "n_bootstrap": 5000,
       "seed": 20261845,
@@ -582,20 +582,20 @@
       "significant_positive": true
     }
   ],
-  "draws_sha256": "5eddb52c7bc5e59a0dcad8541aeb271912a67ed1e2776e788fc58090744529af",
+  "draws_sha256": "469b40aa8408300f3c0b62fdda63abddcd82439ddabef5a64d5461cce03e598f",
   "source_sha256": {
-    "manuscript/analysis/selected_model_bundle.json": "bb7001b1ddcce8633c51331d96e30f4ed035cf845c9586dad1e3fb709265d670",
-    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/production_figure4/figure/summary.json": "370ccc113e3336b52fb70ff70552c351af55b375204e3370cd55f47c5761bd26",
-    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/response_matrix_40img_x_200fix/merged/summary.json": "bb4275ea68559e620b17e38657759d457f54efe4df5d4647f98822facb00ee4b",
-    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/response_matrix_40img_x_200fix/merged/mean_rate_matrix.npy": "973a2ded0e18862549c2d8bb1713ade7ad1b888a41e064cc412aaddd5a7b8d88",
-    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/response_matrix_40img_x_200fix/merged/ssi_matrix.npy": "e76c81c71e86af87e55142a7893571a5aa2ddcfdcf3c869a25ad0e7e6ce9752a",
-    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/response_matrix_40img_x_200fix/merged/expected_spikes_matrix.npy": "9b3ec5287bc2217cc7627af3002c2c4e8cf242a72a9b0ca01db1906d747565fe",
-    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/response_matrix_40img_x_200fix/merged/stabilized_mean_rate_by_image.npy": "0b15a03f388e9825217918e1583e0f250052c3171b31bcbff91f4acad6f7add8",
-    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/response_matrix_40img_x_200fix/merged/stabilized_ssi_by_image.npy": "434ee8861af6709130527af11ee08a3d9eed44d01dd7135df6e0b177222e3b85",
-    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/response_matrix_40img_x_200fix/merged/stabilized_expected_spikes_by_image.npy": "8f59a64c9fbe18058f853dd6192fa82416ab973ab88fd50db71e473b15bcbe01",
-    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/response_matrix_40img_x_200fix/merged/trace_feature_table.csv": "5efba6029e6e86db9d121dc5cf4bad3885167b1384da3c06f81f88332f72f0c9",
-    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/matrix_spectral_replay/shard_00/causal_chain_shard.npz": "f54463df8ea4b9e41f78b87c15387014c1124d09f5dfbc55879aecae56fd80d2",
-    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/matrix_spectral_replay/shard_01/causal_chain_shard.npz": "5182d84dddf51b87daa56da18bad497b526fea568977b72973c613800391d488",
-    "outputs/no_phase_readout_comparison_20260910/rank1/figure4/top_passband_stage_trajectory_10img_x_10fix/top_passband_stage_trajectory.npz": "e9acf077b4c1c178c330a51d0470d5266b1c9fbb81db7429e4c20238f43e3afe"
+    "manuscript/analysis/selected_model_bundle.json": "71a9f48751deb4f1864e80778b61c68001661c029200e6d7fd0babe61eadbabf",
+    "outputs/stats/fig4_orientation_fix/bundle/figure4/production_figure4/figure/summary.json": "389729d79db15026d273b8157048e6893bf85181760575099c04878c03ae00b4",
+    "outputs/stats/fig4_orientation_fix/bundle/figure4/response_matrix_40img_x_200fix/merged/summary.json": "bb4275ea68559e620b17e38657759d457f54efe4df5d4647f98822facb00ee4b",
+    "outputs/stats/fig4_orientation_fix/bundle/figure4/response_matrix_40img_x_200fix/merged/mean_rate_matrix.npy": "973a2ded0e18862549c2d8bb1713ade7ad1b888a41e064cc412aaddd5a7b8d88",
+    "outputs/stats/fig4_orientation_fix/bundle/figure4/response_matrix_40img_x_200fix/merged/ssi_matrix.npy": "e76c81c71e86af87e55142a7893571a5aa2ddcfdcf3c869a25ad0e7e6ce9752a",
+    "outputs/stats/fig4_orientation_fix/bundle/figure4/response_matrix_40img_x_200fix/merged/expected_spikes_matrix.npy": "9b3ec5287bc2217cc7627af3002c2c4e8cf242a72a9b0ca01db1906d747565fe",
+    "outputs/stats/fig4_orientation_fix/bundle/figure4/response_matrix_40img_x_200fix/merged/stabilized_mean_rate_by_image.npy": "0b15a03f388e9825217918e1583e0f250052c3171b31bcbff91f4acad6f7add8",
+    "outputs/stats/fig4_orientation_fix/bundle/figure4/response_matrix_40img_x_200fix/merged/stabilized_ssi_by_image.npy": "434ee8861af6709130527af11ee08a3d9eed44d01dd7135df6e0b177222e3b85",
+    "outputs/stats/fig4_orientation_fix/bundle/figure4/response_matrix_40img_x_200fix/merged/stabilized_expected_spikes_by_image.npy": "8f59a64c9fbe18058f853dd6192fa82416ab973ab88fd50db71e473b15bcbe01",
+    "outputs/stats/fig4_orientation_fix/bundle/figure4/response_matrix_40img_x_200fix/merged/trace_feature_table.csv": "5efba6029e6e86db9d121dc5cf4bad3885167b1384da3c06f81f88332f72f0c9",
+    "outputs/stats/fig4_orientation_fix/bundle/figure4/matrix_spectral_replay/shard_00/causal_chain_shard.npz": "5e4ac7fc31cfe3e4288171b0ab7b33e9f2f515fd9c46c57702990fd1056d6b9d",
+    "outputs/stats/fig4_orientation_fix/bundle/figure4/matrix_spectral_replay/shard_01/causal_chain_shard.npz": "5d67acbe10acf86b3afe4b3f2f0ee4dd85e14c25309db5f93bbe2f9d95d60e4d",
+    "outputs/stats/fig4_orientation_fix/bundle/figure4/top_passband_stage_trajectory_10img_x_10fix/top_passband_stage_trajectory.npz": "753d3bc5df825f98281c8f9172f8154973e0e4cf83ee4bd4c425cdacc4b1031c"
   }
 }

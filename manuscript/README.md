@@ -71,18 +71,48 @@ uv run --project .. --no-sync python manuscript/review_figure4_examples.py --ins
 uv run --project .. --no-sync python manuscript/render_figures.py 4
 ```
 
-## Orientation-corrected Figure 4 (2026-09-28)
+## Orientation-corrected Figure 4 (2026-09-29)
 
 The released spectral replay paired image orientation 180−θ with tuning
-orientation θ. `figures/figure4.pdf` and `generated_stats.tex` are now built
-from orientation-corrected predictors by
-`declan/fig4_orientation_fix/manuscript_outputs.py`, which runs the scripts here
-unmodified against a local overlay of the selected bundle (Jake's artifacts are
-read only; rebuilt artifacts live in `outputs/stats/fig4_orientation_fix/`).
-Panels F and G and the passband-comparison macros change; A--E do not. Running
-`make stats`, `make check-stats`, or `render_figures.py 4` directly still reads
-the released bundle and would restore, or report as stale, the uncorrected
-values. See `declan/fig4_orientation_fix/README.md`.
+orientation θ. `spectral_power.py` keeps the physical Fourier grid y-up but
+converts its orientation labels to the grating assay's rows-down convention.
+The manuscript selects the audited correction in
+`outputs/stats/fig4_orientation_fix/bundle/figure4/`; the completed model,
+checkpoint, Figure 3, response matrix, tuning assay, and Figure 4A example
+are unchanged. Corrected spectral shards, the 100-movie stage trajectory,
+passband/path comparison, Figure 4 release audit, and results provenance live
+in that local bundle. Its other inputs are read-only links to the released
+bundle. `analysis/passband_comparison.json` pins the corrected regression
+reports in `outputs/stats/fig4_orientation_fix/passband_comparison_corrected/`.
+The release manifest and original Figure 4 result hash remain recorded in
+`analysis/selected_model_bundle.json`; the new result hash binds the audited
+correction. The released cache and supporting inputs must remain available
+for these links to resolve. Nothing writes to the released source tree.
+
+With the staged inputs present, the standard commands regenerate the selected
+statistics, significance tests, and Figure 4 without an overlay or an interim
+panel substitution:
+
+```sh
+uv run --project .. --no-sync python manuscript/export_figure4_zero_tests.py
+make -C manuscript stats
+make -C manuscript check-stats
+uv run --project .. --no-sync python manuscript/render_figures.py 4
+make -C manuscript audit
+```
+
+To recompute the corrected bundle itself, run the existing
+`paper/fig4/spatiotemporal_tuning/` shard replay, stage-trajectory, Figure 4
+render, release audit, and results-provenance scripts with the corrected
+shards and the released checkpoint; use the released response cache and trace
+inputs to regenerate the separate passband comparison with
+`jake/passband_comparison/`. Do not run inference against the released bundle
+in place. The source hashes and executed assembly arguments are recorded in
+the corrected local artifacts. Panels F and G and the passband-comparison
+statistics change; A--E retain their original inputs and example. The full
+manuscript audit additionally checks Figure 2 font sizes and exact Figure 3
+manifest statistics; inspect `analysis/figure_audit.json` for those independent
+checks.
 
 ## Build the PDF
 
@@ -109,17 +139,17 @@ make -C manuscript clean
 
 This removes LaTeX build products, retaining the figure replay caches.
 
-## Use an external artifact tree
+## Staged analysis inputs
 
-Set the source root when the selected bundle is stored in another VisionCore
-checkout. The scripts read artifacts from that tree and do not write to it.
-Manuscript products stay under this checkout's `manuscript/build/`,
-`manuscript/figures/`, and `manuscript/analysis/` directories. Figure 3 may
-refresh derived caches under this checkout's `outputs/cache/`.
-
-```sh
-export VISIONCORE_MANUSCRIPT_SOURCE_ROOT=/home/jake/repos/VisionCore
-```
+The orientation-corrected selection is staged under this checkout's
+`outputs/stats/fig4_orientation_fix/bundle/`. Leave
+`VISIONCORE_MANUSCRIPT_SOURCE_ROOT` unset for the normal manuscript commands;
+pointing it at the released checkout would not resolve the selected local
+bundle. The staged bundle links unchanged inputs to the read-only source
+checkout. The
+scripts write manuscript products only under this checkout's
+`manuscript/build/`, `manuscript/figures/`, and `manuscript/analysis/`;
+Figure 3 may refresh derived caches in `outputs/cache/`.
 
 The recorded Figure 2 cache is not readable in that checkout on this machine.
 Point the workflow at the existing local cache directory; `sync_stats.py`
@@ -129,10 +159,9 @@ checks its recorded SHA-256 before using it.
 export VISIONCORE_MANUSCRIPT_EMPIRICAL_CACHE_DIR="$PWD/outputs/cache"
 ```
 
-Keep both variables set for statistics and Figure 3 rendering. Figure 4 uses
-the selected external bundle directly. The manuscript selection remains
-`analysis/selected_model_bundle.json`; repository-wide production defaults do
-not replace it.
+Keep the empirical-cache variable set for statistics and Figure 3 rendering.
+The manuscript selection remains `analysis/selected_model_bundle.json`;
+repository-wide production defaults do not replace it.
 
 ## Update statistics
 
@@ -239,7 +268,7 @@ against the native renderer, without running the model.
 
 ## Selected analysis and files
 
-- Model/analysis bundle: `outputs/no_phase_readout_comparison_20260910/rank1`.
+- Model/analysis bundle: `outputs/stats/fig4_orientation_fix/bundle` (unchanged completed model and Figure 3 linked from the released rank-one bundle).
 - Checkpoint SHA-256:
   `e70f287462155607a96c7d23d9d56e347111319aa48cafd3f54fe88dd4484cb9`.
 - Empirical input: `outputs/dekel240_paper/m77_epoch279/production_figure3/cache/covdecomp_derived.pkl`,

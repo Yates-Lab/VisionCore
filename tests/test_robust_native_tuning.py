@@ -9,10 +9,14 @@ from paper.fig4.spatiotemporal_tuning.robust_native_tuning import (
 from paper.fig4.spatiotemporal_tuning.spectral_power import (
     circular_orientation_weights,
     folded_dpss_mode_power,
+    frequency_grid,
     interpolate_tuning_temporal,
     log_interpolation_weights,
+    mode_to_grid_matrix,
+    movie_power_cube,
     spectral_predictors,
 )
+from paper.fig4.upstream.real_trace_matrix.model import OUT_SIZE, PPD
 
 
 def test_recommended_grid_is_cycle_valid_and_below_nyquist() -> None:
@@ -148,6 +152,33 @@ def test_spectral_grid_interpolates_log_frequency_and_orientation() -> None:
     )
     assert (o0[0], o1[0]) == (0, 1)
     np.testing.assert_allclose([w0[0], w1[0]], [1.0, 0.0])
+
+
+def test_oblique_rendered_gratings_match_assay_bar_orientation_across_wrap() -> None:
+    grid = frequency_grid()
+    size = OUT_SIZE[0]  # Integer Fourier cycles avoid orientation ambiguity.
+    orientation = np.arange(0.0, 180.0, 10.0)
+    radial = np.hypot(1, 4) * PPD / size
+    matrix, _ = mode_to_grid_matrix(
+        grid["kxy"], radial * np.asarray([0.5, 1.0, 2.0]), orientation
+    )
+    yy, xx = np.meshgrid(np.arange(size), np.arange(size), indexing="ij")
+    time = np.arange(64)[:, None, None]
+    for row_cycles, expected_bar in ((4, 170.0), (-4, 10.0)):
+        # Image y increases downward; physical frequency_grid() has ky = -fy.
+        movie = 127.0 + 50.0 * np.cos(
+            2.0 * np.pi * ((xx + row_cycles * yy) / size - 8.0 * time / 64.0)
+        )
+        _, cube = movie_power_cube(
+            movie,
+            flat_index=grid["flat_index"],
+            mode_to_grid=matrix,
+            n_spatial=3,
+            n_orientation=len(orientation),
+            frame_rate_hz=64.0,
+        )
+        observed_bar = orientation[np.argmax(cube.sum(axis=(0, 1)))]
+        assert observed_bar == expected_bar, (row_cycles, observed_bar)
 
 
 def test_folded_dpss_power_recovers_constant_translation_frequency() -> None:

@@ -12,7 +12,7 @@ from jake.passband_comparison.data import ROOT, SEED, digest, write_json
 from jake.passband_comparison.run import save_per_unit, strata_results
 from jake.passband_comparison.statistics import (
     animal_weights, bootstrap_weights, fit_predict, make_features,
-    paired_scores, trial_folds,
+    paired_scores, trial_folds, validate_fold_assignments, load_released_folds,
 )
 
 
@@ -113,9 +113,16 @@ def main():
     folds = []
     max_baseline_error = 0.
     with np.load(src / 'primary_predictions_lambda_0.01.npz') as reference:
+        released = original.get('released_folds')
+        reference_folds = validate_fold_assignments(table, reference['fold_assignments'])
+        if released:
+            archive = Path(released['path'])
+            check('released_fold_digest', digest(archive) == released['sha256'])
+            check('released_trace_digest', digest(archive.parent/'traces.csv') == released['traces_sha256'])
+            check('released_fold_identity', np.array_equal(reference_folds, load_released_folds(table, archive)))
         for repeat in range(3):
-            fold = trial_folds(table, SEED + repeat)
-            check(f'identical_folds:{repeat}', np.array_equal(fold, reference['fold_assignments'][repeat]))
+            fold = reference_folds[repeat] if released else trial_folds(table, SEED + repeat)
+            check(f'identical_folds:{repeat}', np.array_equal(fold, reference_folds[repeat]))
             folds.append(fold)
             for k in range(5):
                 train = np.flatnonzero(fold != k)

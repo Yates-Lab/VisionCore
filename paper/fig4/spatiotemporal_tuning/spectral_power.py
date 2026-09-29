@@ -63,7 +63,8 @@ def circular_orientation_weights(
     step = float(np.diff(orientations)[0])
     if not np.isclose(step * len(orientations), 180.0):
         raise ValueError("orientation probes must tile the 180-degree period")
-    normal = np.degrees(np.arctan2(kxy[:, 1], kxy[:, 0]))
+    # Assay bar labels use image rows-down y; kxy stores physical y-up frequency.
+    normal = np.degrees(np.arctan2(-kxy[:, 1], kxy[:, 0]))
     position = np.mod(normal - 90.0 - orientations[0], 180.0) / step
     lower = np.floor(position).astype(int) % len(orientations)
     fraction = position - np.floor(position)
