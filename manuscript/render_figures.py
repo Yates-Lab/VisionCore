@@ -17,8 +17,6 @@ from analysis_selection import SOURCE_ROOT, SELECTION, selected_analysis, source
 
 HERE=Path(__file__).resolve().parent
 ROOT=HERE.parent
-SELECTED=selected_analysis()
-BUNDLE=SOURCE_ROOT/SELECTED['bundle']
 BUILD=HERE/'build'
 
 
@@ -54,13 +52,17 @@ def replay_example(env, device):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    choices=('1','2','3','4','supplement','stabilization')
-    parser.add_argument('figures',nargs='*',metavar='FIGURE',help='Select 1, 2, 3, 4, supplement, or stabilization (default: all)')
+    choices=('1','2','3','4','supplement','stabilization','extended3')
+    parser.add_argument('figures',nargs='*',metavar='FIGURE',help='Select 1, 2, 3, 4, supplement, stabilization, or extended3 (default: all)')
     parser.add_argument('--replay-example',action='store_true')
     parser.add_argument('--device',default='cuda:0')
     args=parser.parse_args()
     if any(which not in choices for which in args.figures):
-        parser.error('FIGURE must be 1, 2, 3, 4, supplement, or stabilization')
+        parser.error('FIGURE must be 1, 2, 3, 4, supplement, stabilization, or extended3')
+    # Frozen ED3 renders without opening the selected analysis bundle.
+    global SELECTED, BUNDLE
+    SELECTED = selected_analysis() if args.replay_example or any(which != 'extended3' for which in args.figures or choices) else None
+    BUNDLE = SOURCE_ROOT / SELECTED['bundle'] if SELECTED is not None else None
     env=os.environ.copy()
     env.update(MPLCONFIGDIR=str(BUILD/'mpl'),OMP_NUM_THREADS='2',OPENBLAS_NUM_THREADS='2')
     BUILD.mkdir(exist_ok=True);(BUILD/'mpl').mkdir(exist_ok=True)
@@ -115,6 +117,9 @@ def main():
             source=out/'figure3.pdf'
         elif which=='stabilization':
             run([sys.executable, HERE/'render_stabilization_control.py'], current)
+            continue
+        elif which=='extended3':
+            run([sys.executable, '-m', 'manuscript.render_extended_fig3'], current)
             continue
         elif which=='4':
             example=BUILD/'panel_a_exemplar_audit'

@@ -4,9 +4,11 @@ SCI_PYTHON ?= uv run --project ../.. --no-sync python
 
 stats:
 	$(SCI_PYTHON) sync_stats.py
+	PYTHONPATH=.. $(SCI_PYTHON) render_extended_fig3.py --stats-only
 
 check-stats:
 	$(SCI_PYTHON) sync_stats.py --check
+	PYTHONPATH=.. $(SCI_PYTHON) render_extended_fig3.py --check-stats
 
 empirical-stats:
 	OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 MPLCONFIGDIR=/tmp/visioncore-mpl $(SCI_PYTHON) export_empirical_stats.py

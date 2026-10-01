@@ -1,0 +1,30 @@
+{
+  "population_color_limit_hz": 10.862809238433849,
+  "example_signed_map_limit_hz": 30.282640800476077,
+  "page_size_inches": [
+    8,
+    10.5
+  ],
+  "example_displayed_trials": 56,
+  "example_complete_supported_events": 53,
+  "status": "provisional B-only three-bin preview; A/C\u2013H unchanged",
+  "example_session": "Allen_2022-04-06",
+  "example_cid": 98,
+  "example_bootstrap_seed": 21338026,
+  "example_bootstrap_draws": 400,
+  "psth_smoothing_bins": 3,
+  "event_smoothing_bins": 0,
+  "population_smoothing_bins": 0,
+  "cohort_units": 725,
+  "cohort_sessions": 15,
+  "gain_peak_order": "latest positive 0\u2013200 ms gain peak first, then earlier, then nonpositive; shared by additive",
+  "gain_median_total_area_spikes": 0.4055278928989235,
+  "additive_median_total_area_spikes": 0.09154268640559168,
+  "gain_median_absolute_balance": 0.29607536232097054,
+  "additive_median_absolute_balance": 0.8694631214298871,
+  "histogram": "10 shared signed-balance bins \u22121..1 and common .05-spikes total-area bins; shared fraction axes",
+  "input_completed_csv_sha256": "4183f24ab616bb53fbf5e2ff7adb5ec56ee6f35ebf5b2d5b364df97cfa01949c",
+  "input_completed_summary_sha256": "dd331096fdaacd261bd2eda31be8d46766237fdb671197bba114bf44ec23b823",
+  "example_cache_sha256": "147b7f63612ef0096c4d658618eef3e7ea327b3aaa357ab55ccdd92a3a284816",
+  "psth_smoothing_ms": 12.5
+}

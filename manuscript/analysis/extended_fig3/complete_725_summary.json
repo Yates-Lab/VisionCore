@@ -1,0 +1,198 @@
+{
+  "units": 725,
+  "sessions": 15,
+  "supported_units": 725,
+  "zero_event_units": 0,
+  "one_event_units": 0,
+  "unit_event_windows": 29341,
+  "overlapping_unit_event_windows": 9136,
+  "cv_status_counts": {
+    "ok": 725
+  },
+  "score_denominator": 725,
+  "score_positive": 724,
+  "score_negative": 1,
+  "score_median": 0.45217602798610756,
+  "score_iqr": [
+    0.36251715717372346,
+    0.5319169594658852
+  ],
+  "gain_absolute_spikes_denominator": 725,
+  "gain_median_absolute_spikes": 0.4055278928989235,
+  "gain_absolute_spikes_iqr": [
+    0.21917829454566043,
+    0.7222062050035067
+  ],
+  "gain_signed_balance_denominator": 725,
+  "gain_median_signed_balance": -0.06963025654801087,
+  "gain_signed_balance_iqr": [
+    -0.3696151844625363,
+    0.21382339947182805
+  ],
+  "gain_median_absolute_balance": 0.29607536232097054,
+  "gain_absolute_balance_iqr": [
+    0.12885811220652216,
+    0.4948908529632972
+  ],
+  "additive_absolute_spikes_denominator": 725,
+  "additive_median_absolute_spikes": 0.09154268640559168,
+  "additive_absolute_spikes_iqr": [
+    0.04874504642017806,
+    0.17224955453226962
+  ],
+  "additive_signed_balance_denominator": 725,
+  "additive_median_signed_balance": -0.6949585257446742,
+  "additive_signed_balance_iqr": [
+    -0.9920949700124578,
+    0.19390437989989628
+  ],
+  "additive_median_absolute_balance": 0.8694631214298871,
+  "additive_absolute_balance_iqr": [
+    0.5515756374848897,
+    0.999579722955755
+  ],
+  "cached_original_unchanged": 706,
+  "previous_706": {
+    "units": 706,
+    "sessions": 13,
+    "supported_units": 706,
+    "zero_event_units": 0,
+    "one_event_units": 0,
+    "unit_event_windows": 28475,
+    "overlapping_unit_event_windows": 8873,
+    "cv_status_counts": {
+      "ok": 706
+    },
+    "score_denominator": 706,
+    "score_positive": 705,
+    "score_negative": 1,
+    "score_median": 0.45194040005909764,
+    "score_iqr": [
+      0.36260306654540997,
+      0.5282254552855961
+    ],
+    "gain_absolute_spikes_denominator": 706,
+    "gain_median_absolute_spikes": 0.416203591428833,
+    "gain_absolute_spikes_iqr": [
+      0.23696049120256552,
+      0.7331354640402424
+    ],
+    "gain_signed_balance_denominator": 706,
+    "gain_median_signed_balance": -0.07672795826555318,
+    "gain_signed_balance_iqr": [
+      -0.3707636703312128,
+      0.19843469182606532
+    ],
+    "gain_median_absolute_balance": 0.2920041660120465,
+    "gain_absolute_balance_iqr": [
+      0.12506334159414642,
+      0.4805706624372643
+    ],
+    "additive_absolute_spikes_denominator": 706,
+    "additive_median_absolute_spikes": 0.09529870544599059,
+    "additive_absolute_spikes_iqr": [
+      0.049638518865685904,
+      0.17601699291262773
+    ],
+    "additive_signed_balance_denominator": 706,
+    "additive_median_signed_balance": -0.7205669481283838,
+    "additive_signed_balance_iqr": [
+      -0.993663557549821,
+      0.15651054892256724
+    ],
+    "additive_median_absolute_balance": 0.8718182269138197,
+    "additive_absolute_balance_iqr": [
+      0.5656231631796004,
+      0.9999778687241283
+    ]
+  },
+  "added_19": {
+    "units": 19,
+    "sessions": 2,
+    "supported_units": 19,
+    "zero_event_units": 0,
+    "one_event_units": 0,
+    "unit_event_windows": 866,
+    "overlapping_unit_event_windows": 263,
+    "cv_status_counts": {
+      "ok": 19
+    },
+    "score_denominator": 19,
+    "score_positive": 19,
+    "score_negative": 0,
+    "score_median": 0.479130680072408,
+    "score_iqr": [
+      0.3613988153451811,
+      0.6343843964782848
+    ],
+    "gain_absolute_spikes_denominator": 19,
+    "gain_median_absolute_spikes": 0.12464025536125214,
+    "gain_absolute_spikes_iqr": [
+      0.08633713569858326,
+      0.19611033045754694
+    ],
+    "gain_signed_balance_denominator": 19,
+    "gain_median_signed_balance": 0.3638493755428433,
+    "gain_signed_balance_iqr": [
+      0.19279479403402056,
+      0.5470771238583481
+    ],
+    "gain_median_absolute_balance": 0.4809782647686789,
+    "gain_absolute_balance_iqr": [
+      0.2664578820324782,
+      0.7560726640359862
+    ],
+    "additive_absolute_spikes_denominator": 19,
+    "additive_median_absolute_spikes": 0.028153708627784605,
+    "additive_absolute_spikes_iqr": [
+      0.016777430346943827,
+      0.0380974924567757
+    ],
+    "additive_signed_balance_denominator": 19,
+    "additive_median_signed_balance": 0.43643974619842996,
+    "additive_signed_balance_iqr": [
+      -0.09076586338151796,
+      0.9360126731315831
+    ],
+    "additive_median_absolute_balance": 0.6652628119967081,
+    "additive_absolute_balance_iqr": [
+      0.31716621880071383,
+      0.9360126731315831
+    ]
+  },
+  "missing_session_cache_provenance": {
+    "Logan_2020-02-29": {
+      "components_sha256": "ee934df8d04cc7a16a2cf6190c0d3448000d6e54a6356e6e7a1681b7586770c9",
+      "source_hashes": {
+        "fixrsvp": "61967b69a0c0535e443ba299786a8bbf1d0e8dcdc48cd8fb5e1b4fa39a244aa1",
+        "saccades": "c07b9c31b1075d81d20c401101e6a538c831488734e39f6b570a98c71917a0a4"
+      },
+      "identity_errors": {
+        "full_logit": 1.9073486328125e-06,
+        "zero_logit": 1.9073486328125e-06,
+        "latent": 1.9073486328125e-06,
+        "rates": 2.9802322387695312e-08,
+        "ordinary_full": 2.384185791015625e-07,
+        "ordinary_zero": 1.4901161193847656e-07
+      }
+    },
+    "Logan_2020-03-06": {
+      "components_sha256": "c8fe2a75ccd54f48b1ea29cbc3acb826a1d92ea937941af650a737fc6307256b",
+      "source_hashes": {
+        "fixrsvp": "a1a19e8315a2af9eeb0022cd0ee209dbb7977b65b844b21623cd219cb25d1462",
+        "saccades": "2665fdf91a1b4d2733efd3a02cbc73fc378864a3b5c718dc268ba23883559a0f"
+      },
+      "identity_errors": {
+        "full_logit": 2.6226043701171875e-06,
+        "zero_logit": 1.9073486328125e-06,
+        "latent": 2.6226043701171875e-06,
+        "rates": 2.9802322387695312e-08,
+        "ordinary_full": 4.76837158203125e-07,
+        "ordinary_zero": 4.76837158203125e-07
+      }
+    }
+  },
+  "selected_checkpoint_sha256": "e70f287462155607a96c7d23d9d56e347111319aa48cafd3f54fe88dd4484cb9",
+  "elapsed_seconds": 27.18377124518156,
+  "nonpositive_gain_peak_rows": 9
+}

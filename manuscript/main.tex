@@ -72,6 +72,7 @@
 \newcommand{\ph}[1]{\textbf{[#1]}}
 \input{generated_stats}
 \input{stabilization_stats}
+\input{extended_fig3_stats}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -243,7 +244,7 @@ The full and retinal-only models achieved similar trial-averaged accuracy. The f
 
 We therefore scored each model condition's prediction on single trials by the fraction of the conditional rate variance measured in Figure~2 that it captured (Methods). This score is zero for a constant-value predictor and one for an ideal predictor of the conditional rate. For comparison, we predicted each trial's response from the average of the remaining repeats. This leave-one-out trial average estimates the stimulus-locked response that defines the prediction ceiling when trial-to-trial fluctuations are treated as noise \cite{schoppe2016measuring}. It captured a median of $\FigThreeDPsth$ of the rate variance, whereas the full model captured $\FigThreeDFull$ (median paired $\Delta = +\FigThreeDFullGain$, $95\%$ CI $\FigThreeDFullGainCI$; $n = \FigThreeDUnits$ units from \FigThreeSessions{} sessions; session-clustered bootstrap, Methods; Fig.~3D). This amounted to a \FigThreeDGainPercent\% improvement over the trial-average median, suggesting that the model captured substantial FEM-driven variability around the mean response.
 
-Most of the model's single-trial predictive advantage persisted when the explicit extraretinal inputs were removed. Zeroing those eye position and velocity terms caused a very small loss of captured variance (median $\FigThreeDRetinal$; median paired $\Delta = \FigThreeDRetinalLoss$, $95\%$ CI $\FigThreeDRetinalLossCI$). In contrast, stabilizing the retinal input reduced the median fraction to $\FigThreeDStabilized$, below the trial-average median (paired $\Delta = \FigThreeDStabilizedLoss$, $95\%$ CI $\FigThreeDStabilizedLossCI$; Fig.~3D). This paired loss was \FigThreeDLossPercent\% of the full-model median. Single-trial prediction therefore depended strongly on gaze-contingent retinal input; removing the separate eye-state input cost substantially less than stabilizing the retinal image.
+Most of the model's single-trial predictive advantage persisted when the explicit extraretinal inputs were removed. We found that the extraretinal pathway learned structured modulation linked to saccades (\ref{fig:extraretinal_saccade_modulation}). However, zeroing the eye position and velocity terms cost very little in terms of captured variance (median $\FigThreeDRetinal$; median paired $\Delta = \FigThreeDRetinalLoss$, $95\%$ CI $\FigThreeDRetinalLossCI$). In contrast, stabilizing the retinal input reduced the median fraction to $\FigThreeDStabilized$, below the trial-average median (paired $\Delta = \FigThreeDStabilizedLoss$, $95\%$ CI $\FigThreeDStabilizedLossCI$; Fig.~3D). This paired loss was \FigThreeDLossPercent\% of the full-model median. Single-trial prediction therefore depended strongly on gaze-contingent retinal input; removing the separate eye-state input cost substantially less than stabilizing the retinal image.
 
 In an additional analysis, we asked over what timescale reafferent input contributed to accurate model predictions. We compared fixing gaze at one position for the entire session, at each trial's mean position, or at the latest position within each 250-ms input history. Preserving each history's final retinal position avoided most of the loss in accuracy caused by fixing gaze across whole trials or sessions. Thus, accurate prediction depended more on tracking moment-to-moment retinal position than on retaining the motion leading to that position (\ref{fig:stabilization_control}).
 
@@ -884,6 +885,35 @@ This work was supported by NEI K99-EY037839-01 to D.P.R., NEI R01-EY030998 to J.
   \label{fig:population_extended}
 \end{figure}
 \clearpage
+
+\begin{figure}[p]
+  \centering
+  \includegraphics[width=\linewidth]{figures/extended_fig3.pdf}
+  %\captionsetup{font=footnotesize,singlelinecheck=false}
+  \caption[The model's extraretinal pathway learns structured saccade-linked modulation.]{\textbf{The model's extraretinal pathway learns structured saccade-linked modulation.}}
+\end{figure}
+
+\begin{figure}[p]
+  \ContinuedFloat
+  \captionsetup{singlelinecheck=false}
+  \caption[]{
+  Despite its small contribution to overall prediction performance during the flashed image experiment (Fig.~3), the extraretinal pathway produces consistent peri-saccadic changes in predicted firing rate. The pathway learns arbitrary transformations of eye position and velocity without being given explicit saccade labels. Its learned effects show a consistent saccade-related pattern, with suppression followed by enhancement in the gain component and predominantly monophasic suppression or enhancement in the additive component.
+  \textbf{(A)} From left to right, observed responses, full-model predictions, and rate effects of the gain and additive components for an example unit across \EDThreeTrials{} repeated stimulus presentations. Green triangles mark detected saccade onsets. To isolate each component's effect, we first calculated the model's internal drive in the absence of extraretinal modulation. We then restored the eye-dependent change in either the gain or additive component, holding the other unchanged. Each rate effect is the difference between this reconstructed prediction and the prediction without extraretinal modulation, evaluated after the output nonlinearity and converted to spikes/s. All predictions retain the same recorded retinal input and fitted weights. Because of the output nonlinearity, the two component effects need not sum to the full extraretinal rate change.
+  \textbf{(B)} Observed and full-model stimulus-aligned mean responses for the trials shown in A, smoothed over \EDThreeSmoothingBins{} bins (\EDThreeSmoothingMs{}~ms). Shading indicates $\pm1$ standard deviation across trials.
+  \textbf{(C)} Saccade-aligned rate effect of the gain component for the example unit, showing suppression followed by enhancement. Shading indicates 95\% bootstrap intervals from \EDThreeBootstrapDraws{} resamples of trials.
+  \textbf{(D)} Saccade-aligned rate effect of the additive component for the same unit, showing predominantly suppressive modulation. Shading as in C.
+  \textbf{(E)} Saccade-aligned gain-component rate effects across the \EDThreeUnits{} units analysed in the main manuscript text. Each row shows one unit's mean rate effect across saccades. Rows are ordered by the time of peak enhancement within 200~ms after saccade onset, with later peaks above earlier peaks and units without a positive peak at the bottom. Suppression followed by enhancement is common across the population.
+  \textbf{(F)} Balance and magnitude of gain modulation for each unit. Enhancing area $P$ and suppressive area $N$ were calculated by integrating the positive and absolute negative portions of each unit's saccade-averaged rate effect from 0 to 200~ms. Total modulation (vertical axis), $P+N$, is expressed in spikes/saccade. Signed balance (horizontal axis), $(P-N)/(P+N)$, ranges from $-1$ for purely suppressive effects to $+1$ for purely enhancing effects, with zero indicating equal areas, as in a balanced biphasic response. Marginal histograms show the fraction of units in each bin. Gain effects concentrate near balanced enhancing and suppressive contributions (median absolute signed balance, \EDThreeGainBalance{}), with a median total modulation of \EDThreeGainTotal{} spikes/saccade.
+  \textbf{(G)} Saccade-aligned additive-component rate effects, using the same units, ordering, and color scale as E. Effects are generally monophasic and predominantly suppressive, with enhancement in a subset of units.
+  \textbf{(H)} Balance and magnitude of additive modulation, calculated and displayed as in F. Signed balances concentrate toward the extremes, particularly the suppressive end (median absolute signed balance, \EDThreeAdditiveBalance{}), with a median total modulation of \EDThreeAdditiveTotal{} spikes/saccade.
+
+  Together, these analyses show that the model's extraretinal pathway produces structured peri-saccadic modulation despite its small contribution to overall prediction performance during the flashed-image experiment. The model could learn arbitrary transformations of eye position and velocity, without explicit saccade labels or a prescribed temporal response. Nevertheless, it learned a consistent saccade-linked pattern across units, with suppression followed by enhancement in the gain component and generally monophasic suppression or enhancement in the additive component. The biphasic time course qualitatively resembles the extraretinal modulation reported in macaque V1 by \citet{mcfarland2015saccadic}, although the decomposition into gain and additive effects differs between the studies. These findings are consistent with a saccade-linked extraretinal contribution in our data.
+  }
+  \label{fig:extraretinal_saccade_modulation}
+\end{figure}
+
+\clearpage
+
 \begin{figure}[p]
   \centering
   \includegraphics[width=\linewidth]{figures/stabilization_control.pdf}
