@@ -16,7 +16,7 @@ from matplotlib.transforms import Affine2D
 # Full, Retinal, and Global match paper/fig3/generate_figure3.py.
 COLORS = {"psth": ".55", "full": "#1f77b4", "retinal": "#d62728",
           "global": "#b97800", "history": "#009e73", "trial": "#7b3294"}
-LABELS = {"psth": "PSTH", "full": "Full", "retinal": "Retinal-only",
+LABELS = {"psth": "PSTH", "full": "Full", "retinal": "Retinal only",
           "global": "Global", "history": "History-local", "trial": "Trial"}
 SUBTITLES = {"full": "follows gaze", "history": "frozen per history",
              "trial": "frozen at trial mean", "global": "frozen at session center"}
@@ -44,11 +44,11 @@ def _draw_gaze(ax, example, axis, history, view, limits):
     anchor = example["frozen_arcmin_trial"][axis]
     ax.plot(time[[0, -1]], (0, 0), color=COLORS["global"], lw=1, ls=(0, (4, 2)))
     ax.plot(time[[0, -1]], (anchor, anchor), color=COLORS["trial"], lw=1, ls=(0, (4, 2)))
-    ax.plot(time, gaze[:, axis], color=".15", lw=.9)
+    ax.plot(time, gaze[:, axis], color=".15", lw=.9, zorder=3)
     for condition in reversed(STABILIZATION):
         path = _window_path(example, condition, axis, history)
-        # Full is a translucent band under the trace; frozen windows are opaque lines.
-        style = dict(lw=5, alpha=.4) if condition == "full" else dict(lw=2.2)
+        # Full is a translucent band behind the gaze trace; frozen windows are opaque lines.
+        style = dict(lw=5, alpha=.4, zorder=1.5) if condition == "full" else dict(lw=2.2, zorder=4)
         ax.plot(time[history], path, color=COLORS[condition], solid_capstyle="butt", **style)
         ax.plot(time[history][-1], path[-1], "o", color=COLORS[condition],
                 ms=6 if condition == "history" else 3.8, mec="white", mew=.6, zorder=5)
@@ -87,7 +87,7 @@ def _draw_example(fig, spec, example):
     n_lags = len(example["movie_full"])
     history = slice(endpoint - n_lags + 1, endpoint + 1)
     end = time[endpoint]
-    view = (time >= end - 410) & (time <= end + 160)
+    view = (time >= end - 460) & (time <= end + 160)
     trial = example["frozen_arcmin_trial"]
     span = time[history]
     axes = []
@@ -104,14 +104,23 @@ def _draw_example(fig, spec, example):
     axes[0].plot(span[[0, -1]], (low + 1.2,) * 2, color=".35", lw=.8)
     axes[0].text(span.mean(), low + 1.6, "250-ms history", ha="center", va="bottom",
                  fontsize=6.5, color=".35")
-    # Name the two reference lines on the axis that separates them, each on the side away from gaze.
+    # Name each window on the axis that separates the frozen ones, on the side away from gaze.
     axis = int(np.argmax(np.abs(trial)))
+    note = dict(fontsize=6.5, weight="bold")
     before = np.median(gaze[view][time[view] < span[0], axis])
-    for level, text, color in ((0., "session center", COLORS["global"]),
-                               (trial[axis], "trial mean", COLORS["trial"])):
+    for condition, level, text in (("global", 0., "Global (session center)"),
+                                   ("trial", trial[axis], "Trial (trial mean)")):
         above = level > before
-        axes[axis].text(time[view][0] + 6, level + (.8 if above else -.8), text, color=color,
-                        va="bottom" if above else "top", fontsize=6.5)
+        axes[axis].text(time[view][0] + 6, level + (.8 if above else -.8), text,
+                        color=COLORS[condition], va="bottom" if above else "top", **note)
+    frozen = example["frozen_arcmin_history"][axis]
+    axes[axis].text(span[0] - 6, frozen, LABELS["history"], color=COLORS["history"],
+                    ha="right", va="center", **note)
+    late = gaze[history, axis][n_lags // 2:]
+    above = gaze[history, axis][:n_lags // 4].mean() > frozen
+    axes[axis].text(span[-1] - 4, (late.max() + 2.3) if above else (late.min() - 2.3),
+                    LABELS["full"] + " (gaze)", color=COLORS["full"], ha="right",
+                    va="bottom" if above else "top", **note)
     gray = np.percentile(example["movie_full"], [1, 99])
     for index, condition in enumerate(STABILIZATION):
         ax = fig.add_subplot(grid[index // 2, 1 + index % 2])

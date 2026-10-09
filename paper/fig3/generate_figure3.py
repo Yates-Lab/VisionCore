@@ -209,7 +209,7 @@ def _plot_ccnorm_violins(ax, abl):
 
     ax.set_xlim(-0.6, 2.9)
     ax.set_xticks([0, 1, 2])
-    ax.set_xticklabels(["Full", "Retinal", "Stabilized"], rotation=25, ha="right",
+    ax.set_xticklabels(["Full", "Retinal only", "Stabilized"], rotation=25, ha="right",
                        fontsize=5.3)
     ax.set_ylabel("Held-out prediction\n(ccnorm)")
     ax.spines["top"].set_visible(False)
@@ -419,7 +419,7 @@ def _plot_explainable_variance_boxes(ax, abl):
     ax.set_xticklabels([
         "PSTH",
         "Full",
-        "Retinal",
+        "Retinal only",
         "Stabilized",
     ], fontsize=4.9, rotation=25, ha="right")
     ax.set_ylabel("Fraction of conditional rate\nvariance explained")
@@ -670,7 +670,7 @@ def _plot_femfraction(ax, femdata, *, margin=TOST_MARGIN):
                Line2D([0], [0], color=INTACT_COLOR, lw=1.6),
                Line2D([0], [0], color=ABLATED_COLOR, lw=1.6),
                Line2D([0], [0], color=STABILIZED_COLOR, lw=1.6)]
-    labels = ["Empirical", "Full", "Retinal", "Stabilized"]
+    labels = ["Empirical", "Full", "Retinal only", "Stabilized"]
     leg = ax.legend(handles, labels, frameon=False, fontsize=7.2, loc="upper left",
                     handlelength=1.3, handletextpad=0.5, labelspacing=0.35,
                     borderaxespad=0.2, ncol=2, columnspacing=0.7)
