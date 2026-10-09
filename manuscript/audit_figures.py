@@ -26,6 +26,8 @@ RENDER_SOURCES = [
     'paper/fig3/_fig3_data.py', 'paper/fig3/_fig3_femfraction.py',
     'eval/eval_stack_multidataset.py',
     'manuscript/render_stabilization_control.py',
+    'paper/supp_stabilization_control/analysis.py',
+    'paper/supp_stabilization_control/figure.py',
     'models/modules/dekel.py', 'models/data/transforms.py',
     'paper/fig4/spatiotemporal_tuning/_figure4_renderer.py',
     'paper/fig4/spatiotemporal_tuning/_figure4_rendering.py',
