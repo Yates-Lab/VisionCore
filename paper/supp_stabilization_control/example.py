@@ -6,7 +6,7 @@ the same frozen-ROI rules as the scored replays: paper/fig3/_fig3_ablation_data.
 (session-global and trial-centroid) and paper/fig3/history_stabilization.py
 (history endpoint). The result is retained so the figure renders without raw data.
 
-    uv run python paper/supp_stabilization_control/example.py --list
+    uv run python paper/supp_stabilization_control/example.py --list drift --session Allen_2022-03-02
     uv run python paper/supp_stabilization_control/example.py \\
         --session Allen_2022-02-16 --trial 12 --endpoint 140
 """
@@ -20,6 +20,7 @@ MODEL_HW = (35, 35)
 FIX_RADIUS = 1.0            # deg; match _fig3_ablation_data
 CENTROID_RADIUS = 0.5       # deg; match _fig3_ablation_data
 SACCADE_SPEED = 8.0         # deg/s; display-only example selection
+DRIFT_MAX_SPEED = 3.0       # deg/s on the smoothed trace; excludes microsaccades
 CONDITIONS = ("full", "history", "trial", "global")
 
 
@@ -65,6 +66,29 @@ def post_saccade_endpoints(eye_deg, sample_rate=240., delay=10, n_lags=N_LAGS):
     return out
 
 
+def drift_endpoint(eye_deg, sample_rate=240., n_lags=N_LAGS, guard=12, smooth=9):
+    """Saccade-free history with the largest net gaze displacement in a trial.
+
+    Returns (endpoint, displacement_deg), or None when no history and its
+    `guard` samples on either side stay below DRIFT_MAX_SPEED.
+    """
+    pad = smooth // 2
+    padded = np.pad(eye_deg, ((pad, pad), (0, 0)), mode="edge")
+    smoothed = np.stack([np.convolve(padded[:, axis], np.ones(smooth) / smooth, mode="valid")
+                         for axis in range(2)], axis=1)
+    fast = np.hypot(*np.gradient(smoothed, axis=0).T) * sample_rate > DRIFT_MAX_SPEED
+    n_fast = np.r_[0, np.cumsum(fast)]
+    best = None
+    for endpoint in range(n_lags - 1 + guard, len(eye_deg) - guard):
+        start = endpoint - n_lags + 1
+        if n_fast[endpoint + guard + 1] - n_fast[start - guard]:
+            continue
+        displacement = float(np.hypot(*(smoothed[endpoint] - smoothed[start])))
+        if best is None or displacement > best[1]:
+            best = (endpoint, displacement)
+    return best
+
+
 class Session:
     def __init__(self, session_name):
         from DataYatesV1.utils.data.datasets import DictDataset
@@ -93,21 +117,27 @@ class Session:
             index = centroid_index(self.dpi_pix, rows & self.fixation & self.dpi_valid)
         return index
 
-    def candidates(self):
-        """Post-saccade histories ranked by separation of the three frozen gazes."""
+    def candidates(self, kind="saccade"):
+        """Rank histories: post-saccade by frozen-gaze separation, drift by displacement."""
         out = []
         for trial_id in np.unique(self.trial_ids):
             rows = np.flatnonzero(self.trial_ids == trial_id)
             if not (self.dpi_valid[rows] & self.central[rows]).all():
                 continue
             anchor = self.trial_index(trial_id)
-            for endpoint, amplitude in post_saccade_endpoints(self.eye[rows]):
+            if kind == "drift":
+                found = drift_endpoint(self.eye[rows])
+                endpoints = [found] if found else []
+            else:
+                endpoints = post_saccade_endpoints(self.eye[rows])
+            for endpoint, amplitude in endpoints:
                 frozen = self.eye[[rows[endpoint], anchor, self.global_index]] * 60
                 gaps = [np.hypot(*(frozen[i] - frozen[j])) for i, j in ((0, 1), (0, 2), (1, 2))]
                 out.append({"session": self.name, "trial": int(trial_id), "endpoint": endpoint,
-                            "trial_samples": len(rows), "saccade_arcmin": amplitude * 60,
+                            "trial_samples": len(rows), "movement_arcmin": amplitude * 60,
                             "min_gap_arcmin": float(min(gaps))})
-        return sorted(out, key=lambda record: -record["min_gap_arcmin"])
+        key = "movement_arcmin" if kind == "drift" else "min_gap_arcmin"
+        return sorted(out, key=lambda record: -record[key])
 
     def extract(self, trial_id, endpoint):
         """Gaze trace and the four 60-frame retinal movies ending at `endpoint`."""
@@ -149,7 +179,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--session", nargs="+", required=True)
-    parser.add_argument("--list", action="store_true", help="Rank candidate histories and exit")
+    parser.add_argument("--list", choices=("saccade", "drift"),
+                        help="Rank candidate histories of this kind and exit")
     parser.add_argument("--trial", type=int)
     parser.add_argument("--endpoint", type=int, help="Sample within the trial")
     parser.add_argument("--out", type=Path,
@@ -157,11 +188,12 @@ def main():
                         / "manuscript/analysis/stabilization_control/panel_a_example.npz")
     args = parser.parse_args()
     if args.list:
-        records = sorted((r for name in args.session for r in Session(name).candidates()),
-                         key=lambda record: -record["min_gap_arcmin"])
+        key = "movement_arcmin" if args.list == "drift" else "min_gap_arcmin"
+        records = sorted((r for name in args.session for r in Session(name).candidates(args.list)),
+                         key=lambda record: -record[key])
         for record in records[:25]:
             print("{session} trial={trial} endpoint={endpoint} samples={trial_samples} "
-                  "saccade={saccade_arcmin:.1f}' min_gap={min_gap_arcmin:.1f}'".format(**record))
+                  "movement={movement_arcmin:.1f}' min_gap={min_gap_arcmin:.1f}'".format(**record))
         return
     example = Session(args.session[0]).extract(args.trial, args.endpoint)
     args.out.parent.mkdir(parents=True, exist_ok=True)

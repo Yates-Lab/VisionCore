@@ -16,7 +16,7 @@ from matplotlib.transforms import Affine2D
 # Full, Retinal, and Global match paper/fig3/generate_figure3.py.
 COLORS = {"psth": ".55", "full": "#1f77b4", "retinal": "#d62728",
           "global": "#b97800", "history": "#009e73", "trial": "#7b3294"}
-LABELS = {"psth": "PSTH", "full": "Full", "retinal": "Retinal",
+LABELS = {"psth": "PSTH", "full": "Full", "retinal": "Retinal-only",
           "global": "Global", "history": "History-local", "trial": "Trial"}
 SUBTITLES = {"full": "follows gaze", "history": "frozen per history",
              "trial": "frozen at trial mean", "global": "frozen at session center"}
@@ -47,8 +47,9 @@ def _draw_gaze(ax, example, axis, history, view, limits):
     ax.plot(time, gaze[:, axis], color=".15", lw=.9)
     for condition in reversed(STABILIZATION):
         path = _window_path(example, condition, axis, history)
-        ax.plot(time[history], path, color=COLORS[condition], lw=3.6, alpha=.55,
-                solid_capstyle="butt")
+        # Full is a translucent band under the trace; frozen windows are opaque lines.
+        style = dict(lw=5, alpha=.4) if condition == "full" else dict(lw=2.2)
+        ax.plot(time[history], path, color=COLORS[condition], solid_capstyle="butt", **style)
         ax.plot(time[history][-1], path[-1], "o", color=COLORS[condition],
                 ms=6 if condition == "history" else 3.8, mec="white", mew=.6, zorder=5)
     ax.axvline(time[history][-1], color=".3", lw=.7, ls=(0, (2, 2)), zorder=1)
@@ -86,23 +87,31 @@ def _draw_example(fig, spec, example):
     n_lags = len(example["movie_full"])
     history = slice(endpoint - n_lags + 1, endpoint + 1)
     end = time[endpoint]
-    view = (time >= end - 620) & (time <= end + 160)
-    limits = gaze[view].min() - 5, gaze[view].max() + 4
+    view = (time >= end - 410) & (time <= end + 160)
+    trial = example["frozen_arcmin_trial"]
+    span = time[history]
     axes = []
     for axis in range(2):
+        seen = gaze[view, axis]
+        limits = min(seen.min(), trial[axis], 0) - 5, max(seen.max(), trial[axis], 0) + 4
         ax = fig.add_subplot(grid[axis, 0])
         _draw_gaze(ax, example, axis, history, view, limits)
+        # The history bar is the only time scale.
+        ax.spines["bottom"].set_visible(False)
+        ax.tick_params(bottom=False, labelbottom=False)
         axes.append(ax)
-    span = time[history]
-    axes[0].tick_params(labelbottom=False)
-    axes[0].plot(span[[0, -1]], (limits[0] + 1.2,) * 2, color=".35", lw=.8)
-    axes[0].text(span.mean(), limits[0] + 1.6, "250-ms history", ha="center", va="bottom",
+    low = axes[0].get_ylim()[0]
+    axes[0].plot(span[[0, -1]], (low + 1.2,) * 2, color=".35", lw=.8)
+    axes[0].text(span.mean(), low + 1.6, "250-ms history", ha="center", va="bottom",
                  fontsize=6.5, color=".35")
-    axes[1].set_xlabel("Time in trial (ms)")
-    left = time[view][0] + 12
-    axes[1].text(left, -1.2, "session center", color=COLORS["global"], va="top", fontsize=6.5)
-    axes[1].text(left, example["frozen_arcmin_trial"][1] - 1.2, "trial mean",
-                 color=COLORS["trial"], va="top", fontsize=6.5)
+    # Name the two reference lines on the axis that separates them, each on the side away from gaze.
+    axis = int(np.argmax(np.abs(trial)))
+    before = np.median(gaze[view][time[view] < span[0], axis])
+    for level, text, color in ((0., "session center", COLORS["global"]),
+                               (trial[axis], "trial mean", COLORS["trial"])):
+        above = level > before
+        axes[axis].text(time[view][0] + 6, level + (.8 if above else -.8), text, color=color,
+                        va="bottom" if above else "top", fontsize=6.5)
     gray = np.percentile(example["movie_full"], [1, 99])
     for index, condition in enumerate(STABILIZATION):
         ax = fig.add_subplot(grid[index // 2, 1 + index % 2])
