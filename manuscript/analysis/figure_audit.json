@@ -21,7 +21,49 @@
     "Page 6: '2' is 4.267 pt",
     "Page 6: 'rate' is 4.267 pt",
     "Page 6: 'sc' is 4.267 pt",
-    "Figure 3 numerical results changed"
+    "Page 44: 'Observed' is 5.688 pt",
+    "Page 44: 'Full prediction' is 5.688 pt",
+    "Page 44: '0' is 5.688 pt",
+    "Page 44: '100' is 5.688 pt",
+    "Page 44: '200' is 5.688 pt",
+    "Page 44: '300' is 5.688 pt",
+    "Page 44: '400' is 5.688 pt",
+    "Page 44: '500+' is 5.688 pt",
+    "Page 44: '\u221230' is 5.688 pt",
+    "Page 44: '\u221220' is 5.688 pt",
+    "Page 44: '\u221210' is 5.688 pt",
+    "Page 44: '0' is 5.688 pt",
+    "Page 44: '10' is 5.688 pt",
+    "Page 44: '20' is 5.688 pt",
+    "Page 44: '30' is 5.688 pt",
+    "Page 46: '250-ms history' is 5.951 pt",
+    "Page 46: 'Global (session center)' is 5.951 pt",
+    "Page 46: 'Trial (trial mean)' is 5.951 pt",
+    "Page 46: 'History-local' is 5.951 pt",
+    "Page 46: 'Full (gaze)' is 5.951 pt",
+    "Page 46: 'follows gaze' is 5.676 pt",
+    "Page 46: 'frozen per history' is 5.676 pt",
+    "Page 46: 'frozen at trial mean' is 5.676 pt",
+    "Page 46: '250 ms' is 5.951 pt",
+    "Page 46: '0.9\u00b0' is 5.951 pt",
+    "Page 46: 'frozen at session center' is 5.676 pt",
+    "Page 46: '0.649' is 5.310 pt",
+    "Page 46: '0.647' is 5.310 pt",
+    "Page 46: '0.642' is 5.310 pt",
+    "Page 46: '0.620' is 5.310 pt",
+    "Page 46: '0.562' is 5.310 pt",
+    "Page 46: '0.139' is 5.310 pt",
+    "Page 46: '0.235' is 5.310 pt",
+    "Page 46: '0.226' is 5.310 pt",
+    "Page 46: '0.217' is 5.310 pt",
+    "Page 46: '0.107' is 5.310 pt",
+    "Page 46: '0.042' is 5.310 pt",
+    "Page 46: '-0.007' is 5.310 pt",
+    "Page 46: '-0.010' is 5.310 pt",
+    "Page 46: '-0.094' is 5.310 pt",
+    "Page 46: '-0.174' is 5.310 pt",
+    "Expected 7 figure pages, found 8",
+    "Compiled figure text span count differs from the source PDFs"
   ],
   "figure_sources": [
     {
@@ -38,7 +80,7 @@
     },
     {
       "file": "figures/figure3.pdf",
-      "sha256": "b69da2f00627d56d2be4422ebe304702327e271ff31d11009145c7fd5c9345fa",
+      "sha256": "512d4901f9deae9ec0ca44fca6a5ae76bc08da5937929bf1901d4b60022a9440",
       "text_spans": 135,
       "minimum_source_pt": 8.5
     },
@@ -62,9 +104,9 @@
     },
     {
       "file": "figures/stabilization_control.pdf",
-      "sha256": "c82620b49245947e9d2719ce2b59637de3bc1cbf5d9a82bacfe5239aa657827e",
-      "text_spans": 33,
-      "minimum_source_pt": 8.0
+      "sha256": "d0dd9633e4cd4337db5aedf639a81d2476f75edf0633389ba76c3a6d0b0ed76b",
+      "text_spans": 91,
+      "minimum_source_pt": 5.800000190734863
     }
   ],
   "compiled_pages": [
@@ -89,24 +131,29 @@
       "text_spans": 135
     },
     {
-      "pdf_page": 40,
+      "pdf_page": 41,
       "minimum_figure_font_pt": 6.087270259857178,
       "text_spans": 165
     },
     {
-      "pdf_page": 42,
+      "pdf_page": 43,
       "minimum_figure_font_pt": 6.148800373077393,
       "text_spans": 112
     },
     {
-      "pdf_page": 43,
-      "minimum_figure_font_pt": 7.324240207672119,
-      "text_spans": 33
+      "pdf_page": 44,
+      "minimum_figure_font_pt": 5.6875,
+      "text_spans": 162
+    },
+    {
+      "pdf_page": 46,
+      "minimum_figure_font_pt": 5.310074329376221,
+      "text_spans": 91
     }
   ],
   "compiled_pdf": {
-    "sha256": "2019e8485dccdeda27aab9c0be50b53dc67554c078ea9c65351c4eb5df766043",
-    "pages": 43
+    "sha256": "f8548eb4240760a997844b670bcb03e4d73a1489aea7b94ec1fb353b0f7dcc4f",
+    "pages": 47
   },
   "installed_figures_match_rendered": {
     "1": true,
@@ -117,7 +164,7 @@
   "figure3_statistics_unchanged": {
     "panel_c_stats": true,
     "panel_d_stats": true,
-    "panel_e_stats": false
+    "panel_e_stats": true
   },
   "figure4_matches_selected_analysis": {
     "B": true,
@@ -130,7 +177,7 @@
   },
   "stabilization_control": {
     "summary": "manuscript/analysis/stabilization_control/summary.json",
-    "summary_sha256": "51d1653ceab569a30f9ae0cfc3526f06f14ee49dc1e40ee433856c467f37e7bc"
+    "summary_sha256": "17dd44b4695acaa6fb683ececf7cee286fcd0642aa67df7b0d7552b34d2a82e3"
   },
   "selected_analysis_bundle": "/home/ryanress/v1-fovea/VisionCore/outputs/stats/fig4_orientation_fix/bundle",
   "figure4_interim_spectrum_selection": null,
@@ -142,9 +189,9 @@
   "statistics_provenance": {
     "checkpoint_sha256": "e70f287462155607a96c7d23d9d56e347111319aa48cafd3f54fe88dd4484cb9",
     "sources": {
-      "manuscript/analysis/selected_model_bundle.json": "71a9f48751deb4f1864e80778b61c68001661c029200e6d7fd0babe61eadbabf",
+      "manuscript/analysis/selected_model_bundle.json": "0a164640f09e4a161fc10fed9050bd1aaeddb7c1933b35dc4805340218fda289",
       "/home/jake/repos/VisionCore/outputs/no_phase_readout_comparison_20260910/rank1/FINAL_MANIFEST.json": "a0207ad82ec9ceef733adf3920083f46588c4083c3337df8b6a4f0d473731243",
-      "/home/jake/repos/VisionCore/outputs/no_phase_readout_comparison_20260910/rank1/figure3/figures/figure3_manifest.json": "ef9b00e47e9ed032ac62e42f2467e648d845171e8900a69bbffc526363307976",
+      "outputs/stats/fig4_orientation_fix/bundle/figure3/figures/figure3_manifest.json": "3c5f08edcd84c36e15dc28a52dcbfff6910cacf3719603a0aa44062ee65a2c04",
       "outputs/stats/fig4_orientation_fix/bundle/figure4/production_figure4/figure/results_provenance.json": "47fb6c37a334875593f29794c1cdec01e48196f17cc103c0e68c6eb737816da2",
       "/home/jake/repos/VisionCore/outputs/no_phase_readout_comparison_20260910/rank1/figure4/panel_a_exemplar_audit/summary.json": "89f3254c9e508da8c18a66d380bee8006eccf0b578047e12a797e547272bf55b",
       "/home/jake/repos/VisionCore/outputs/no_phase_readout_comparison_20260910/rank1/figure4/panel_b_population_path_length/summary.json": "35ad14c6ee317ddc30265636ba627988c88a353b34872bd23b37b85289c241ca",
@@ -194,24 +241,23 @@
       "FigTwoPRStimulus": "3.6\\pm1.0",
       "FigTwoPRResidual": "24.3\\pm14.7",
       "FigTwoPRSignP": "0.36",
-      "FigThreeCUnits": "987",
+      "FigThreeUnits": "962",
       "FigThreeSessions": "19",
       "FigThreeCFull": "0.649",
       "FigThreeDFull": "0.235",
       "FigThreeEFull": "0.722",
-      "FigThreeCRetinal": "0.645",
+      "FigThreeCRetinal": "0.647",
       "FigThreeDRetinal": "0.226",
       "FigThreeERetinal": "0.686",
-      "FigThreeCStabilized": "0.560",
-      "FigThreeDStabilized": "0.041",
+      "FigThreeCStabilized": "0.562",
+      "FigThreeDStabilized": "0.042",
       "FigThreeEStabilized": "0.285",
       "FigThreeCRetinalDelta": "-0.005",
       "FigThreeCRetinalReduction": "0.8",
-      "FigThreeCRetinalP": "2.7\\times10^{-38}",
-      "FigThreeCStabilizedDelta": "-0.083",
-      "FigThreeCStabilizedReduction": "12.7",
-      "FigThreeCStabilizedP": "4.4\\times10^{-71}",
-      "FigThreeDUnits": "969",
+      "FigThreeCRetinalP": "2.4\\times10^{-37}",
+      "FigThreeCStabilizedDelta": "-0.082",
+      "FigThreeCStabilizedReduction": "12.6",
+      "FigThreeCStabilizedP": "9.8\\times10^{-69}",
       "FigThreeDPsth": "0.139",
       "FigThreeDFullGain": "0.090",
       "FigThreeDFullGainP": "2.0\\times10^{-4}",
@@ -221,7 +267,7 @@
       "FigThreeDRetinalLossCI": "[-0.011, -0.004]",
       "FigThreeDStabilizedLoss": "-0.174",
       "FigThreeDStabilizedLossP": "2.0\\times10^{-4}",
-      "FigThreeDStabilizedLossCI": "[-0.204, -0.152]",
+      "FigThreeDStabilizedLossCI": "[-0.203, -0.152]",
       "FigThreeDGainPercent": "65",
       "FigThreeDLossPercent": "74",
       "FigThreeDFullPositiveSessions": "16",
@@ -311,7 +357,7 @@
     "paper/fig2/generate_figure2.py": "de832ada2bc652ea1db7e8de29f3a713369d2e827fa736527bf318e86f9029af",
     "paper/fig2/generate_panel_example.py": "f4c78686d08fe32e0f09303def03a15d8b3f9910cf645a30b9134f021b59be66",
     "paper/fig3/generate_fig3a.py": "179260a316b467b0ebb60f0cc7dc32b01760104c461f4a4137f6ac58400a42dc",
-    "paper/fig3/generate_figure3.py": "074f7327c9494c60d3b4e1b1ea9e4ab3692cd2ab82c0437318f091e882e553f4",
+    "paper/fig3/generate_figure3.py": "729a0eaa31497dbe53f1f087ac3ec067b72f7557e2eb6b1b96926e1ac8715870",
     "paper/fig3/manuscript_schematic.py": "df2d134ffa562a8daeac47015834342db436e259720dcc2e266a33bf7e5b4918",
     "paper/fig3/manuscript_examples.py": "271a86e9356c30f94d86fd0214733af4e4757a9c50fb0961abffc895925bd35c",
     "paper/fig3/history_stabilization.py": "e3b262a87818f816a70cc1f246efd997d90c30180e9bcb543b6a742735b8444d",
@@ -320,18 +366,20 @@
     "paper/fig3/_fig3_data.py": "67bf266bd44e0ebaf5a916fd68f873b87bf6daa63460b232763dd33e164e12a0",
     "paper/fig3/_fig3_femfraction.py": "8615846ba3f10d51db4067ecf53812d130c3678a162b6296c6d6304e366e8f25",
     "eval/eval_stack_multidataset.py": "6d80b830fb447501cad1a567db218623f97f148259ebe10b024feb7bd04cedf5",
-    "manuscript/render_stabilization_control.py": "674321572fe010f74c741da04df54212119641d8b62ef643d5dbe636af60bd66",
+    "manuscript/render_stabilization_control.py": "21a0ca40e4084dc8626e8138ab2ea7c88bfbba2df6879f4f458a27aa2eee40cb",
+    "paper/supp_stabilization_control/analysis.py": "18eeb1373f22b874370251e11681cefbb1d5a4e8941e73013777cc0c8865635c",
+    "paper/supp_stabilization_control/figure.py": "f44660b8b832a6982a570a5911f304fe749a874732cbf2a2996664613bc59299",
     "models/modules/dekel.py": "2682f5594c287478b4440713a30c49180c121a8be0566b9633e88cfdd4864e17",
     "models/data/transforms.py": "1f4f4f4aeee5d79b859c312a7ead93a0ba21773e4b8d9c545363ec4a1cfc32d5",
     "paper/fig4/spatiotemporal_tuning/_figure4_renderer.py": "c1265ac207fd9371b5d4b6272ccbe10a26b7940ccbc886431643971200c7d414",
     "paper/fig4/spatiotemporal_tuning/_figure4_rendering.py": "1e0e6f3b751eb9086db369c6e024aabccae8e341fdaaa394d28bca8872f40e0d",
     "paper/fig4/spatiotemporal_tuning/audit_panel_a_exemplars.py": "4d99f488a6d23766b45443963a75c134ce42a2cc1e0a11c0fc584e917e89b754",
     "manuscript/render_support.py": "75f9d21d112f28858b1bd3a54a99ff318d01454af347565b69e59001fc1c60cd",
-    "manuscript/render_figures.py": "04ccd416e9e0c1e6f368fb97d819d28f1ea473ae9d88b257e70906e4e99da513",
-    "manuscript/sync_stats.py": "6e846ba37e712f75068d104521a841f64715bde294a320f2ae5fd7db2ea7e4fd",
+    "manuscript/render_figures.py": "b2205253ce33ef29cc659ec8334e12d51a5f1b95a37b7694fe43be372cf9c12b",
+    "manuscript/sync_stats.py": "fc3663cfde00f6c1427266f6c71050a67947160093901f39dbc07ece31bd4a79",
     "manuscript/export_empirical_stats.py": "e3bbdf793d72d07340992f7baeb82c493c8dfbc507111ae411b174ade307cd4d",
-    "manuscript/audit_figures.py": "605067dd305978d377d022612622600c69b5ec6f842e46d5c37ee2fddc16c313",
-    "manuscript/Makefile": "274735d894ad11fa32621bd2426b50ef2c5291b7ad401604223d026984a3102f",
+    "manuscript/audit_figures.py": "f7dede09fb0685df4a957efaea4d15315b892235815d8d16cfa845588a6f8f6e",
+    "manuscript/Makefile": "45555b5cce76497cddac843cdfd6de5132fd6d3c23498582fa08fae41dbe6a9e",
     "manuscript/figure4_selection.py": "d4bbdfec143809f0c4beb266b24686025882157e84a29fd9a54071ade6abf3ac",
     "manuscript/review_figure4_examples.py": "79cebb4eb74f7d836511c2562640588fadbec2560a27655794172592dddcb486",
     "manuscript/export_figure4_zero_tests.py": "eb802d8d0f2a02b4d1a4fa9d91f94dad554285bb4d511e05f3ce59917932870d",
@@ -339,13 +387,13 @@
     "manuscript/analysis_selection.py": "39ed9d959528902fe94a693de915d79e35f9ab190d40489bdab7c371f36735ce"
   },
   "manuscript_sha256": {
-    "main.tex": "263ca3765b5a0b8a788229fd774bfbf4404b109e022790aa1656d8996c648fe9",
-    "refs.bib": "e713d5527a0b9dff685f8365fed90fdf32b601e918a8d21357a98883166a5966",
+    "main.tex": "6e409a6e3bc98979479e41f056546954f8e2cdf1a756f3390312d2b257036e36",
+    "refs.bib": "d8c0db31a7e8b84bea281564036e07e633b7dc2e75369796a5b72a8b57496a01",
     "lite.cls": "9700d568283012b961f79f08fe496f0da2591fdd0eff571e27931cecfc6edded",
-    "generated_stats.tex": "055071b181a8c1e8cc1882b5fa2cb243da1779f699449255e203f39a6a9d9711",
+    "generated_stats.tex": "d46d03e5481c2a422aa30fccc095e7fbad2b0231315b892911bd7a83b498415a",
     "analysis/panel_a_selection.json": "86b78d5a79f2ef83c7a85f32821ba1fe93a3cdd7d997add675bc07a5fc6ed40d",
     "analysis/figure3_schematic.json": "d3507f79445e8fbd74846cd5b5c7175b8726af29ec852223a616206142fcf01d",
-    "stabilization_stats.tex": "1fc895107126ae17bfcf4e1a804f9bb3944bdc00a66442eb675631ffc6c7964d"
+    "stabilization_stats.tex": "a8c0496c42b18c72ebf60a3905a6dcda657449926a8326d3db3f9aa80c248afd"
   },
   "outlined_text_note": "Figure 1 schematic labels were restored from SVG aria-label paths; all other main-figure text exported as measurable fonts. Supplement 1 vector text re-typeset at the original baselines."
 }

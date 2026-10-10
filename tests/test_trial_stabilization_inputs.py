@@ -225,13 +225,15 @@ class TrialStabilizationInputTest(unittest.TestCase):
         import render_stabilization_control as render
 
         self.assertTrue(hasattr(render, "validate_replay_provenance"))
-        protected = ("checkpoint_sha256", "model_spec_sha256",
-                     "final_manifest_sha256", "figure3_manifest_sha256")
+        protected = ("checkpoint_sha256", "model_spec_sha256", "final_manifest_sha256")
         current = {key: key for key in protected}
+        # Figure 3's manifest records its scored population, which the replays do not use.
         current.update(bundle="corrected", figure4_results_sha256="corrected",
+                       figure3_manifest_sha256="corrected",
                        reason="updated manuscript", selected_utc="later")
         recorded = {key: key for key in protected}
         recorded.update(bundle="released", figure4_results_sha256="released",
+                        figure3_manifest_sha256="released",
                         reason="original manuscript", selected_utc="earlier")
         with tempfile.TemporaryDirectory() as directory:
             cache = Path(directory) / "control.pkl"

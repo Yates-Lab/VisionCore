@@ -14,10 +14,9 @@ def digest(path):
 
 
 def validate_replay_provenance(control_path, run_manifest, reference, selection):
-    """Keep model and Figure 3 identity fixed across Figure 4-only selection changes."""
+    """Keep model identity fixed across selection changes that leave the replays valid."""
     recorded = run_manifest.get("selection")
-    protected = ("checkpoint_sha256", "model_spec_sha256",
-                 "final_manifest_sha256", "figure3_manifest_sha256")
+    protected = ("checkpoint_sha256", "model_spec_sha256", "final_manifest_sha256")
     if (not isinstance(recorded, dict)
             or any(key not in recorded or key not in selection or recorded[key] != selection[key]
                    for key in protected)
@@ -162,8 +161,10 @@ def adjacent_scope_contrasts(values, sessions, mask, bootstrap):
 def summarize(metrics, sessions, pop, bootstrap):
     """Medians and paired session-bootstrap contrasts, plus the scores they use."""
     reports, arrays = {}, {}
+    # One population for every panel: units scored under all conditions on both metrics.
+    mask = pop & np.logical_and.reduce(
+        [np.isfinite(value) for values in metrics.values() for value in values.values()])
     for name, values in metrics.items():
-        mask = pop & np.logical_and.reduce([np.isfinite(value) for value in values.values()])
         reports[name] = {"n_units": int(mask.sum()), "n_sessions": len(np.unique(sessions[mask])),
                          "medians": {key: float(np.median(values[key][mask])) for key in values},
                          "contrasts": {}}
@@ -175,7 +176,9 @@ def summarize(metrics, sessions, pop, bootstrap):
         # subtracting two population medians would estimate a different quantity.
         for first, second in (("full", "history"), ("global", "history"),
                               ("history", "full"), ("retinal", "full"),
-                              ("history", "retinal")):
+                              ("history", "retinal"),
+                              # Panel D: every ablation minus Full.
+                              ("full", "retinal"), ("full", "trial"), ("full", "global")):
             stat = bootstrap(values[first], values[second], sessions, mask)
             reports[name]["contrasts"][second+"_minus_"+first] = stat
         reports[name]["contrasts"].update(
@@ -199,6 +202,9 @@ def statistics_tex(metrics):
                                  ("ExtraLoss", "full_minus_retinal"),
                                  ("CostDifference", "retinal_minus_history"),
                                  ("FullToHistory", "history_minus_full"),
+                                 ("FullToRetinal", "retinal_minus_full"),
+                                 ("FullToTrial", "trial_minus_full"),
+                                 ("FullToGlobal", "global_minus_full"),
                                  ("HistoryToTrial", "trial_minus_history"),
                                  ("TrialToGlobal", "global_minus_trial")):
             stat = record["contrasts"][contrast]

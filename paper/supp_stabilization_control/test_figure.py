@@ -75,11 +75,18 @@ class SummaryTest(unittest.TestCase):
 
         reports, out = analysis.summarize(
             metrics, arrays["sessions"], arrays["population"], bootstrap)
-        self.assertEqual(reports["ccnorm"]["n_units"], 40)
+        # One unit lacks a single-trial score, so it leaves both panels.
+        self.assertEqual(reports["ccnorm"]["n_units"], 39)
         self.assertEqual(reports["fraction"]["n_units"], 39)
+        self.assertFalse(out["ccnorm_mask"][0])
         self.assertFalse(out["fraction_mask"][0])
         self.assertIn("global_minus_trial", reports["fraction"]["contrasts"])
-        self.assertIn("StabDTrialToGlobal", analysis.statistics_tex(reports))
+        tex = analysis.statistics_tex(reports)
+        self.assertIn("StabDTrialToGlobal", tex)
+        # Panel D pairs every ablation with Full.
+        for key in figure.ABLATIONS:
+            self.assertIn(key + "_minus_full", reports["fraction"]["contrasts"])
+            self.assertIn("\\StabDFullTo" + key.capitalize() + "CI}", tex)
 
 
 if __name__ == "__main__":

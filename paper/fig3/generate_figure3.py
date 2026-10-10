@@ -180,6 +180,13 @@ def _finite_mask(*arrays):
     return m
 
 
+def _scored_units(abl):
+    """Units scored in both C and D, so the two panels describe one population."""
+    scores = [*abl["ccnorm"].values(), *abl["explainable_fraction"].values()]
+    return np.asarray(abl["cd_population"], dtype=bool) & _finite_mask(
+        *(np.asarray(score, dtype=float) for score in scores))
+
+
 # ---------------------------------------------------------------------------
 # Panel C — trial-averaged held-out prediction (intact vs ablated ccnorm)
 # ---------------------------------------------------------------------------
@@ -188,7 +195,7 @@ def _plot_ccnorm_violins(ax, abl):
     intact = np.asarray(abl["ccnorm"]["intact"], dtype=float)
     ablated = np.asarray(abl["ccnorm"]["zeroed"], dtype=float)
     stab = np.asarray(abl["ccnorm"]["stabilized"], dtype=float)
-    m = pop & _finite_mask(intact, ablated, stab)
+    m = _scored_units(abl)
     gi, ga, gs = intact[m], ablated[m], stab[m]
 
     _box_whisker(ax, [gi, ga, gs], [0, 1, 2],
@@ -345,7 +352,7 @@ def _plot_explainable_variance_boxes(ax, abl):
     score = abl["explainable_fraction"]
     keys = ["psth", "intact", "zeroed", "stabilized"]
     vals = {key: np.asarray(score[key], dtype=float) for key in keys}
-    m = pop & _finite_mask(*(vals[key] for key in keys))
+    m = _scored_units(abl)
     groups = [vals[key][m] for key in keys]
     colors = [PSTH_COLOR, INTACT_COLOR, ABLATED_COLOR, STABILIZED_COLOR]
     positions = np.arange(4)

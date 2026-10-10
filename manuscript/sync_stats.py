@@ -114,7 +114,9 @@ def main() -> None:
     value("FigTwoPRSignP", empirical["participation_ratio"]["sign_p"], 2)
 
     c, d, e = (three[f"panel_{panel}_stats"] for panel in "cde")
-    value("FigThreeCUnits", c["n_units"], 0)
+    if c["n_units"] != d["n_units"]:
+        raise ValueError("Figure 3 C and D must score the same units")
+    value("FigThreeUnits", c["n_units"], 0)
     value("FigThreeSessions", c["n_sessions"], 0)
     for key, label in (("intact", "Full"), ("zeroed", "Retinal"), ("stabilized", "Stabilized")):
         value("FigThreeC" + label, c["medians"][key])
@@ -125,7 +127,6 @@ def main() -> None:
         value("FigThreeC" + label + "Delta", contrast["median_difference"])
         value("FigThreeC" + label + "Reduction", contrast["percent_of_intact_median"], 1)
         probability("FigThreeC" + label + "P", contrast["wilcoxon_p"])
-    value("FigThreeDUnits", d["n_units"], 0)
     value("FigThreeDPsth", d["conditions"]["psth"]["median"])
     for key, label in (("full_vs_psth", "FullGain"), ("ablated_vs_full", "RetinalLoss"), ("stabilized_vs_full", "StabilizedLoss")):
         contrast = d["contrasts"][key]
