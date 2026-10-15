@@ -10,6 +10,7 @@ from torch import nn
 from models import build_model
 from models.config_loader import load_config
 from models.data.datasets import CombinedEmbeddedDataset, DictDataset
+from models.data.loading import resolve_cid_columns
 from models.modules.readout import (
     DynamicGaussianReadout,
     SparseGaussianLowRankReadout,
@@ -23,6 +24,14 @@ from training.train_multidataset import apply_stimulus_sampling_weight_overrides
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_rowley_cluster_ids_map_to_response_columns():
+    metadata = {"cluster_ids": [700, 732, 745, 877]}
+    assert resolve_cid_columns(metadata, [732, 877]).tolist() == [1, 3]
+    assert resolve_cid_columns({}, [1, 3]).tolist() == [1, 3]
+    with pytest.raises(ValueError, match="999"):
+        resolve_cid_columns(metadata, [732, 999])
 
 
 def test_stage_two_trains_only_deep_and_phase_readouts():
@@ -93,6 +102,29 @@ def test_rank_two_phase_readout_is_exactly_embedded_in_rank_four():
     stimulus = torch.randn(5, 4, 7, 7)
     assert holder._low_rank_migrated_readouts == {"phase_readouts.0"}
     assert torch.allclose(target(stimulus), source(stimulus), atol=1.0e-6)
+
+
+def test_core_only_warm_start_allows_new_session_identity():
+    model = nn.Module()
+    model.convnet = nn.Linear(3, 2)
+    model.readouts = nn.ModuleList([nn.Linear(2, 1)])
+    checkpoint = {
+        "model.convnet.weight": model.convnet.weight.detach().clone(),
+        "model.convnet.bias": model.convnet.bias.detach().clone(),
+        "model.readouts.0.weight": model.readouts[0].weight.detach().clone(),
+        "model.readouts.0.bias": model.readouts[0].bias.detach().clone(),
+    }
+    holder = SimpleNamespace(model=model)
+
+    selected, _ = MultiDatasetModel._compatible_pretrained_state(
+        holder,
+        checkpoint,
+        load_heads=False,
+        source_sessions=["Allen_2022-04-13"],
+        target_sessions=["Luke_2026-03-02"],
+    )
+
+    assert set(selected) == {"convnet.weight", "convnet.bias"}
 
 
 @pytest.mark.parametrize("floor", [0.0, 0.75])

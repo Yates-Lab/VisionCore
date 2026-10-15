@@ -200,6 +200,15 @@ def main():
                    help="Experiment name (auto-generated if not provided)")
     p.add_argument("--checkpoint_dir", type=str, default="./checkpoints",
                    help="Directory for saving checkpoints")
+    p.add_argument(
+        "--checkpoint_monitor",
+        choices=("val_bps_overall", "val_bps_selection"),
+        default="val_bps_overall",
+        help=(
+            "Validation metric used for checkpoint selection and early stopping. "
+            "val_bps_selection requires selection_cids in the dataset config."
+        ),
+    )
 
     p.add_argument("--ckpt_path", type=str, default=None,
                    help="Checkpoint to resume from (restores optimizer, "
@@ -313,8 +322,8 @@ def main():
         # Checkpoint saving
         ModelCheckpoint(
             dirpath=str(ckpt_dir),
-            filename="{epoch:02d}-{val_bps_overall:.4f}",
-            monitor="val_bps_overall",
+            filename=f"{{epoch:02d}}-{{{args.checkpoint_monitor}:.4f}}",
+            monitor=args.checkpoint_monitor,
             mode="max",
             save_top_k=3,
             save_last=True,
@@ -328,7 +337,7 @@ def main():
     if args.early_stopping:
         callbacks.append(
             EarlyStopping(
-                monitor="val_bps_overall",
+                monitor=args.checkpoint_monitor,
                 mode="max",
                 patience=args.early_stopping_patience,
                 min_delta=args.early_stopping_min_delta,

@@ -167,6 +167,29 @@ class MultiDatasetDM(pl.LightningDataModule):
                             return True
         return False
 
+    @staticmethod
+    def _validate_uint8_stimulus_contract(*datasets) -> None:
+        """Reject pre-normalized movies before the destructive uint8 cast."""
+        seen = set()
+        for dataset in datasets:
+            if dataset is None:
+                continue
+            for backing in dataset.dsets:
+                stimulus = backing.covariates.get("stim")
+                if stimulus is None or id(stimulus) in seen or not stimulus.numel():
+                    continue
+                seen.add(id(stimulus))
+                minimum, maximum = torch.aminmax(stimulus.detach())
+                if not torch.isfinite(minimum) or not torch.isfinite(maximum):
+                    raise ValueError("uint8 storage requires finite raw display values")
+                if minimum < 0 or maximum > 255 or maximum <= 1:
+                    raise ValueError(
+                        "dset_dtype='uint8' requires raw display values in [0, 255] "
+                        "before casting; received range "
+                        f"[{minimum.item():.4g}, {maximum.item():.4g}]. "
+                        "The source movie appears pre-normalized."
+                    )
+
     def setup(self, stage: Optional[str] = None):
         """
         Load datasets and prepare for training/validation.
@@ -232,6 +255,8 @@ class MultiDatasetDM(pl.LightningDataModule):
                 else:
                     tr, va, _ = prepare_data(cfg, strict=True)
                     te = None
+
+                self._validate_uint8_stimulus_contract(tr, va, te)
 
                 # Session files may store integer-valued pixels as float32.
                 # Convert the shared backing tensors so uint8 mode actually

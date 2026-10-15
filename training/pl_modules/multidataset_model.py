@@ -285,6 +285,28 @@ class MultiDatasetModel(pl.LightningModule):
         self.val_losses = []
         self.val_losses_by_ds = {i: [] for i in range(len(self.names))}
 
+        # Optional, predeclared per-session unit subsets for checkpoint
+        # selection.  These are physical cluster IDs from the session config,
+        # not response-column indices.  The ordinary population metric remains
+        # available, while ``val_bps_selection`` preserves signed BPS and can
+        # be used by a canary whose conclusion hinges on specific reliable
+        # units.
+        self.selection_unit_indices = {}
+        for ds_i, (name, cfg) in enumerate(zip(self.names, self.cfgs)):
+            selection_cids = [int(cid) for cid in cfg.get("selection_cids", [])]
+            if not selection_cids:
+                continue
+            dataset_cids = [int(cid) for cid in cfg.get("cids", [])]
+            cid_to_index = {cid: index for index, cid in enumerate(dataset_cids)}
+            missing = [cid for cid in selection_cids if cid not in cid_to_index]
+            if missing:
+                raise ValueError(
+                    f"selection_cids for {name!r} are absent from cids: {missing}"
+                )
+            self.selection_unit_indices[ds_i] = torch.tensor(
+                [cid_to_index[cid] for cid in selection_cids], dtype=torch.long
+            )
+
         # Build subject -> dataset index mapping (subject = name before first '_')
         self._subject_ds = {}
         for i, name in enumerate(self.names):
@@ -365,11 +387,15 @@ class MultiDatasetModel(pl.LightningModule):
     ):
         """Select compatible tensors and migrate Gaussian readouts exactly."""
         source = MultiDatasetModel._canonical_pretrained_state_dict(state_dict)
-        source = MultiDatasetModel._remap_pretrained_dataset_components(
-            source,
-            source_sessions=source_sessions,
-            target_sessions=target_sessions,
-        )
+        # Session identities matter only when transferring dataset-specific
+        # heads.  Core-only warm starts are intentionally allowed across new
+        # sessions/animals and contain no indexed tensors that need remapping.
+        if load_heads:
+            source = MultiDatasetModel._remap_pretrained_dataset_components(
+                source,
+                source_sessions=source_sessions,
+                target_sessions=target_sessions,
+            )
         target = self.model.state_dict()
         prefixes = ["adapters", "frontend", "convnet"]
         if load_heads:
@@ -994,6 +1020,8 @@ class MultiDatasetModel(pl.LightningModule):
         # 2. BPS per-dataset & overall
         per_ds = []
         per_ds_bps = {}  # dataset_idx -> bps_mean, for per-subject aggregation
+        selection_sum = torch.tensor(0.0, device=self.device)
+        selection_count = torch.tensor(0, device=self.device)
         for ds_i, (name, agg) in enumerate(zip(self.names, self.bps_aggs)):
 
             # a) build local SUM & COUNT tensors on *every* rank
@@ -1003,6 +1031,19 @@ class MultiDatasetModel(pl.LightningModule):
             else:
                 bps = agg.closure()  # (units,) - may contain NaN for cells with no samples
                 if bps is not None:
+                    selection_indices = self.selection_unit_indices.get(ds_i)
+                    if selection_indices is not None:
+                        selected_bps = bps[
+                            selection_indices.to(device=bps.device)
+                        ]
+                        selected_bps = selected_bps[torch.isfinite(selected_bps)]
+                        selection_sum = selection_sum + selected_bps.sum().to(
+                            self.device
+                        )
+                        selection_count = selection_count + torch.tensor(
+                            selected_bps.numel(), device=self.device
+                        )
+
                     # Filter out NaN values (cells with no valid samples on this rank)
                     valid_mask = ~torch.isnan(bps)
                     if valid_mask.any():
@@ -1042,6 +1083,36 @@ class MultiDatasetModel(pl.LightningModule):
 
         # Log with sync_dist=True so all ranks have access to the metric
         self.log("val_bps_overall", overall, prog_bar=True, sync_dist=True, rank_zero_only=False)
+
+        if self.selection_unit_indices:
+            expected_selection_count = sum(
+                indices.numel() for indices in self.selection_unit_indices.values()
+            )
+            if selection_count.item() != expected_selection_count:
+                raise RuntimeError(
+                    "Expected finite validation BPS for all "
+                    f"{expected_selection_count} predeclared selection units, "
+                    f"found {selection_count.item()}"
+                )
+            global_selection_sum = self.trainer.strategy.reduce(
+                selection_sum, reduce_op="sum"
+            )
+            global_selection_count = self.trainer.strategy.reduce(
+                selection_count, reduce_op="sum"
+            )
+            if global_selection_count <= 0:
+                raise RuntimeError(
+                    "No finite validation BPS values were available for the "
+                    "predeclared selection_cids"
+                )
+            selection_bps = global_selection_sum / global_selection_count
+            self.log(
+                "val_bps_selection",
+                selection_bps,
+                prog_bar=True,
+                sync_dist=True,
+                rank_zero_only=False,
+            )
 
         # 3. Per-subject aggregated val_loss and val_bps
         if self.global_rank == 0:

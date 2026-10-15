@@ -147,8 +147,27 @@ def _make_fftwhitening(cfg, dataset_config=None):
 
 @_register("pixelnorm")
 def _make_pixelnorm(cfg, dataset_config=None):
+    validate_range = cfg.get("validate_range", True) if isinstance(cfg, dict) else True
+
     def pixelnorm(x: torch.Tensor):
-        return (x.float() - 127) / 255
+        x_float = x.float()
+        if validate_range and x_float.numel():
+            x_min, x_max = torch.aminmax(x_float.detach())
+            if not torch.isfinite(x_min) or not torch.isfinite(x_max):
+                raise ValueError("pixelnorm requires finite raw display values")
+            if x_min < 0 or x_max > 255:
+                raise ValueError(
+                    "pixelnorm expects raw display values in [0, 255], but received "
+                    f"range [{x_min.item():.4g}, {x_max.item():.4g}]. "
+                    "The stimulus may already be standardized; remove pixelnorm or "
+                    "export raw display values."
+                )
+            if x_max <= 1:
+                raise ValueError(
+                    "pixelnorm received values entirely in [0, 1]. It expects raw "
+                    "display values in [0, 255], not unit-scaled luminance."
+                )
+        return (x_float - 127) / 255
     return pixelnorm
 
 

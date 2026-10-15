@@ -14,6 +14,8 @@ The module supports:
 import torch
 import torch.nn.functional as F
 import numpy as np
+from pathlib import Path
+from pathlib import Path
 from .datasets import DictDataset, CombinedEmbeddedDataset
 from .filtering import get_valid_dfs
 from .splitting import split_inds_by_trial, split_inds_by_trial_train_val_test
@@ -24,6 +26,38 @@ from DataYatesV1.utils.rf import calc_sta
 from typing import Dict, Any, List, Tuple
 import yaml
 import copy
+
+
+def resolve_cid_columns(metadata, cids):
+    """Resolve configured cell IDs to response-matrix column indices.
+
+    Rowley datasets store physical cluster IDs in metadata, whereas older
+    datasets use response-column indices directly in their session configs.
+    Preserve the legacy behavior when no cluster-ID metadata is available.
+    """
+    stored_cids = metadata.get("cluster_ids")
+    if stored_cids is None:
+        stored_cids = metadata.get("all_cids")
+    if stored_cids is None:
+        return np.asarray(cids, dtype=np.intp)
+
+    id_to_column = {
+        int(cluster_id): column
+        for column, cluster_id in enumerate(np.asarray(stored_cids).tolist())
+    }
+    missing = [int(cluster_id) for cluster_id in cids
+               if int(cluster_id) not in id_to_column]
+    if missing:
+        raise ValueError(
+            f"Config cids not found in dataset cluster IDs: {missing}. "
+            "Check that the session YAML cids match the stored dataset "
+            "cluster_ids."
+        )
+    return np.asarray(
+        [id_to_column[int(cluster_id)] for cluster_id in cids],
+        dtype=np.intp,
+    )
+
 
 def resolve_split_fractions(dataset_config):
     """Read the split fractions out of a dataset config.
@@ -71,6 +105,7 @@ def get_embedded_datasets(
     pre_func=None,
     test_split=None,
     train_all_types=None,
+    split_stratify_key=None,
     **kwargs,
 ):
     """
@@ -108,6 +143,9 @@ def get_embedded_datasets(
         unchanged, so this is an explicit descriptive-fit diagnostic rather
         than a generalization protocol. The default is empty and leaves every
         historical split byte-identical.
+    split_stratify_key : str, optional
+        Covariate used to stratify the trial-level three-way split.  The
+        historical split is unchanged when omitted.
 
     Returns
     -------
@@ -142,10 +180,11 @@ def get_embedded_datasets(
         # Filter by cell IDs if specified
         if cids is not None:
             dset.metadata['cids'] = cids
-            dset['robs'] = dset['robs'][:,cids]
+            col_indices = resolve_cid_columns(dset.metadata, cids)
+            dset['robs'] = dset['robs'][:, col_indices]
             if 'dfs' in dset and dset['dfs'].ndim == 2:
                 if (dset['dfs'].shape[1] > 1) and (dset['dfs'].shape[1] != len(cids)):
-                    dset['dfs'] = dset['dfs'][:,cids]
+                    dset['dfs'] = dset['dfs'][:, col_indices]
 
         dsets.append(dset)
 
@@ -178,7 +217,13 @@ def get_embedded_datasets(
             # Validation takes whatever the train and test fractions leave.
             val_split = 1.0 - train_val_split - test_split
             train_inds_, val_inds_, test_inds_ = split_inds_by_trial_train_val_test(
-                dset, dset_inds[iD], train_val_split, val_split, seed)
+                dset,
+                dset_inds[iD],
+                train_val_split,
+                val_split,
+                seed,
+                stratify_key=split_stratify_key,
+            )
             test_inds.append(test_inds_)
         if str(dset.metadata.get("name")) in train_all_types:
             # Deliberate leakage for a descriptive capture assay: fit all
@@ -489,18 +534,33 @@ def prepare_data(dataset_config: Dict[str, Any], strict: bool = True,
     # Handle different session naming conventions
     if lab.lower() == "yates":
         from DataYatesV1.utils.io import get_session
+        sess = get_session(*sess_name.split("_"))
     elif lab.lower() == "rowley":
-        from DataRowleyV1V2.data.registry import get_session
+        if "directory" in dataset_config:
+            # Immutable/canary artifacts are self-contained. Construct the
+            # session wrapper without consulting the host-specific registry;
+            # its get_dataset method reads the explicit directory below.
+            from DataRowleyV1V2.data.registry import RowleySession
+            sess = RowleySession(
+                sess_name,
+                data_dir=Path(dataset_config["directory"]).resolve(),
+            )
+        else:
+            from DataRowleyV1V2.data.registry import get_session
+            sess = get_session(*sess_name.split("_"))
     else:
         raise ValueError(f"Unknown lab: {lab}")
-    
-    sess = get_session(*sess_name.split("_"))
+
 
     # For Rowley sessions, datasets live under {eye}_eye/ subdirectories
     if lab.lower() == "rowley":
         eye = dataset_config.get("eye", "right")
-        dataset_config["directory"] = str(
-            sess.processed_path / "datasets" / f"{eye}_eye"
+        # Respect an explicitly configured directory.  This is required for
+        # immutable derived/canary datasets and alternate preprocessing
+        # lineages; the default remains the ordinary session directory.
+        dataset_config.setdefault(
+            "directory",
+            str(sess.processed_path / "datasets" / f"{eye}_eye"),
         )
 
     # -------------------------------------------------------------------------
@@ -672,6 +732,7 @@ def prepare_data(dataset_config: Dict[str, Any], strict: bool = True,
         pre_func         = lambda x: x,          # preprocessing already done
         test_split       = test_fraction,
         train_all_types  = sorted(train_all_types & loaded_names),
+        split_stratify_key = dataset_config.get("split_stratify_key"),
     )
     train_dset, val_dset = splits[0], splits[1]
     test_dset = splits[2] if test_fraction is not None else None

@@ -123,7 +123,6 @@ def _make_valid_nlags(cfg):
     
     return valid_nlags
 
-# register a missing_pct filter
 @_register("missing_pct")
 def _make_missing_pct(cfg):
     """
@@ -139,7 +138,18 @@ def _make_missing_pct(cfg):
     DataFilterFn
         Function that takes a dataset and returns boolean mask
     """
-    threshold = cfg if isinstance(cfg, (int, float)) else cfg.get("threshold", 45)
+    if isinstance(cfg, (int, float)):
+        threshold = float(cfg)
+        source = None
+        allow_high_median_units = True
+    else:
+        # ``theshold`` appears in several historical configs.  Continue to
+        # accept it, but prefer the correctly spelled key for new configs.
+        threshold = float(cfg.get("threshold", cfg.get("theshold", 45)))
+        source = cfg.get("source")
+        allow_high_median_units = bool(
+            cfg.get("allow_high_median_units", True)
+        )
     
     def missing_pct(dset: DictDataset) -> torch.Tensor:
         """
@@ -158,17 +168,54 @@ def _make_missing_pct(cfg):
         torch.Tensor
             Binary mask tensor of shape [n_frames, n_units] where 1 indicates valid frames
         """
-        cids = dset.metadata['sess'].get_cluster_ids()
-        times = dset.covariates['t_bins']
+        if source is not None:
+            if source not in dset:
+                raise KeyError(
+                    f"missing_pct datafilter requires exported covariate {source!r}"
+                )
+            missing_pct = torch.as_tensor(dset[source], dtype=torch.float32)
+        else:
+            # Backward-compatible path for older artifacts that retain their
+            # live Session object in metadata.  New reproducible artifacts
+            # should export missing_pct and name it with ``source``.
+            sess = dset.metadata.get("sess")
+            if sess is None:
+                raise KeyError(
+                    "missing_pct is not exported and dataset metadata has no 'sess'"
+                )
+            cids = dset.metadata.get("cluster_ids")
+            if cids is None:
+                cids = sess.get_cluster_ids()
+            times = dset["t_bins"]
+            missing_pct = torch.as_tensor(
+                sess.get_missing_pct_interp(cids)(times), dtype=torch.float32
+            )
 
-        missing_pct_fun = dset.metadata['sess'].get_missing_pct_interp(cids) # missing percent interpolating function
-        missing_pct = missing_pct_fun(times)
+        if missing_pct.ndim != 2:
+            raise ValueError(
+                "missing_pct must have shape [n_samples, n_units], got "
+                f"{tuple(missing_pct.shape)}"
+            )
+        if missing_pct.shape[0] != len(dset):
+            raise ValueError(
+                "missing_pct sample dimension does not match dataset: "
+                f"{missing_pct.shape[0]} != {len(dset)}"
+            )
+        if "robs" in dset and missing_pct.shape[1] != dset["robs"].shape[1]:
+            raise ValueError(
+                "missing_pct unit dimension does not match robs: "
+                f"{missing_pct.shape[1]} != {dset['robs'].shape[1]}"
+            )
 
-        mask = missing_pct < threshold
-
-        med = np.median(missing_pct, axis=0)  # [N]
-        multi_units = med >= threshold
-        mask[:, multi_units] = True  # don't exclude clear multiunits
+        mask = torch.isfinite(missing_pct) & (missing_pct < threshold)
+        if allow_high_median_units:
+            # Historical behavior: units whose median exceeds the threshold
+            # are treated as multi-units and not time-masked.  The Rowley
+            # canary disables this override so missing coverage fails closed.
+            median = torch.from_numpy(
+                np.nanmedian(missing_pct.cpu().numpy(), axis=0)
+            ).to(mask.device)
+            mask[:, median >= threshold] = True
 
         return mask
     

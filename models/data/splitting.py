@@ -127,7 +127,14 @@ def get_train_val_with_sections(dset, num_sections, val_fraction=0.2):
     
     return train_set, val_set
 
-def split_inds_by_trial_train_val_test(dset, inds, train_split, val_split, seed=1002):
+def split_inds_by_trial_train_val_test(
+    dset,
+    inds,
+    train_split,
+    val_split,
+    seed=1002,
+    stratify_key=None,
+):
     '''
     Split indices by trial into training, validation, and test sets.
 
@@ -144,6 +151,12 @@ def split_inds_by_trial_train_val_test(dset, inds, train_split, val_split, seed=
         The remaining trials (1 - train_split - val_split) will be used for testing.
     seed : int, optional
         The random seed. The default is 1002.
+    stratify_key : str, optional
+        Sample-level covariate whose trial-level values define strata.  Each
+        trial must have exactly one value.  Splits are then made independently
+        within every stratum, which is useful when physical stimulus banks
+        must all be represented in train, validation, and test sets.  The
+        default keeps the historical unstratified split unchanged.
 
     Returns
     -------
@@ -157,16 +170,56 @@ def split_inds_by_trial_train_val_test(dset, inds, train_split, val_split, seed=
 
     set_seeds(seed)
     trials = dset['trial_inds'].unique()
-    rand_trials = torch.randperm(len(trials))
-    
-    # Calculate split points
-    train_end = int(len(trials) * train_split)
-    val_end = int(len(trials) * (train_split + val_split))
-    
-    # Split trials into three groups
-    train_trials = trials[rand_trials[:train_end]]
-    val_trials = trials[rand_trials[train_end:val_end]]
-    test_trials = trials[rand_trials[val_end:]]
+
+    if stratify_key is None:
+        rand_trials = torch.randperm(len(trials))
+
+        # Calculate split points
+        train_end = int(len(trials) * train_split)
+        val_end = int(len(trials) * (train_split + val_split))
+
+        # Split trials into three groups
+        train_trials = trials[rand_trials[:train_end]]
+        val_trials = trials[rand_trials[train_end:val_end]]
+        test_trials = trials[rand_trials[val_end:]]
+    else:
+        if stratify_key not in dset:
+            raise KeyError(
+                f"split stratification key {stratify_key!r} is absent"
+            )
+        trial_values = dset['trial_inds'][inds]
+        stratum_values = dset[stratify_key][inds]
+        if stratum_values.ndim > 1:
+            if stratum_values.shape[1:] != torch.Size([1]):
+                raise ValueError(
+                    f"split stratification key {stratify_key!r} must be scalar "
+                    f"per sample, got {tuple(stratum_values.shape)}"
+                )
+            stratum_values = stratum_values.flatten()
+
+        generator = torch.Generator(device="cpu")
+        generator.manual_seed(seed)
+        train_groups, val_groups, test_groups = [], [], []
+        for stratum in torch.unique(stratum_values, sorted=True):
+            in_stratum = stratum_values == stratum
+            stratum_trials = torch.unique(trial_values[in_stratum], sorted=True)
+            for trial in stratum_trials:
+                values = torch.unique(stratum_values[trial_values == trial])
+                if len(values) != 1:
+                    raise ValueError(
+                        f"trial {int(trial)} spans multiple {stratify_key!r} "
+                        f"strata: {values.tolist()}"
+                    )
+            order = torch.randperm(len(stratum_trials), generator=generator)
+            train_end = int(len(stratum_trials) * train_split)
+            val_end = int(len(stratum_trials) * (train_split + val_split))
+            train_groups.append(stratum_trials[order[:train_end]])
+            val_groups.append(stratum_trials[order[train_end:val_end]])
+            test_groups.append(stratum_trials[order[val_end:]])
+
+        train_trials = torch.cat(train_groups)
+        val_trials = torch.cat(val_groups)
+        test_trials = torch.cat(test_groups)
     
     # Map trials back to indices
     train_inds = inds[torch.isin(dset['trial_inds'][inds], train_trials)]
