@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from .general import ensure_tensor
-from DataYatesV1.utils.data.datasets import CombinedEmbeddedDataset
+from models.data.datasets import CombinedEmbeddedDataset
 
 import math
 from scipy.stats import pearsonr

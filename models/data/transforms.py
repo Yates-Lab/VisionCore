@@ -211,7 +211,7 @@ def _make_mul(cfg, dataset_config=None):
 
 @_register("temporal_basis")
 def _make_basis(cfg, dataset_config=None):
-    from DataYatesV1.models.modules import TemporalBasis
+    from models.modules.frontend import TemporalBasis
     basis = TemporalBasis(**cfg)
     def tb(x):                         # x (T, …)  or (B,T, …)
         # TemporalBasis expects (B,C,T); reshape accordingly
@@ -236,7 +236,7 @@ def _make_basis(cfg, dataset_config=None):
 
 @_register("splitrelu")
 def _make_splitrelu(cfg, dataset_config=None):
-    from DataYatesV1.models.modules import SplitRelu
+    from models.modules.common import SplitRelu
     return SplitRelu(**cfg)
 
 @_register("symlog")
@@ -253,7 +253,7 @@ def _make_maxnorm(cfg, dataset_config=None):
 
 @_register("dacones")
 def _make_dacones(cfg, dataset_config=None):
-    from DataYatesV1.models.modules import DAModel
+    from models.modules.frontend import DAModel
     def dacones(x):
         cones = DAModel(**cfg)
         # permute (B,H,W) to (1, B, H, W) and squeeze back to (B,H,W)

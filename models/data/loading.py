@@ -22,7 +22,6 @@ from .splitting import split_inds_by_trial, split_inds_by_trial_train_val_test
 from .transforms import make_pipeline
 from .datafilters import make_datafilter_pipeline
 from ..utils.general import ensure_tensor
-from DataYatesV1.utils.rf import calc_sta
 from typing import Dict, Any, List, Tuple
 import yaml
 import copy
@@ -267,6 +266,10 @@ def get_gaborium_sta_ste(sess, n_lags, cids=None):
     stes : numpy.ndarray
         Spike-triggered second moments with shape (n_cells, n_lags, n_y, n_x)
     """
+    # This diagnostic remains specific to Yates sessions. Keep the optional
+    # dependency lazy so Rowley artifact training does not require DataYates.
+    from DataYatesV1.utils.rf import calc_sta
+
     # Verify that the dataset exists
     assert (sess.sess_dir / 'datasets' / 'gaborium.dset').exists()
 

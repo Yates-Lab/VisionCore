@@ -204,8 +204,8 @@ class MultiDatasetDM(pl.LightningDataModule):
             return
 
         from models.config_loader import load_dataset_configs
-        from DataYatesV1.utils.data.loading import remove_pixel_norm
         from models.data import prepare_data
+        from models.data.loading import remove_pixel_norm
 
         # Load dataset configurations from parent config
         # cfg_dir should now point to a parent config file (e.g., multi_basic_120_backimage_all.yaml)

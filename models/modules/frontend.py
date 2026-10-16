@@ -16,7 +16,7 @@ from einops import rearrange
 from models.modules.conv_layers import StandardConv
 from plenoptic.tools.conv import upsample_blur, blur_downsample
 
-from DataYatesV1.utils.modeling.bases import make_raised_cosine_basis
+from models.utils.bases import make_raised_cosine_basis
 from ..utils.general import ensure_tensor
 from torch._dynamo import disable  # hack to avoid dynamo warning about the graph breaking
 

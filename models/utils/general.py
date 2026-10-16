@@ -1,4 +1,5 @@
 import sys
+import os
 import numpy as np
 import lightning as pl
 import torch
@@ -6,7 +7,41 @@ import h5py
 from scipy.sparse import coo_array
 
 __all__ = ['min_max_norm', 'ensure_ndarray', 'nd_cut',
-           'nd_paste', 'ensure_tensor', 'explore_hdf5', 'convert_time_to_samples']
+           'nd_paste', 'ensure_tensor', 'explore_hdf5', 'convert_time_to_samples',
+           'get_memory_footprints_str', 'set_seeds']
+
+
+def get_memory_footprints_str(value):
+    """Return the in-memory size of a tensor or ndarray in readable units."""
+    if isinstance(value, np.ndarray):
+        size = value.nbytes
+    elif isinstance(value, torch.Tensor):
+        size = value.element_size() * value.nelement()
+        if value.is_sparse:
+            size = (
+                value.values().element_size() * value.values().nelement()
+                + value.indices().element_size() * value.indices().nelement()
+            )
+    else:
+        size = 0
+
+    suffixes = ('B', 'KB', 'MB', 'GB', 'TB')
+    suffix = 0
+    while size > 1024 and suffix < len(suffixes) - 1:
+        size /= 1024
+        suffix += 1
+    return f'{size:.2f} {suffixes[suffix]}'
+
+
+def set_seeds(seed: int) -> None:
+    """Set NumPy and PyTorch seeds using the historical trainer contract."""
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    os.environ['PYTHONHASHSEED'] = str(seed)
 
 def min_max_norm(x, min, max):
     '''
@@ -607,4 +642,3 @@ def get_optimizer(parameters, config:dict):
     else:
         raise ValueError(f"Optimizer {name} not recognized")
     return optimizer
-
