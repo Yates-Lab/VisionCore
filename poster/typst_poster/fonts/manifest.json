@@ -17,6 +17,12 @@
     "family": "Liberation Sans",
     "bundled": true
   },
+  "LiberationSans-Italic.ttf": {
+    "sha256": "1d1c68c5d13017777fcc96059dcca36f9720d3c3702de417bdd56d87fe493ec4",
+    "version": "Version 2.1.5",
+    "family": "Liberation Sans",
+    "bundled": true
+  },
   "LiberationSans-Regular.ttf": {
     "sha256": "76d04c18ea243f426b7de1f3ad208e927008f961dc5945e5aad352d0dfde8ee8",
     "version": "Version 2.1.5",

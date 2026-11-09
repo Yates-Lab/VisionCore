@@ -87,11 +87,39 @@ def fem_panel():
 
     image, half = d["image"], float(d["image_half_deg"])
     gaze_hi, gaze_lo, rf = d["gaze_hi"], d["gaze_lo"], d["rf"]
-    shift = float(d["gaze_shift_deg"])
+    shift, diam = float(d["gaze_shift_deg"]), d["rf_diam_deg"]
+    NOTE = "#25327a"
 
-    # ---- Left column: rig, eye image, symbol key ------------------------------
-    # The rig is drawn in its own coordinates and scaled into the column.
-    rig = ax(20, 66, 380, 303)
+    def note(x, y, text, size=25):
+        # Arial Italic is not in the locked font set; Liberation Sans Italic is
+        # metrically identical and bundled under its open licence.
+        bg.text(x, y, text, family="Liberation Sans", style="italic", fontsize=size,
+                color=TEXT, va="top", linespacing=1.15)
+
+    def arrow(xy_a, xy_b, color, ax_a=None, ax_b=None, lw=2.4):
+        fig.add_artist(ConnectionPatch(xy_a, xy_b, coordsA="data", coordsB="data",
+                                       axesA=ax_a or bg, axesB=ax_b or bg, color=color,
+                                       lw=lw, arrowstyle="-|>", mutation_scale=20,
+                                       shrinkA=4, shrinkB=3))
+
+    # ---- Eye tracker ------------------------------------------------------------
+    note(22, 78, "Dual Purkinje\nhigh-resolution\neye tracker")
+    dpi = ax(262, 62, 402, 202)
+    dpi.imshow(np.asarray(Image.open(HERE / "assets" / "dpi_eye.png")), cmap="gray",
+               vmin=0, vmax=255)
+    dpi.add_patch(Circle((270, 262), 222, fill=False, ec="#c9e8a0", lw=2))
+    dpi.add_patch(Circle((382, 238), 30, fill=False, ec="#f2e27a", lw=1.5))
+    for (tx, ty), (px, py), label in (((150, 170), (204, 278), "P4"),
+                                      ((205, 410), (262, 330), "Pupil"),
+                                      ((345, 395), (382, 268), "CR")):
+        dpi.annotate(label, (px, py), (tx, ty), color="#c9e8a0", fontsize=17,
+                     arrowprops=dict(arrowstyle="-|>", color="#d9483b", lw=1.6,
+                                     mutation_scale=10, shrinkB=2))
+    dpi.axis("off")
+    bg.text(406, 202, "[2–4]", fontsize=15, color=TEXT, va="bottom")
+
+    # ---- Rig (own coordinates, scaled into place) ---------------------------------
+    rig = ax(20, 210, 380, 447)
     rig.set_xlim(20, 400), rig.set_ylim(345, 95), rig.axis("off")
     rig.add_patch(Polygon([(28, 168), (170, 132), (170, 262), (28, 296)], fc="#8c8c8c", ec="none"))
     rig.imshow(image, cmap="gray", extent=[96, 140, 236, 192], zorder=2)
@@ -108,100 +136,56 @@ def fem_panel():
     rig.text(280, 112, "Eye camera", fontsize=20, color=TEXT, ha="left", va="bottom")
     rig.imshow(marmoset_filled(), extent=[232, 388, 336, 142], zorder=4)
 
-    dpi = ax(110, 318, 270, 478)
-    dpi.imshow(np.asarray(Image.open(HERE / "assets" / "dpi_eye.png")), cmap="gray",
-               vmin=0, vmax=255)
-    dpi.add_patch(Circle((270, 262), 222, fill=False, ec="#c9e8a0", lw=2))
-    dpi.add_patch(Circle((382, 238), 30, fill=False, ec="#f2e27a", lw=1.5))
-    for (tx, ty), (px, py), label in (((150, 170), (204, 278), "P4"),
-                                      ((205, 410), (262, 330), "Pupil"),
-                                      ((345, 395), (382, 268), "CR")):
-        dpi.annotate(label, (px, py), (tx, ty), color="#c9e8a0", fontsize=17,
-                     arrowprops=dict(arrowstyle="-|>", color="#d9483b", lw=1.6,
-                                     mutation_scale=10, shrinkB=2))
-    dpi.axis("off")
-    caption = "DPI eye tracking"
-    x_cap = 190 - text_width(caption, 21) / 2
-    bg.text(x_cap, 486, caption, va="top", fontsize=21, color=MUTED)
-    bg.text(x_cap + text_width(caption, 21) + 3, 480, "[2–4]", fontsize=15, color=TEXT,
-            va="top")
-
-    # Symbol key.
-    key = ax(30, 560, 380, 790)
-    key.set_xlim(0, 350), key.set_ylim(230, 0), key.axis("off")
-    key.scatter([18, 40], [22, 22], s=260, color=[RED, BLUE], edgecolor="white", lw=3)
-    key.text(66, 22, "Gaze on one trial", va="center", fontsize=21, color=TEXT)
-    ring = lambda r, cy, **kw: key.plot(29 + r * np.cos(np.linspace(0, 2 * np.pi, 60)),  # noqa: E731
-                                        cy + r * np.sin(np.linspace(0, 2 * np.pi, 60)), **kw)
-    ring(17, 82, color="white", lw=5, path_effects=[pe.Stroke(linewidth=9, foreground="#111111"),
-                                                    pe.Normal()])
-    key.plot(29, 82, marker="+", ms=18, mew=3.5, color=NAVY)
-    key.text(66, 72, "Population RF on these trials", va="center", fontsize=21, color=TEXT)
-    key.text(66, 98, "(same neurons in both views)", va="center", fontsize=19, color=MUTED)
-    ring(17, 152, color="white", lw=2.2, ls=(0, (3, 2)),
-         path_effects=[pe.Stroke(linewidth=4.5, foreground="#555555"), pe.Normal()])
-    key.text(66, 152, "Where it sat on the other trials", va="center", fontsize=21, color=TEXT)
-    key.text(0, 210, "Views: the cyan screen patch, enlarged", va="center", fontsize=19,
-             color=MUTED)
-
-    # ---- Middle: one enlarged view per trial group, beside its rasters --------
+    # ---- Zoomed stimulus: gaze dots and the RF on each group's trials -------------
     pts = np.vstack([gaze_hi, gaze_lo, rf + gaze_hi.mean(0), rf + gaze_lo.mean(0)])
     cx, cy = (pts.min(0) + pts.max(0)) / 2
-    view = np.ptp(pts, axis=0).max() / 2 + 0.1
-    vx0, vs = 395, 245
-    halo = [pe.Stroke(linewidth=10, foreground="#111111"), pe.Normal()]
-    ghost_fx = [pe.Stroke(linewidth=4.5, foreground="#444444"), pe.Normal()]
-    cross_fx = [pe.Stroke(linewidth=7.5, foreground="white"), pe.Normal()]
-    views = {}
-    groups = {RED: (gaze_hi, gaze_lo, "Red trials", 100),
-              BLUE: (gaze_lo, gaze_hi, "Blue trials", 420)}
-    for color, (gaze, other, title, vy0) in groups.items():
-        v = ax(vx0, vy0, vx0 + vs, vy0 + vs)
-        v.imshow(image, cmap="gray", extent=[-half, half, -half, half], origin="upper",
-                 vmin=0, vmax=255, interpolation="bilinear")
-        ghost = rf + other.mean(0)
-        v.plot(*np.vstack([ghost, ghost[:1]]).T, color="white", lw=2.2, ls=(0, (3, 2)),
-               path_effects=ghost_fx, zorder=3)
-        here = rf + gaze.mean(0)
-        v.plot(*np.vstack([here, here[:1]]).T, color="white", lw=5.5, path_effects=halo,
-               zorder=4)
-        v.plot(*np.vstack([gaze.mean(0), here.mean(0)]).T, color=color, lw=2.5,
-               ls=(0, (3, 2)), zorder=5,
-               path_effects=[pe.Stroke(linewidth=5, foreground="white"), pe.Normal()])
-        v.plot(*here.mean(0), marker="+", ms=24, mew=4, color=color, zorder=6,
-               path_effects=cross_fx)
-        v.scatter(*gaze.T, s=230, color=color, edgecolor="white", linewidth=3, zorder=5)
-        v.set_xlim(cx - view, cx + view), v.set_ylim(cy - view, cy + view)
-        v.set_xticks([]), v.set_yticks([])
-        for spine in v.spines.values():
-            spine.set_color(FRAME), spine.set_linewidth(4)
-        bg.text(vx0, vy0 - 8, title, fontsize=22, weight="bold", color=color, va="bottom")
-        views[color] = v
-    # The shift, drawn once: from where the RF sat on red trials to blue trials.
-    v = views[BLUE]
-    c_from, c_to = (rf + gaze_hi.mean(0)).mean(0), (rf + gaze_lo.mean(0)).mean(0)
-    v.annotate("", c_to, c_from, zorder=7,
-               arrowprops=dict(arrowstyle="-|>", color="white", lw=3.5, mutation_scale=22,
-                               shrinkA=0, shrinkB=6,
-                               path_effects=[pe.Stroke(linewidth=7, foreground="#111111"),
-                                             pe.Normal()]))
-    v.text(*((c_from + c_to) / 2 + np.array([0, -0.09])), f"{shift:.2f}°", ha="center",
-           va="top", fontsize=22, weight="bold", color="white", zorder=7,
-           path_effects=[pe.withStroke(linewidth=5, foreground="#111111")])
-    deg_pt = vs / (2 * view)
-    bar_y = 420 + vs + 16
-    bg.plot([vx0, vx0 + deg_pt], [bar_y] * 2, color="black", lw=4, solid_capstyle="butt")
-    bg.text(vx0 + deg_pt + 8, bar_y, "1°", ha="left", va="center", fontsize=21)
+    view = np.ptp(pts, axis=0).max() / 2 + 0.08
+    zx0, zy0, zs = 30, 462, 380
+    # Zoom connectors on the background layer, so the marmoset hides them.
+    sx = lambda x: 20 + (x - 20) * 360 / 380  # noqa: E731  rig -> panel coordinates
+    sy = lambda y: 210 + (y - 95) * 237 / 250  # noqa: E731
+    for (xa, ya), (xb, yb) in (((patch[0], patch[3]), (zx0, zy0)),
+                               ((patch[2], patch[3]), (zx0 + zs, zy0))):
+        bg.plot([sx(xa), xb], [sy(ya), yb], ls=(0, (5, 3)), color=FRAME, lw=2.5)
+    im = ax(zx0, zy0, zx0 + zs, zy0 + zs)
+    im.imshow(image, cmap="gray", extent=[-half, half, -half, half], origin="upper",
+              vmin=0, vmax=255, interpolation="bilinear")
+    halo = [pe.Stroke(linewidth=8.5, foreground="white"), pe.Normal()]
+    centres = {}
+    for gaze, color in ((gaze_lo, BLUE), (gaze_hi, RED)):
+        outline = rf + gaze.mean(0)
+        im.plot(*np.vstack([outline, outline[:1]]).T, color=color, lw=5, path_effects=halo,
+                zorder=3)
+        centres[color] = outline.mean(0)
+    im.annotate("", centres[RED], centres[BLUE], zorder=5,
+                arrowprops=dict(arrowstyle="-|>", color="white", lw=3.5, mutation_scale=22,
+                                shrinkA=0, shrinkB=0,
+                                path_effects=[pe.Stroke(linewidth=7, foreground="#111111"),
+                                              pe.Normal()]))
+    for gaze, color in ((gaze_lo, BLUE), (gaze_hi, RED)):
+        im.scatter(*gaze.T, s=170, color=color, edgecolor="white", linewidth=2.5, zorder=6)
+    im.set_xlim(cx - view, cx + view), im.set_ylim(cy - view, cy + view)
+    im.set_xticks([]), im.set_yticks([])
+    for spine in im.spines.values():
+        spine.set_color(FRAME), spine.set_linewidth(4)
+    bar_deg = 1.0 if zs / (2 * view) <= zs else 0.5      # 1 deg unless wider than the view
+    bar_pt = bar_deg * zs / (2 * view)
+    bar_y = zy0 + zs + 18
+    bg.plot([zx0, zx0 + bar_pt], [bar_y] * 2, color="black", lw=4, solid_capstyle="butt")
+    bg.text(zx0 + bar_pt, bar_y + 10, "1 degree" if bar_deg == 1 else "0.5 degree",
+            ha="right", va="top", fontsize=20)
 
-    # ---- Rasters: red (higher-rate) group above blue, trials numbered upward ----
+    # ---- Rasters: red (higher-rate) group above blue, trials numbered upward ------
     t_lo, t_hi = d["raster_ms"]
     w0, w1 = d["window_ms"]
-    rx0, rx1, bh, gap, ggap, top = 730, 1095, 70, 5, 22, 72
+    n_per = int(d["n_per"])
+    rx0, rx1, gap, ggap, top = 760, 1095, 5, 22, 72
+    bh = (612 - ggap - 2 * (n_per - 1) * gap) / (2 * n_per)   # rasters span y 72-684
     raster = {}
     y = top
-    for k in range(8):
-        group, number = (RED, 4 - k) if k < 4 else (BLUE, 8 - k)
-        row = (number - 1) if k < 4 else 4 + number - 1
+    for k in range(2 * n_per):
+        group, number = (RED, n_per - k) if k < n_per else (BLUE, 2 * n_per - k)
+        row = (number - 1) if k < n_per else n_per + number - 1
         a = ax(rx0, y, rx1, y + bh)
         a.axvspan(w0, w1, color=WINDOW, lw=0, zorder=0)
         sel = d["spk_k"] == row
@@ -211,14 +195,14 @@ def fem_panel():
         bg.text(rx0 - 12, y + bh / 2, f"Trial {number}", ha="right", va="center",
                 fontsize=21, color=group)
         raster[(group, number)] = (y, a)
-        y += bh + (ggap if k == 3 else gap)
+        y += bh + (ggap if k == n_per - 1 else gap)
     y_last = raster[(BLUE, 1)][0]
     n_pt = bh / (int(d["n_units"]) + 1) * 100
     bg.plot([rx1 + 12] * 2, [y_last + bh, y_last + bh - n_pt], color="black", lw=2.2)
-    bg.text(rx1 + 22, y_last + bh, "100 units", rotation=90, ha="left", va="bottom",
+    bg.text(rx1 + 22, y_last + bh, "100 neurons", rotation=90, ha="left", va="bottom",
             fontsize=21)
 
-    # ---- Group PSTHs -------------------------------------------------------------
+    # ---- PSTH ---------------------------------------------------------------------
     py0, py1 = y + 14, y + 100
     ps = ax(rx0, py0, rx1, py1)
     ps.axvspan(w0, w1, color=WINDOW, lw=0, zorder=0)
@@ -233,20 +217,26 @@ def fem_panel():
     ms_pt = (rx1 - rx0) / (t_hi - t_lo)
     bg.plot([rx0, rx0 + 50 * ms_pt], [py1 + 14] * 2, color="black", lw=4, solid_capstyle="butt")
     bg.text(rx0, py1 + 24, "50 ms", va="top", fontsize=21)
-    bg.text(rx1, py1 + 24, "shaded: gaze window", va="top", ha="right",
-            fontsize=19, color=MUTED)
 
-    # Captions.
-    diam = d["rf_diam_deg"]
-    bg.text(20, 858, f"Gaze shift {shift:.2f}° — smaller than a typical receptive field "
-            f"(median diameter {np.median(diam):.2f}°, {len(diam)} units)",
-            fontsize=23, weight="bold", color=NAVY)
-    bg.text(20, 893, "Dots: each trial’s median gaze in the shaded window. RF shape from noise "
-            "mapping, located from these trials.", fontsize=21, color=MUTED)
-    bg.text(20, 922, "One session, 132 units; same image sequence on every trial. "
-            "Lines: mean rate per unit.", fontsize=21, color=MUTED)
-    bg.text(20, 951, "Dataset: 2 marmosets · 1,022 foveal V1 units · 19 sessions · "
-            "20 Hz natural images", fontsize=21, color=MUTED)
+    # ---- Call-outs: the argument, in three phrases ----------------------------------
+    note(445, 556, "example trials\nfor different\nfixation positions", size=23)
+    for gaze, color in ((gaze_hi, RED), (gaze_lo, BLUE)):
+        yy, _ = raster[(color, 1)]
+        arrow(tuple(gaze.mean(0)), (rx0 - 98, yy + bh / 2), color if color == RED else NOTE,
+              ax_a=im)
+    note(440, 690, f"RF shift ({shift:.2f}°)\nsmaller than\nRF size ({np.median(diam):.2f}°)")
+    arrow((436, 730), tuple((centres[RED] + centres[BLUE]) / 2 + np.array([0, -0.05])),
+          NOTE, ax_b=im)
+    note(440, 838, "Small changes in fixation drive\nlarge changes in population response")
+    arrow((440 + text_width("large changes in population response", 25) + 10, 884),
+          (rx0 + 210, py1 + 2), NOTE)
+
+    # ---- Provenance -------------------------------------------------------------------
+    bg.text(20, 930, f"One session, 132 neurons, {n_per} trials per gaze group. Dots: median gaze in the "
+            "shaded window. RF: population footprint from noise mapping,", fontsize=17,
+            color=MUTED, va="top")
+    bg.text(20, 952, "located from these trials. Dataset: 2 marmosets · 1,022 foveal V1 units · "
+            "19 sessions · 20 Hz natural images.", fontsize=17, color=MUTED, va="top")
     save(fig, "panel_fem")
 
 

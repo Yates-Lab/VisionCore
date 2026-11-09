@@ -39,7 +39,7 @@ substitution. Obtain these fonts through your licensed installation; this projec
 does not distribute or download them. Preserve your own licensed originals for
 future rebuilds. No font licensing rights are granted by this repository.
 
-DejaVu Sans 2.37 and Liberation Sans 2.1.5 are bundled in `fonts/open/` with their
+DejaVu Sans 2.37 and Liberation Sans 2.1.5 (regular, bold and italic; the italic sets panel 1's call-outs) are bundled in `fonts/open/` with their
 license notices. Both renderers use the checked local fonts. Typst system-font
 lookup is disabled. Subsequent builds need no font setup:
 

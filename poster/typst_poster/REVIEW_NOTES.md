@@ -29,20 +29,32 @@ Old → new: 1 and 3 retired, 2 → 2, 4 → 3, 5 → 4, 6 → 5, 7 → 6, 8 →
   - Gaze is (x right, y up). RFs are in retinal coordinates and drawn at each
     group's mean gaze.
   - The image placement reproduces the dataset's gaze-contingent crops.
-  - The 0.33° shift is smaller than 99% of single-unit RFs (median diameter 0.42°).
+  - The 0.13° shift is about a third of the median single-unit RF (0.42°).
   - **RF position comes from the fixation trials** (`_task_rf_offset`): 0.41° left,
     0.06° below gaze (95% CI y −0.11 to −0.02°). This is consistent with Figure 1C's
     across-session RFs. The separate gaborium mapping put it at 0.56° left, 0.10°
     up, so only the RF's shape and size come from the mapping. Re-cropping with
     mirrored gaze axes explains the residual spiking much less well, which rules
     out a coordinate flip.
-- **Panel 1 layout:** one enlarged view per trial group ("Red trials" / "Blue
-  trials") beside its rasters.
-  - Each view shows that group's gaze dots, a gaze → RF-centre connector, the RF
-    outline with a crosshair at its centre, and a dashed ghost of where the RF sat
-    on the other trials.
-  - The blue view carries the 0.33° shift arrow.
-  - A left column holds the rig, the DPI eye image and a symbol key.
+- **Panel 1 layout** follows the original R01 figure: one zoomed stimulus view
+  fed from the rig, with red and blue as the only colour code across gaze dots,
+  RF outlines, trial labels and PSTH.
+  - Three italic call-outs, each with one arrow, carry the argument: example
+    trials for different fixation positions; RF shift (0.13°) smaller than RF size
+    (0.42°); small changes in fixation drive large changes in population response.
+  - A white arrow marks the RF shift between the two outlines.
+  - Two small provenance lines replace the caption block.
+  - Liberation Sans Italic 2.1.5 is bundled for the call-outs (metrically
+    identical to Arial; same open licence as the other Liberation fonts).
+  - Earlier per-group views, ghost outlines, crosshairs and symbol key were tried
+    and dropped as too busy.
+- **Panel 1 trials:** Figure 1F's grouping search, with cluster-centre distance
+  capped at 0.06° (`GROUP_CENTROID_DISTANCE` in `generate_fem_overview.py`).
+  - Red trials 36, 39, 69, 84, 87; blue trials 4, 8, 11, 26, 44. All five per group
+    are shown.
+  - Mean gaze shift 0.13° (about a third of an RF); population rate about 1.5×.
+  - The uncapped search picked the most distant pairs (0.33°, 2.1×). Those pairs
+    overstated the shift relative to the RF.
 - **Panel titles:** 48 pt, rewritten as claims.
   1. Tiny gaze shifts reshape population responses
   2. One neuron’s “noise” tracks the eye
@@ -85,8 +97,8 @@ Old → new: 1 and 3 retired, 2 → 2, 4 → 3, 5 → 4, 6 → 5, 7 → 6, 8 →
    19-session summary comparing fixational gaze spread with RF diameter.
 6. **Intro has spare space at the bottom.** It could be shortened in favour of
    panel 1.
-7. **Standalone R01 figure** (`generate_fem_overview.py`) still uses the single
-   zoom layout. It could adopt panel 1's per-group views.
+7. **Standalone R01 figure** (`generate_fem_overview.py`) shares panel 1's trials,
+   RF placement and image, but keeps the original R01 layout.
 
 ## Likely questions at the poster (no change needed)
 

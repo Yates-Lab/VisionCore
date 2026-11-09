@@ -63,13 +63,13 @@ def main():
     t1 = int(round(RASTER_MS[1] / 1000 / g.DT))
 
     spk_t, spk_u, spk_k = [], [], []
-    for k, trial in enumerate(high + low):         # rows 0-3 red trials 1-4, 4-7 blue
+    for k, trial in enumerate(high + low):         # red trials 1..n, then blue 1..n
         times, units = g.trial_spikes(payload, trial, t0, t1)
         spk_t.append(times), spk_u.append(units), spk_k.append(np.full(times.size, k))
     psth_t, psth_hi = g.group_psth(payload, high, t0, t1)
     _, psth_lo = g.group_psth(payload, low, t0, t1)
 
-    image_id = 4                                   # see generate_fem_overview docstring
+    image_id, _ = g.displayed_image(payload, assets, low, high)
     rf, n_rf = g.population_rf(payload, assets)
     gaze_hi, gaze_lo = g.trial_gaze(payload, high, s, e), g.trial_gaze(payload, low, s, e)
     diam = single_unit_rf_diameters(payload, assets)
@@ -81,7 +81,7 @@ def main():
         image=assets[f"im_{image_id}"], image_half_deg=float(assets[f"half_{image_id}"]),
         gaze_hi=gaze_hi, gaze_lo=gaze_lo, rf=rf, n_rf_units=n_rf,
         spk_t=np.concatenate(spk_t), spk_u=np.concatenate(spk_u),
-        spk_k=np.concatenate(spk_k), n_units=payload["robs"].shape[2],
+        spk_k=np.concatenate(spk_k), n_units=payload["robs"].shape[2], n_per=len(high),
         raster_ms=np.array(RASTER_MS), window_ms=np.array([s, e]) * g.DT * 1000,
         psth_t=psth_t, psth_hi=psth_hi, psth_lo=psth_lo,
         gaze_shift_deg=float(np.hypot(*(gaze_hi.mean(0) - gaze_lo.mean(0)))),

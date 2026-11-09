@@ -13,8 +13,12 @@ the Figure 1 work. Panels:
     (right)      population rasters for four trials per gaze group
     (bottom right) group population PSTHs
 
-Data: the same Allen 2022-03-02 session, gaze grouping and trial selection as
-Figure 1F (``generate_fig1f.py``) and poster panel 3.
+Data: the same Allen 2022-03-02 session and gaze-grouping search as Figure 1F
+(``generate_fig1f.py``), with the distance between cluster centres capped at
+0.06 deg (``GROUP_CENTROID_DISTANCE``). Red trials are 36, 39, 69, 84 and 87;
+blue trials are 4, 8, 11, 26 and 44. Their mean gaze differs by 0.13 deg, and the
+population rate differs about 1.5-fold in the grouping window. Figure 1F's
+uncapped search picks the pairs furthest apart (0.33 deg).
 
 What the marks mean (checked against the raw data, 2026-11-09):
     Dots         Each trial's median gaze over 158–292 ms after fixation onset,
@@ -31,13 +35,13 @@ What the marks mean (checked against the raw data, 2026-11-09):
                  across-session RFs. The mapping session alone put it 0.56 deg
                  left and 0.10 deg up, at the edge of that scatter; see
                  ``_task_rf_offset``. Single-unit RFs are similar in size
-                 (median diameter 0.42 deg), so the 0.33 deg gaze shift between
-                 groups is smaller than nearly every unit's RF.
+                 (median diameter 0.42 deg), so the 0.13 deg gaze shift between
+                 groups is about a third of an RF.
     Image        fixRSVP image 4 (on screen 150–200 ms; the same picture on
-                 every trial). It drives most of the response difference
-                 (179–243 ms) after the 33 ms population lag. Images 5 and 6
-                 also appear during the dot window, so one image is a
-                 simplification. Rendering this image at each gaze sample
+                 every trial). It was on screen one 33 ms population lag before
+                 the largest red–blue response difference
+                 (``displayed_image``). Images 5 and 6 also appear during the
+                 dot window, so one image is a simplification. Rendering this image at each gaze sample
                  reproduces the dataset's own gaze-contingent stimulus crops.
 
 Two stages:
@@ -84,9 +88,13 @@ PAYLOAD_PATH = CACHE_DIR / "fig1_population" / f"{SESSION}_panel_f.pkl"
 STE_PATH = CACHE_DIR / "fig1_rf_contours" / f"{SESSION}_sta_ste.npz"
 ASSET_PATH = CACHE_DIR / "fig1_population" / f"{SESSION}_overview_assets.npz"
 
-# Same display selection as fig1f / poster panel 3: drop combined rows 2 and 7
-# (1-indexed, lower-rate group first) to keep four trials per group.
-DROP_DISPLAY_ROWS = (2, 7)
+# Trial groups: Figure 1F's grouping search (generate_fig1f._get_eyepos_clusters)
+# with the distance between the two cluster-centre trials capped at 0.06 deg, so
+# the example shows a gaze shift well under one RF (~0.13 deg vs ~0.45 deg).
+# The uncapped search (up to 0.30 deg) favours the most distant pairs, which gave
+# a 0.33 deg shift. All five trials of each group are shown.
+GROUP_CENTROID_DISTANCE = (0.02, 0.06)
+GROUPS_PATH = CACHE_DIR / "fig1_population" / f"{SESSION}_overview_groups.npz"
 
 # Raster window, in bins relative to the clustering window [s, e).
 RASTER_PAD_BINS = 6
@@ -232,13 +240,32 @@ def load_assets(payload, refresh=False):
     return assets
 
 
-def selected_trials(payload):
-    iix, clusters = payload["iix"], payload["clusters"]
-    low = [int(t) for t, c in zip(iix, clusters) if c == 0]
-    high = [int(t) for t, c in zip(iix, clusters) if c == 1]
-    combined = low + high
-    keep = [t for i, t in enumerate(combined, start=1) if i not in DROP_DISPLAY_ROWS]
-    return keep[:len(low) - 1], keep[len(low) - 1:]
+def selected_trials(payload, refresh=False):
+    """(low-rate/blue, high-rate/red) trial lists, five trials each. Cached."""
+    if GROUPS_PATH.exists() and not refresh:
+        z = np.load(GROUPS_PATH)
+        return [int(t) for t in z["low"]], [int(t) for t in z["high"]]
+    import generate_fig1f as fig1f          # same directory; heavy, so imported lazily
+    iix_list, cl_list = fig1f._get_eyepos_clusters(
+        payload["eyepos"], payload["robs"], payload["segment_start"],
+        payload["segment_end"], payload["peak_lag"],
+        dist_between_centroids=GROUP_CENTROID_DISTANCE, return_top_k=1)
+    iix, clusters = iix_list[0], cl_list[0]
+    groups = [sorted(int(t) for t, c in zip(iix, clusters) if c == label)
+              for label in (0, 1)]            # 0 = lower total rate (blue), 1 = red
+    np.savez(GROUPS_PATH, low=groups[0], high=groups[1])
+    return groups[0], groups[1]
+
+
+def displayed_image(payload, assets, low, high):
+    """Image on screen one population lag before the largest group difference."""
+    s, e = clustering_window(payload)
+    centers, rate_hi = group_psth(payload, high, s, e + RASTER_PAD_BINS)
+    _, rate_lo = group_psth(payload, low, s, e + RASTER_PAD_BINS)
+    peak_ms = centers[np.argmax(np.abs(rate_hi - rate_lo))]
+    stim_bin = int(peak_ms / 1000 / DT) - payload["peak_lag"]
+    image_id = int(np.bincount(assets["image_ids"][high + low, stim_bin].clip(min=0)).argmax())
+    return image_id, stim_bin
 
 
 def clustering_window(payload):
@@ -348,10 +375,7 @@ def make_figure():
 
     centers, rate_hi = group_psth(payload, high, t0, t1)
     _, rate_lo = group_psth(payload, low, t0, t1)
-    peak_ms = centers[np.argmax(np.abs(rate_hi - rate_lo))]
-    stim_bin = int(peak_ms / 1000 / DT) - payload["peak_lag"]
-    image_id = int(np.bincount(assets["image_ids"][high + low, stim_bin]
-                               .clip(min=0)).argmax())
+    image_id, stim_bin = displayed_image(payload, assets, low, high)
     image, half = assets[f"im_{image_id}"], float(assets[f"half_{image_id}"])
     gaze_hi, gaze_lo = trial_gaze(payload, high, s, e), trial_gaze(payload, low, s, e)
     rf, n_rf_units = population_rf(payload, assets)
@@ -442,17 +466,23 @@ def make_figure():
                                ((patch[2], patch[3]), (222, 420))):
         ax_rig.plot([xa, xb], [ya, yb], ls=(0, (4, 3)), color=FRAME_BLUE, lw=2,
                     clip_on=False)
-    bar_px = 214 / (2 * view)                               # px per degree
+    bar_deg = 1.0 if 214 / (2 * view) <= 214 else 0.5       # 1 deg unless wider than view
+    bar_px = bar_deg * 214 / (2 * view)
     fig.add_artist(mpl.lines.Line2D([P(8, 0)[0], P(8 + bar_px, 0)[0]],
                                     [P(0, 649)[1]] * 2, color="black", lw=3.5,
                                     solid_capstyle="butt"))
-    fig.text(*P(8 + bar_px, 657), "1 degree", ha="right", va="top", fontsize=12)
+    fig.text(*P(8 + bar_px, 657), "1 degree" if bar_deg == 1 else "0.5 degree", ha="right",
+             va="top", fontsize=12)
 
     # ---- Rasters --------------------------------------------------------------
-    rx0, rx1, block_h = 480, 662, 80
+    rx0, rx1 = 480, 662
     raster_axes = {}
-    tops = [0, 87, 174, 261, 352, 439, 526, 613]
-    rows = [(RED, high, k) for k in (4, 3, 2, 1)] + [(NAVY, low, k) for k in (4, 3, 2, 1)]
+    n_per = len(high)
+    step = 700 // (2 * n_per + 1)
+    tops = [i * step for i in range(n_per)] + [(n_per + i) * step + 10 for i in range(n_per)]
+    block_h = step - 7
+    rows = ([(RED, high, k) for k in range(n_per, 0, -1)]
+            + [(NAVY, low, k) for k in range(n_per, 0, -1)])
     for top, (color, group, k) in zip(tops, rows):
         ax = box(rx0, top + 4, rx1, top + 4 + block_h)
         times, units = trial_spikes(payload, group[k - 1], t0, t1)
@@ -464,7 +494,8 @@ def make_figure():
         raster_axes[(color, k)] = ax
     ax_last = raster_axes[(NAVY, 1)]
     neuron_px = block_h / (n_units + 1)
-    y_bar = (630, 630 + 100 * neuron_px)
+    y_end = tops[-1] + 4 + block_h
+    y_bar = (y_end - 100 * neuron_px, y_end)
     fig.add_artist(mpl.lines.Line2D([P(667, 0)[0]] * 2, [P(0, y)[1] for y in y_bar],
                                     color="black", lw=1.8))
     fig.text(*P(678, y_bar[1]), "100 neurons", rotation=90, ha="left", va="bottom",
@@ -494,9 +525,9 @@ def make_figure():
 
     # ---- Annotations ------------------------------------------------------------
     note(252, 468, "example trials\nfor different\nfixation\npositions", size=15)
-    arrow(tuple(gaze_hi.mean(0)), P(400, 320), RED, coords_a="data", ax_a=ax_im,
+    arrow(tuple(gaze_hi.mean(0)), P(400, tops[n_per - 1] + 18), RED, coords_a="data", ax_a=ax_im,
           rad=-0.25)
-    arrow(tuple(gaze_lo.mean(0)), P(410, 638), NAVY, coords_a="data", ax_a=ax_im,
+    arrow(tuple(gaze_lo.mean(0)), P(410, tops[-1] + 18), NAVY, coords_a="data", ax_a=ax_im,
           rad=0.12)
     note(242, 655, "RF shift smaller\nthan RF size")
     arrow(P(236, 672), tuple(rf.mean(0) + gaze_hi.mean(0)), NAVY, coords_b="data",
