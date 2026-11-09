@@ -32,6 +32,13 @@ def main():
     typst.compile(str(component / 'panel5.typ'), output=str(component / 'panel5_pilot.pdf'),
                   root=str(component), **options)
     shutil.copyfile(component / 'panel5_pilot.pdf', HERE / 'assets/panel5_pilot.pdf')
+    # Intro and panel 1 (gaze shifts within an RF): Matplotlib plots from frozen
+    # data, intro text composed natively in Typst.
+    fem = HERE / 'components/panel_fem'
+    subprocess.run([sys.executable, str(fem / 'render_plots.py')],
+                   cwd=HERE, env=env, check=True, stdout=subprocess.DEVNULL)
+    typst.compile(str(fem / 'intro.typ'), output=str(HERE / 'assets/intro.pdf'),
+                  root=str(HERE), **options)
     out = HERE / 'output'
     out.mkdir(exist_ok=True)
     pdf = out / 'poster_typst_full_60x36.pdf'

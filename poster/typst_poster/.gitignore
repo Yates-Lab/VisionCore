@@ -3,6 +3,7 @@
 !/.gitignore
 !/.python-version
 !/README.md
+!/REVIEW_NOTES.md
 !/pyproject.toml
 !/uv.lock
 !/build.py
@@ -21,9 +22,7 @@
 !/assets/background.svg
 !/assets/header.svg
 !/assets/footer.svg
-!/assets/panel1.svg
 !/assets/panel2.svg
-!/assets/panel3.svg
 !/assets/panel4.svg
 !/assets/panel6.svg
 !/assets/panel7.svg
@@ -39,6 +38,14 @@
 !/components/panel5/assets/
 /components/panel5/assets/*
 !/components/panel5/assets/residual_connector.svg
+!/components/panel_fem/
+/components/panel_fem/*
+!/components/panel_fem/export_data.py
+!/components/panel_fem/render_plots.py
+!/components/panel_fem/intro.typ
+!/components/panel_fem/plot_data.npz
+!/components/panel_fem/assets/
+!/components/panel_fem/assets/*.png
 !/fonts/manifest.json
 !/reference/inputs.json
 !/reference/approved.pdf

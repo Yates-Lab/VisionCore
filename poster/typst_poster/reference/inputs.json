@@ -1,19 +1,21 @@
 {
-  "assets/background.svg": "d802fbe637376e2661d0d94c0f12a0a5e86a93c015edbc4690a2484eaedeb33c",
+  "assets/background.svg": "fcc7e748d36ac41ac985d7d65fe85f4367c13e12ef5f184757608e1e03cb2886",
   "assets/footer.svg": "61401141362b09197635e4ec543ef517dc21248b2f339bfad974ac0a44c5feb6",
   "assets/header.svg": "64b1cd54f53f55bf882f68784cc8dcec4d08395abd0b1f20314a24ef0ba92e3f",
-  "assets/panel1.svg": "8432c5c74d12b60f77ee410514eb270a3a8a3b92193661c4b9f3f677c8dc679a",
-  "assets/panel2.svg": "b628459696b3028025bc144990b133474f618ba5252ed7c28c5c7f068ed50d00",
-  "assets/panel3.svg": "b892289fe53283a024f2772b3a5cccb612157ebad83bc6ebd9cb54cd11254008",
+  "assets/panel2.svg": "ec2815aa9eb5f3311d88abc6ab8402b0d6a7e7c05b0754a4460f6b186340ecb0",
   "assets/panel4.svg": "452578c99e4cb9bf91cb47670407398220c479911c6cdec01a06651908f9de14",
   "assets/panel6.svg": "afb3eaad258d92d87c90f62340cbb45eb8ce8faa9f32d3fe26c8a91e3822a8d5",
   "assets/panel7.svg": "0bfc01ec917d33fe6c1a1f048b72aae4761d29b673235c899905cb1d34d8755e",
   "assets/panel8.svg": "98ee6bb0d2acf9e8630817327230412fa555c9e203773535d351affe0698bab2",
   "assets/panel9.svg": "3384d2b7f0424b04cec56018e0799e9d3a6b5d114f157affacd33d62b1bf9870",
   "components/panel5/assets/residual_connector.svg": "47874966126acb9c14b47d2ac5cf3d54ff7cc142676821d4447d64e3d45c5255",
-  "components/panel5/panel5.typ": "9c1c96f94a590d7eb82afdf15701ca97205dc325b5680f2be043a0357f4fb7b2",
+  "components/panel5/panel5.typ": "e2ee78830b4dc668149ce87a4b7463b3d730c1282e25cb550924a528cdbfccff",
   "components/panel5/plot_data.npz": "3ad173168b952d93934478525d01c51d6f42339427368d2d47267be228924b77",
+  "components/panel_fem/assets/dpi_eye.png": "bfd26e1861e6849c2b62a4effe3504566eb17bd917ebde466f1ab4c54d62e033",
+  "components/panel_fem/assets/marmoset.png": "fc0203e3774c5526d1d90bd8adb9464c2379c180ef730715d2c8e9a7cd2c4600",
+  "components/panel_fem/intro.typ": "9db21c0b24a6f5fe867488c4966dfba9cbe52f1aa62c36b49fc5b8bdca8f069d",
+  "components/panel_fem/plot_data.npz": "3e3b99ba71767a7b550733be18d226daee3ade512fa2e93b59b688217d53356a",
   "poster.typ": "b0e0e3a43eed97d0567cdda78a6b3eb1505f1216eab8e1d26536b533187b2127",
-  "poster_content.json": "950872e073141b400ff040a23a0b1ea0a4fa87c7e3f2da4ea7a114bbcdd48ef5",
-  "reference/approved.pdf": "f02a9dcb5697c3eeae246feaad1f157f9c72d64b33909400dfb054fad7c95111"
+  "poster_content.json": "8aa09acd653825f5f99cf4694a08b355651c3b8bc0f38a1f854490b9bf2c796d",
+  "reference/approved.pdf": "21c5ee47c20c8c68e49e384d5255d78051e5262367c491a0376af8d9ae008f93"
 }

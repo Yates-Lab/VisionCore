@@ -61,7 +61,8 @@ The original repository-wide `.venv` is not required.
 - `output/poster_typst_full.png`: full 4320 × 2592 pixel preview (72 pixels per
   physical inch at poster size; use the PDF for printing).
 - `output/poster_typst_overview.png`: compact 1728 × 1037 preview.
-- `output/panel1.png` through `output/panel9.png`, plus header/footer crops.
+- One crop per region in `poster_content.json` (`intro.png`, `panel_fem.png`,
+  `panel2.png`, `panel4.png` … `panel9.png`), plus header and footer crops.
 - `output/validation.json` and `output/layout_audit.json`: validation reports.
 - With `--compare`: `output/approved_reference.png` and `output/difference.png`.
   An all-black difference image means no changed pixels.
@@ -74,9 +75,20 @@ JSON, NPZ and reference PDF inputs despite the repository-wide extension rules.
 
 - `poster.typ` and `poster_content.json`: page layout, scientific wording,
   positions, font sizes, colors and rotations. Text remains native/selectable.
+  Region names keep the original panel numbers. Since the 2026-11-09 column-1
+  redesign, the printed badge of region `panelN` (N ≥ 4) reads N − 1: the first
+  column is now the intro, panel 1 (`panel_fem`) and panel 2.
 - `assets/*.svg`: approved scientific graphics, including embedded raster data,
-  clipping, original plotted paths and panel 8's schematic. These are editable
-  graphics, not screenshots of complete panels.
+  clipping, original plotted paths and the model schematic (region `panel8`).
+  These are editable graphics, not screenshots of complete panels.
+- `components/panel_fem/`: the intro and panel 1 ("Gaze shifts within an RF change
+  population responses"). `plot_data.npz` holds the frozen data. `render_plots.py`
+  draws panel 1 and the intro's gaze/RF schematic. `intro.typ` composes the intro
+  text. `assets/marmoset.png` is the canonical marmoset line drawing and
+  `assets/dpi_eye.png` the DPI eye image. `export_data.py` documents provenance:
+  it regenerates the data from `paper/fig1/generate_fem_overview.py` (same
+  session, trials and RFs as the standalone R01 figure), needs the analysis
+  environment, and is never run by the build.
 - `components/panel5/plot_data.npz`: unchanged matrix, Fano and correlation data
   used to regenerate panel 5. `render_plots.py` renders the plots at their approved
   physical sizes; `panel5.typ` composes the panel with native text.
@@ -85,9 +97,10 @@ JSON, NPZ and reference PDF inputs despite the repository-wide extension rules.
   `generate_panel_noisecorr.py`. Implicit analysis-loading fallbacks were removed;
   the plotting operations are preserved. This isolates the build from future
   manuscript-helper changes and avoids importing the analysis dependency tree.
-- `reference/approved.pdf`: the accepted full poster immediately before this
-  packaging change. `reference/inputs.json` records the corresponding hashes of
-  the scientific/layout sources, saved data and reference PDF.
+- `reference/approved.pdf`: the currently approved full poster, last updated
+  for the 2026-11-09 review edits and column-1 redesign (see `REVIEW_NOTES.md`). `reference/inputs.json`
+  records the corresponding hashes of the scientific/layout sources, saved data
+  and reference PDF.
 
 Reproduction starts from these approved assets and saved results. It does not
 rerun model fitting or regenerate every panel from the experimental raw data.
