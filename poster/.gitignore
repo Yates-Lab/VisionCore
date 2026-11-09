@@ -1,0 +1,6 @@
+# Historical exports, analysis caches and one-off editing workspaces stay local.
+# The current build and its required source/data inputs live in typst_poster.
+/*
+!/.gitignore
+!/.gitattributes
+!/typst_poster/

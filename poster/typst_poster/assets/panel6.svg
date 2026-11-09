@@ -1,0 +1,861 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1479.73828125pt" height="627.09375pt" viewBox="1229.87109375 1843.23046875 1479.73828125 627.09375"><defs><clipPath id="clippath-705">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-632">
+      <rect x="1344.16" y="1963.35" width="356.77" height="334.78" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-695">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-700">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-637">
+      <rect x="1344.16" y="1963.35" width="356.77" height="334.78" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-658">
+      <rect x="1794.03" y="1920.58" width="414.32" height="414.32" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-661">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-625">
+      <rect x="1344.16" y="1963.35" width="356.77" height="334.78" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-655">
+      <rect x="1794.03" y="1920.58" width="414.32" height="414.32" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-617">
+      <rect x="1344.16" y="1963.35" width="356.77" height="334.78" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-636">
+      <rect x="1344.16" y="1963.35" width="356.77" height="334.78" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-687">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-697">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-696">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-691">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-690">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-649">
+      <rect x="1794.03" y="1920.58" width="414.32" height="414.32" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-669">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-647">
+      <rect x="1794.03" y="1920.58" width="414.32" height="414.32" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-666">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-679">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-668">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-676">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-692">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-707">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-688">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-698">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-644">
+      <rect x="1344.16" y="1963.35" width="356.77" height="334.78" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-623">
+      <rect x="1344.16" y="1963.35" width="356.77" height="334.78" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-680">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-693">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-672">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-634">
+      <rect x="1344.16" y="1963.35" width="356.77" height="334.78" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-627">
+      <rect x="1344.16" y="1963.35" width="356.77" height="334.78" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-703">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-684">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-694">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-626">
+      <rect x="1344.16" y="1963.35" width="356.77" height="334.78" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-653">
+      <rect x="1794.03" y="1920.58" width="414.32" height="414.32" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-664">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-667">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-665">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-630">
+      <rect x="1344.16" y="1963.35" width="356.77" height="334.78" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-628">
+      <rect x="1344.16" y="1963.35" width="356.77" height="334.78" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-645">
+      <rect x="1344.16" y="1963.35" width="356.77" height="334.78" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-638">
+      <rect x="1344.16" y="1963.35" width="356.77" height="334.78" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-633">
+      <rect x="1344.16" y="1963.35" width="356.77" height="334.78" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-671">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-662">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-621">
+      <rect x="1344.16" y="1963.35" width="356.77" height="334.78" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-654">
+      <rect x="1794.03" y="1920.58" width="414.32" height="414.32" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-643">
+      <rect x="1344.16" y="1963.35" width="356.77" height="334.78" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-675">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-677">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-652">
+      <rect x="1794.03" y="1920.58" width="414.32" height="414.32" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-678">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-629">
+      <rect x="1344.16" y="1963.35" width="356.77" height="334.78" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-681">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-646">
+      <rect x="1794.03" y="1920.58" width="414.32" height="414.32" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-663">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-709">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-702">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-659">
+      <rect x="1794.03" y="1920.58" width="414.32" height="414.32" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-624">
+      <rect x="1344.16" y="1963.35" width="356.77" height="334.78" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-656">
+      <rect x="1794.03" y="1920.58" width="414.32" height="414.32" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-641">
+      <rect x="1344.16" y="1963.35" width="356.77" height="334.78" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-674">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-683">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-660">
+      <rect x="1794.03" y="1920.58" width="414.32" height="414.32" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-704">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-699">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-616">
+      <rect x="1344.16" y="1963.35" width="356.77" height="334.78" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-708">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-622">
+      <rect x="1344.16" y="1963.35" width="356.77" height="334.78" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-618">
+      <rect x="1344.16" y="1963.35" width="356.77" height="334.78" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-640">
+      <rect x="1344.16" y="1963.35" width="356.77" height="334.78" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-670">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-657">
+      <rect x="1794.03" y="1920.58" width="414.32" height="414.32" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-648">
+      <rect x="1794.03" y="1920.58" width="414.32" height="414.32" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-619">
+      <rect x="1344.16" y="1963.35" width="356.77" height="334.78" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-620">
+      <rect x="1344.16" y="1963.35" width="356.77" height="334.78" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-673">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-686">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-639">
+      <rect x="1344.16" y="1963.35" width="356.77" height="334.78" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-651">
+      <rect x="1794.03" y="1920.58" width="414.32" height="414.32" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-710">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-701">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-642">
+      <rect x="1344.16" y="1963.35" width="356.77" height="334.78" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-706">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-650">
+      <rect x="1794.03" y="1920.58" width="414.32" height="414.32" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-685">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-689">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-682">
+      <rect x="2307.35" y="1962.84" width="373.23" height="331.79" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-631">
+      <rect x="1344.16" y="1963.35" width="356.77" height="334.78" fill="none"/>
+    </clipPath>
+    <clipPath id="clippath-635">
+      <rect x="1344.16" y="1963.35" width="356.77" height="334.78" fill="none"/>
+    </clipPath>
+    </defs><g id="Panel_6_revised"><g id="_07_Panel_6_Number_badge" data-name="07_Panel_6_Number_badge">
+        <circle cx="1259.01" cy="1879.57" r="22.13" fill="#B8651B" stroke="#fff" stroke-linejoin="round" stroke-width="2.5"/>
+      </g>
+      <g id="p6_a0_axes_1" data-name="p6 a0 axes 1" transform="translate(0 1963.23046875) scale(1 .96) translate(0 -1963.23046875) translate(0 -8) translate(0 2360) scale(1 1.1649789407653015) translate(0 -2298.12)">
+              <g id="p6_a0_patch_2" data-name="p6 a0 patch 2">
+                <path d="M1344.16,2298.12h356.77v-334.77h-356.77V2298.12Z" fill="none"/>
+              </g>
+              <g id="p6_a0_matplotlib.axis_1" data-name="p6 a0 matplotlib.axis 1">
+                <g id="p6_a0_xtick_1" data-name="p6 a0 xtick 1">
+                  <g id="p6_a0_line2d_1" data-name="p6 a0 line2d 1">
+                    <path id="p6_a0_mc8aaef6300" data-name="p6 a0 mc8aaef6300" d="M1401.7,2298.12v6.22" stroke="#000" stroke-linejoin="round" stroke-width="1.42"/>
+                  </g>
+                </g>
+                <g id="p6_a0_xtick_2" data-name="p6 a0 xtick 2">
+                  <g id="p6_a0_line2d_2" data-name="p6 a0 line2d 2">
+                    <path id="p6_a0_mc8aaef6300-2" data-name="p6 a0 mc8aaef6300" d="M1516.79,2298.12v6.22" stroke="#000" stroke-linejoin="round" stroke-width="1.42"/>
+                  </g>
+                </g>
+                <g id="p6_a0_xtick_3" data-name="p6 a0 xtick 3">
+                  <g id="p6_a0_line2d_3" data-name="p6 a0 line2d 3">
+                    <path id="p6_a0_mc8aaef6300-3" data-name="p6 a0 mc8aaef6300" d="M1631.88,2298.12v6.22" stroke="#000" stroke-linejoin="round" stroke-width="1.42"/>
+                  </g>
+                </g>
+              </g>
+              <g id="p6_a0_matplotlib.axis_2" data-name="p6 a0 matplotlib.axis 2">
+                <g id="p6_a0_ytick_1" data-name="p6 a0 ytick 1">
+                  <g id="p6_a0_line2d_4" data-name="p6 a0 line2d 4">
+                    <g clip-path="url(#clippath-616)">
+                      <path d="M1344.16,2298.12h356.77" fill="none" stroke="rgba(176, 176, 176, .25)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.07"/>
+                    </g>
+                  </g>
+                  <g id="p6_a0_line2d_5" data-name="p6 a0 line2d 5">
+                    <path id="p6_a0_m2e22ceb904" data-name="p6 a0 m2e22ceb904" d="M1344.16,2298.12h-6.22" stroke="#000" stroke-linejoin="round" stroke-width="1.42"/>
+                  </g>
+                </g>
+                <g id="p6_a0_ytick_2" data-name="p6 a0 ytick 2">
+                  <g id="p6_a0_line2d_6" data-name="p6 a0 line2d 6">
+                    <g clip-path="url(#clippath-617)">
+                      <path d="M1344.16,2253.71h356.77" fill="none" stroke="rgba(176, 176, 176, .25)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.07"/>
+                    </g>
+                  </g>
+                  <g id="p6_a0_line2d_7" data-name="p6 a0 line2d 7">
+                    <path id="p6_a0_m2e22ceb904-2" data-name="p6 a0 m2e22ceb904" d="M1344.16,2253.71h-6.22" stroke="#000" stroke-linejoin="round" stroke-width="1.42"/>
+                  </g>
+                </g>
+                <g id="p6_a0_ytick_3" data-name="p6 a0 ytick 3">
+                  <g id="p6_a0_line2d_8" data-name="p6 a0 line2d 8">
+                    <g clip-path="url(#clippath-618)">
+                      <path d="M1344.16,2195.01h356.77" fill="none" stroke="rgba(176, 176, 176, .25)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.07"/>
+                    </g>
+                  </g>
+                  <g id="p6_a0_line2d_9" data-name="p6 a0 line2d 9">
+                    <path id="p6_a0_m2e22ceb904-3" data-name="p6 a0 m2e22ceb904" d="M1344.16,2195.01h-6.22" stroke="#000" stroke-linejoin="round" stroke-width="1.42"/>
+                  </g>
+                </g>
+                <g id="p6_a0_ytick_4" data-name="p6 a0 ytick 4">
+                  <g id="p6_a0_line2d_10" data-name="p6 a0 line2d 10">
+                    <g clip-path="url(#clippath-619)">
+                      <path d="M1344.16,2150.59h356.77" fill="none" stroke="rgba(176, 176, 176, .25)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.07"/>
+                    </g>
+                  </g>
+                  <g id="p6_a0_line2d_11" data-name="p6 a0 line2d 11">
+                    <path id="p6_a0_m2e22ceb904-4" data-name="p6 a0 m2e22ceb904" d="M1344.16,2150.59h-6.22" stroke="#000" stroke-linejoin="round" stroke-width="1.42"/>
+                  </g>
+                </g>
+                <g id="p6_a0_ytick_5" data-name="p6 a0 ytick 5">
+                  <g id="p6_a0_line2d_12" data-name="p6 a0 line2d 12">
+                    <g clip-path="url(#clippath-620)">
+                      <path d="M1344.16,2106.18h356.77" fill="none" stroke="rgba(176, 176, 176, .25)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.07"/>
+                    </g>
+                  </g>
+                  <g id="p6_a0_line2d_13" data-name="p6 a0 line2d 13">
+                    <path id="p6_a0_m2e22ceb904-5" data-name="p6 a0 m2e22ceb904" d="M1344.16,2106.18h-6.22" stroke="#000" stroke-linejoin="round" stroke-width="1.42"/>
+                  </g>
+                </g>
+                <g id="p6_a0_ytick_6" data-name="p6 a0 ytick 6">
+                  <g id="p6_a0_line2d_14" data-name="p6 a0 line2d 14">
+                    <g clip-path="url(#clippath-621)">
+                      <path d="M1344.16,2047.48h356.77" fill="none" stroke="rgba(176, 176, 176, .25)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.07"/>
+                    </g>
+                  </g>
+                  <g id="p6_a0_line2d_15" data-name="p6 a0 line2d 15">
+                    <path id="p6_a0_m2e22ceb904-6" data-name="p6 a0 m2e22ceb904" d="M1344.16,2047.48h-6.22" stroke="#000" stroke-linejoin="round" stroke-width="1.42"/>
+                  </g>
+                </g>
+                <g id="p6_a0_ytick_7" data-name="p6 a0 ytick 7">
+                  <g id="p6_a0_line2d_16" data-name="p6 a0 line2d 16">
+                    <path id="p6_a0_mfb2bc4e401" data-name="p6 a0 mfb2bc4e401" d="M1344.16,2227.73h-3.55" stroke="#000" stroke-linejoin="round" stroke-width="1.07"/>
+                  </g>
+                </g>
+                <g id="p6_a0_ytick_8" data-name="p6 a0 ytick 8">
+                  <g id="p6_a0_line2d_17" data-name="p6 a0 line2d 17">
+                    <path id="p6_a0_mfb2bc4e401-2" data-name="p6 a0 mfb2bc4e401" d="M1344.16,2209.3h-3.55" stroke="#000" stroke-linejoin="round" stroke-width="1.07"/>
+                  </g>
+                </g>
+                <g id="p6_a0_ytick_9" data-name="p6 a0 ytick 9">
+                  <g id="p6_a0_line2d_18" data-name="p6 a0 line2d 18">
+                    <path id="p6_a0_mfb2bc4e401-3" data-name="p6 a0 mfb2bc4e401" d="M1344.16,2183.32h-3.55" stroke="#000" stroke-linejoin="round" stroke-width="1.07"/>
+                  </g>
+                </g>
+                <g id="p6_a0_ytick_10" data-name="p6 a0 ytick 10">
+                  <g id="p6_a0_line2d_19" data-name="p6 a0 line2d 19">
+                    <path id="p6_a0_mfb2bc4e401-4" data-name="p6 a0 mfb2bc4e401" d="M1344.16,2173.45h-3.55" stroke="#000" stroke-linejoin="round" stroke-width="1.07"/>
+                  </g>
+                </g>
+                <g id="p6_a0_ytick_11" data-name="p6 a0 ytick 11">
+                  <g id="p6_a0_line2d_20" data-name="p6 a0 line2d 20">
+                    <path id="p6_a0_mfb2bc4e401-5" data-name="p6 a0 mfb2bc4e401" d="M1344.16,2164.89h-3.55" stroke="#000" stroke-linejoin="round" stroke-width="1.07"/>
+                  </g>
+                </g>
+                <g id="p6_a0_ytick_12" data-name="p6 a0 ytick 12">
+                  <g id="p6_a0_line2d_21" data-name="p6 a0 line2d 21">
+                    <path id="p6_a0_mfb2bc4e401-6" data-name="p6 a0 mfb2bc4e401" d="M1344.16,2157.35h-3.55" stroke="#000" stroke-linejoin="round" stroke-width="1.07"/>
+                  </g>
+                </g>
+                <g id="p6_a0_ytick_13" data-name="p6 a0 ytick 13">
+                  <g id="p6_a0_line2d_22" data-name="p6 a0 line2d 22">
+                    <path id="p6_a0_mfb2bc4e401-7" data-name="p6 a0 mfb2bc4e401" d="M1344.16,2080.21h-3.55" stroke="#000" stroke-linejoin="round" stroke-width="1.07"/>
+                  </g>
+                </g>
+                <g id="p6_a0_ytick_14" data-name="p6 a0 ytick 14">
+                  <g id="p6_a0_line2d_23" data-name="p6 a0 line2d 23">
+                    <path id="p6_a0_mfb2bc4e401-8" data-name="p6 a0 mfb2bc4e401" d="M1344.16,2061.77h-3.55" stroke="#000" stroke-linejoin="round" stroke-width="1.07"/>
+                  </g>
+                </g>
+                <g id="p6_a0_ytick_15" data-name="p6 a0 ytick 15">
+                  <g id="p6_a0_line2d_24" data-name="p6 a0 line2d 24">
+                    <path id="p6_a0_mfb2bc4e401-9" data-name="p6 a0 mfb2bc4e401" d="M1344.16,2035.79h-3.55" stroke="#000" stroke-linejoin="round" stroke-width="1.07"/>
+                  </g>
+                </g>
+                <g id="p6_a0_ytick_16" data-name="p6 a0 ytick 16">
+                  <g id="p6_a0_line2d_25" data-name="p6 a0 line2d 25">
+                    <path id="p6_a0_mfb2bc4e401-10" data-name="p6 a0 mfb2bc4e401" d="M1344.16,2025.92h-3.55" stroke="#000" stroke-linejoin="round" stroke-width="1.07"/>
+                  </g>
+                </g>
+                <g id="p6_a0_ytick_17" data-name="p6 a0 ytick 17">
+                  <g id="p6_a0_line2d_26" data-name="p6 a0 line2d 26">
+                    <path id="p6_a0_mfb2bc4e401-11" data-name="p6 a0 mfb2bc4e401" d="M1344.16,2017.36h-3.55" stroke="#000" stroke-linejoin="round" stroke-width="1.07"/>
+                  </g>
+                </g>
+                <g id="p6_a0_ytick_18" data-name="p6 a0 ytick 18">
+                  <g id="p6_a0_line2d_27" data-name="p6 a0 line2d 27">
+                    <path id="p6_a0_mfb2bc4e401-12" data-name="p6 a0 mfb2bc4e401" d="M1344.16,2009.82h-3.55" stroke="#000" stroke-linejoin="round" stroke-width="1.07"/>
+                  </g>
+                </g>
+              </g>
+              <g id="p6_a0_line2d_28" data-name="p6 a0 line2d 28">
+                <g clip-path="url(#clippath-622)">
+                  <path d="M1401.7,2078.76l115.09,128.53,115.09,24.32" fill="none" stroke="rgba(135, 143, 152, .65)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.24"/>
+                </g>
+              </g>
+              <g id="p6_a0_line2d_29" data-name="p6 a0 line2d 29">
+                <g clip-path="url(#clippath-623)">
+                  <path d="M1401.7,2124.02l115.09,111.66,115.09,13.85" fill="none" stroke="rgba(135, 143, 152, .65)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.24"/>
+                </g>
+              </g>
+              <g id="p6_a0_line2d_30" data-name="p6 a0 line2d 30">
+                <g clip-path="url(#clippath-624)">
+                  <path d="M1401.7,2125.38l115.09,75.73,115.09-13.52" fill="none" stroke="rgba(135, 143, 152, .65)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.24"/>
+                </g>
+              </g>
+              <g id="p6_a0_line2d_31" data-name="p6 a0 line2d 31">
+                <g clip-path="url(#clippath-625)">
+                  <path d="M1401.7,2079.14l115.09,153.15,115.09-8.57" fill="none" stroke="rgba(135, 143, 152, .65)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.24"/>
+                </g>
+              </g>
+              <g id="p6_a0_line2d_32" data-name="p6 a0 line2d 32">
+                <g clip-path="url(#clippath-626)">
+                  <path d="M1401.7,2068.06l115.09,145.09,115.09-10.68" fill="none" stroke="rgba(135, 143, 152, .65)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.24"/>
+                </g>
+              </g>
+              <g id="p6_a0_line2d_33" data-name="p6 a0 line2d 33">
+                <g clip-path="url(#clippath-627)">
+                  <path d="M1401.7,2043.8l115.09,150.73,115.09,12.28" fill="none" stroke="rgba(135, 143, 152, .65)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.24"/>
+                </g>
+              </g>
+              <g id="p6_a0_line2d_34" data-name="p6 a0 line2d 34">
+                <g clip-path="url(#clippath-628)">
+                  <path d="M1401.7,2058.63l115.09,136.3,115.09,11" fill="none" stroke="rgba(135, 143, 152, .65)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.24"/>
+                </g>
+              </g>
+              <g id="p6_a0_line2d_35" data-name="p6 a0 line2d 35">
+                <g clip-path="url(#clippath-629)">
+                  <path d="M1401.7,2059.64l115.09,132.37,115.09,5.35" fill="none" stroke="rgba(135, 143, 152, .65)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.24"/>
+                </g>
+              </g>
+              <g id="p6_a0_line2d_36" data-name="p6 a0 line2d 36">
+                <g clip-path="url(#clippath-630)">
+                  <path d="M1401.7,2064.11l115.09,138.45,115.09,25.93" fill="none" stroke="rgba(135, 143, 152, .65)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.24"/>
+                </g>
+              </g>
+              <g id="p6_a0_line2d_37" data-name="p6 a0 line2d 37">
+                <g clip-path="url(#clippath-631)">
+                  <path d="M1401.7,2087.93l115.09,135.27,115.09,11.07" fill="none" stroke="rgba(135, 143, 152, .65)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.24"/>
+                </g>
+              </g>
+              <g id="p6_a0_line2d_38" data-name="p6 a0 line2d 38">
+                <g clip-path="url(#clippath-632)">
+                  <path d="M1401.7,2058.53l115.09,155.05,115.09,10.36" fill="none" stroke="rgba(135, 143, 152, .65)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.24"/>
+                </g>
+              </g>
+              <g id="p6_a0_line2d_39" data-name="p6 a0 line2d 39">
+                <g clip-path="url(#clippath-633)">
+                  <path d="M1401.7,2106.58l115.09,112.29,115.09-10.86" fill="none" stroke="rgba(135, 143, 152, .65)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.24"/>
+                </g>
+              </g>
+              <g id="p6_a0_line2d_40" data-name="p6 a0 line2d 40">
+                <g clip-path="url(#clippath-634)">
+                  <path d="M1401.7,2109.35l115.09,95.38,115.09-16.98" fill="none" stroke="rgba(135, 143, 152, .65)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.24"/>
+                </g>
+              </g>
+              <g id="p6_a0_line2d_41" data-name="p6 a0 line2d 41">
+                <g clip-path="url(#clippath-635)">
+                  <path d="M1401.7,2167.21l115.09,69.3,115.09,17.42" fill="none" stroke="rgba(135, 143, 152, .65)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.24"/>
+                </g>
+              </g>
+              <g id="p6_a0_line2d_42" data-name="p6 a0 line2d 42">
+                <g clip-path="url(#clippath-636)">
+                  <path d="M1401.7,2154.45l115.09,96.35,115.09-20.4" fill="none" stroke="rgba(135, 143, 152, .65)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.24"/>
+                </g>
+              </g>
+              <g id="p6_a0_line2d_43" data-name="p6 a0 line2d 43">
+                <g clip-path="url(#clippath-637)">
+                  <path d="M1401.7,2145.9l115.09,101.34,115.09-25.51" fill="none" stroke="rgba(135, 143, 152, .65)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.24"/>
+                </g>
+              </g>
+              <g id="p6_a0_line2d_44" data-name="p6 a0 line2d 44">
+                <g clip-path="url(#clippath-638)">
+                  <path d="M1401.7,2150.26l115.09,80.07,115.09,23.32" fill="none" stroke="rgba(135, 143, 152, .65)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.24"/>
+                </g>
+              </g>
+              <g id="p6_a0_line2d_45" data-name="p6 a0 line2d 45">
+                <g clip-path="url(#clippath-639)">
+                  <path d="M1401.7,2192.66l115.09,34.7,115.09,16.28" fill="none" stroke="rgba(135, 143, 152, .65)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.24"/>
+                </g>
+              </g>
+              <g id="p6_a0_line2d_46" data-name="p6 a0 line2d 46">
+                <g clip-path="url(#clippath-640)">
+                  <path d="M1401.7,2158.57l115.09,69.69,115.09,23.51" fill="none" stroke="rgba(135, 143, 152, .65)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.24"/>
+                </g>
+              </g>
+              <g id="p6_a0_patch_3" data-name="p6 a0 patch 3">
+                <path d="M1344.16,2298.12v-334.77" fill="none" stroke="#000" stroke-linecap="square" stroke-miterlimit="7.1" stroke-width="1.42"/>
+              </g>
+              <g id="p6_a0_patch_4" data-name="p6 a0 patch 4">
+                <path d="M1344.16,2298.12h356.77" fill="none" stroke="#000" stroke-linecap="square" stroke-miterlimit="7.1" stroke-width="1.42"/>
+              </g>
+              <g id="p6_a0_line2d_50" data-name="p6 a0 line2d 50">
+                <g clip-path="url(#clippath-641)">
+                  <path d="M1401.7,2093.69l115.09,122.64,115.09,3.47" fill="none" stroke="#737373" stroke-linecap="square" stroke-linejoin="round" stroke-width="3.55"/>
+                </g>
+              </g>
+              <g id="p6_a0_LineCollection_1" data-name="p6 a0 LineCollection 1">
+                <g clip-path="url(#clippath-642)">
+                  <path d="M1401.7,2153.05v-89.64" fill="none" stroke="#667480" stroke-linejoin="round" stroke-width="2.66"/>
+                </g>
+                <g clip-path="url(#clippath-643)">
+                  <path d="M1516.79,2236.78v-35.93" fill="none" stroke="#D55E00" stroke-linejoin="round" stroke-width="2.66"/>
+                </g>
+                <g clip-path="url(#clippath-644)">
+                  <path d="M1631.88,2246.69v-45.78" fill="none" stroke="#0072B2" stroke-linejoin="round" stroke-width="2.66"/>
+                </g>
+              </g>
+              <g id="p6_a0_line2d_51" data-name="p6 a0 line2d 51">
+                <g clip-path="url(#clippath-645)">
+                  <g>
+                    <path id="p6_a0_m8d915a8cd7" data-name="p6 a0 m8d915a8cd7" d="M1401.7,2099.9c1.65,0,3.23-.65,4.4-1.82,1.16-1.16,1.82-2.74,1.82-4.39s-.66-3.23-1.82-4.4c-1.17-1.16-2.75-1.82-4.4-1.82s-3.23.66-4.39,1.82c-1.17,1.17-1.82,2.75-1.82,4.4s.65,3.23,1.82,4.39C1398.47,2099.25,1400.05,2099.9,1401.7,2099.9Z" fill="#667480" stroke="#667480" stroke-linejoin="round" stroke-width="2.84"/>
+                    <path id="p6_a0_m8d915a8cd7-2" data-name="p6 a0 m8d915a8cd7" d="M1516.79,2222.54c1.65,0,3.23-.65,4.4-1.82,1.16-1.16,1.82-2.75,1.82-4.39s-.66-3.23-1.82-4.4c-1.17-1.17-2.75-1.82-4.4-1.82s-3.23.65-4.39,1.82c-1.17,1.17-1.82,2.75-1.82,4.4s.65,3.23,1.82,4.39C1513.56,2221.89,1515.14,2222.54,1516.79,2222.54Z" fill="#D55E00" stroke="#D55E00" stroke-linejoin="round" stroke-width="2.84"/>
+                    <path id="p6_a0_m8d915a8cd7-3" data-name="p6 a0 m8d915a8cd7" d="M1631.88,2226.01c1.65,0,3.23-.65,4.39-1.82,1.17-1.16,1.83-2.74,1.83-4.39s-.66-3.23-1.83-4.4c-1.16-1.16-2.74-1.82-4.39-1.82s-3.23.66-4.4,1.82c-1.16,1.17-1.82,2.75-1.82,4.4s.66,3.23,1.82,4.39C1628.65,2225.36,1630.23,2226.01,1631.88,2226.01Z" fill="#0072B2" stroke="#0072B2" stroke-linejoin="round" stroke-width="2.84"/>
+                  </g>
+                </g>
+              </g>
+            </g>
+          <g id="p6_a2_axes_1" data-name="p6 a2 axes 1" transform="translate(0 1963.23046875) scale(1 .96) translate(0 -1963.23046875) translate(0 -8) translate(0 2360) scale(1 1.1754422978389945) translate(0 -2294.63)">
+              <g id="p6_a2_patch_2" data-name="p6 a2 patch 2">
+                <path d="M2307.35,2294.63h373.23v-331.79h-373.23V2294.63Z" fill="none"/>
+              </g>
+              <g id="p6_a2_patch_3" data-name="p6 a2 patch 3">
+                <g clip-path="url(#clippath-661)">
+                  <path d="M2375.21,2195.66h67.86v-33.4h-67.86V2195.66Z" fill="#999" isolation="isolate" opacity=".3" stroke="#595959" stroke-dasharray="4.56 1.97" stroke-miterlimit="7.04" stroke-width="1.23"/>
+                </g>
+              </g>
+              <g id="p6_a2_patch_4" data-name="p6 a2 patch 4">
+                <g clip-path="url(#clippath-662)">
+                  <path d="M2544.86,2192.57h67.86v-32.5h-67.86V2192.57Z" fill="#999" isolation="isolate" opacity=".3" stroke="#595959" stroke-dasharray="4.56 1.97" stroke-miterlimit="7.04" stroke-width="1.23"/>
+                </g>
+              </g>
+              <g id="p6_a2_matplotlib.axis_1" data-name="p6 a2 matplotlib.axis 1">
+                <g id="p6_a2_xtick_1" data-name="p6 a2 xtick 1">
+                  <g id="p6_a2_line2d_1" data-name="p6 a2 line2d 1">
+                    <path id="p6_a2_me7db80d6f5" data-name="p6 a2 me7db80d6f5" d="M2409.14,2294.63v6.16" stroke="#000" stroke-linejoin="round" stroke-width="1.41"/>
+                  </g>
+                </g>
+                <g id="p6_a2_xtick_2" data-name="p6 a2 xtick 2">
+                  <g id="p6_a2_line2d_2" data-name="p6 a2 line2d 2">
+                    <path id="p6_a2_me7db80d6f5-2" data-name="p6 a2 me7db80d6f5" d="M2578.79,2294.63v6.16" stroke="#000" stroke-linejoin="round" stroke-width="1.41"/>
+                  </g>
+                </g>
+              </g>
+              <g id="p6_a2_matplotlib.axis_2" data-name="p6 a2 matplotlib.axis 2">
+                <g id="p6_a2_ytick_1" data-name="p6 a2 ytick 1">
+                  <g id="p6_a2_line2d_3" data-name="p6 a2 line2d 3">
+                    <g clip-path="url(#clippath-663)">
+                      <path d="M2307.35,2294.63h373.23" fill="none" stroke="rgba(176, 176, 176, .25)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.06"/>
+                    </g>
+                  </g>
+                  <g id="p6_a2_line2d_4" data-name="p6 a2 line2d 4">
+                    <path id="p6_a2_me6776dde70" data-name="p6 a2 me6776dde70" d="M2307.35,2294.63h-6.16" stroke="#000" stroke-linejoin="round" stroke-width="1.41"/>
+                  </g>
+                </g>
+                <g id="p6_a2_ytick_2" data-name="p6 a2 ytick 2">
+                  <g id="p6_a2_line2d_5" data-name="p6 a2 line2d 5">
+                    <g clip-path="url(#clippath-664)">
+                      <path d="M2307.35,2228.27h373.23" fill="none" stroke="rgba(176, 176, 176, .25)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.06"/>
+                    </g>
+                  </g>
+                  <g id="p6_a2_line2d_6" data-name="p6 a2 line2d 6">
+                    <path id="p6_a2_me6776dde70-2" data-name="p6 a2 me6776dde70" d="M2307.35,2228.27h-6.16" stroke="#000" stroke-linejoin="round" stroke-width="1.41"/>
+                  </g>
+                </g>
+                <g id="p6_a2_ytick_3" data-name="p6 a2 ytick 3">
+                  <g id="p6_a2_line2d_7" data-name="p6 a2 line2d 7">
+                    <g clip-path="url(#clippath-665)">
+                      <path d="M2307.35,2161.91h373.23" fill="none" stroke="rgba(176, 176, 176, .25)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.06"/>
+                    </g>
+                  </g>
+                  <g id="p6_a2_line2d_8" data-name="p6 a2 line2d 8">
+                    <path id="p6_a2_me6776dde70-3" data-name="p6 a2 me6776dde70" d="M2307.35,2161.91h-6.16" stroke="#000" stroke-linejoin="round" stroke-width="1.41"/>
+                  </g>
+                </g>
+                <g id="p6_a2_ytick_4" data-name="p6 a2 ytick 4">
+                  <g id="p6_a2_line2d_9" data-name="p6 a2 line2d 9">
+                    <g clip-path="url(#clippath-666)">
+                      <path d="M2307.35,2095.56h373.23" fill="none" stroke="rgba(176, 176, 176, .25)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.06"/>
+                    </g>
+                  </g>
+                  <g id="p6_a2_line2d_10" data-name="p6 a2 line2d 10">
+                    <path id="p6_a2_me6776dde70-4" data-name="p6 a2 me6776dde70" d="M2307.35,2095.56h-6.16" stroke="#000" stroke-linejoin="round" stroke-width="1.41"/>
+                  </g>
+                </g>
+                <g id="p6_a2_ytick_5" data-name="p6 a2 ytick 5">
+                  <g id="p6_a2_line2d_11" data-name="p6 a2 line2d 11">
+                    <g clip-path="url(#clippath-667)">
+                      <path d="M2307.35,2029.2h373.23" fill="none" stroke="rgba(176, 176, 176, .25)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.06"/>
+                    </g>
+                  </g>
+                  <g id="p6_a2_line2d_12" data-name="p6 a2 line2d 12">
+                    <path id="p6_a2_me6776dde70-5" data-name="p6 a2 me6776dde70" d="M2307.35,2029.2h-6.16" stroke="#000" stroke-linejoin="round" stroke-width="1.41"/>
+                  </g>
+                </g>
+                <g id="p6_a2_ytick_6" data-name="p6 a2 ytick 6">
+                  <g id="p6_a2_line2d_13" data-name="p6 a2 line2d 13">
+                    <g clip-path="url(#clippath-668)">
+                      <path d="M2307.35,1962.84h373.23" fill="none" stroke="rgba(176, 176, 176, .25)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.06"/>
+                    </g>
+                  </g>
+                  <g id="p6_a2_line2d_14" data-name="p6 a2 line2d 14">
+                    <path id="p6_a2_me6776dde70-6" data-name="p6 a2 me6776dde70" d="M2307.35,1962.84h-6.16" stroke="#000" stroke-linejoin="round" stroke-width="1.41"/>
+                  </g>
+                </g>
+              </g>
+              <g id="p6_a2_patch_5" data-name="p6 a2 patch 5">
+                <path d="M2307.35,2294.63v-331.79" fill="none" stroke="#000" stroke-linecap="square" stroke-miterlimit="7.04" stroke-width="1.41"/>
+              </g>
+              <g id="p6_a2_patch_6" data-name="p6 a2 patch 6">
+                <path d="M2307.35,2294.63h373.23" fill="none" stroke="#000" stroke-linecap="square" stroke-miterlimit="7.04" stroke-width="1.41"/>
+              </g>
+              <g id="p6_a2_PathCollection_1" data-name="p6 a2 PathCollection 1">
+                <g clip-path="url(#clippath-669)">
+                  <path id="p6_a2_C0_0_903e6bfcc5" data-name="p6 a2 C0 0 903e6bfcc5" d="M2409.43,2108.11c.99,0,1.94-.39,2.64-1.09s1.09-1.65,1.09-2.64-.39-1.94-1.09-2.64-1.65-1.09-2.64-1.09-1.94.39-2.64,1.09-1.09,1.65-1.09,2.64.39,1.94,1.09,2.64S2408.44,2108.11,2409.43,2108.11Z" fill="rgba(0, 114, 178, .5)" transform="translate(-15.14000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-670)">
+                  <path id="p6_a2_C0_0_903e6bfcc5-2" data-name="p6 a2 C0 0 903e6bfcc5" d="M2420.67,2108.66c.99,0,1.94-.39,2.65-1.09s1.09-1.65,1.09-2.64-.39-1.94-1.09-2.64-1.66-1.1-2.65-1.1-1.94.4-2.64,1.1-1.09,1.65-1.09,2.64.39,1.94,1.09,2.64S2419.68,2108.66,2420.67,2108.66Z" fill="rgba(0, 114, 178, .5)" transform="translate(-14.83000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-671)">
+                  <path id="p6_a2_C0_0_903e6bfcc5-3" data-name="p6 a2 C0 0 903e6bfcc5" d="M2419.53,2163.88c.99,0,1.94-.39,2.64-1.09s1.09-1.65,1.09-2.64-.39-1.94-1.09-2.64-1.65-1.1-2.64-1.1-1.94.4-2.64,1.1-1.09,1.65-1.09,2.64.39,1.94,1.09,2.64S2418.54,2163.88,2419.53,2163.88Z" fill="rgba(0, 114, 178, .5)" transform="translate(-2.14000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-672)">
+                  <path id="p6_a2_C0_0_903e6bfcc5-4" data-name="p6 a2 C0 0 903e6bfcc5" d="M2404.81,2107.39c.99,0,1.94-.4,2.64-1.1s1.1-1.65,1.1-2.64-.4-1.94-1.1-2.64-1.65-1.09-2.64-1.09-1.94.39-2.64,1.09-1.09,1.65-1.09,2.64.39,1.94,1.09,2.64S2403.82,2107.39,2404.81,2107.39Z" fill="rgba(0, 114, 178, .5)" transform="translate(-7.22000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-673)">
+                  <path id="p6_a2_C0_0_903e6bfcc5-5" data-name="p6 a2 C0 0 903e6bfcc5" d="M2406.61,2145.62c.99,0,1.94-.39,2.64-1.09s1.1-1.65,1.1-2.64-.4-1.94-1.1-2.64-1.65-1.1-2.64-1.1-1.94.4-2.64,1.1-1.09,1.65-1.09,2.64.39,1.94,1.09,2.64S2405.62,2145.62,2406.61,2145.62Z" fill="rgba(0, 114, 178, .5)" transform="translate(2.53000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-674)">
+                  <path id="p6_a2_C0_0_903e6bfcc5-6" data-name="p6 a2 C0 0 903e6bfcc5" d="M2404.67,2129.48c.99,0,1.94-.39,2.64-1.09s1.09-1.65,1.09-2.64-.39-1.94-1.09-2.64-1.65-1.1-2.64-1.1-1.94.4-2.64,1.1-1.1,1.65-1.1,2.64.4,1.94,1.1,2.64S2403.68,2129.48,2404.67,2129.48Z" fill="rgba(0, 114, 178, .5)" transform="translate(16.02000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-675)">
+                  <path id="p6_a2_C0_0_903e6bfcc5-7" data-name="p6 a2 C0 0 903e6bfcc5" d="M2413.97,2117.71c.99,0,1.94-.4,2.64-1.1s1.1-1.65,1.1-2.64-.4-1.94-1.1-2.64-1.65-1.09-2.64-1.09-1.94.39-2.64,1.09-1.09,1.65-1.09,2.64.39,1.94,1.09,2.64S2412.98,2117.71,2413.97,2117.71Z" fill="rgba(0, 114, 178, .5)" transform="translate(-13.08000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-676)">
+                  <path id="p6_a2_C0_0_903e6bfcc5-8" data-name="p6 a2 C0 0 903e6bfcc5" d="M2408.67,2108.79c.99,0,1.94-.4,2.64-1.1s1.09-1.65,1.09-2.64-.39-1.94-1.09-2.64-1.65-1.09-2.64-1.09-1.95.39-2.65,1.09-1.09,1.65-1.09,2.64.39,1.94,1.09,2.64S2407.67,2108.79,2408.67,2108.79Z" fill="rgba(0, 114, 178, .5)" transform="translate(3.77000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-677)">
+                  <path id="p6_a2_C0_0_903e6bfcc5-9" data-name="p6 a2 C0 0 903e6bfcc5" d="M2415.48,2071.31c.99,0,1.94-.39,2.64-1.09s1.09-1.65,1.09-2.64-.39-1.94-1.09-2.64-1.65-1.1-2.64-1.1-1.94.4-2.64,1.1-1.1,1.65-1.1,2.64.4,1.94,1.1,2.64S2414.49,2071.31,2415.48,2071.31Z" fill="rgba(0, 114, 178, .5)" transform="translate(8.51000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-678)">
+                  <path id="p6_a2_C0_0_903e6bfcc5-10" data-name="p6 a2 C0 0 903e6bfcc5" d="M2393.47,2089.89c.99,0,1.94-.39,2.64-1.09s1.09-1.65,1.09-2.64-.39-1.94-1.09-2.64-1.65-1.09-2.64-1.09-1.94.39-2.64,1.09-1.09,1.65-1.09,2.64.39,1.94,1.09,2.64S2392.48,2089.89,2393.47,2089.89Z" fill="rgba(0, 114, 178, .5)" transform="translate(10.72000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-679)">
+                  <path id="p6_a2_C0_0_903e6bfcc5-11" data-name="p6 a2 C0 0 903e6bfcc5" d="M2422.43,2116.83c.99,0,1.94-.39,2.64-1.09s1.09-1.65,1.09-2.64-.39-1.94-1.09-2.64-1.65-1.1-2.64-1.1-1.94.4-2.64,1.1-1.09,1.65-1.09,2.64.39,1.94,1.09,2.64S2421.44,2116.83,2422.43,2116.83Z" fill="rgba(0, 114, 178, .5)" transform="translate(-6.69000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-680)">
+                  <path id="p6_a2_C0_0_903e6bfcc5-12" data-name="p6 a2 C0 0 903e6bfcc5" d="M2408.32,2096.15c.99,0,1.94-.39,2.64-1.09s1.1-1.65,1.1-2.64-.4-1.94-1.1-2.64-1.65-1.09-2.64-1.09-1.94.39-2.64,1.09-1.09,1.65-1.09,2.64.39,1.94,1.09,2.64S2407.33,2096.15,2408.32,2096.15Z" fill="rgba(0, 114, 178, .5)" transform="translate(-12.38000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-681)">
+                  <path id="p6_a2_C0_0_903e6bfcc5-13" data-name="p6 a2 C0 0 903e6bfcc5" d="M2414.91,2148.64c.99,0,1.94-.4,2.64-1.1s1.1-1.65,1.1-2.64-.4-1.94-1.1-2.64-1.65-1.09-2.64-1.09-1.94.39-2.64,1.09-1.09,1.65-1.09,2.64.39,1.94,1.09,2.64S2413.92,2148.64,2414.91,2148.64Z" fill="rgba(0, 114, 178, .5)" transform="translate(-7.42000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-682)">
+                  <path id="p6_a2_C0_0_903e6bfcc5-14" data-name="p6 a2 C0 0 903e6bfcc5" d="M2407.98,2051.81c.99,0,1.94-.4,2.64-1.1s1.1-1.65,1.1-2.64-.4-1.94-1.1-2.64-1.65-1.09-2.64-1.09-1.94.39-2.64,1.09-1.09,1.65-1.09,2.64.39,1.94,1.09,2.64S2406.99,2051.81,2407.98,2051.81Z" fill="rgba(0, 114, 178, .5)" transform="translate(11.06000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-683)">
+                  <path id="p6_a2_C0_0_903e6bfcc5-15" data-name="p6 a2 C0 0 903e6bfcc5" d="M2405.92,2027.18c1,0,1.94-.4,2.65-1.1s1.09-1.65,1.09-2.64-.39-1.94-1.09-2.64-1.65-1.09-2.65-1.09-1.94.39-2.64,1.09-1.09,1.65-1.09,2.64.39,1.94,1.09,2.64S2404.93,2027.18,2405.92,2027.18Z" fill="rgba(0, 114, 178, .5)" transform="translate(-6.68000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-684)">
+                  <path id="p6_a2_C0_0_903e6bfcc5-16" data-name="p6 a2 C0 0 903e6bfcc5" d="M2413.07,2106.97c.99,0,1.94-.39,2.64-1.09s1.09-1.65,1.09-2.64-.39-1.94-1.09-2.64-1.65-1.1-2.64-1.1-1.94.4-2.64,1.1-1.09,1.65-1.09,2.64.39,1.94,1.09,2.64S2412.08,2106.97,2413.07,2106.97Z" fill="rgba(0, 114, 178, .5)" transform="translate(-2.28000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-685)">
+                  <path id="p6_a2_C0_0_903e6bfcc5-17" data-name="p6 a2 C0 0 903e6bfcc5" d="M2416.13,2027.12c.99,0,1.94-.4,2.64-1.1s1.1-1.65,1.1-2.64-.39-1.94-1.1-2.64-1.65-1.09-2.64-1.09-1.94.39-2.64,1.09-1.09,1.65-1.09,2.64.39,1.94,1.09,2.64S2415.14,2027.12,2416.13,2027.12Z" fill="rgba(0, 114, 178, .5)" transform="translate(6.21000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-686)">
+                  <path id="p6_a2_C0_0_903e6bfcc5-18" data-name="p6 a2 C0 0 903e6bfcc5" d="M2407.42,2077.99c.99,0,1.94-.4,2.64-1.1s1.1-1.65,1.1-2.64-.4-1.94-1.1-2.64-1.65-1.09-2.64-1.09-1.94.39-2.64,1.09-1.09,1.65-1.09,2.64.39,1.94,1.09,2.64S2406.43,2077.99,2407.42,2077.99Z" fill="rgba(0, 114, 178, .5)" transform="translate(-4.88000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-687)">
+                  <path id="p6_a2_C0_0_903e6bfcc5-19" data-name="p6 a2 C0 0 903e6bfcc5" d="M2407.84,2047.83c.99,0,1.94-.39,2.64-1.1s1.1-1.65,1.1-2.64-.39-1.94-1.1-2.64-1.65-1.09-2.64-1.09-1.94.39-2.64,1.09-1.09,1.65-1.09,2.64.39,1.94,1.09,2.64S2406.85,2047.83,2407.84,2047.83Z" fill="rgba(0, 114, 178, .5)" transform="translate(6.25000 0)"/>
+                </g>
+              </g>
+              <g id="p6_a2_PathCollection_2" data-name="p6 a2 PathCollection 2">
+                <g clip-path="url(#clippath-688)">
+                  <path id="p6_a2_C1_0_2ec87f60a8" data-name="p6 a2 C1 0 2ec87f60a8" d="M2584.61,2106.33c.99,0,1.94-.39,2.64-1.09s1.09-1.65,1.09-2.64-.39-1.94-1.09-2.64-1.65-1.1-2.64-1.1-1.94.4-2.64,1.1-1.1,1.65-1.1,2.64.4,1.94,1.1,2.64S2583.62,2106.33,2584.61,2106.33Z" fill="rgba(0, 114, 178, .5)" transform="translate(-20.67000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-689)">
+                  <path id="p6_a2_C1_0_2ec87f60a8-2" data-name="p6 a2 C1 0 2ec87f60a8" d="M2571.41,2075.34c.99,0,1.94-.39,2.64-1.09s1.09-1.65,1.09-2.64-.39-1.94-1.09-2.64-1.65-1.09-2.64-1.09-1.94.39-2.64,1.09-1.1,1.65-1.1,2.64.4,1.94,1.1,2.64S2570.42,2075.34,2571.41,2075.34Z" fill="rgba(0, 114, 178, .5)" transform="translate(4.08000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-690)">
+                  <path id="p6_a2_C1_0_2ec87f60a8-3" data-name="p6 a2 C1 0 2ec87f60a8" d="M2565.95,2165.8c.99,0,1.94-.39,2.64-1.09s1.09-1.65,1.09-2.64-.39-1.94-1.09-2.64-1.65-1.09-2.64-1.09-1.94.39-2.64,1.09-1.1,1.65-1.1,2.64.4,1.94,1.1,2.64S2564.96,2165.8,2565.95,2165.8Z" fill="rgba(0, 114, 178, .5)" transform="translate(21.09000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-691)">
+                  <path id="p6_a2_C1_0_2ec87f60a8-4" data-name="p6 a2 C1 0 2ec87f60a8" d="M2582.14,2109.37c.99,0,1.94-.39,2.64-1.09s1.1-1.65,1.1-2.64-.4-1.94-1.1-2.64-1.65-1.1-2.64-1.1-1.94.4-2.64,1.1-1.09,1.65-1.09,2.64.39,1.94,1.09,2.64S2581.15,2109.37,2582.14,2109.37Z" fill="rgba(0, 114, 178, .5)" transform="translate(-14.90000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-692)">
+                  <path id="p6_a2_C1_0_2ec87f60a8-5" data-name="p6 a2 C1 0 2ec87f60a8" d="M2573.1,2145.02c.99,0,1.94-.39,2.64-1.09s1.1-1.65,1.1-2.64-.4-1.94-1.1-2.64-1.65-1.1-2.64-1.1-1.94.4-2.64,1.1-1.09,1.65-1.09,2.64.39,1.94,1.09,2.64S2572.11,2145.02,2573.1,2145.02Z" fill="rgba(0, 114, 178, .5)" transform="translate(5.69000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-693)">
+                  <path id="p6_a2_C1_0_2ec87f60a8-6" data-name="p6 a2 C1 0 2ec87f60a8" d="M2562.5,2113.06c.99,0,1.94-.39,2.64-1.09s1.1-1.65,1.1-2.64-.4-1.94-1.1-2.64-1.65-1.1-2.64-1.1-1.94.39-2.64,1.1-1.09,1.65-1.09,2.64.39,1.94,1.09,2.64S2561.51,2113.06,2562.5,2113.06Z" fill="rgba(0, 114, 178, .5)" transform="translate(27.84000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-694)">
+                  <path id="p6_a2_C1_0_2ec87f60a8-7" data-name="p6 a2 C1 0 2ec87f60a8" d="M2571.89,2130.12c.99,0,1.94-.39,2.64-1.09s1.09-1.65,1.09-2.64-.39-1.94-1.09-2.64-1.65-1.1-2.64-1.1-1.94.4-2.64,1.1-1.1,1.65-1.1,2.64.4,1.94,1.1,2.64S2570.9,2130.12,2571.89,2130.12Z" fill="rgba(0, 114, 178, .5)" transform="translate(-1.35000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-695)">
+                  <path id="p6_a2_C1_0_2ec87f60a8-8" data-name="p6 a2 C1 0 2ec87f60a8" d="M2574.82,2128.58c1,0,1.94-.39,2.65-1.09s1.09-1.65,1.09-2.64-.39-1.94-1.09-2.64-1.65-1.1-2.65-1.1-1.94.4-2.64,1.1-1.09,1.65-1.09,2.64.39,1.94,1.09,2.64S2573.83,2128.58,2574.82,2128.58Z" fill="rgba(0, 114, 178, .5)" transform="translate(7.27000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-696)">
+                  <path id="p6_a2_C1_0_2ec87f60a8-9" data-name="p6 a2 C1 0 2ec87f60a8" d="M2568.67,2071.76c.99,0,1.94-.39,2.64-1.09s1.09-1.65,1.09-2.64-.39-1.94-1.09-2.64-1.65-1.1-2.64-1.1-1.94.4-2.64,1.1-1.09,1.65-1.09,2.64.39,1.94,1.09,2.64S2567.68,2071.76,2568.67,2071.76Z" fill="rgba(0, 114, 178, .5)" transform="translate(24.97000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-697)">
+                  <path id="p6_a2_C1_0_2ec87f60a8-10" data-name="p6 a2 C1 0 2ec87f60a8" d="M2566.13,2077.67c.99,0,1.94-.39,2.64-1.09s1.1-1.65,1.1-2.64-.4-1.94-1.1-2.64-1.65-1.09-2.64-1.09-1.94.39-2.64,1.09-1.09,1.65-1.09,2.64.39,1.94,1.09,2.64S2565.14,2077.67,2566.13,2077.67Z" fill="rgba(0, 114, 178, .5)" transform="translate(7.71000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-698)">
+                  <path id="p6_a2_C1_0_2ec87f60a8-11" data-name="p6 a2 C1 0 2ec87f60a8" d="M2579.1,2099.09c.99,0,1.94-.39,2.64-1.09s1.1-1.65,1.1-2.64-.4-1.94-1.1-2.64-1.65-1.1-2.64-1.1-1.94.4-2.64,1.1-1.09,1.65-1.09,2.64.39,1.94,1.09,2.64S2578.11,2099.09,2579.1,2099.09Z" fill="rgba(0, 114, 178, .5)" transform="translate(6.29000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-699)">
+                  <path id="p6_a2_C1_0_2ec87f60a8-12" data-name="p6 a2 C1 0 2ec87f60a8" d="M2586.4,2116.94c.99,0,1.94-.4,2.64-1.1s1.1-1.65,1.1-2.64-.4-1.94-1.1-2.64-1.65-1.09-2.64-1.09-1.94.39-2.64,1.09-1.09,1.65-1.09,2.64.39,1.94,1.09,2.64S2585.41,2116.94,2586.4,2116.94Z" fill="rgba(0, 114, 178, .5)" transform="translate(-20.81000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-700)">
+                  <path id="p6_a2_C1_0_2ec87f60a8-13" data-name="p6 a2 C1 0 2ec87f60a8" d="M2576.81,2146.54c.99,0,1.94-.39,2.64-1.09s1.1-1.65,1.1-2.64-.4-1.94-1.1-2.64-1.65-1.09-2.64-1.09-1.94.39-2.64,1.09-1.09,1.65-1.09,2.64.39,1.94,1.09,2.64S2575.82,2146.54,2576.81,2146.54Z" fill="rgba(0, 114, 178, .5)" transform="translate(0.33000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-701)">
+                  <path id="p6_a2_C1_0_2ec87f60a8-14" data-name="p6 a2 C1 0 2ec87f60a8" d="M2572.48,2030.45c.99,0,1.94-.4,2.64-1.1s1.1-1.65,1.1-2.64-.4-1.94-1.1-2.64-1.65-1.09-2.64-1.09-1.94.39-2.64,1.09-1.09,1.65-1.09,2.64.39,1.94,1.09,2.64S2571.49,2030.45,2572.48,2030.45Z" fill="rgba(0, 114, 178, .5)" transform="translate(16.21000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-702)">
+                  <path id="p6_a2_C1_0_2ec87f60a8-15" data-name="p6 a2 C1 0 2ec87f60a8" d="M2582.06,2036.33c.99,0,1.94-.39,2.64-1.09s1.09-1.65,1.09-2.64-.39-1.94-1.09-2.64-1.65-1.1-2.64-1.1-1.94.39-2.64,1.1-1.1,1.65-1.1,2.64.4,1.94,1.1,2.64S2581.07,2036.33,2582.06,2036.33Z" fill="rgba(0, 114, 178, .5)" transform="translate(-13.17000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-703)">
+                  <path id="p6_a2_C1_0_2ec87f60a8-16" data-name="p6 a2 C1 0 2ec87f60a8" d="M2584.88,2099.83c.99,0,1.94-.39,2.64-1.09s1.09-1.65,1.09-2.64-.39-1.94-1.09-2.64-1.65-1.1-2.64-1.1-1.94.4-2.64,1.1-1.1,1.65-1.1,2.64.39,1.94,1.1,2.64S2583.89,2099.83,2584.88,2099.83Z" fill="rgba(0, 114, 178, .5)" transform="translate(-4.44000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-704)">
+                  <path id="p6_a2_C1_0_2ec87f60a8-17" data-name="p6 a2 C1 0 2ec87f60a8" d="M2576.25,2013.94c.99,0,1.94-.39,2.64-1.09s1.09-1.65,1.09-2.64-.39-1.94-1.09-2.64-1.65-1.1-2.64-1.1-1.94.39-2.64,1.1-1.1,1.65-1.1,2.64.4,1.94,1.1,2.64S2575.26,2013.94,2576.25,2013.94Z" fill="rgba(0, 114, 178, .5)" transform="translate(15.74000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-705)">
+                  <path id="p6_a2_C1_0_2ec87f60a8-18" data-name="p6 a2 C1 0 2ec87f60a8" d="M2583.41,2033.29c.99,0,1.94-.39,2.64-1.09s1.1-1.65,1.1-2.64-.4-1.94-1.1-2.64-1.65-1.1-2.64-1.1-1.94.4-2.64,1.1-1.09,1.65-1.09,2.64.39,1.94,1.09,2.64S2582.42,2033.29,2583.41,2033.29Z" fill="rgba(0, 114, 178, .5)" transform="translate(-11.22000 0)"/>
+                </g>
+                <g clip-path="url(#clippath-706)">
+                  <path id="p6_a2_C1_0_2ec87f60a8-19" data-name="p6 a2 C1 0 2ec87f60a8" d="M2587.64,2020.56c.99,0,1.94-.39,2.64-1.09s1.09-1.65,1.09-2.64-.39-1.94-1.09-2.64-1.65-1.1-2.64-1.1-1.94.4-2.64,1.1-1.1,1.65-1.1,2.64.4,1.94,1.1,2.64S2586.65,2020.56,2587.64,2020.56Z" fill="rgba(0, 114, 178, .5)" transform="translate(-3.90000 0)"/>
+                </g>
+              </g>
+              <g id="p6_a2_LineCollection_1" data-name="p6 a2 LineCollection 1">
+                <g clip-path="url(#clippath-707)">
+                  <path d="M2409.14,2132.63v-77.85" fill="none" stroke="#0072B2" stroke-linejoin="round" stroke-width="2.82"/>
+                </g>
+              </g>
+              <g id="p6_a2_LineCollection_2" data-name="p6 a2 LineCollection 2">
+                <g clip-path="url(#clippath-708)">
+                  <path d="M2578.79,2132.8v-92.01" fill="none" stroke="#0072B2" stroke-linejoin="round" stroke-width="2.82"/>
+                </g>
+              </g>
+              <g id="p6_a2_line2d_17" data-name="p6 a2 line2d 17">
+                <g clip-path="url(#clippath-709)">
+                  <path id="p6_a2_m200f94ab56" data-name="p6 a2 m200f94ab56" d="M2409.14,2100.75c1.87,0,3.66-.75,4.98-2.07,1.32-1.32,2.06-3.11,2.06-4.97s-.74-3.66-2.06-4.98c-1.32-1.32-3.11-2.07-4.98-2.07s-3.66.75-4.98,2.07c-1.32,1.32-2.06,3.11-2.06,4.98s.74,3.65,2.06,4.97C2405.48,2100,2407.27,2100.75,2409.14,2100.75Z" fill="#0072B2" stroke="#0072B2" stroke-linejoin="round" stroke-width="2.82"/>
+                </g>
+              </g>
+              <g id="p6_a2_line2d_18" data-name="p6 a2 line2d 18">
+                <g clip-path="url(#clippath-710)">
+                  <path id="p6_a2_m200f94ab56-2" data-name="p6 a2 m200f94ab56" d="M2578.79,2093.83c1.87,0,3.66-.74,4.98-2.06,1.32-1.32,2.06-3.11,2.06-4.98s-.74-3.65-2.06-4.97c-1.32-1.32-3.11-2.07-4.98-2.07s-3.66.75-4.98,2.07c-1.32,1.32-2.06,3.11-2.06,4.97s.74,3.66,2.06,4.98C2575.13,2093.09,2576.92,2093.83,2578.79,2093.83Z" fill="#0072B2" stroke="#0072B2" stroke-linejoin="round" stroke-width="2.82"/>
+                </g>
+              </g>
+            </g>
+          <path d="M1401.7,2006V1998H1631.88V2006" fill="none" stroke="#202632" stroke-width="1.5"/><path d="M1401.7,2043V2035H1516.79V2043" fill="none" stroke="#202632" stroke-width="1.5"/><path d="M1516.79,2168V2160H1631.88V2168" fill="none" stroke="#202632" stroke-width="1.5"/><g id="p6_a1_axes_1" data-name="p6 a1 axes 1" transform="translate(0 -16) translate(1990 2160) scale(1.05 1.12) translate(-1990 -2100)">
+              <g id="p6_a1_patch_3" data-name="p6 a1 patch 3">
+                <path d="M1849.97,2175.39q-13.47,33.14-26.93,66.29" fill="none" isolation="isolate" opacity=".9" stroke="#666d77" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.93"/>
+              </g>
+              <g id="p6_a1_patch_4" data-name="p6 a1 patch 4">
+                <path d="M1849.97,2175.39h186.44" fill="none" isolation="isolate" opacity=".9" stroke="#666d77" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.93"/>
+              </g>
+              <g id="p6_a1_patch_5" data-name="p6 a1 patch 5">
+                <path d="M1849.97,2175.39v-221.66" fill="none" isolation="isolate" opacity=".9" stroke="#666d77" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.93"/>
+              </g>
+              <g id="p6_a1_line2d_1" data-name="p6 a1 line2d 1">
+                <g clip-path="url(#clippath-646)">
+                  <path d="M2053.44,2147.81l.19-.35-.06-.38-.29-.39-.54-.42-.78-.43-1.01-.44-1.24-.47-1.47-.47-1.7-.49-1.91-.5-2.13-.51-2.33-.52-2.54-.53-2.72-.53-2.91-.53-3.08-.54-3.25-.53-3.41-.54-3.55-.53-3.69-.53-3.82-.53-3.93-.51-4.03-.51-4.13-.5-4.21-.49-4.28-.48-4.34-.46-4.39-.45-4.41-.44-4.44-.41-4.45-.4-4.45-.38-4.43-.36-4.41-.34-4.37-.31-4.32-.3-4.26-.27-4.18-.24-4.1-.22-4.01-.2-3.9-.16-3.78-.15-3.66-.11-3.52-.09-3.38-.06-3.22-.04h-3.06s-2.89.02-2.89.02l-2.71.05-2.53.07-2.33.11-2.13.13-1.93.15-1.72.19-1.5.2-1.29.24-1.06.26-.83.28-.61.3-.37.33-.15.35.09.37.32.39.55.41.79.42,1.01.45,1.24.45,1.46.47,1.69.49,1.9.49,2.11.51,2.31.51,2.52.53,2.71.52,2.9.53,3.07.54,3.25.54,3.41.53,3.56.54,3.7.53,3.83.53,3.96.52,4.07.51,4.17.51,4.26.49,4.34.48,4.4.47,4.45.46,4.49.44,4.52.42,4.53.4,4.53.39,4.52.36,4.5.34,4.45.32,4.41.29,4.34.27,4.27.25,4.17.22,4.08.19,3.96.16,3.84.14,3.7.11,3.56.07,3.4.05,3.23.03h3.06s2.87-.05,2.87-.05l2.68-.06,2.48-.1,2.27-.12,2.05-.15,1.84-.18,1.61-.21,1.37-.23,1.15-.26.91-.28.67-.31L2053.44,2147.81" fill="none" stroke="rgba(0, 114, 178, .9)" stroke-dasharray="9.99 4.32" stroke-linejoin="round" stroke-width="2.7"/>
+                </g>
+              </g>
+              <g id="p6_a1_Line3DCollection_1" data-name="p6 a1 Line3DCollection 1">
+                <g clip-path="url(#clippath-647)">
+                  <path d="M2054.37,2010.94l-.93,136.87" fill="none" stroke="#595959" stroke-dasharray="1.35 2.23" stroke-linejoin="round" stroke-width="1.35"/>
+                </g>
+                <g clip-path="url(#clippath-648)">
+                  <path d="M2018.92,2016.22l-.21,122.49" fill="none" stroke="#595959" stroke-dasharray="1.35 2.23" stroke-linejoin="round" stroke-width="1.35"/>
+                </g>
+                <g clip-path="url(#clippath-649)">
+                  <path d="M1933.21,2049.23l.86,81.35" fill="none" stroke="#595959" stroke-dasharray="1.35 2.23" stroke-linejoin="round" stroke-width="1.35"/>
+                </g>
+                <g clip-path="url(#clippath-650)">
+                  <path d="M1883.04,2077.18l.97,54.59" fill="none" stroke="#595959" stroke-dasharray="1.35 2.23" stroke-linejoin="round" stroke-width="1.35"/>
+                </g>
+                <g clip-path="url(#clippath-651)">
+                  <path d="M1917.49,2072.65l.89,68.49" fill="none" stroke="#595959" stroke-dasharray="1.35 2.23" stroke-linejoin="round" stroke-width="1.35"/>
+                </g>
+                <g clip-path="url(#clippath-652)">
+                  <path d="M2004.25,2039.26l.04,110.08" fill="none" stroke="#595959" stroke-dasharray="1.35 2.23" stroke-linejoin="round" stroke-width="1.35"/>
+                </g>
+              </g>
+              <g id="p6_a1_Poly3DCollection_1" data-name="p6 a1 Poly3DCollection 1">
+                <g clip-path="url(#clippath-653)">
+                  <path id="p6_a1_mdc61d0a4c4" data-name="p6 a1 mdc61d0a4c4" d="M2054.37,2010.94l.2-.61-.06-.52-.3-.41-.55-.32-.79-.21-1.04-.11h-1.27s-1.5.08-1.5.08l-1.74.19-1.95.3-2.18.39-2.38.49-2.59.59-2.78.68-2.97.77-3.14.87-3.32.95-3.47,1.03-3.62,1.12-3.76,1.19-3.88,1.27-4,1.34-4.1,1.4-4.2,1.47-4.28,1.52-4.34,1.58-4.4,1.63-4.45,1.67-4.47,1.71-4.5,1.75-4.5,1.77-4.5,1.8-4.48,1.83-4.45,1.84-4.41,1.84-4.35,1.86-4.3,1.85-4.21,1.85-4.13,1.84-4.03,1.83-3.92,1.81-3.81,1.78-3.67,1.75-3.54,1.72-3.38,1.69-3.24,1.64-3.06,1.59-2.9,1.55-2.71,1.49-2.53,1.43-2.33,1.37-2.13,1.3-1.93,1.23-1.72,1.16-1.5,1.09-1.28,1-1.06.93-.83.84-.6.75-.37.67-.15.57.09.49.33.39.55.29.79.2,1.01.11h1.24s1.47-.08,1.47-.08l1.69-.19,1.9-.28,2.11-.38,2.32-.47,2.52-.56,2.72-.66,2.9-.75,3.09-.84,3.25-.93,3.42-1.01,3.57-1.1,3.72-1.17,3.86-1.26,3.98-1.32,4.09-1.39,4.2-1.47,4.28-1.52,4.37-1.58,4.44-1.63,4.49-1.69,4.53-1.73,4.56-1.77,4.58-1.8,4.58-1.83,4.58-1.86,4.55-1.88,4.51-1.89,4.47-1.9,4.4-1.91,4.33-1.9,4.24-1.89,4.15-1.88,4.02-1.86,3.91-1.84,3.77-1.81,3.62-1.77,3.47-1.73,3.29-1.68,3.12-1.64,2.93-1.58,2.73-1.52,2.54-1.45,2.31-1.39,2.11-1.31,1.87-1.24,1.65-1.15,1.41-1.08,1.17-.98.93-.9.69-.8L2054.37,2010.94Z" fill="rgba(0, 114, 178, .28)" stroke="#0072B2" stroke-linejoin="round" stroke-width="3.08"/>
+                </g>
+              </g>
+              <g id="p6_a1_Line3DCollection_2" data-name="p6 a1 Line3DCollection 2">
+                <g clip-path="url(#clippath-654)">
+                  <path d="M2056.66,2161.61l-28.87,16.91" fill="none" stroke="#D55E00" stroke-linejoin="round" stroke-width="3.47"/>
+                </g>
+                <g clip-path="url(#clippath-655)">
+                  <path d="M2056.66,2161.61l-3.84,4.05" fill="none" stroke="#D55E00" stroke-linejoin="round" stroke-width="3.47"/>
+                </g>
+                <g clip-path="url(#clippath-656)">
+                  <path d="M2056.66,2161.61l-3.82.43" fill="none" stroke="#D55E00" stroke-linejoin="round" stroke-width="3.47"/>
+                </g>
+              </g>
+              <g id="p6_a1_Line3DCollection_3" data-name="p6 a1 Line3DCollection 3">
+                <g clip-path="url(#clippath-657)">
+                  <path d="M2094.29,2191.24l-66.5-12.72" fill="none" stroke="#D55E00" stroke-linejoin="round" stroke-width="3.47"/>
+                </g>
+                <g clip-path="url(#clippath-658)">
+                  <path d="M2094.29,2191.24l-9.14.52" fill="none" stroke="#D55E00" stroke-linejoin="round" stroke-width="3.47"/>
+                </g>
+                <g clip-path="url(#clippath-659)">
+                  <path d="M2094.29,2191.24l-9.09-4.01" fill="none" stroke="#D55E00" stroke-linejoin="round" stroke-width="3.47"/>
+                </g>
+              </g>
+              <g id="p6_a1_Poly3DCollection_2" data-name="p6 a1 Poly3DCollection 2">
+                <g clip-path="url(#clippath-660)">
+                  <path d="M1825.4,2150.07l255.52,49.54,78.09-48.91-245.43-43.87L1825.4,2150.07Z" fill="rgba(220, 20, 60, .1)" stroke="#D55E00" stroke-dasharray="7.13 3.08" stroke-linejoin="round" stroke-width="1.93"/>
+                </g>
+              </g>
+            </g>
+          </g></svg>

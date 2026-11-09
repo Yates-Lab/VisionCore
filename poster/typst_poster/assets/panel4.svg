@@ -1,0 +1,700 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<ns0:svg xmlns:ns0="http://www.w3.org/2000/svg" width="1479.73828125pt" height="699.80859375pt" viewBox="1229.87109375 307.4296875 1479.73828125 699.80859375"><ns0:defs><ns0:clipPath id="clippath-273">
+      <ns0:rect x="1869.1" y="443.92" width="313.48" height="456.04" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-265">
+      <ns0:rect x="1383.21" y="443.92" width="313.48" height="209.19" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-275">
+      <ns0:rect x="1869.1" y="443.92" width="313.48" height="456.04" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-263">
+      <ns0:rect x="1383.21" y="443.92" width="313.48" height="209.19" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-318">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-271">
+      <ns0:rect x="1383.21" y="690.77" width="313.48" height="209.19" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-262">
+      <ns0:rect x="1383.21" y="443.92" width="313.48" height="209.19" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-269">
+      <ns0:rect x="1383.21" y="690.77" width="313.48" height="209.19" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-295">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-297">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-302">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-301">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-282">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-313">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-280">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-316">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-300">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-268">
+      <ns0:rect x="1383.21" y="690.77" width="313.48" height="209.19" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-307">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-272">
+      <ns0:rect x="1383.21" y="690.77" width="313.48" height="209.19" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-299">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-310">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-290">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-296">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-293">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-288">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-291">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-308">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-314">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-317">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-305">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-278">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-284">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-289">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-274">
+      <ns0:rect x="1869.1" y="443.92" width="313.48" height="456.04" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-298">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-304">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-311">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-312">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-267">
+      <ns0:rect x="1383.21" y="690.77" width="313.48" height="209.19" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-294">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-270">
+      <ns0:rect x="1383.21" y="690.77" width="313.48" height="209.19" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-264">
+      <ns0:rect x="1383.21" y="443.92" width="313.48" height="209.19" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-287">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-303">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-292">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-276">
+      <ns0:rect x="1869.1" y="443.92" width="313.48" height="456.04" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-285">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-315">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-309">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-281">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-283">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-306">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-279">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-286">
+      <ns0:rect x="2321.01" y="516.02" width="350.12" height="380.48" fill="none"/>
+    </ns0:clipPath>
+    <ns0:clipPath id="clippath-277">
+      <ns0:rect x="1869.1" y="443.92" width="313.48" height="456.04" fill="none"/>
+    </ns0:clipPath>
+    </ns0:defs><ns0:g id="Panel_4_revised"><ns0:g id="_05_Panel_4_Number_badge" data-name="05_Panel_4_Number_badge">
+        <ns0:circle cx="1259.01" cy="343.77" r="22.13" fill="#B8651B" stroke="#fff" stroke-linejoin="round" stroke-width="2.5"/>
+      </ns0:g>
+      <ns0:g id="_05_Panel_4_Titles_and_captions" data-name="05_Panel_4_Titles_and_captions">
+        </ns0:g>
+    <ns0:g id="p4_a0_axes_1" data-name="p4 a0 axes 1" transform="translate(0 900) scale(1 0.942817049640414) translate(0 -900)">
+              <ns0:g id="p4_a0_patch_2" data-name="p4 a0 patch 2">
+                <ns0:path d="M1383.21,653.11h313.48v-209.19h-313.48V653.11Z" fill="none"/>
+              </ns0:g>
+              <ns0:g id="p4_a0_patch_3" data-name="p4 a0 patch 3">
+                <ns0:g clip-path="url(#clippath-262)">
+                  <ns0:path d="M1475.31,653.11h26.31v-209.19h-26.31V653.11Z" fill="#d9d9d9" stroke="#d9d9d9" stroke-miterlimit="7.23" stroke-width="1.81"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a0_patch_4" data-name="p4 a0 patch 4">
+                <ns0:g clip-path="url(#clippath-263)">
+                  <ns0:path d="M1593.72,653.11h26.31v-209.19h-26.31V653.11Z" fill="#d9d9d9" stroke="#d9d9d9" stroke-miterlimit="7.23" stroke-width="1.81"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a0_matplotlib.axis_1" data-name="p4 a0 matplotlib.axis 1">
+                <ns0:g id="p4_a0_xtick_1" data-name="p4 a0 xtick 1">
+                  <ns0:g id="p4_a0_line2d_1" data-name="p4 a0 line2d 1">
+                    <ns0:path id="p4_a0_mf4d7dff502" data-name="p4 a0 mf4d7dff502" d="M1383.21,653.11v6.33" stroke="#000" stroke-linejoin="round" stroke-width="1.45"/>
+                  </ns0:g>
+                </ns0:g>
+                <ns0:g id="p4_a0_xtick_2" data-name="p4 a0 xtick 2">
+                  <ns0:g id="p4_a0_line2d_2" data-name="p4 a0 line2d 2">
+                    <ns0:path id="p4_a0_mf4d7dff502-2" data-name="p4 a0 mf4d7dff502" d="M1488.47,653.11v6.33" stroke="#000" stroke-linejoin="round" stroke-width="1.45"/>
+                  </ns0:g>
+                </ns0:g>
+                <ns0:g id="p4_a0_xtick_3" data-name="p4 a0 xtick 3">
+                  <ns0:g id="p4_a0_line2d_3" data-name="p4 a0 line2d 3">
+                    <ns0:path id="p4_a0_mf4d7dff502-3" data-name="p4 a0 mf4d7dff502" d="M1593.72,653.11v6.33" stroke="#000" stroke-linejoin="round" stroke-width="1.45"/>
+                  </ns0:g>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a0_line2d_4" data-name="p4 a0 line2d 4">
+                <ns0:g clip-path="url(#clippath-264)">
+                  <ns0:path d="M1383.21,536.46l4.39-1.12,4.39,2.47,4.38,1.61,4.39-.48,4.38,2.43,4.39.81,4.38.04,4.39,5.45,4.38-95.2,4.39,4.16,4.38,9.1,4.39,1.09,4.39.23,4.38-5.05,4.39,5.73,4.38-5.24,4.39-2.83,4.38.58,4.39,2.7,4.38-2.84,4.39-2.13,4.39,4.39,4.38-4.95,4.39-2.87,4.38,5.73,4.39-3.41,4.38,1.81,4.39-3.46,4.38,3.07,4.39.21,4.39-.44,4.38-.89,4.39,1.22,4.38,1.4,4.39-1.85,4.38,1.34,4.39-3.04,4.38,3.35,4.39.44,4.38.86,4.39-.95,4.39-1.27,4.38,2.61,4.39-1.39,4.38,3.83,4.39-3.05,4.38-2.55,4.39-.75,4.38,2.97,4.39-1.15,4.39-3.4,4.38-3.14,4.39,8.95,4.38-4.72,4.39,3.69,4.38-1.16,4.39-.05,4.38,3.96,4.39-4.83,4.39-1.41,4.38,2.93,4.39-1.19,4.38-1.61,4.39.97,4.38,1.3,4.39-2.91,4.38,4.52,4.39-4.93,4.38,3.97,4.39.95,4.39,1.35" fill="none" stroke="#000" stroke-linecap="square" stroke-linejoin="round" stroke-width="3.25"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a0_line2d_5" data-name="p4 a0 line2d 5">
+                <ns0:g clip-path="url(#clippath-265)">
+                  <ns0:path d="M1383.21,603.1l4.39,1.39,4.39-2.49,4.38-.3,4.39,2.17,4.38-3.09,4.39,2.79,4.38,3.06,4.39.04,4.38-2.3,4.39.75,4.38-3.03,4.39,3.79,4.39-3.15,4.38.22,4.39-.95,4.38,6.92,4.39-1.59,4.38-5.09,4.39-.73,4.38.3,4.39.61,4.39,3.61,4.38-5.65,4.39,4.86,4.38-5.21,4.39.06,4.38-2.13,4.39-.18,4.38,1.49,4.39-1.37,4.39,2.63,4.38-2.68,4.39,25.56,4.38-157.17,4.39-1.81,4.38,17.9,4.39-3.34,4.38.57,4.39-1.26,4.38-1.02,4.39.97,4.39.14,4.38-1.8,4.39,2.56,4.38.62,4.39-1.61,4.38.58,4.39,3.11,4.38-1.36h4.39s4.39,3.36,4.39,3.36l4.38-7.09,4.39,7.02,4.38-3.01,4.39,1.98,4.38-.69,4.39,1.23,4.38-2.04,4.39-.42,4.39-.07,4.38.44,4.39,3.54,4.38-2.44,4.39-.54,4.38,6.43,4.39-2.54,4.38,3.2,4.39-6.64,4.38,5.8,4.39-1.99,4.39.32" fill="none" stroke="#000" stroke-linecap="square" stroke-linejoin="round" stroke-width="3.25"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a0_line2d_6" data-name="p4 a0 line2d 6">
+                <ns0:path d="M1700.9,641.65v-45.83" fill="none" stroke="#000" stroke-linecap="square" stroke-linejoin="round" stroke-width="3.62"/>
+              </ns0:g>
+              <ns0:g id="p4_a0_patch_5" data-name="p4 a0 patch 5">
+                <ns0:path d="M1383.21,653.11h313.48" fill="none" stroke="#000" stroke-linecap="square" stroke-miterlimit="7.23" stroke-width="1.45"/>
+              </ns0:g>
+              </ns0:g>
+            <ns0:g id="p4_a0_axes_2" data-name="p4 a0 axes 2" transform="translate(0 900) scale(1 0.942817049640414) translate(0 -900)">
+              <ns0:g id="p4_a0_patch_8" data-name="p4 a0 patch 8">
+                <ns0:path d="M1383.21,899.96h313.48v-209.19h-313.48V899.96Z" fill="none"/>
+              </ns0:g>
+              <ns0:g id="p4_a0_patch_9" data-name="p4 a0 patch 9">
+                <ns0:g clip-path="url(#clippath-267)">
+                  <ns0:path d="M1475.31,899.96h26.31v-209.19h-26.31V899.96Z" fill="#d9d9d9" stroke="#d9d9d9" stroke-miterlimit="7.23" stroke-width="1.81"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a0_patch_10" data-name="p4 a0 patch 10">
+                <ns0:g clip-path="url(#clippath-268)">
+                  <ns0:path d="M1593.72,899.96h26.31v-209.19h-26.31V899.96Z" fill="#d9d9d9" stroke="#d9d9d9" stroke-miterlimit="7.23" stroke-width="1.81"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a0_line2d_8" data-name="p4 a0 line2d 8">
+                <ns0:g clip-path="url(#clippath-269)">
+                  <ns0:path d="M1383.21,890.45h313.48" fill="none" stroke="#b2b2b2" stroke-linecap="square" stroke-linejoin="round" stroke-width=".9"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a0_line2d_9" data-name="p4 a0 line2d 9">
+                <ns0:g clip-path="url(#clippath-270)">
+                  <ns0:path d="M1383.21,779.88h313.48" fill="none" stroke="#b2b2b2" stroke-linecap="square" stroke-linejoin="round" stroke-width=".9"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a0_matplotlib.axis_3" data-name="p4 a0 matplotlib.axis 3">
+                <ns0:g id="p4_a0_xtick_4" data-name="p4 a0 xtick 4">
+                  <ns0:g id="p4_a0_line2d_10" data-name="p4 a0 line2d 10">
+                    <ns0:path id="p4_a0_mf4d7dff502-4" data-name="p4 a0 mf4d7dff502" d="M1383.21,899.96v6.32" stroke="#000" stroke-linejoin="round" stroke-width="1.45"/>
+                  </ns0:g>
+                </ns0:g>
+                <ns0:g id="p4_a0_xtick_5" data-name="p4 a0 xtick 5">
+                  <ns0:g id="p4_a0_line2d_11" data-name="p4 a0 line2d 11">
+                    <ns0:path id="p4_a0_mf4d7dff502-5" data-name="p4 a0 mf4d7dff502" d="M1488.47,899.96v6.32" stroke="#000" stroke-linejoin="round" stroke-width="1.45"/>
+                  </ns0:g>
+                </ns0:g>
+                <ns0:g id="p4_a0_xtick_6" data-name="p4 a0 xtick 6">
+                  <ns0:g id="p4_a0_line2d_12" data-name="p4 a0 line2d 12">
+                    <ns0:path id="p4_a0_mf4d7dff502-6" data-name="p4 a0 mf4d7dff502" d="M1593.72,899.96v6.32" stroke="#000" stroke-linejoin="round" stroke-width="1.45"/>
+                  </ns0:g>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a0_line2d_13" data-name="p4 a0 line2d 13">
+                <ns0:g clip-path="url(#clippath-271)">
+                  <ns0:path d="M1389.79,735.66h6.58v8.84h13.16v26.54h13.15v-8.85h13.16v-17.69h13.16v26.54h13.15v-17.69h13.16v26.53h13.16v-8.84h13.15v8.84h39.47v-8.84h13.16v-8.85h26.31v-35.38h13.16v-26.54h13.16v17.69h13.15v26.54h13.16v-26.54h13.16v8.85h13.15v17.69h32.89" fill="none" stroke="#000" stroke-linecap="square" stroke-linejoin="round" stroke-width="3.25"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a0_line2d_14" data-name="p4 a0 line2d 14">
+                <ns0:g clip-path="url(#clippath-272)">
+                  <ns0:path d="M1389.79,881.6h6.58v-8.84h26.31v8.84h26.32v-35.38h13.15v26.54h13.16v-26.54h13.16v-8.84h13.15v17.69h13.16v-26.54h26.31v-26.54h13.16v70.77h13.16v17.69h13.15v-17.69h13.16v-53.07h13.16v8.84h13.15v53.07h13.16v-26.53h13.16v-26.54h13.15v17.69h13.16v17.69h19.73" fill="none" stroke="#000" stroke-linecap="square" stroke-linejoin="round" stroke-width="3.25"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a0_line2d_15" data-name="p4 a0 line2d 15">
+                <ns0:path d="M1700.9,890.45v-44.23" fill="none" stroke="#000" stroke-linecap="square" stroke-linejoin="round" stroke-width="3.62"/>
+              </ns0:g>
+              <ns0:g id="p4_a0_patch_11" data-name="p4 a0 patch 11">
+                <ns0:path d="M1383.21,899.96h313.48" fill="none" stroke="#000" stroke-linecap="square" stroke-miterlimit="7.23" stroke-width="1.45"/>
+              </ns0:g>
+            </ns0:g>
+            <ns0:g id="p4_a0_axes_3" data-name="p4 a0 axes 3" transform="translate(-50 900) scale(1 0.942817049640414) translate(0 -900)">
+              <ns0:g id="p4_a0_patch_12" data-name="p4 a0 patch 12">
+                <ns0:path d="M1869.1,899.96h313.48v-456.04h-313.48V899.96Z" fill="none"/>
+              </ns0:g>
+              <ns0:g id="p4_a0_line2d_16" data-name="p4 a0 line2d 16">
+                <ns0:g clip-path="url(#clippath-273)">
+                  <ns0:path d="M1869.1,492.78h313.48" fill="none" stroke="#000" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.81"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a0_line2d_17" data-name="p4 a0 line2d 17">
+                <ns0:g clip-path="url(#clippath-274)">
+                  <ns0:path d="M1869.1,564.94h313.48" fill="none" stroke="#000" stroke-dasharray="6.69 2.89" stroke-linejoin="round" stroke-width="1.81"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a0_line2d_18" data-name="p4 a0 line2d 18">
+                <ns0:g clip-path="url(#clippath-275)">
+                  <ns0:path d="M1869.1,777.75h313.48" fill="none" stroke="#667480" stroke-dasharray="1.81 2.98" stroke-linejoin="round" stroke-width="1.81"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a0_matplotlib.axis_5" data-name="p4 a0 matplotlib.axis 5">
+                <ns0:g id="p4_a0_xtick_7" data-name="p4 a0 xtick 7">
+                  <ns0:g id="p4_a0_line2d_19" data-name="p4 a0 line2d 19">
+                    <ns0:path id="p4_a0_mf4d7dff502-7" data-name="p4 a0 mf4d7dff502" d="M2168.07,899.96v6.32" stroke="#000" stroke-linejoin="round" stroke-width="1.45"/>
+                  </ns0:g>
+                </ns0:g>
+                <ns0:g id="p4_a0_xtick_8" data-name="p4 a0 xtick 8">
+                  <ns0:g id="p4_a0_line2d_20" data-name="p4 a0 line2d 20">
+                    <ns0:path id="p4_a0_mf4d7dff502-8" data-name="p4 a0 mf4d7dff502" d="M2110.02,899.96v6.32" stroke="#000" stroke-linejoin="round" stroke-width="1.45"/>
+                  </ns0:g>
+                </ns0:g>
+                <ns0:g id="p4_a0_xtick_9" data-name="p4 a0 xtick 9">
+                  <ns0:g id="p4_a0_line2d_21" data-name="p4 a0 line2d 21">
+                    <ns0:path id="p4_a0_mf4d7dff502-9" data-name="p4 a0 mf4d7dff502" d="M2051.96,899.96v6.32" stroke="#000" stroke-linejoin="round" stroke-width="1.45"/>
+                  </ns0:g>
+                </ns0:g>
+                <ns0:g id="p4_a0_xtick_10" data-name="p4 a0 xtick 10">
+                  <ns0:g id="p4_a0_line2d_22" data-name="p4 a0 line2d 22">
+                    <ns0:path id="p4_a0_mf4d7dff502-10" data-name="p4 a0 mf4d7dff502" d="M1993.91,899.96v6.32" stroke="#000" stroke-linejoin="round" stroke-width="1.45"/>
+                  </ns0:g>
+                </ns0:g>
+                <ns0:g id="p4_a0_xtick_11" data-name="p4 a0 xtick 11">
+                  <ns0:g id="p4_a0_line2d_23" data-name="p4 a0 line2d 23">
+                    <ns0:path id="p4_a0_mf4d7dff502-11" data-name="p4 a0 mf4d7dff502" d="M1935.86,899.96v6.32" stroke="#000" stroke-linejoin="round" stroke-width="1.45"/>
+                  </ns0:g>
+                </ns0:g>
+                <ns0:g id="p4_a0_xtick_12" data-name="p4 a0 xtick 12">
+                  <ns0:g id="p4_a0_line2d_24" data-name="p4 a0 line2d 24">
+                    <ns0:path id="p4_a0_mf4d7dff502-12" data-name="p4 a0 mf4d7dff502" d="M1877.81,899.96v6.32" stroke="#000" stroke-linejoin="round" stroke-width="1.45"/>
+                  </ns0:g>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a0_matplotlib.axis_6" data-name="p4 a0 matplotlib.axis 6">
+                <ns0:g id="p4_a0_ytick_1" data-name="p4 a0 ytick 1">
+                  <ns0:g id="p4_a0_line2d_25" data-name="p4 a0 line2d 25">
+                    <ns0:path id="p4_a0_m80e2cfbbbc" data-name="p4 a0 m80e2cfbbbc" d="M1869.1,899.96h-6.32" stroke="#000" stroke-linejoin="round" stroke-width="1.45"/>
+                  </ns0:g>
+                </ns0:g>
+                <ns0:g id="p4_a0_ytick_2" data-name="p4 a0 ytick 2">
+                  <ns0:g id="p4_a0_line2d_26" data-name="p4 a0 line2d 26">
+                    <ns0:path id="p4_a0_m80e2cfbbbc-2" data-name="p4 a0 m80e2cfbbbc" d="M1869.1,837.02h-6.32" stroke="#000" stroke-linejoin="round" stroke-width="1.45"/>
+                  </ns0:g>
+                </ns0:g>
+                <ns0:g id="p4_a0_ytick_3" data-name="p4 a0 ytick 3">
+                  <ns0:g id="p4_a0_line2d_27" data-name="p4 a0 line2d 27">
+                    <ns0:path id="p4_a0_m80e2cfbbbc-3" data-name="p4 a0 m80e2cfbbbc" d="M1869.1,774.09h-6.32" stroke="#000" stroke-linejoin="round" stroke-width="1.45"/>
+                  </ns0:g>
+                </ns0:g>
+                <ns0:g id="p4_a0_ytick_4" data-name="p4 a0 ytick 4">
+                  <ns0:g id="p4_a0_line2d_28" data-name="p4 a0 line2d 28">
+                    <ns0:path id="p4_a0_m80e2cfbbbc-4" data-name="p4 a0 m80e2cfbbbc" d="M1869.1,711.15h-6.32" stroke="#000" stroke-linejoin="round" stroke-width="1.45"/>
+                  </ns0:g>
+                </ns0:g>
+                <ns0:g id="p4_a0_ytick_5" data-name="p4 a0 ytick 5">
+                  <ns0:g id="p4_a0_line2d_29" data-name="p4 a0 line2d 29">
+                    <ns0:path id="p4_a0_m80e2cfbbbc-5" data-name="p4 a0 m80e2cfbbbc" d="M1869.1,648.21h-6.32" stroke="#000" stroke-linejoin="round" stroke-width="1.45"/>
+                  </ns0:g>
+                </ns0:g>
+                <ns0:g id="p4_a0_ytick_6" data-name="p4 a0 ytick 6">
+                  <ns0:g id="p4_a0_line2d_30" data-name="p4 a0 line2d 30">
+                    <ns0:path id="p4_a0_m80e2cfbbbc-6" data-name="p4 a0 m80e2cfbbbc" d="M1869.1,585.28h-6.32" stroke="#000" stroke-linejoin="round" stroke-width="1.45"/>
+                  </ns0:g>
+                </ns0:g>
+                <ns0:g id="p4_a0_ytick_7" data-name="p4 a0 ytick 7">
+                  <ns0:g id="p4_a0_line2d_31" data-name="p4 a0 line2d 31">
+                    <ns0:path id="p4_a0_m80e2cfbbbc-7" data-name="p4 a0 m80e2cfbbbc" d="M1869.1,522.34h-6.32" stroke="#000" stroke-linejoin="round" stroke-width="1.45"/>
+                  </ns0:g>
+                </ns0:g>
+                <ns0:g id="p4_a0_ytick_8" data-name="p4 a0 ytick 8">
+                  <ns0:g id="p4_a0_line2d_32" data-name="p4 a0 line2d 32">
+                    <ns0:path id="p4_a0_m80e2cfbbbc-8" data-name="p4 a0 m80e2cfbbbc" d="M1869.1,459.41h-6.32" stroke="#000" stroke-linejoin="round" stroke-width="1.45"/>
+                  </ns0:g>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a0_patch_13" data-name="p4 a0 patch 13">
+                <ns0:path d="M1869.1,899.96v-456.04" fill="none" stroke="#000" stroke-linecap="square" stroke-miterlimit="7.23" stroke-width="1.45"/>
+              </ns0:g>
+              <ns0:g id="p4_a0_patch_14" data-name="p4 a0 patch 14">
+                <ns0:path d="M1869.1,899.96h313.48" fill="none" stroke="#000" stroke-linecap="square" stroke-miterlimit="7.23" stroke-width="1.45"/>
+              </ns0:g>
+              <ns0:g id="p4_a0_line2d_33" data-name="p4 a0 line2d 33">
+                <ns0:g clip-path="url(#clippath-276)">
+                  <ns0:path d="M2160.81,777.75l-14.51-6.03-14.51-12.68-14.52-36.03-14.51-21.01-14.51-20.87-14.52-29.11-14.51-26.31-14.51-15.55-14.51-14.94-14.52-11.78-14.51-7.1-14.51-4.91-14.52-3.47-14.51-2.06-14.51-.29-14.51-.35-14.52-.23-14.51-.09h-14.51" fill="none" stroke="#000" stroke-linecap="square" stroke-linejoin="round" stroke-width="2.71"/>
+                </ns0:g>
+                <ns0:g clip-path="url(#clippath-277)">
+                  <ns0:g>
+                    <ns0:path id="p4_a0_m5fdffb221f" data-name="p4 a0 m5fdffb221f" d="M2160.81,781.36c.96,0,1.88-.38,2.56-1.06.68-.67,1.06-1.59,1.06-2.55s-.38-1.88-1.06-2.56c-.68-.68-1.6-1.06-2.56-1.06s-1.88.38-2.56,1.06c-.67.68-1.05,1.6-1.05,2.56s.38,1.88,1.05,2.55C2158.93,780.98,2159.85,781.36,2160.81,781.36Z" stroke="#000" stroke-linejoin="round" stroke-width=".72"/>
+                    <ns0:path id="p4_a0_m5fdffb221f-2" data-name="p4 a0 m5fdffb221f" d="M2146.3,775.34c.96,0,1.88-.38,2.55-1.06.68-.68,1.06-1.6,1.06-2.56s-.38-1.87-1.06-2.55c-.67-.68-1.59-1.06-2.55-1.06s-1.88.38-2.56,1.06c-.68.68-1.06,1.6-1.06,2.55s.38,1.88,1.06,2.56C2144.42,774.96,2145.34,775.34,2146.3,775.34Z" stroke="#000" stroke-linejoin="round" stroke-width=".72"/>
+                    <ns0:path id="p4_a0_m5fdffb221f-3" data-name="p4 a0 m5fdffb221f" d="M2131.79,762.66c.95,0,1.87-.38,2.55-1.06.68-.68,1.06-1.6,1.06-2.56s-.38-1.87-1.06-2.55c-.68-.68-1.6-1.06-2.55-1.06s-1.88.38-2.56,1.06c-.68.68-1.06,1.6-1.06,2.55s.38,1.88,1.06,2.56C2129.91,762.28,2130.83,762.66,2131.79,762.66Z" stroke="#000" stroke-linejoin="round" stroke-width=".72"/>
+                    <ns0:path id="p4_a0_m5fdffb221f-4" data-name="p4 a0 m5fdffb221f" d="M2117.27,726.63c.96,0,1.88-.38,2.56-1.06.68-.68,1.06-1.6,1.06-2.56s-.38-1.88-1.06-2.55c-.68-.68-1.6-1.06-2.56-1.06s-1.88.38-2.55,1.06c-.68.67-1.06,1.59-1.06,2.55s.38,1.88,1.06,2.56C2115.39,726.25,2116.31,726.63,2117.27,726.63Z" stroke="#000" stroke-linejoin="round" stroke-width=".72"/>
+                    <ns0:path id="p4_a0_m5fdffb221f-5" data-name="p4 a0 m5fdffb221f" d="M2102.76,705.61c.96,0,1.88-.38,2.56-1.05.67-.68,1.05-1.6,1.05-2.56s-.38-1.88-1.05-2.56c-.68-.67-1.6-1.06-2.56-1.06s-1.88.39-2.56,1.06c-.67.68-1.06,1.6-1.06,2.56s.39,1.88,1.06,2.56C2100.88,705.23,2101.8,705.61,2102.76,705.61Z" stroke="#000" stroke-linejoin="round" stroke-width=".72"/>
+                    <ns0:path id="p4_a0_m5fdffb221f-6" data-name="p4 a0 m5fdffb221f" d="M2088.25,684.75c.96,0,1.88-.38,2.55-1.06.68-.68,1.06-1.6,1.06-2.56s-.38-1.87-1.06-2.55c-.67-.68-1.59-1.06-2.55-1.06s-1.88.38-2.56,1.06c-.68.68-1.06,1.6-1.06,2.55s.38,1.88,1.06,2.56C2086.37,684.37,2087.29,684.75,2088.25,684.75Z" stroke="#000" stroke-linejoin="round" stroke-width=".72"/>
+                    <ns0:path id="p4_a0_m5fdffb221f-7" data-name="p4 a0 m5fdffb221f" d="M2073.73,655.64c.96,0,1.88-.39,2.56-1.06.68-.68,1.06-1.6,1.06-2.56s-.38-1.88-1.06-2.56c-.68-.67-1.6-1.06-2.56-1.06s-1.87.39-2.55,1.06c-.68.68-1.06,1.6-1.06,2.56s.38,1.88,1.06,2.56C2071.86,655.25,2072.78,655.64,2073.73,655.64Z" stroke="#000" stroke-linejoin="round" stroke-width=".72"/>
+                    <ns0:path id="p4_a0_m5fdffb221f-8" data-name="p4 a0 m5fdffb221f" d="M2059.22,629.32c.96,0,1.88-.38,2.56-1.05.68-.68,1.06-1.6,1.06-2.56s-.38-1.88-1.06-2.56c-.68-.68-1.6-1.06-2.56-1.06s-1.88.38-2.56,1.06c-.67.68-1.05,1.6-1.05,2.56s.38,1.88,1.05,2.56C2057.34,628.94,2058.26,629.32,2059.22,629.32Z" stroke="#000" stroke-linejoin="round" stroke-width=".72"/>
+                    <ns0:path id="p4_a0_m5fdffb221f-9" data-name="p4 a0 m5fdffb221f" d="M2044.71,613.77c.96,0,1.88-.38,2.55-1.06.68-.67,1.06-1.59,1.06-2.55s-.38-1.88-1.06-2.56c-.67-.68-1.59-1.06-2.55-1.06s-1.88.38-2.56,1.06c-.68.68-1.06,1.6-1.06,2.56s.38,1.88,1.06,2.55C2042.83,613.39,2043.75,613.77,2044.71,613.77Z" stroke="#000" stroke-linejoin="round" stroke-width=".72"/>
+                    <ns0:path id="p4_a0_m5fdffb221f-10" data-name="p4 a0 m5fdffb221f" d="M2030.2,598.83c.95,0,1.87-.38,2.55-1.05.68-.68,1.06-1.6,1.06-2.56s-.38-1.88-1.06-2.56c-.68-.68-1.6-1.06-2.55-1.06s-1.88.38-2.56,1.06c-.68.68-1.06,1.6-1.06,2.56s.38,1.88,1.06,2.56C2028.32,598.45,2029.24,598.83,2030.2,598.83Z" stroke="#000" stroke-linejoin="round" stroke-width=".72"/>
+                    <ns0:path id="p4_a0_m5fdffb221f-11" data-name="p4 a0 m5fdffb221f" d="M2015.68,587.05c.96,0,1.88-.38,2.56-1.06.68-.67,1.06-1.59,1.06-2.55s-.38-1.88-1.06-2.56c-.68-.68-1.6-1.06-2.56-1.06s-1.88.38-2.55,1.06c-.68.68-1.06,1.6-1.06,2.56s.38,1.88,1.06,2.55C2013.8,586.67,2014.72,587.05,2015.68,587.05Z" stroke="#000" stroke-linejoin="round" stroke-width=".72"/>
+                    <ns0:path id="p4_a0_m5fdffb221f-12" data-name="p4 a0 m5fdffb221f" d="M2001.17,579.96c.96,0,1.88-.38,2.56-1.06.67-.68,1.05-1.6,1.05-2.56s-.38-1.87-1.05-2.55c-.68-.68-1.6-1.06-2.56-1.06s-1.88.38-2.56,1.06c-.67.68-1.06,1.6-1.06,2.55s.39,1.88,1.06,2.56C1999.29,579.58,2000.21,579.96,2001.17,579.96Z" stroke="#000" stroke-linejoin="round" stroke-width=".72"/>
+                    <ns0:path id="p4_a0_m5fdffb221f-13" data-name="p4 a0 m5fdffb221f" d="M1986.66,575.05c.96,0,1.88-.38,2.55-1.06.68-.68,1.06-1.6,1.06-2.56s-.38-1.88-1.06-2.56c-.67-.67-1.59-1.05-2.55-1.05s-1.88.38-2.56,1.05c-.68.68-1.06,1.6-1.06,2.56s.38,1.88,1.06,2.56C1984.78,574.67,1985.7,575.05,1986.66,575.05Z" stroke="#000" stroke-linejoin="round" stroke-width=".72"/>
+                    <ns0:path id="p4_a0_m5fdffb221f-14" data-name="p4 a0 m5fdffb221f" d="M1972.14,571.58c.96,0,1.88-.38,2.56-1.06.68-.68,1.06-1.6,1.06-2.56s-.38-1.87-1.06-2.55c-.68-.68-1.6-1.06-2.56-1.06s-1.87.38-2.55,1.06c-.68.68-1.06,1.6-1.06,2.55s.38,1.88,1.06,2.56C1970.27,571.2,1971.19,571.58,1972.14,571.58Z" stroke="#000" stroke-linejoin="round" stroke-width=".72"/>
+                    <ns0:path id="p4_a0_m5fdffb221f-15" data-name="p4 a0 m5fdffb221f" d="M1957.63,569.52c.96,0,1.88-.38,2.56-1.06.68-.68,1.06-1.6,1.06-2.56s-.38-1.87-1.06-2.55c-.68-.68-1.6-1.06-2.56-1.06s-1.88.38-2.56,1.06c-.67.68-1.05,1.6-1.05,2.55s.38,1.88,1.05,2.56C1955.75,569.14,1956.67,569.52,1957.63,569.52Z" stroke="#000" stroke-linejoin="round" stroke-width=".72"/>
+                    <ns0:path id="p4_a0_m5fdffb221f-16" data-name="p4 a0 m5fdffb221f" d="M1943.12,569.23c.96,0,1.88-.38,2.55-1.06.68-.68,1.06-1.6,1.06-2.56s-.38-1.88-1.06-2.55c-.67-.68-1.59-1.06-2.55-1.06s-1.88.38-2.56,1.06c-.68.67-1.06,1.59-1.06,2.55s.38,1.88,1.06,2.56C1941.24,568.85,1942.16,569.23,1943.12,569.23Z" stroke="#000" stroke-linejoin="round" stroke-width=".72"/>
+                    <ns0:path id="p4_a0_m5fdffb221f-17" data-name="p4 a0 m5fdffb221f" d="M1928.61,568.88c.95,0,1.87-.38,2.55-1.06.68-.68,1.06-1.6,1.06-2.56s-.38-1.88-1.06-2.55c-.68-.68-1.6-1.06-2.55-1.06s-1.88.38-2.56,1.06c-.68.67-1.06,1.59-1.06,2.55s.38,1.88,1.06,2.56C1926.73,568.5,1927.65,568.88,1928.61,568.88Z" stroke="#000" stroke-linejoin="round" stroke-width=".72"/>
+                    <ns0:path id="p4_a0_m5fdffb221f-18" data-name="p4 a0 m5fdffb221f" d="M1914.09,568.65c.96,0,1.88-.38,2.56-1.06.68-.68,1.06-1.6,1.06-2.56s-.38-1.88-1.06-2.56c-.68-.67-1.6-1.05-2.56-1.05s-1.88.38-2.55,1.05c-.68.68-1.06,1.6-1.06,2.56s.38,1.88,1.06,2.56C1912.21,568.27,1913.13,568.65,1914.09,568.65Z" stroke="#000" stroke-linejoin="round" stroke-width=".72"/>
+                    <ns0:path id="p4_a0_m5fdffb221f-19" data-name="p4 a0 m5fdffb221f" d="M1899.58,568.56c.96,0,1.88-.39,2.56-1.06.67-.68,1.06-1.6,1.06-2.56s-.39-1.88-1.06-2.56c-.68-.67-1.6-1.06-2.56-1.06s-1.88.39-2.56,1.06c-.67.68-1.06,1.6-1.06,2.56s.39,1.88,1.06,2.56C1897.7,568.17,1898.62,568.56,1899.58,568.56Z" stroke="#000" stroke-linejoin="round" stroke-width=".72"/>
+                    <ns0:path id="p4_a0_m5fdffb221f-20" data-name="p4 a0 m5fdffb221f" d="M1885.07,568.56c.96,0,1.88-.39,2.55-1.06.68-.68,1.06-1.6,1.06-2.56s-.38-1.88-1.06-2.56c-.67-.67-1.59-1.06-2.55-1.06s-1.88.39-2.56,1.06c-.68.68-1.06,1.6-1.06,2.56s.38,1.88,1.06,2.56C1883.19,568.17,1884.11,568.56,1885.07,568.56Z" stroke="#000" stroke-linejoin="round" stroke-width=".72"/>
+                  </ns0:g>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a0_patch_16" data-name="p4 a0 patch 16">
+                <ns0:path d="M1901.03,770.09v-197.49" fill="none" stroke="#0072B2" stroke-linecap="round" stroke-linejoin="round" stroke-width="3.62"/>
+                <ns0:path d="M1904.65,762.86l-3.62,7.23-3.61-7.23" fill="none" stroke="#0072B2" stroke-linecap="round" stroke-linejoin="round" stroke-width="3.62"/>
+                <ns0:path d="M1897.42,579.83l3.61-7.23,3.62,7.23" fill="none" stroke="#0072B2" stroke-linecap="round" stroke-linejoin="round" stroke-width="3.62"/>
+              </ns0:g>
+              <ns0:g id="p4_a0_patch_17" data-name="p4 a0 patch 17">
+                <ns0:path d="M1901.03,557.28v-56.83" fill="none" stroke="#D55E00" stroke-linecap="round" stroke-linejoin="round" stroke-width="3.62"/>
+                <ns0:path d="M1904.65,550.05l-3.62,7.23-3.61-7.23" fill="none" stroke="#D55E00" stroke-linecap="round" stroke-linejoin="round" stroke-width="3.62"/>
+                <ns0:path d="M1897.42,507.68l3.61-7.23,3.62,7.23" fill="none" stroke="#D55E00" stroke-linecap="round" stroke-linejoin="round" stroke-width="3.62"/>
+              </ns0:g>
+              <ns0:g id="p4_a0_patch_18" data-name="p4 a0 patch 18">
+                <ns0:path d="M1901.03,892.3v-106.9" fill="none" stroke="#667480" stroke-linecap="round" stroke-linejoin="round" stroke-width="3.62"/>
+                <ns0:path d="M1904.65,885.07l-3.62,7.23-3.61-7.23" fill="none" stroke="#667480" stroke-linecap="round" stroke-linejoin="round" stroke-width="3.62"/>
+                <ns0:path d="M1897.42,792.63l3.61-7.23,3.62,7.23" fill="none" stroke="#667480" stroke-linecap="round" stroke-linejoin="round" stroke-width="3.62"/>
+              </ns0:g>
+            </ns0:g>
+          <ns0:g id="p4_a1_axes_1" data-name="p4 a1 axes 1" transform="translate(0 900) scale(1 1.1301513877207736) translate(0 -896.5)">
+              <ns0:g id="p4_a1_patch_2" data-name="p4 a1 patch 2">
+                <ns0:path d="M2321.01,896.5h350.12v-380.48h-350.12V896.5Z" fill="none"/>
+              </ns0:g>
+              <ns0:g id="p4_a1_patch_3" data-name="p4 a1 patch 3">
+                <ns0:g clip-path="url(#clippath-278)">
+                  <ns0:path d="M2336.92,896.5h10.61v-14.87h-10.61V896.5Z" fill="#0072B2" isolation="isolate" opacity=".75" stroke="#fff" stroke-miterlimit="7.84" stroke-width="1.96"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a1_patch_4" data-name="p4 a1 patch 4">
+                <ns0:g clip-path="url(#clippath-279)">
+                  <ns0:path d="M2347.53,896.5h10.61v-18.59h-10.61V896.5Z" fill="#0072B2" isolation="isolate" opacity=".75" stroke="#fff" stroke-miterlimit="7.84" stroke-width="1.96"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a1_patch_5" data-name="p4 a1 patch 5">
+                <ns0:g clip-path="url(#clippath-280)">
+                  <ns0:path d="M2358.14,896.5h10.61v-44.62h-10.61V896.5Z" fill="#0072B2" isolation="isolate" opacity=".75" stroke="#fff" stroke-miterlimit="7.84" stroke-width="1.96"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a1_patch_6" data-name="p4 a1 patch 6">
+                <ns0:g clip-path="url(#clippath-281)">
+                  <ns0:path d="M2368.75,896.5h10.61v-33.46h-10.61V896.5Z" fill="#0072B2" isolation="isolate" opacity=".75" stroke="#fff" stroke-miterlimit="7.84" stroke-width="1.96"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a1_patch_7" data-name="p4 a1 patch 7">
+                <ns0:g clip-path="url(#clippath-282)">
+                  <ns0:path d="M2379.36,896.5h10.61v-22.31h-10.61V896.5Z" fill="#0072B2" isolation="isolate" opacity=".75" stroke="#fff" stroke-miterlimit="7.84" stroke-width="1.96"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a1_patch_8" data-name="p4 a1 patch 8">
+                <ns0:g clip-path="url(#clippath-283)">
+                  <ns0:path d="M2389.97,896.5h10.61v-26.03h-10.61V896.5Z" fill="#0072B2" isolation="isolate" opacity=".75" stroke="#fff" stroke-miterlimit="7.84" stroke-width="1.96"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a1_patch_9" data-name="p4 a1 patch 9">
+                <ns0:g clip-path="url(#clippath-284)">
+                  <ns0:path d="M2400.58,896.5h10.61v-14.87h-10.61V896.5Z" fill="#0072B2" isolation="isolate" opacity=".75" stroke="#fff" stroke-miterlimit="7.84" stroke-width="1.96"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a1_patch_10" data-name="p4 a1 patch 10">
+                <ns0:g clip-path="url(#clippath-285)">
+                  <ns0:path d="M2411.19,896.5h10.61v-33.46h-10.61V896.5Z" fill="#0072B2" isolation="isolate" opacity=".75" stroke="#fff" stroke-miterlimit="7.84" stroke-width="1.96"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a1_patch_11" data-name="p4 a1 patch 11">
+                <ns0:g clip-path="url(#clippath-286)">
+                  <ns0:path d="M2421.8,896.5h10.61v-52.05h-10.61V896.5Z" fill="#0072B2" isolation="isolate" opacity=".75" stroke="#fff" stroke-miterlimit="7.84" stroke-width="1.96"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a1_patch_12" data-name="p4 a1 patch 12">
+                <ns0:g clip-path="url(#clippath-287)">
+                  <ns0:path d="M2432.41,896.5h10.61v-63.21h-10.61V896.5Z" fill="#0072B2" isolation="isolate" opacity=".75" stroke="#fff" stroke-miterlimit="7.84" stroke-width="1.96"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a1_patch_13" data-name="p4 a1 patch 13">
+                <ns0:g clip-path="url(#clippath-288)">
+                  <ns0:path d="M2443.02,896.5h10.61v-33.46h-10.61V896.5Z" fill="#0072B2" isolation="isolate" opacity=".75" stroke="#fff" stroke-miterlimit="7.84" stroke-width="1.96"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a1_patch_14" data-name="p4 a1 patch 14">
+                <ns0:g clip-path="url(#clippath-289)">
+                  <ns0:path d="M2453.63,896.5h10.61v-85.51h-10.61V896.5Z" fill="#0072B2" isolation="isolate" opacity=".75" stroke="#fff" stroke-miterlimit="7.84" stroke-width="1.96"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a1_patch_15" data-name="p4 a1 patch 15">
+                <ns0:g clip-path="url(#clippath-290)">
+                  <ns0:path d="M2464.24,896.5h10.61v-63.21h-10.61V896.5Z" fill="#0072B2" isolation="isolate" opacity=".75" stroke="#fff" stroke-miterlimit="7.84" stroke-width="1.96"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a1_patch_16" data-name="p4 a1 patch 16">
+                <ns0:g clip-path="url(#clippath-291)">
+                  <ns0:path d="M2474.85,896.5h10.61v-66.92h-10.61V896.5Z" fill="#0072B2" isolation="isolate" opacity=".75" stroke="#fff" stroke-miterlimit="7.84" stroke-width="1.96"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a1_patch_17" data-name="p4 a1 patch 17">
+                <ns0:g clip-path="url(#clippath-292)">
+                  <ns0:path d="M2485.46,896.5h10.61v-111.54h-10.61V896.5Z" fill="#0072B2" isolation="isolate" opacity=".75" stroke="#fff" stroke-miterlimit="7.84" stroke-width="1.96"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a1_patch_18" data-name="p4 a1 patch 18">
+                <ns0:g clip-path="url(#clippath-293)">
+                  <ns0:path d="M2496.07,896.5h10.61v-107.82h-10.61V896.5Z" fill="#0072B2" isolation="isolate" opacity=".75" stroke="#fff" stroke-miterlimit="7.84" stroke-width="1.96"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a1_patch_19" data-name="p4 a1 patch 19">
+                <ns0:g clip-path="url(#clippath-294)">
+                  <ns0:path d="M2506.68,896.5h10.61v-78.08h-10.61V896.5Z" fill="#0072B2" isolation="isolate" opacity=".75" stroke="#fff" stroke-miterlimit="7.84" stroke-width="1.96"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a1_patch_20" data-name="p4 a1 patch 20">
+                <ns0:g clip-path="url(#clippath-295)">
+                  <ns0:path d="M2517.29,896.5h10.61v-145h-10.61V896.5Z" fill="#0072B2" isolation="isolate" opacity=".75" stroke="#fff" stroke-miterlimit="7.84" stroke-width="1.96"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a1_patch_21" data-name="p4 a1 patch 21">
+                <ns0:g clip-path="url(#clippath-296)">
+                  <ns0:path d="M2527.9,896.5h10.61v-208.21h-10.61V896.5Z" fill="#0072B2" isolation="isolate" opacity=".75" stroke="#fff" stroke-miterlimit="7.84" stroke-width="1.96"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a1_patch_22" data-name="p4 a1 patch 22">
+                <ns0:g clip-path="url(#clippath-297)">
+                  <ns0:path d="M2538.51,896.5h10.61v-223.08h-10.61V896.5Z" fill="#0072B2" isolation="isolate" opacity=".75" stroke="#fff" stroke-miterlimit="7.84" stroke-width="1.96"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a1_patch_23" data-name="p4 a1 patch 23">
+                <ns0:g clip-path="url(#clippath-298)">
+                  <ns0:path d="M2549.12,896.5h10.61v-230.52h-10.61V896.5Z" fill="#0072B2" isolation="isolate" opacity=".75" stroke="#fff" stroke-miterlimit="7.84" stroke-width="1.96"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a1_patch_24" data-name="p4 a1 patch 24">
+                <ns0:g clip-path="url(#clippath-299)">
+                  <ns0:path d="M2559.73,896.5h10.61v-226.8h-10.61V896.5Z" fill="#0072B2" isolation="isolate" opacity=".75" stroke="#fff" stroke-miterlimit="7.84" stroke-width="1.96"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a1_patch_25" data-name="p4 a1 patch 25">
+                <ns0:g clip-path="url(#clippath-300)">
+                  <ns0:path d="M2570.34,896.5h10.61v-293.72h-10.61V896.5Z" fill="#0072B2" isolation="isolate" opacity=".75" stroke="#fff" stroke-miterlimit="7.84" stroke-width="1.96"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a1_patch_26" data-name="p4 a1 patch 26">
+                <ns0:g clip-path="url(#clippath-301)">
+                  <ns0:path d="M2580.95,896.5h10.61v-338.34h-10.61V896.5Z" fill="#0072B2" isolation="isolate" opacity=".75" stroke="#fff" stroke-miterlimit="7.84" stroke-width="1.96"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a1_patch_27" data-name="p4 a1 patch 27">
+                <ns0:g clip-path="url(#clippath-302)">
+                  <ns0:path d="M2591.56,896.5h10.61v-304.88h-10.61V896.5Z" fill="#0072B2" isolation="isolate" opacity=".75" stroke="#fff" stroke-miterlimit="7.84" stroke-width="1.96"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a1_patch_28" data-name="p4 a1 patch 28">
+                <ns0:g clip-path="url(#clippath-303)">
+                  <ns0:path d="M2602.17,896.5h10.61v-301.16h-10.61V896.5Z" fill="#0072B2" isolation="isolate" opacity=".75" stroke="#fff" stroke-miterlimit="7.84" stroke-width="1.96"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a1_patch_29" data-name="p4 a1 patch 29">
+                <ns0:g clip-path="url(#clippath-304)">
+                  <ns0:path d="M2612.78,896.5h10.61v-152.44h-10.61V896.5Z" fill="#0072B2" isolation="isolate" opacity=".75" stroke="#fff" stroke-miterlimit="7.84" stroke-width="1.96"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a1_patch_30" data-name="p4 a1 patch 30">
+                <ns0:g clip-path="url(#clippath-305)">
+                  <ns0:path d="M2623.39,896.5h10.61v-126.41h-10.61V896.5Z" fill="#0072B2" isolation="isolate" opacity=".75" stroke="#fff" stroke-miterlimit="7.84" stroke-width="1.96"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a1_patch_31" data-name="p4 a1 patch 31">
+                <ns0:g clip-path="url(#clippath-306)">
+                  <ns0:path d="M2634,896.5h10.61v-63.21h-10.61V896.5Z" fill="#0072B2" isolation="isolate" opacity=".75" stroke="#fff" stroke-miterlimit="7.84" stroke-width="1.96"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a1_patch_32" data-name="p4 a1 patch 32">
+                <ns0:g clip-path="url(#clippath-307)">
+                  <ns0:path d="M2644.61,896.5h10.61v-7.44h-10.61V896.5Z" fill="#0072B2" isolation="isolate" opacity=".75" stroke="#fff" stroke-miterlimit="7.84" stroke-width="1.96"/>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a1_matplotlib.axis_1" data-name="p4 a1 matplotlib.axis 1">
+                <ns0:g id="p4_a1_xtick_1" data-name="p4 a1 xtick 1">
+                  <ns0:g id="p4_a1_line2d_1" data-name="p4 a1 line2d 1">
+                    <ns0:g clip-path="url(#clippath-308)">
+                      <ns0:path d="M2333.73,896.5v-380.48" fill="none" stroke="rgba(176, 176, 176, .3)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.57"/>
+                    </ns0:g>
+                  </ns0:g>
+                  <ns0:g id="p4_a1_line2d_2" data-name="p4 a1 line2d 2">
+                    <ns0:path id="p4_a1_mbd4873df1b" data-name="p4 a1 mbd4873df1b" d="M2333.73,896.5v6.86" stroke="#000" stroke-linejoin="round" stroke-width="1.57"/>
+                  </ns0:g>
+                </ns0:g>
+                <ns0:g id="p4_a1_xtick_2" data-name="p4 a1 xtick 2">
+                  <ns0:g id="p4_a1_line2d_3" data-name="p4 a1 line2d 3">
+                    <ns0:g clip-path="url(#clippath-309)">
+                      <ns0:path d="M2414.19,896.5v-380.48" fill="none" stroke="rgba(176, 176, 176, .3)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.57"/>
+                    </ns0:g>
+                  </ns0:g>
+                  <ns0:g id="p4_a1_line2d_4" data-name="p4 a1 line2d 4">
+                    <ns0:path id="p4_a1_mbd4873df1b-2" data-name="p4 a1 mbd4873df1b" d="M2414.19,896.5v6.86" stroke="#000" stroke-linejoin="round" stroke-width="1.57"/>
+                  </ns0:g>
+                </ns0:g>
+                <ns0:g id="p4_a1_xtick_3" data-name="p4 a1 xtick 3">
+                  <ns0:g id="p4_a1_line2d_5" data-name="p4 a1 line2d 5">
+                    <ns0:g clip-path="url(#clippath-310)">
+                      <ns0:path d="M2494.65,896.5v-380.48" fill="none" stroke="rgba(176, 176, 176, .3)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.57"/>
+                    </ns0:g>
+                  </ns0:g>
+                  <ns0:g id="p4_a1_line2d_6" data-name="p4 a1 line2d 6">
+                    <ns0:path id="p4_a1_mbd4873df1b-3" data-name="p4 a1 mbd4873df1b" d="M2494.65,896.5v6.86" stroke="#000" stroke-linejoin="round" stroke-width="1.57"/>
+                  </ns0:g>
+                </ns0:g>
+                <ns0:g id="p4_a1_xtick_4" data-name="p4 a1 xtick 4">
+                  <ns0:g id="p4_a1_line2d_7" data-name="p4 a1 line2d 7">
+                    <ns0:g clip-path="url(#clippath-311)">
+                      <ns0:path d="M2575.1,896.5v-380.48" fill="none" stroke="rgba(176, 176, 176, .3)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.57"/>
+                    </ns0:g>
+                  </ns0:g>
+                  <ns0:g id="p4_a1_line2d_8" data-name="p4 a1 line2d 8">
+                    <ns0:path id="p4_a1_mbd4873df1b-4" data-name="p4 a1 mbd4873df1b" d="M2575.1,896.5v6.86" stroke="#000" stroke-linejoin="round" stroke-width="1.57"/>
+                  </ns0:g>
+                </ns0:g>
+                <ns0:g id="p4_a1_xtick_5" data-name="p4 a1 xtick 5">
+                  <ns0:g id="p4_a1_line2d_9" data-name="p4 a1 line2d 9">
+                    <ns0:g clip-path="url(#clippath-312)">
+                      <ns0:path d="M2655.56,896.5v-380.48" fill="none" stroke="rgba(176, 176, 176, .3)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.57"/>
+                    </ns0:g>
+                  </ns0:g>
+                  <ns0:g id="p4_a1_line2d_10" data-name="p4 a1 line2d 10">
+                    <ns0:path id="p4_a1_mbd4873df1b-5" data-name="p4 a1 mbd4873df1b" d="M2655.56,896.5v6.86" stroke="#000" stroke-linejoin="round" stroke-width="1.57"/>
+                  </ns0:g>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a1_matplotlib.axis_2" data-name="p4 a1 matplotlib.axis 2">
+                <ns0:g id="p4_a1_ytick_1" data-name="p4 a1 ytick 1">
+                  <ns0:g id="p4_a1_line2d_11" data-name="p4 a1 line2d 11">
+                    <ns0:g clip-path="url(#clippath-313)">
+                      <ns0:path d="M2321.01,896.5h350.12" fill="none" stroke="rgba(176, 176, 176, .3)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.57"/>
+                    </ns0:g>
+                  </ns0:g>
+                  <ns0:g id="p4_a1_line2d_12" data-name="p4 a1 line2d 12">
+                    <ns0:path id="p4_a1_m7b12a3d461" data-name="p4 a1 m7b12a3d461" d="M2321.01,896.5h-6.87" stroke="#000" stroke-linejoin="round" stroke-width="1.57"/>
+                  </ns0:g>
+                </ns0:g>
+                <ns0:g id="p4_a1_ytick_2" data-name="p4 a1 ytick 2">
+                  <ns0:g id="p4_a1_line2d_13" data-name="p4 a1 line2d 13">
+                    <ns0:g clip-path="url(#clippath-314)">
+                      <ns0:path d="M2321.01,822.14h350.12" fill="none" stroke="rgba(176, 176, 176, .3)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.57"/>
+                    </ns0:g>
+                  </ns0:g>
+                  <ns0:g id="p4_a1_line2d_14" data-name="p4 a1 line2d 14">
+                    <ns0:path id="p4_a1_m7b12a3d461-2" data-name="p4 a1 m7b12a3d461" d="M2321.01,822.14h-6.87" stroke="#000" stroke-linejoin="round" stroke-width="1.57"/>
+                  </ns0:g>
+                </ns0:g>
+                <ns0:g id="p4_a1_ytick_3" data-name="p4 a1 ytick 3">
+                  <ns0:g id="p4_a1_line2d_15" data-name="p4 a1 line2d 15">
+                    <ns0:g clip-path="url(#clippath-315)">
+                      <ns0:path d="M2321.01,747.78h350.12" fill="none" stroke="rgba(176, 176, 176, .3)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.57"/>
+                    </ns0:g>
+                  </ns0:g>
+                  <ns0:g id="p4_a1_line2d_16" data-name="p4 a1 line2d 16">
+                    <ns0:path id="p4_a1_m7b12a3d461-3" data-name="p4 a1 m7b12a3d461" d="M2321.01,747.78h-6.87" stroke="#000" stroke-linejoin="round" stroke-width="1.57"/>
+                  </ns0:g>
+                </ns0:g>
+                <ns0:g id="p4_a1_ytick_4" data-name="p4 a1 ytick 4">
+                  <ns0:g id="p4_a1_line2d_17" data-name="p4 a1 line2d 17">
+                    <ns0:g clip-path="url(#clippath-316)">
+                      <ns0:path d="M2321.01,673.42h350.12" fill="none" stroke="rgba(176, 176, 176, .3)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.57"/>
+                    </ns0:g>
+                  </ns0:g>
+                  <ns0:g id="p4_a1_line2d_18" data-name="p4 a1 line2d 18">
+                    <ns0:path id="p4_a1_m7b12a3d461-4" data-name="p4 a1 m7b12a3d461" d="M2321.01,673.42h-6.87" stroke="#000" stroke-linejoin="round" stroke-width="1.57"/>
+                  </ns0:g>
+                </ns0:g>
+                <ns0:g id="p4_a1_ytick_5" data-name="p4 a1 ytick 5">
+                  <ns0:g id="p4_a1_line2d_19" data-name="p4 a1 line2d 19">
+                    <ns0:g clip-path="url(#clippath-317)">
+                      <ns0:path d="M2321.01,599.06h350.12" fill="none" stroke="rgba(176, 176, 176, .3)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.57"/>
+                    </ns0:g>
+                  </ns0:g>
+                  <ns0:g id="p4_a1_line2d_20" data-name="p4 a1 line2d 20">
+                    <ns0:path id="p4_a1_m7b12a3d461-5" data-name="p4 a1 m7b12a3d461" d="M2321.01,599.06h-6.87" stroke="#000" stroke-linejoin="round" stroke-width="1.57"/>
+                  </ns0:g>
+                </ns0:g>
+                <ns0:g id="p4_a1_ytick_6" data-name="p4 a1 ytick 6">
+                  <ns0:g id="p4_a1_line2d_21" data-name="p4 a1 line2d 21">
+                    <ns0:g clip-path="url(#clippath-318)">
+                      <ns0:path d="M2321.01,524.7h350.12" fill="none" stroke="rgba(176, 176, 176, .3)" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.57"/>
+                    </ns0:g>
+                  </ns0:g>
+                  <ns0:g id="p4_a1_line2d_22" data-name="p4 a1 line2d 22">
+                    <ns0:path id="p4_a1_m7b12a3d461-6" data-name="p4 a1 m7b12a3d461" d="M2321.01,524.7h-6.87" stroke="#000" stroke-linejoin="round" stroke-width="1.57"/>
+                  </ns0:g>
+                </ns0:g>
+              </ns0:g>
+              <ns0:g id="p4_a1_patch_33" data-name="p4 a1 patch 33">
+                <ns0:path d="M2321.01,896.5v-380.48" fill="none" stroke="#000" stroke-linecap="square" stroke-miterlimit="7.84" stroke-width="1.57"/>
+              </ns0:g>
+              <ns0:g id="p4_a1_patch_34" data-name="p4 a1 patch 34">
+                <ns0:path d="M2321.01,896.5h350.12" fill="none" stroke="#000" stroke-linecap="square" stroke-miterlimit="7.84" stroke-width="1.57"/>
+              </ns0:g>
+              </ns0:g>
+          <ns0:path d="M1470,455 L1488.47,463 L1488.47,470" fill="none" stroke="#D55E00" stroke-width="1.6"/><ns0:path d="M1650,455 L1606.88,463 L1606.88,470" fill="none" stroke="#0072B2" stroke-width="1.6"/><ns0:path d="M2155,516.0660410454307V784.7406156814594 M2150,525.0660410454307L2155,516.0660410454307L2160,525.0660410454307 M2150,775.7406156814594L2155,784.7406156814594L2160,775.7406156814594" fill="none" stroke="#193654" stroke-width="2.5" stroke-linejoin="round"/><ns0:line x1="2132.58" x2="2162" y1="516.0660410454307" y2="516.0660410454307" stroke="#193654" stroke-width="1.2" stroke-dasharray="4 3"/><ns0:line x1="2132.58" x2="2162" y1="784.7406156814594" y2="784.7406156814594" stroke="#193654" stroke-width="1.2"/><ns0:line x1="2562.15" x2="2562.15" y1="470" y2="489" stroke="#193654" stroke-width="3"/></ns0:g></ns0:svg>

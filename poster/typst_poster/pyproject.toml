@@ -1,0 +1,24 @@
+[project]
+name = "visioncore-poster"
+version = "1.0.0"
+description = "Reproducible build of the approved 60 x 36 inch scientific poster"
+requires-python = "==3.12.12"
+dependencies = [
+  "matplotlib==3.10.8",
+  "numpy==1.26.4",
+  "pillow==12.1.0",
+  "pymupdf==1.28.0",
+  "typst==0.15.2",
+  "fonttools==4.61.1",
+  "contourpy==1.3.3",
+  "cycler==0.12.1",
+  "kiwisolver==1.4.9",
+  "packaging==25.0",
+  "pyparsing==3.3.1",
+  "python-dateutil==2.9.0.post0",
+  "six==1.17.0",
+]
+
+[tool.uv]
+package = false
+required-version = "==0.9.25"

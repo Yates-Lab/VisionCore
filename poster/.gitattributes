@@ -1,0 +1,4 @@
+# Preserve scientific data, approved PDF and font bytes on every platform.
+*.pdf binary
+*.npz binary
+*.ttf binary
