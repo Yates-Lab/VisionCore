@@ -10,7 +10,7 @@
 #let cite(t) = super(baseline: -9pt, size: 15pt)[[#t]]
 
 #place(top + left, dx: 21pt, dy: 18pt)[
-  #text(size: 40pt, weight: "bold", fill: navy)[Fixational eye movements: noise or signal?]
+  #text(size: 48pt, weight: "bold", fill: navy)[Fixational eye movements: noise or signal?]
 ]
 
 #place(top + left, dx: 21pt, dy: 92pt)[

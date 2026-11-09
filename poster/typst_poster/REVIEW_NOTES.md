@@ -30,7 +30,30 @@ Old → new: 1 and 3 retired, 2 → 2, 4 → 3, 5 → 4, 6 → 5, 7 → 6, 8 →
     group's mean gaze.
   - The image placement reproduces the dataset's gaze-contingent crops.
   - The 0.33° shift is smaller than 99% of single-unit RFs (median diameter 0.42°).
-- Panel titles enlarged from 36 pt to 40 pt.
+  - **RF position comes from the fixation trials** (`_task_rf_offset`): 0.41° left,
+    0.06° below gaze (95% CI y −0.11 to −0.02°). This is consistent with Figure 1C's
+    across-session RFs. The separate gaborium mapping put it at 0.56° left, 0.10°
+    up, so only the RF's shape and size come from the mapping. Re-cropping with
+    mirrored gaze axes explains the residual spiking much less well, which rules
+    out a coordinate flip.
+- **Panel 1 layout:** one enlarged view per trial group ("Red trials" / "Blue
+  trials") beside its rasters.
+  - Each view shows that group's gaze dots, a gaze → RF-centre connector, the RF
+    outline with a crosshair at its centre, and a dashed ghost of where the RF sat
+    on the other trials.
+  - The blue view carries the 0.33° shift arrow.
+  - A left column holds the rig, the DPI eye image and a symbol key.
+- **Panel titles:** 48 pt, rewritten as claims.
+  1. Tiny gaze shifts reshape population responses
+  2. One neuron’s “noise” tracks the eye
+  3. Eye movements drive most rate variance (71%)
+  4. Correcting for gaze removes shared noise
+  5. Eye-driven variability follows stimulus dimensions
+  6. The retinal image, not an eye signal, predicts single trials
+  7. In the model, eye motion sharpens spatial coding
+  8. Sharpening grows with tuning and model depth
+
+  The intro title is unchanged, at 48 pt.
 - Header: "Tejas" changed to "Tejasvi" Kothapalli. The author line stays centred.
 - Reference [4] changed to Ressmeyer 2026. The tracker paper is now published:
   J Neurosci Methods 429:110693, doi:10.1016/j.jneumeth.2026.110693 (PMID 41581702).
@@ -62,6 +85,8 @@ Old → new: 1 and 3 retired, 2 → 2, 4 → 3, 5 → 4, 6 → 5, 7 → 6, 8 →
    19-session summary comparing fixational gaze spread with RF diameter.
 6. **Intro has spare space at the bottom.** It could be shortened in favour of
    panel 1.
+7. **Standalone R01 figure** (`generate_fem_overview.py`) still uses the single
+   zoom layout. It could adopt panel 1's per-group views.
 
 ## Likely questions at the poster (no change needed)
 

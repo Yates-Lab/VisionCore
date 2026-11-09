@@ -29,7 +29,7 @@
 #place(top + left, dx: 9pt, dy: 15pt)[
   #grid(columns: (42pt, 1fr), column-gutter: 9pt, align: horizon,
     circle(radius: 21pt, fill: copper, stroke: none)[#align(center + horizon)[#text(size: 29pt, weight: "bold", fill: white)[4]]],
-    text(size: 40pt, weight: "bold", fill: copper)[FEM correction reduces variability and shared noise],
+    text(size: 48pt, weight: "bold", fill: copper)[Correcting for gaze removes shared noise],
   )
 ]
 #place(top + left, dx: 30.13pt, dy: 109.37pt)[

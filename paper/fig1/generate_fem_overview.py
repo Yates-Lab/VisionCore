@@ -25,8 +25,12 @@ What the marks mean (checked against the raw data, 2026-11-09):
                  contour of the mean normalized peak-lag STE of 124 RF-qualified
                  units. The gaborium crop follows gaze, so this map is in
                  retinal coordinates; it is drawn at each group's mean gaze,
-                 i.e. where the RF lands on the screen. It is centred about
-                 0.56 deg left of gaze. Single-unit RFs are similar in size
+                 i.e. where the RF lands on the screen. Its position comes from
+                 the fixation trials themselves: 0.41 deg left and 0.06 deg below
+                 gaze (95% CI y −0.11 to −0.02), matching Figure 1C's
+                 across-session RFs. The mapping session alone put it 0.56 deg
+                 left and 0.10 deg up, at the edge of that scatter; see
+                 ``_task_rf_offset``. Single-unit RFs are similar in size
                  (median diameter 0.42 deg), so the 0.33 deg gaze shift between
                  groups is smaller than nearly every unit's RF.
     Image        fixRSVP image 4 (on screen 150–200 ms; the same picture on
@@ -151,11 +155,80 @@ def _compute_assets(payload):
     return out
 
 
+def _task_rf_offset(assets, lag, n_boot=200, seed=0):
+    """RF location relative to gaze, estimated from the fixation task itself.
+
+    The fixRSVP crops follow gaze (crop = gaze + roi_src), so trial-to-trial
+    differences in spiking at the same moment of the repeated sequence should
+    covary with crop contrast energy where the RF is. Both spikes and energy are
+    demeaned within each sequence bin, which removes the shared image structure.
+    The half-maximum-weighted centroid of the resulting map is the RF centre in
+    gaze-relative degrees. A trial bootstrap gives its 95% CI. Needs DataYatesV1.
+
+    This mapping gave a clearer RF on this session's own trials than the
+    separate gaborium session: its offset matches Figure 1C's across-session
+    RFs (left of and just below gaze), and recrops with mirrored gaze axes
+    explain the residual spiking much less well.
+    """
+    from DataYatesV1.utils.data import DictDataset
+    from DataYatesV1.utils.io import YatesV1Session
+
+    dset = YatesV1Session(SESSION).get_dataset("fixrsvp")
+    ppd = float(dset.metadata["ppd"])
+    roi = np.asarray(dset.metadata["roi_src"])
+    psth, eye = np.asarray(dset["psth_inds"]), np.asarray(dset["eyepos"])
+    robs, trials = np.asarray(dset["robs"], dtype=np.float32), np.asarray(dset["trial_inds"])
+    # Images 2-10 only, avoiding a bin either side of each 12-bin image change.
+    ok = (psth < 106) & (psth % 12 > 1) & (psth % 12 < 10) & (np.hypot(*eye.T) < 0.8)
+    idx = np.flatnonzero(ok)
+    idx = idx[idx + lag < len(robs)]
+    pad = 80
+    ims = {i: np.pad(assets[f"im_{i}"].astype(np.float32), pad,
+                     constant_values=float(np.median(assets[f"im_{i}"]))) for i in range(2, 11)}
+    h_roi, w_roi = roi[0, 1] - roi[0, 0], roi[1, 1] - roi[1, 0]
+    crops = np.empty((len(idx), h_roi, w_roi), np.float32)
+    for n, k in enumerate(idx):
+        im = ims[2 + psth[k] // 12]
+        centre = (im.shape[0] - 2 * pad) // 2 + pad
+        r0 = int(np.floor(centre - eye[k, 1] * ppd)) + roi[0, 0]
+        c0 = int(np.floor(centre + eye[k, 0] * ppd)) + roi[1, 0]
+        crops[n] = im[r0:r0 + h_roi, c0:c0 + w_roi]
+    groups = psth[idx]
+
+    def demean(x):
+        x = x.copy()
+        for gid in np.unique(groups):
+            sel = groups == gid
+            x[sel] -= x[sel].mean(0)
+        return x
+
+    energy = demean((crops - crops.mean(0)) ** 2)
+    spikes = demean(robs[idx + lag].sum(1))
+    rows, cols = np.mgrid[:h_roi, :w_roi]
+
+    def centroid(sel):
+        m = gaussian_filter(np.tensordot(spikes[sel], energy[sel], axes=(0, 0)), 1.5)
+        w = np.where(m >= 0.5 * m.max(), m - 0.5 * m.max(), 0.0)
+        r, c = (w * rows).sum() / w.sum(), (w * cols).sum() / w.sum()
+        return np.array([(roi[1, 0] + c) / ppd, -(roi[0, 0] + r) / ppd])   # (x, y), up +
+
+    est = centroid(np.ones(len(idx), bool))
+    rng = np.random.default_rng(seed)
+    tr, unique = trials[idx], np.unique(trials[idx])
+    boot = np.array([centroid(np.isin(tr, rng.choice(unique, len(unique))))
+                     for _ in range(n_boot)])
+    return est, np.percentile(boot, [2.5, 97.5], axis=0)
+
+
 def load_assets(payload, refresh=False):
     if ASSET_PATH.exists() and not refresh:
-        return dict(np.load(ASSET_PATH))
-    assets = _compute_assets(payload)
-    np.savez_compressed(ASSET_PATH, **assets)
+        assets = dict(np.load(ASSET_PATH))
+    else:
+        assets = _compute_assets(payload)
+    if refresh or "task_rf_offset_deg" not in assets:
+        est, ci = _task_rf_offset(assets, lag=int(payload["peak_lag"]))
+        assets["task_rf_offset_deg"], assets["task_rf_offset_ci"] = est, ci
+        np.savez_compressed(ASSET_PATH, **assets)
     return assets
 
 
@@ -201,11 +274,24 @@ def trial_gaze(payload, trials, s, e):
 
 
 def population_rf(payload, assets):
-    """Mean normalized peak-lag STE of RF-qualified units → contour in degrees.
+    """Population RF outline in gaze-relative degrees (x right, y up).
 
-    Coordinates are retinal (deg relative to the fovea), as in Figure 1C;
-    adding a gaze position gives the RF's location on the screen.
+    Shape and size: half-maximum contour of the mean normalized peak-lag STE of
+    the RF-qualified units (gaborium noise mapping, as in Figure 1C).
+    Position: centred on the fixation-task estimate from ``_task_rf_offset``.
+    That estimate comes from this session's own fixation trials and puts the RF
+    left of and just below gaze. The separate mapping session placed it about
+    0.13 deg higher, at the edge of the across-session scatter in Figure 1C.
+    Adding a gaze position gives the RF's location on the screen.
     """
+    mapped, n_units = _mapped_rf_contour(payload, assets)
+    centred = mapped - mapped.mean(0) + assets["task_rf_offset_deg"][None, :]
+    return centred, n_units
+
+
+def _mapped_rf_contour(payload, assets):
+    """Half-maximum contour of the mean normalized gaborium STE, at its mapped
+    position (gaze-relative degrees, x right, y up)."""
     z = np.load(STE_PATH)
     stes, spikes = z["stes"], z["num_spikes"]
     signal = np.abs(stes - np.median(stes, axis=(2, 3), keepdims=True))

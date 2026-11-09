@@ -9,13 +9,13 @@
   "assets/panel8.svg": "98ee6bb0d2acf9e8630817327230412fa555c9e203773535d351affe0698bab2",
   "assets/panel9.svg": "3384d2b7f0424b04cec56018e0799e9d3a6b5d114f157affacd33d62b1bf9870",
   "components/panel5/assets/residual_connector.svg": "47874966126acb9c14b47d2ac5cf3d54ff7cc142676821d4447d64e3d45c5255",
-  "components/panel5/panel5.typ": "e2ee78830b4dc668149ce87a4b7463b3d730c1282e25cb550924a528cdbfccff",
+  "components/panel5/panel5.typ": "83e6e514da3918ed88be689874b97e92ac7a18198957241c104dbc714075e728",
   "components/panel5/plot_data.npz": "3ad173168b952d93934478525d01c51d6f42339427368d2d47267be228924b77",
   "components/panel_fem/assets/dpi_eye.png": "bfd26e1861e6849c2b62a4effe3504566eb17bd917ebde466f1ab4c54d62e033",
   "components/panel_fem/assets/marmoset.png": "fc0203e3774c5526d1d90bd8adb9464c2379c180ef730715d2c8e9a7cd2c4600",
-  "components/panel_fem/intro.typ": "9db21c0b24a6f5fe867488c4966dfba9cbe52f1aa62c36b49fc5b8bdca8f069d",
-  "components/panel_fem/plot_data.npz": "3e3b99ba71767a7b550733be18d226daee3ade512fa2e93b59b688217d53356a",
+  "components/panel_fem/intro.typ": "477626310687a4520d5e43505a0a2a2110853f3e899b1a27dea6a9706ddcef3b",
+  "components/panel_fem/plot_data.npz": "e7c1c58992bd20647af5e3e6b967df50f3f011e858bb88e6c7133de8ad7db5ae",
   "poster.typ": "b0e0e3a43eed97d0567cdda78a6b3eb1505f1216eab8e1d26536b533187b2127",
-  "poster_content.json": "53ad351fef26cd53ad7c6f05a41e4d11156047f469bac654ac8c6ecf494aefba",
-  "reference/approved.pdf": "f6c8ab4d0df7c8c79f2cb0a7b9e669703d474054f7e66f791856508a60dd9e44"
+  "poster_content.json": "f0c5238b98b032611df343b25ca0189b8d0fd862ed003b41158700b95943bf22",
+  "reference/approved.pdf": "ed12317e379d96d376f901aceec05b4749b2fb8aac34366cd9e3d5b28c2909c3"
 }
