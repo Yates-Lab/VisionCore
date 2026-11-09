@@ -32,7 +32,7 @@ def main():
         versions[name] = importlib.metadata.version(name)
         require(versions[name] == expected, f'{name}: expected {expected}, got {versions[name]}')
 
-    # This snapshot was made before the reproducibility refactor, not by build.py.
+    # This snapshot is updated after reviewed changes, never by build.py.
     inputs = json.loads((HERE / 'reference/inputs.json').read_text())
     for name, expected in inputs.items():
         require(not Path(name).is_absolute() and '..' not in Path(name).parts,

@@ -359,10 +359,10 @@ def _mapped_rf_contour(payload, assets):
     return np.column_stack([deg[:, 1], deg[:, 0]]), len(maps)   # (x, y)
 
 
-# Marmoset line drawing, extracted once from the retired poster panel 1 artwork
-# (labels, gaze line and eye-image inset removed; white made transparent).
-MARMOSET_PNG = (VISIONCORE_ROOT / "poster" / "typst_poster" / "components"
-                / "panel_fem" / "assets" / "marmoset.png")
+# Marmoset line drawing: vector paths extracted from the retired poster panel 1
+# artwork (pale chest fill removed); shared with poster panel 1.
+MARMOSET_SVG = (VISIONCORE_ROOT / "poster" / "typst_poster" / "components"
+                / "panel_fem" / "assets" / "marmoset.svg")
 DPI_IMAGE = VISIONCORE_ROOT / "paper" / "fig1" / "dpieg-levels.png"
 NAVY = "#2e3192"
 PSTH_RED = "#e8312a"
@@ -372,9 +372,14 @@ FRAME_BLUE = "#1aa7d8"
 CANVAS_W, CANVAS_H = 700, 860
 
 
-def marmoset_artwork():
-    """Marmoset head line drawing as an RGBA array."""
-    return np.asarray(Image.open(MARMOSET_PNG).convert("RGBA"))
+def marmoset_artwork(scale=8):
+    """Marmoset line drawing rasterised from the vector SVG: black strokes on a
+    transparent background, true aspect ratio."""
+    import fitz
+    with fitz.open(MARMOSET_SVG) as doc:
+        pix = doc[0].get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+    grey = np.asarray(Image.frombytes("RGB", (pix.width, pix.height), pix.samples).convert("L"))
+    return np.dstack([np.zeros(grey.shape + (3,), np.uint8), 255 - grey])
 
 
 def nice_scale(span, options=(5, 10, 20, 50, 100)):
@@ -457,7 +462,7 @@ def make_figure():
     ax_rig.add_patch(mpl.patches.Rectangle((196, 224), 26, 22, color="#1a1a1a"))
     ax_rig.add_patch(mpl.patches.Polygon([(201, 246), (217, 246), (213, 262), (205, 262)],
                                          color="#1a1a1a"))
-    ax_head = box(193, 232, 313, 380)
+    ax_head = box(189.4, 234.9, 329.4, 364.9)       # eye lands on the gaze-line end
     ax_head.imshow(marmoset_artwork(), aspect="auto")
     ax_head.axis("off")
 
@@ -497,8 +502,12 @@ def make_figure():
     step = 700 // (2 * n_per + 1)
     tops = [i * step for i in range(n_per)] + [(n_per + i) * step + 10 for i in range(n_per)]
     block_h = step - 7
-    rows = ([(RED, high, k) for k in range(n_per, 0, -1)]
-            + [(NAVY, low, k) for k in range(n_per, 0, -1)])
+    # The group with the higher mean gaze is drawn on top, mirroring the dots.
+    groups = [(RED, high), (NAVY, low)]
+    if gaze_lo.mean(0)[1] > gaze_hi.mean(0)[1]:
+        groups.reverse()
+    rows = [(color, grp, k) for color, grp in groups for k in range(n_per, 0, -1)]
+    trial1_top = {color: tops[i * n_per + n_per - 1] for i, (color, _) in enumerate(groups)}
     for top, (color, group, k) in zip(tops, rows):
         ax = box(rx0, top + 4, rx1, top + 4 + block_h)
         times, units = trial_spikes(payload, group[k - 1], t0, t1)
@@ -508,7 +517,7 @@ def make_figure():
         fig.text(*P(470, top + 18), f"Trial {k}", color=PSTH_RED if color == RED else NAVY,
                  ha="right", va="center", fontsize=13)
         raster_axes[(color, k)] = ax
-    ax_last = raster_axes[(NAVY, 1)]
+    ax_last = raster_axes[(groups[1][0], 1)]
     neuron_px = block_h / (n_units + 1)
     y_end = tops[-1] + 4 + block_h
     y_bar = (y_end - 100 * neuron_px, y_end)
@@ -541,9 +550,9 @@ def make_figure():
 
     # ---- Annotations ------------------------------------------------------------
     note(252, 468, "example trials\nfor different\nfixation\npositions", size=15)
-    arrow(tuple(gaze_hi.mean(0)), P(400, tops[n_per - 1] + 18), RED, coords_a="data", ax_a=ax_im,
+    arrow(tuple(gaze_hi.mean(0)), P(400, trial1_top[RED] + 18), RED, coords_a="data", ax_a=ax_im,
           rad=-0.25)
-    arrow(tuple(gaze_lo.mean(0)), P(410, tops[-1] + 18), NAVY, coords_a="data", ax_a=ax_im,
+    arrow(tuple(gaze_lo.mean(0)), P(410, trial1_top[NAVY] + 18), NAVY, coords_a="data", ax_a=ax_im,
           rad=0.12)
     note(242, 655, "RF shift smaller\nthan RF size")
     arrow(P(236, 672), tuple(rf.mean(0) + gaze_hi.mean(0)), NAVY, coords_b="data",

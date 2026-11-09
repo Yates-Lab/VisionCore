@@ -1,7 +1,8 @@
 # Poster review notes — 2026-11-09
 
-Review of the poster as committed in `ad0f638`. The build reproduces the approved
-reference exactly. The headline numbers match `manuscript/generated_stats.tex`:
+Review begun at `ad0f638`, updated for the completed panel-1 layout below. The
+build reproduces the approved reference exactly. The headline numbers match
+`manuscript/generated_stats.tex`:
 1,022 units / 19 sessions, f_FEM median 0.71 (IQR 0.57–0.81, n = 939), Fano
 1.25 → 0.81, corrected noise-correlation CI −0.010 to 0.029, and single-trial
 fractions 0.139 / 0.235 / 0.226 / 0.042 (n = 962).
@@ -17,12 +18,13 @@ Old → new: 1 and 3 retired, 2 → 2, 4 → 3, 5 → 4, 6 → 5, 7 → 6, 8 →
   centred.
 
 - **Column 1 redesign.** It is now an intro ("Fixational eye movements: noise or
-  signal?"), panel 1 ("Gaze shifts within an RF change population responses",
+  signal?"), panel 1 ("Tiny gaze shifts reshape population responses",
   rebuilt from the R01 figure) and panel 2 (single unit, unchanged).
   - Old panel 1 (setup and dataset stats) and old panel 3 (gaze-grouped rasters)
     are retired.
   - Their content moved into the intro and new panel 1. That covers the rig, DPI
-    image, dataset line, same trials and gaze-window shading.
+    image, dataset line and selected trials. The current rasters show only the
+    gaze-grouping window, so they no longer need window shading.
   - The intro's Q1/Q2 point to panels 1–5 and 6–8.
 - Semantics of new panel 1 checked against the raw data; see the docstring of
   `paper/fig1/generate_fem_overview.py`.
@@ -36,18 +38,27 @@ Old → new: 1 and 3 retired, 2 → 2, 4 → 3, 5 → 4, 6 → 5, 7 → 6, 8 →
     up, so only the RF's shape and size come from the mapping. Re-cropping with
     mirrored gaze axes explains the residual spiking much less well, which rules
     out a coordinate flip.
-- **Panel 1 layout** follows the original R01 figure: one zoomed stimulus view
-  fed from the rig, with red and blue as the only colour code across gaze dots,
-  RF outlines, trial labels and PSTH.
-  - Three italic call-outs, each with one arrow, carry the argument: example
-    trials for different fixation positions; RF shift (0.13°) smaller than RF size
-    (0.42°); small changes in fixation drive large changes in population response.
-  - A white arrow marks the RF shift between the two outlines.
-  - Two small provenance lines replace the caption block.
+- **Panel 1 layout C** puts one stimulus/RF view beside each group's rasters.
+  Red and blue link the gaze traces, dots, RF outlines, trial labels and PSTHs.
+  - The group with the higher mean vertical gaze is shown above the other group
+    in both the poster and standalone R01 figure. A dashed outline shows the
+    other group's RF position in each poster view.
+  - The left column contains the vector brain with V1/fovea labels and electrode,
+    the rig and vector marmoset, then a separate DPI eye-image row. The DPI image
+    is 110 pt square with separated Pupil/CR labels and its tracker note alongside.
+  - Removed the dashed connectors from the screen to the enlarged stimulus view;
+    the screen-to-eye lines within the rig remain.
+  - The all-session RF plot shows both animals' mapping outlines, this session's
+    population RF, and the example's 0.13° gaze shift at the same angular scale.
+    Its legend is below the plot. This is RF context, not an all-session analysis
+    of gaze spread versus RF diameter.
+  - The population-response takeaway sits beside the PSTHs. A bottom strip gives
+    the dataset statistics. The intro's space is unchanged.
   - Liberation Sans Italic 2.1.5 is bundled for the call-outs (metrically
     identical to Arial; same open licence as the other Liberation fonts).
-  - Earlier per-group views, ghost outlines, crosshairs and symbol key were tried
-    and dropped as too busy.
+  - Build, overlap/boundary audit, approved-reference validation and clean-clone
+    repeat builds pass. The DPI repair preserves the supplied data and artwork;
+    all existing fields in the example cache match the preceding committed cache.
 - **Panel 1 trials:** Figure 1F's grouping search on the 258–392 ms window, with
   cluster-centre distance capped at 0.06° (`SEGMENT_START`,
   `GROUP_CENTROID_DISTANCE` in `generate_fem_overview.py`). The first-ranked
@@ -101,8 +112,8 @@ Old → new: 1 and 3 retired, 2 → 2, 4 → 3, 5 → 4, 6 → 5, 7 → 6, 8 →
    σ²_FEM, so it is not conditional on the stimulus. A short definition would help.
 5. **Panel 1 is one session.** Its "shift < RF size" example could be backed by a
    19-session summary comparing fixational gaze spread with RF diameter.
-6. **Intro has spare space at the bottom.** It could be shortened in favour of
-   panel 1.
+6. **Intro is still being developed.** Keep its allocated space for the additional
+   content; do not shorten it to enlarge panel 1.
 7. **Standalone R01 figure** (`generate_fem_overview.py`) shares panel 1's trials,
    RF placement and image, but keeps the original R01 layout.
 

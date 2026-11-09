@@ -39,6 +39,8 @@ def main():
                    cwd=HERE, env=env, check=True, stdout=subprocess.DEVNULL)
     typst.compile(str(fem / 'intro.typ'), output=str(HERE / 'assets/intro.pdf'),
                   root=str(HERE), **options)
+    typst.compile(str(fem / 'panel_fem.typ'), output=str(HERE / 'assets/panel_fem.pdf'),
+                  root=str(HERE), **options)
     out = HERE / 'output'
     out.mkdir(exist_ok=True)
     pdf = out / 'poster_typst_full_60x36.pdf'

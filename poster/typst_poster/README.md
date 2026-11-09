@@ -81,14 +81,20 @@ JSON, NPZ and reference PDF inputs despite the repository-wide extension rules.
 - `assets/*.svg`: approved scientific graphics, including embedded raster data,
   clipping, original plotted paths and the model schematic (region `panel8`).
   These are editable graphics, not screenshots of complete panels.
-- `components/panel_fem/`: the intro and panel 1 ("Gaze shifts within an RF change
-  population responses"). `plot_data.npz` holds the frozen data. `render_plots.py`
-  draws panel 1 and the intro's gaze/RF schematic. `intro.typ` composes the intro
-  text. `assets/marmoset.png` is the canonical marmoset line drawing and
-  `assets/dpi_eye.png` the DPI eye image. `export_data.py` documents provenance:
+- `components/panel_fem/`: the intro and panel 1 ("Tiny gaze shifts reshape
+  population responses"). `plot_data.npz` holds the frozen example data, including
+  the per-trial gaze traces. `rf_all_sessions.npz` holds the Figure 1C RF outlines
+  for both animals. `render_plots.py` draws the plots, rig and intro gaze/RF
+  schematic; `intro.typ` composes the intro text. `panel_fem.typ` overlays the
+  vector `assets/marmoset.svg` and `assets/brain_v1.svg` on the Matplotlib layer.
+  Both drawings come from the retired panel-1 artwork; the brain's V1 and fovea
+  labels are outlines. `assets/dpi_eye.png` is the DPI eye image, with its labels
+  drawn separately by Matplotlib. `export_data.py` documents provenance:
   it regenerates the data from `paper/fig1/generate_fem_overview.py` (same
   session, trials and RFs as the standalone R01 figure), needs the analysis
-  environment, and is never run by the build.
+  environment, and is never run by the build. Its `--all-session-rfs` option
+  exports the all-session RF cache from `paper/fig1/generate_fig1c.py` and the
+  session STA caches. Ordinary builds need neither those caches nor raw data.
 - `components/panel5/plot_data.npz`: unchanged matrix, Fano and correlation data
   used to regenerate panel 5. `render_plots.py` renders the plots at their approved
   physical sizes; `panel5.typ` composes the panel with native text.

@@ -86,8 +86,10 @@ def main():
         gaze_shift_deg=float(np.hypot(*(gaze_hi.mean(0) - gaze_lo.mean(0)))),
         rf_diam_deg=diam, intro_trace_deg=trace, intro_dt=g.DT,
         intro_all_deg=payload["eyepos"].astype(np.float32),
+        trace_hi=payload["eyepos"][high, s:e], trace_lo=payload["eyepos"][low, s:e],
+        trace_t=(np.arange(s, e) + 0.5) * g.DT * 1000,
     )
-    # assets/marmoset.png is the canonical line drawing (retired panel-1 artwork).
+    # assets/marmoset.svg is the canonical line drawing (vector, retired panel-1 artwork).
     (HERE / "assets").mkdir(exist_ok=True)
     Image.open(g.DPI_IMAGE).convert("L").save(HERE / "assets" / "dpi_eye.png")
     print(f"trials red={high} blue={low}; {len(diam)} single-unit RFs, median "
@@ -95,5 +97,23 @@ def main():
           f" deg; intro trace {len(trace)} samples")
 
 
+def export_all_session_rfs():
+    """Figure 1C RF outlines for every mapping session, both animals, saved to
+    rf_all_sessions.npz as (x right, y up) degrees from the fovea. This needs
+    DataYatesV1 and every session's STA cache; run it once with the analysis
+    environment via `export_data.py --all-session-rfs`."""
+    import generate_fig1c as fig1c
+    arrays = {}
+    for subject, sessions in fig1c._load_all_contours().items():
+        hulls = [np.column_stack([h[:, 1], h[:, 0]]) for _, hs in sessions for h in hs]
+        arrays[f"{subject}_pts"] = np.concatenate(hulls)
+        arrays[f"{subject}_len"] = np.array([len(h) for h in hulls])
+        print(f"{subject}: {len(sessions)} sessions, {len(hulls)} RFs")
+    np.savez_compressed(HERE / "rf_all_sessions.npz", **arrays)
+
+
 if __name__ == "__main__":
-    main()
+    if "--all-session-rfs" in sys.argv:
+        export_all_session_rfs()
+    else:
+        main()

@@ -43,9 +43,12 @@
 !/components/panel_fem/export_data.py
 !/components/panel_fem/render_plots.py
 !/components/panel_fem/intro.typ
+!/components/panel_fem/panel_fem.typ
 !/components/panel_fem/plot_data.npz
+!/components/panel_fem/rf_all_sessions.npz
 !/components/panel_fem/assets/
 !/components/panel_fem/assets/*.png
+!/components/panel_fem/assets/*.svg
 !/fonts/manifest.json
 !/reference/inputs.json
 !/reference/approved.pdf
