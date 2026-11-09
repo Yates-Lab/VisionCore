@@ -112,7 +112,7 @@
         {
           "id": "header_text_010",
           "text": "5",
-          "x": 1412.3965935847973,
+          "x": 1282.6187615535473,
           "baseline": 261.3885853446402,
           "size": 24.15720808871494,
           "font": "Liberation Sans",
@@ -123,7 +123,7 @@
         {
           "id": "header_text_011",
           "text": "Brain and Cognitive Science, University of Rochester;",
-          "x": 1425.8455059570524,
+          "x": 1296.0676739258024,
           "baseline": 272.0,
           "size": 29.0,
           "font": "Liberation Sans",
@@ -134,7 +134,7 @@
         {
           "id": "header_text_012",
           "text": "6",
-          "x": 2122.100294824197,
+          "x": 1992.3224627929471,
           "baseline": 261.3885853446402,
           "size": 24.15720808871494,
           "font": "Liberation Sans",
@@ -144,8 +144,19 @@
         },
         {
           "id": "header_text_013",
-          "text": "Department of Biology, University of Maryland, College Park",
-          "x": 2135.5492071964522,
+          "text": "Department of Biology, University of Maryland, College Park;",
+          "x": 2005.7713751652022,
+          "baseline": 272.0,
+          "size": 29.0,
+          "font": "Liberation Sans",
+          "weight": "regular",
+          "color": "#d9e4ee",
+          "angle": 0.0
+        },
+        {
+          "id": "header_equal_contribution",
+          "text": "*Equal contribution",
+          "x": 2793.9398321964522,
           "baseline": 272.0,
           "size": 29.0,
           "font": "Liberation Sans",
@@ -167,7 +178,7 @@
         {
           "id": "header_text_015",
           "text": "Declan P. Rowley",
-          "x": 979.6875995822104,
+          "x": 953.6739661653679,
           "baseline": 155.0,
           "size": 40.0,
           "font": "Liberation Sans",
@@ -177,8 +188,8 @@
         },
         {
           "id": "header_text_016",
-          "text": "2",
-          "x": 1290.2244084585973,
+          "text": "2,*",
+          "x": 1264.210775041755,
           "baseline": 140.9353023909986,
           "size": 26.000937646507264,
           "font": "Liberation Sans",
@@ -189,7 +200,7 @@
         {
           "id": "header_text_017",
           "text": ", Ryan A. Ressmeyer",
-          "x": 1304.699320163551,
+          "x": 1296.0281090246035,
           "baseline": 155.0,
           "size": 40.0,
           "font": "Liberation Sans",
@@ -199,8 +210,8 @@
         },
         {
           "id": "header_text_018",
-          "text": "1",
-          "x": 1680.3879090055575,
+          "text": "1,*",
+          "x": 1671.71669786661,
           "baseline": 140.9353023909986,
           "size": 26.000937646507264,
           "font": "Liberation Sans",
@@ -211,7 +222,7 @@
         {
           "id": "header_text_019",
           "text": ", Tejasvi Kothapalli",
-          "x": 1694.862833212465,
+          "x": 1703.5340443514124,
           "baseline": 155.0,
           "size": 40.0,
           "font": "Liberation Sans",
@@ -221,8 +232,8 @@
         },
         {
           "id": "header_text_020",
-          "text": "3,4",
-          "x": 2025.437315675545,
+          "text": "3,4,*",
+          "x": 2034.1085268144925,
           "baseline": 140.9353023909986,
           "size": 26.000937646507264,
           "font": "Liberation Sans",
@@ -233,7 +244,7 @@
         {
           "id": "header_text_021",
           "text": ", Alexander C. Huk",
-          "x": 2061.595452884484,
+          "x": 2087.6090863013264,
           "baseline": 155.0,
           "size": 40.0,
           "font": "Liberation Sans",
@@ -244,7 +255,7 @@
         {
           "id": "header_text_022",
           "text": "2",
-          "x": 2395.1046011889066,
+          "x": 2421.118234605749,
           "baseline": 140.9353023909986,
           "size": 26.000937646507264,
           "font": "Liberation Sans",
@@ -255,7 +266,7 @@
         {
           "id": "header_text_023",
           "text": ", Jude F. Mitchell",
-          "x": 2409.5795128938603,
+          "x": 2435.5931463107027,
           "baseline": 155.0,
           "size": 40.0,
           "font": "Liberation Sans",
@@ -266,7 +277,7 @@
         {
           "id": "header_text_024",
           "text": "5",
-          "x": 2707.4727462115666,
+          "x": 2733.486379628409,
           "baseline": 140.9353023909986,
           "size": 26.000937646507264,
           "font": "Liberation Sans",
@@ -277,7 +288,7 @@
         {
           "id": "header_text_025",
           "text": ", Daniel A. Butts",
-          "x": 2721.94765791652,
+          "x": 2747.961291333362,
           "baseline": 155.0,
           "size": 40.0,
           "font": "Liberation Sans",
@@ -288,7 +299,7 @@
         {
           "id": "header_text_026",
           "text": "6",
-          "x": 3006.5380251614024,
+          "x": 3032.5516585782448,
           "baseline": 140.9353023909986,
           "size": 26.000937646507264,
           "font": "Liberation Sans",
@@ -299,7 +310,7 @@
         {
           "id": "header_text_027",
           "text": ", Jacob L. Yates",
-          "x": 3021.01294936831,
+          "x": 3047.026582785152,
           "baseline": 155.0,
           "size": 40.0,
           "font": "Liberation Sans",
@@ -310,7 +321,7 @@
         {
           "id": "header_text_028",
           "text": "3,4",
-          "x": 3304.167542273451,
+          "x": 3330.1811756902935,
           "baseline": 140.9353023909986,
           "size": 26.000937646507264,
           "font": "Liberation Sans",

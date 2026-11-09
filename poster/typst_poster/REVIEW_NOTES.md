@@ -11,6 +11,11 @@ Old → new: 1 and 3 retired, 2 → 2, 4 → 3, 5 → 4, 6 → 5, 7 → 6, 8 →
 
 ## Done (in the approved reference)
 
+- Added superscript asterisks to Declan P. Rowley, Ryan A. Ressmeyer and
+  Tejasvi Kothapalli, preserving affiliation numbers and centering the author
+  line. "*Equal contribution" closes the last affiliation line, which stays
+  centred.
+
 - **Column 1 redesign.** It is now an intro ("Fixational eye movements: noise or
   signal?"), panel 1 ("Gaze shifts within an RF change population responses",
   rebuilt from the R01 figure) and panel 2 (single unit, unchanged).
