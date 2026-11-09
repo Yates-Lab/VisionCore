@@ -14,15 +14,16 @@ the Figure 1 work. Panels:
     (bottom right) group population PSTHs
 
 Data: the same Allen 2022-03-02 session and gaze-grouping search as Figure 1F
-(``generate_fig1f.py``), with the distance between cluster centres capped at
-0.06 deg (``GROUP_CENTROID_DISTANCE``). Red trials are 36, 39, 69, 84 and 87;
-blue trials are 4, 8, 11, 26 and 44. Their mean gaze differs by 0.13 deg, and the
-population rate differs about 1.5-fold in the grouping window. Figure 1F's
-uncapped search picks the pairs furthest apart (0.33 deg).
+(``generate_fig1f.py``), run on the 258–392 ms window with the distance between
+cluster centres capped at 0.06 deg (``GROUP_CENTROID_DISTANCE``). Red trials are
+5, 20, 25, 26 and 74; blue trials are 24, 43, 67, 84 and 87. Their mean gaze
+differs by 0.13 deg. The population response is reshaped rather than scaled: red
+is higher early in the window and blue later, and the total rate ratio is about
+1.0. Figure 1F's uncapped search picks the pairs furthest apart (0.33 deg).
 
 What the marks mean (checked against the raw data, 2026-11-09):
-    Dots         Each trial's median gaze over 158–292 ms after fixation onset,
-                 the window used to group trials. Gaze is (x right, y up) in
+    Dots         Each trial's median gaze over 258–392 ms after fixation onset,
+                 the window used to group trials and the window plotted. Gaze is (x right, y up) in
                  degrees from screen centre. Gaze is stable within the window
                  (SD about 0.02 deg), and no trial has a microsaccade there.
     Contours     The session's population RF footprint: the half-maximum
@@ -37,11 +38,11 @@ What the marks mean (checked against the raw data, 2026-11-09):
                  ``_task_rf_offset``. Single-unit RFs are similar in size
                  (median diameter 0.42 deg), so the 0.13 deg gaze shift between
                  groups is about a third of an RF.
-    Image        fixRSVP image 4 (on screen 150–200 ms; the same picture on
+    Image        fixRSVP image 8 (on screen 350–400 ms; the same picture on
                  every trial). It was on screen one 33 ms population lag before
-                 the largest red–blue response difference
-                 (``displayed_image``). Images 5 and 6 also appear during the
-                 dot window, so one image is a simplification. Rendering this image at each gaze sample
+                 the largest red–blue response difference in the window
+                 (``displayed_image``). Images 6 and 7 also appear during the
+                 window, so one image is a simplification. Rendering this image at each gaze sample
                  reproduces the dataset's own gaze-contingent stimulus crops.
 
 Two stages:
@@ -91,13 +92,19 @@ ASSET_PATH = CACHE_DIR / "fig1_population" / f"{SESSION}_overview_assets.npz"
 # Trial groups: Figure 1F's grouping search (generate_fig1f._get_eyepos_clusters)
 # with the distance between the two cluster-centre trials capped at 0.06 deg, so
 # the example shows a gaze shift well under one RF (~0.13 deg vs ~0.45 deg).
-# The uncapped search (up to 0.30 deg) favours the most distant pairs, which gave
-# a 0.33 deg shift. All five trials of each group are shown.
+# The uncapped search (up to 0.30 deg) favours the most distant pairs (0.33 deg).
+# The search runs on the 32-bin segment starting at bin 70 (gaze/spike window
+# 258–392 ms). That segment gave the clearest independent example among the
+# 108–392 ms windows compared on 2026-11-09. The first-ranked grouping whose
+# trials all have data across the window is used. All five trials per group are
+# shown.
+SEGMENT_START, SEGMENT_BINS = 70, 32
 GROUP_CENTROID_DISTANCE = (0.02, 0.06)
 GROUPS_PATH = CACHE_DIR / "fig1_population" / f"{SESSION}_overview_groups.npz"
 
-# Raster window, in bins relative to the clustering window [s, e).
-RASTER_PAD_BINS = 6
+# Displayed window = the grouping window itself (no padding), so dots, rasters
+# and PSTH cover the same span.
+RASTER_PAD_BINS = 0
 PSTH_BIN_MS = 2.0
 PSTH_SMOOTH_BINS = 1.0
 
@@ -247,12 +254,21 @@ def selected_trials(payload, refresh=False):
         return [int(t) for t in z["low"]], [int(t) for t in z["high"]]
     import generate_fig1f as fig1f          # same directory; heavy, so imported lazily
     iix_list, cl_list = fig1f._get_eyepos_clusters(
-        payload["eyepos"], payload["robs"], payload["segment_start"],
-        payload["segment_end"], payload["peak_lag"],
-        dist_between_centroids=GROUP_CENTROID_DISTANCE, return_top_k=1)
-    iix, clusters = iix_list[0], cl_list[0]
-    groups = [sorted(int(t) for t, c in zip(iix, clusters) if c == label)
-              for label in (0, 1)]            # 0 = lower total rate (blue), 1 = red
+        payload["eyepos"], payload["robs"], SEGMENT_START, SEGMENT_START + SEGMENT_BINS,
+        payload["peak_lag"], dist_between_centroids=GROUP_CENTROID_DISTANCE,
+        return_top_k=10)
+    s, e = clustering_window(payload)
+
+    def complete(trial):                      # data across the whole displayed window
+        return int((~np.isnan(np.asarray(payload["trial_t_bins"][trial]))).sum()) >= e
+
+    for iix, clusters in zip(iix_list, cl_list):
+        groups = [sorted(int(t) for t, c in zip(iix, clusters) if c == label)
+                  for label in (0, 1)]        # 0 = lower total rate (blue), 1 = red
+        if all(complete(t) for t in groups[0] + groups[1]):
+            break
+    else:
+        raise RuntimeError("No grouping with complete data across the window")
     np.savez(GROUPS_PATH, low=groups[0], high=groups[1])
     return groups[0], groups[1]
 
@@ -269,8 +285,8 @@ def displayed_image(payload, assets, low, high):
 
 
 def clustering_window(payload):
-    s = max(payload["segment_start"] - payload["peak_lag"], 0)
-    return s, s + (payload["segment_end"] - payload["segment_start"])
+    s = max(SEGMENT_START - payload["peak_lag"], 0)
+    return s, s + SEGMENT_BINS
 
 
 def trial_spikes(payload, trial, t0_bin, t1_bin):

@@ -48,13 +48,19 @@ Old → new: 1 and 3 retired, 2 → 2, 4 → 3, 5 → 4, 6 → 5, 7 → 6, 8 →
     identical to Arial; same open licence as the other Liberation fonts).
   - Earlier per-group views, ghost outlines, crosshairs and symbol key were tried
     and dropped as too busy.
-- **Panel 1 trials:** Figure 1F's grouping search, with cluster-centre distance
-  capped at 0.06° (`GROUP_CENTROID_DISTANCE` in `generate_fem_overview.py`).
-  - Red trials 36, 39, 69, 84, 87; blue trials 4, 8, 11, 26, 44. All five per group
-    are shown.
-  - Mean gaze shift 0.13° (about a third of an RF); population rate about 1.5×.
-  - The uncapped search picked the most distant pairs (0.33°, 2.1×). Those pairs
-    overstated the shift relative to the RF.
+- **Panel 1 trials:** Figure 1F's grouping search on the 258–392 ms window, with
+  cluster-centre distance capped at 0.06° (`SEGMENT_START`,
+  `GROUP_CENTROID_DISTANCE` in `generate_fem_overview.py`). The first-ranked
+  grouping whose trials all have data across the window is used.
+  - Red trials 5, 20, 25, 26, 74; blue trials 24, 43, 67, 84, 87. All five per
+    group are shown.
+  - Mean gaze shift 0.13° (about a third of an RF).
+  - The response is reshaped rather than scaled: red is higher early in the
+    window and blue later.
+  - Rasters and PSTH cover exactly the grouping window. The background is image 8,
+    on screen one response lag before the largest group difference.
+  - Chosen from six candidates near 0.13° (108–392 ms windows). The 158–292 ms
+    example (1.5× rate ratio) was the alternative.
 - **Panel titles:** 48 pt, rewritten as claims.
   1. Tiny gaze shifts reshape population responses
   2. One neuron’s “noise” tracks the eye

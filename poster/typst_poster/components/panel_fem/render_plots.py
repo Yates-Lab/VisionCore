@@ -187,7 +187,8 @@ def fem_panel():
         group, number = (RED, n_per - k) if k < n_per else (BLUE, 2 * n_per - k)
         row = (number - 1) if k < n_per else n_per + number - 1
         a = ax(rx0, y, rx1, y + bh)
-        a.axvspan(w0, w1, color=WINDOW, lw=0, zorder=0)
+        if w0 > t_lo or w1 < t_hi:
+            a.axvspan(w0, w1, color=WINDOW, lw=0, zorder=0)
         sel = d["spk_k"] == row
         a.scatter(d["spk_t"][sel], d["spk_u"][sel], s=7, marker="|", color="black",
                   linewidths=0.9, zorder=2)
@@ -205,7 +206,8 @@ def fem_panel():
     # ---- PSTH ---------------------------------------------------------------------
     py0, py1 = y + 14, y + 100
     ps = ax(rx0, py0, rx1, py1)
-    ps.axvspan(w0, w1, color=WINDOW, lw=0, zorder=0)
+    if w0 > t_lo or w1 < t_hi:
+        ps.axvspan(w0, w1, color=WINDOW, lw=0, zorder=0)
     ps.plot(d["psth_t"], d["psth_hi"], color=RED, lw=3)
     ps.plot(d["psth_t"], d["psth_lo"], color=BLUE, lw=3)
     lo = min(d["psth_hi"].min(), d["psth_lo"].min())
@@ -232,8 +234,8 @@ def fem_panel():
           (rx0 + 210, py1 + 2), NOTE)
 
     # ---- Provenance -------------------------------------------------------------------
-    bg.text(20, 930, f"One session, 132 neurons, {n_per} trials per gaze group. Dots: median gaze in the "
-            "shaded window. RF: population footprint from noise mapping,", fontsize=17,
+    bg.text(20, 930, f"One session, 132 neurons, {n_per} trials per gaze group, {w0:.0f}–{w1:.0f} ms after "
+            "fixation onset. Dots: median gaze. RF: population footprint (noise mapping),", fontsize=17,
             color=MUTED, va="top")
     bg.text(20, 952, "located from these trials. Dataset: 2 marmosets · 1,022 foveal V1 units · "
             "19 sessions · 20 Hz natural images.", fontsize=17, color=MUTED, va="top")

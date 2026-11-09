@@ -22,7 +22,7 @@ ROOT = HERE.parents[3]
 sys.path.insert(0, str(ROOT / "paper" / "fig1"))
 import generate_fem_overview as g  # noqa: E402
 
-RASTER_MS = (125.0, 350.0)
+# Rasters and PSTH cover exactly the grouping window (see generate_fem_overview).
 INTRO_TRIAL = 72          # 1 s fixation with drift and one small microsaccade
 
 
@@ -59,8 +59,7 @@ def main():
     assets = g.load_assets(payload)
     low, high = g.selected_trials(payload)
     s, e = g.clustering_window(payload)
-    t0 = int(round(RASTER_MS[0] / 1000 / g.DT))
-    t1 = int(round(RASTER_MS[1] / 1000 / g.DT))
+    t0, t1 = s, e + g.RASTER_PAD_BINS
 
     spk_t, spk_u, spk_k = [], [], []
     for k, trial in enumerate(high + low):         # red trials 1..n, then blue 1..n
@@ -82,7 +81,7 @@ def main():
         gaze_hi=gaze_hi, gaze_lo=gaze_lo, rf=rf, n_rf_units=n_rf,
         spk_t=np.concatenate(spk_t), spk_u=np.concatenate(spk_u),
         spk_k=np.concatenate(spk_k), n_units=payload["robs"].shape[2], n_per=len(high),
-        raster_ms=np.array(RASTER_MS), window_ms=np.array([s, e]) * g.DT * 1000,
+        raster_ms=np.array([t0, t1]) * g.DT * 1000, window_ms=np.array([s, e]) * g.DT * 1000,
         psth_t=psth_t, psth_hi=psth_hi, psth_lo=psth_lo,
         gaze_shift_deg=float(np.hypot(*(gaze_hi.mean(0) - gaze_lo.mean(0)))),
         rf_diam_deg=diam, intro_trace_deg=trace, intro_dt=g.DT,
