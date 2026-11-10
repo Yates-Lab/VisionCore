@@ -354,48 +354,7 @@ def fem_panel():
          "panel_width": W, "panel_height": H}) + "\n")
 
 
-def intro_art():
-    """Intro pictures: a schematic eye with a zoomed fixational path (illustration,
-    not data) and one neuron's responses to the same image on ten repeats (data,
-    from the panel-1 example). Text is composed natively in intro.typ."""
-    rng = np.random.default_rng(7)
-    walk = np.cumsum(rng.normal(0, 0.035, (160, 2)), 0)
-    walk[60:] += np.array([0.22, -0.12])                # two microsaccade-like jumps
-    walk[120:] += np.array([-0.18, 0.2])
-    walk -= walk.mean(0)
-    walk /= np.abs(walk).max()
-
-    w, h = 280, 148
-    fig, _ = canvas(w, h)
-    a = place(fig, w, h, 0, 0, w, h)
-    t = np.linspace(-1, 1, 200)
-    a.plot(-0.55 + 0.95 * t, 0.55 * (1 - t ** 2), color=TEXT, lw=3.4)
-    a.plot(-0.55 + 0.95 * t, -0.55 * (1 - t ** 2), color=TEXT, lw=3.4)
-    a.add_patch(Circle((-0.55, 0), 0.36, fc="#8fb3c9", ec=TEXT, lw=2.4))
-    a.add_patch(Circle((-0.55, 0), 0.16, fc=TEXT, ec="none"))
-    a.add_patch(Circle((-0.48, 0.07), 0.05, fc="white", ec="none"))
-    c = np.array([1.05, 0.0])
-    a.add_patch(Circle(tuple(c), 0.62, fc="white", ec=MUTED, lw=2.4, zorder=2))
-    for sgn in (1, -1):
-        a.plot([-0.2, c[0] - 0.55], [0.3 * sgn, 0.32 * sgn], color=MUTED, lw=1.6, ls=":")
-    a.plot(*(walk * 0.42 + c).T, color=COPPER, lw=2.4, zorder=3)
-    a.set_xlim(-1.6, 1.8), a.set_ylim(-0.9, 0.9), a.set_aspect("equal"), a.axis("off")
-    save(fig, "intro_eye")
-
-    w, h = 280, 136
-    fig, _ = canvas(w, h)
-    a = place(fig, w, h, 0, 0, w, h)
-    unit = int(np.bincount(d["spk_u"].astype(int)).argmax())   # most active unit
-    rows = 2 * int(d["n_per"])
-    for r in range(rows):
-        sel = (d["spk_k"] == r) & (d["spk_u"] == unit)
-        a.vlines(d["spk_t"][sel], rows - r - 0.38, rows - r + 0.38, color=NAVY, lw=2.4)
-    a.set_xlim(*d["raster_ms"]), a.set_ylim(0.4, rows + 0.6), a.axis("off")
-    save(fig, "intro_raster")
-
-
 if __name__ == "__main__":
     OUT.mkdir(exist_ok=True)
     fem_panel()
-    intro_art()
-    print("Rendered panel_fem_plots.pdf and intro schematics; Typst composes panel_fem.pdf")
+    print("Rendered panel_fem_plots.pdf; Typst composes panel_fem.pdf")
