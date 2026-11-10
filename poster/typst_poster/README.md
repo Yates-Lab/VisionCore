@@ -85,7 +85,7 @@ JSON, NPZ and reference PDF inputs despite the repository-wide extension rules.
   population responses"). `plot_data.npz` holds the frozen example data, including
   the per-trial gaze traces. `rf_all_sessions.npz` holds the Figure 1C RF outlines
   for both animals. `render_plots.py` draws the panel-1 plots and rig;
-  `intro.typ` composes the text-only intro ("What looks like noise may reflect active sensing"). `panel_fem.typ` overlays the
+  `intro.typ` composes the text-only intro ("What looks like noise may reflect active sensing", two questions). `panel_fem.typ` overlays the
   vector `assets/marmoset.svg` and `assets/brain_v1.svg` on the Matplotlib layer.
   A separately rendered `assets/panel_fem_eye.pdf` places the annotated eye inset
   above the animal drawing, keeping the compact setup's overlapping layers clean.
