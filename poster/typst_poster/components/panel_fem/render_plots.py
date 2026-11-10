@@ -171,8 +171,8 @@ def fem_panel():
     dpi.add_patch(Circle((270, 262), 222, fill=False, ec="#c9e8a0", lw=2))
     dpi.add_patch(Circle((382, 238), 30, fill=False, ec="#f2e27a", lw=1.5))
     for (tx, ty), (px, py), label in (((150, 170), (204, 278), "P4"),
-                                      ((50, 430), (262, 330), "Pupil"),
-                                      ((345, 430), (382, 268), "CR")):
+                                      ((150, 405), (262, 330), "Pupil"),
+                                      ((345, 170), (380, 212), "CR")):
         dpi.annotate(label, (px, py), (tx, ty), color="#c9e8a0", fontsize=15,
                      arrowprops=dict(arrowstyle="-|>", color="#d9483b", lw=1.4,
                                      mutation_scale=9, shrinkB=2))
@@ -191,7 +191,7 @@ def fem_panel():
     # Foveal RFs from every mapping session (Figure 1C outlines), with this
     # session's population RF and the example gaze shift drawn at the same scale.
     allrf = np.load(HERE / "rf_all_sessions.npz")
-    bg.text(22, 550, "Foveal RFs, all sessions", fontsize=22, weight="bold", color=NAVY,
+    bg.text(22, 550, "Foveal RFs, all mapping sessions", fontsize=22, weight="bold", color=NAVY,
             va="bottom")
     fov = ax(22, 558, 328, 864)
     th = np.linspace(0, 2 * np.pi, 200)
@@ -224,11 +224,17 @@ def fem_panel():
     # ---- Gaze traces over the window ---------------------------------------------
     rx0, rx1 = 728, 1060
     tt = d["trace_t"]
+    # One angular scale for both strips, so the single 0.1 deg bar holds for both;
+    # each strip is centred on its own data.
+    spans = [np.nanmax(v) - np.nanmin(v) for v in
+             (np.concatenate([d["trace_hi"][..., c], d["trace_lo"][..., c]]) for c in (0, 1))]
+    half_range = max(spans) / 2 + 0.02
     for k, (comp, name) in enumerate(((0, "horizontal"), (1, "vertical"))):
         y0 = 72 + k * 50
         a = ax(rx0, y0, rx1, y0 + 42)
         vals = np.concatenate([d["trace_hi"][..., comp], d["trace_lo"][..., comp]])
-        lo, hi = np.nanmin(vals) - 0.02, np.nanmax(vals) + 0.02
+        mid = (np.nanmax(vals) + np.nanmin(vals)) / 2
+        lo, hi = mid - half_range, mid + half_range
         for col, _, _, _, traces in groups:
             for row in traces:
                 a.plot(tt, row[:, comp], color=col, lw=1.6, alpha=0.85)
@@ -246,23 +252,43 @@ def fem_panel():
     view = np.ptp(pts, axis=0).max() / 2 + 0.08
     bh = (group_h - (n_per - 1) * gap) / n_per
     halo = [pe.Stroke(linewidth=8.5, foreground="white"), pe.Normal()]
-    ghost_fx = [pe.Stroke(linewidth=4.2, foreground="#444444"), pe.Normal()]
     for gi, (col, offset, gaze, other, _) in enumerate(groups):
         gy = y_top + gi * (group_h + ggap)
         vy = gy + (group_h - vs) / 2
         v = ax(vx, vy, vx + vs, vy + vs)
         v.imshow(image, cmap="gray", extent=[-half, half, -half, half], origin="upper",
                  vmin=0, vmax=255, interpolation="bilinear")
+        # Where the RF sat on the other group's trials: dashed, in that group's
+        # colour, thinner and semi-transparent so it stays secondary.
         ghost = rf + other.mean(0)
-        v.plot(*np.vstack([ghost, ghost[:1]]).T, color="white", lw=2, ls=(0, (3, 2)),
-               path_effects=ghost_fx, zorder=3)
+        v.plot(*np.vstack([ghost, ghost[:1]]).T, color=groups[1 - gi][0], lw=2.6,
+               ls=(0, (4, 2.5)), alpha=0.85, zorder=3,
+               path_effects=[pe.Stroke(linewidth=5, foreground="white", alpha=0.7),
+                             pe.Normal()])
         here = rf + gaze.mean(0)
         v.plot(*np.vstack([here, here[:1]]).T, color=col, lw=5, path_effects=halo, zorder=4)
+        # The other group's gaze, faint, alongside its dashed RF outline.
+        other_col = groups[1 - gi][0]
+        v.scatter(*other.T, s=110, color=other_col, alpha=0.5, linewidth=0, zorder=4.5)
         v.scatter(*gaze.T, s=150, color=col, edgecolor="white", linewidth=2.5, zorder=5)
         v.set_xlim(cx - view, cx + view), v.set_ylim(cy - view, cy + view)
         v.set_xticks([]), v.set_yticks([])
         for sp in v.spines.values():
             sp.set_color(col), sp.set_linewidth(4)
+        if gi == 0:
+            # Direct labels on the first view only; the second reads by analogy.
+            lab_fx = [pe.withStroke(linewidth=4, foreground="#1d1d1d")]
+            lab = dict(fontsize=18, color="white", weight="bold", zorder=7,
+                       path_effects=lab_fx)
+            g_mid = gaze.mean(0)
+            v.text(g_mid[0], gaze[:, 1].max() + 0.035, f"gaze,\n{n_per} trials",
+                   ha="center", va="bottom", linespacing=1.0, **lab)
+            top = here[np.argmax(here[:, 1])]
+            v.text(top[0], top[1] + 0.02, "RF", ha="center", va="bottom", **lab)
+            low = ghost[np.argmin(ghost[:, 1])]
+            other_trials = f"{(1 - gi) * n_per + 1}–{(2 - gi) * n_per}"
+            v.text(low[0], low[1] - 0.02, f"RF on trials {other_trials}", ha="center",
+                   va="top", **lab)
         bg.text(vx, vy - 6, f"Trials {gi * n_per + 1}–{(gi + 1) * n_per}", fontsize=21,
                 weight="bold", color=col, va="bottom")
         y = gy

@@ -12,6 +12,19 @@ Old → new: 1 and 3 retired, 2 → 2, 4 → 3, 5 → 4, 6 → 5, 7 → 6, 8 →
 
 ## Done (in the approved reference)
 
+- **Panel 1 review fixes (2026-11-09):**
+  - **Gaze traces:** both strips share one angular scale, so the single 0.1° bar
+    holds for both. Previously each strip scaled to its own range, and the vertical
+    one was about 10% compressed.
+  - **Eye-image labels:** "Pupil" and "CR" sit inside the pupil, clear of the ring.
+  - **RF plot title:** now "Foveal RFs, all mapping sessions". It shows 30
+    mapping sessions, distinct from the 19 recording sessions in the stats bar.
+  - **Direct labels:** the first view labels its own marks: "gaze, 5 trials",
+    "RF" and "RF on trials 6–10". The second view reads by analogy.
+  - **Other group in each view:** its gaze is shown as faint dots in its own
+    colour, and its RF as a dashed outline in that colour, pairing with the bold
+    dots and solid outline of this view's trials.
+
 - **Final reviewer fixes (authorized 2026-11-09):** panel 3 now shows Trial 1
   above Trial 2 in both the eye-position and spike-rate examples. Each spike
   trace and its label move together by the existing separation between the
