@@ -61,30 +61,45 @@ def marmoset_size():
     return r.width, r.height
 
 
-def marmoset_interior(scale=8, close=6):
-    """Opaque white silhouette of the marmoset, rasterised from the vector
-    drawing. It sits under the vector strokes, so any rig lines behind the
-    animal are hidden instead of crossing it. Gaps between the
-    hair strokes are closed by dilating the strokes before flood-filling the
-    exterior, then eroding back."""
-    import fitz
-    from PIL import ImageDraw, ImageFilter
-    with fitz.open(MARMOSET_SVG) as doc:
-        pix = doc[0].get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
-    ink = Image.frombytes("RGB", (pix.width, pix.height), pix.samples).convert("L")
-    strokes = ink.point(lambda v: 255 if v < 128 else 0)
-    w, h = strokes.size
-    ImageDraw.Draw(strokes).line([(0, h - 1), (w - 1, h - 1)], fill=255, width=3)
-    grown = strokes
-    for _ in range(close):
-        grown = grown.filter(ImageFilter.MaxFilter(9))
-    filled = grown.copy()
-    ImageDraw.floodfill(filled, (0, 0), 128)
-    inside = filled.point(lambda v: 255 if v != 128 else 0)
-    for _ in range(close):
-        inside = inside.filter(ImageFilter.MinFilter(9))
-    alpha = np.asarray(inside)
-    return np.dstack([np.full(alpha.shape + (3,), 255, np.uint8), alpha])
+SCREEN_PX = 6.0          # texture resolution, pixels per panel point
+
+
+def quad_point(q, u, v):
+    """Bilinear point in quadrilateral q (TL, TR, BR, BL) at fractions u (x), v (y)."""
+    (x0, y0), (x1, y1), (x2, y2), (x3, y3) = q
+    top = np.array([x0 + (x1 - x0) * u, y0 + (y1 - y0) * u])
+    bot = np.array([x3 + (x2 - x3) * u, y3 + (y2 - y3) * u])
+    return top + (bot - top) * v
+
+
+def screen_texture(image, quad, fill_fraction=0.78):
+    """Warp the stimulus, centred on its own background gray, onto a screen
+    quadrilateral with a perspective transform. Returns (x0, y0, rgba)."""
+    gray = int(np.median(np.concatenate([image[0], image[-1], image[:, 0], image[:, -1]])))
+    qx, qy = np.array(quad)[:, 0], np.array(quad)[:, 1]
+    x0, y0 = qx.min(), qy.min()
+    w = int(np.ceil((qx.max() - x0) * SCREEN_PX))
+    h = int(np.ceil((qy.max() - y0) * SCREEN_PX))
+    tw, th = 600, 760                          # texture with the screen's aspect
+    tex = Image.new("L", (tw, th), gray)
+    side = int(tw * fill_fraction)
+    tex.paste(Image.fromarray(image.astype(np.uint8)).resize((side, side), Image.BICUBIC),
+              ((tw - side) // 2, (th - side) // 2))
+    dst = [((x - x0) * SCREEN_PX, (y - y0) * SCREEN_PX) for x, y in quad]
+    src = [(0, 0), (tw, 0), (tw, th), (0, th)]
+    # Coefficients mapping output (dst) pixels back to texture (src) pixels.
+    A, b = [], []
+    for (X, Y), (u, v) in zip(dst, src):
+        A += [[X, Y, 1, 0, 0, 0, -u * X, -u * Y], [0, 0, 0, X, Y, 1, -v * X, -v * Y]]
+        b += [u, v]
+    coef = np.linalg.solve(np.array(A, float), np.array(b, float))
+    warped = tex.transform((w, h), Image.PERSPECTIVE, tuple(coef), Image.BICUBIC,
+                           fillcolor=gray)
+    mask = Image.new("L", (w, h), 0)
+    from PIL import ImageDraw
+    ImageDraw.Draw(mask).polygon(dst, fill=255)
+    rgba = np.dstack([np.repeat(np.asarray(warped)[..., None], 3, 2), np.asarray(mask)])
+    return x0, y0, rgba
 
 
 def canvas(w, h):
@@ -138,27 +153,32 @@ def fem_panel():
 
     # ---- Compact apparatus: brain above the animal, eye inset beside it ------
     note(22, 86, "Laminar\nrecordings in\nfoveal V1")
-    bg.add_patch(Polygon([(22, 186), (140, 192), (140, 327), (22, 356)],
-                         fc="#8c8c8c", ec="none"))
-    screen = ax(58, 217, 110, 269)
-    screen.imshow(image, cmap="gray", vmin=0, vmax=255)
-    screen.axis("off")
+    # The stimulus is drawn on the screen surface in perspective: a texture of
+    # the image centred on its own background gray is warped onto the screen
+    # quadrilateral, so image and screen blend without a visible square.
+    screen_quad = [(22, 172), (140, 178), (140, 313), (22, 342)]
+    sx0, sy0, warped = screen_texture(image, screen_quad)
+    bg.imshow(warped, extent=[sx0, sx0 + warped.shape[1] / SCREEN_PX,
+                              sy0 + warped.shape[0] / SCREEN_PX, sy0],
+              interpolation="bilinear", zorder=0.5)
+    screen_c = quad_point(screen_quad, 0.5, 0.5)
     # Eye position and the hot mirror use separate, explicit visual keys.
-    bg.plot([84, 239], [241, 241], color=RED, lw=2.5, ls=(0, (3, 2)), zorder=6)
-    bg.plot([165, 165], [274, 331], color="#b7b7b7", lw=8, zorder=1)
+    bg.plot([screen_c[0], 239], [screen_c[1], 241], color=RED, lw=2.5, ls=(0, (3, 2)),
+            zorder=6)
+    # Camera post stops at the mirror's lower edge, beneath its outline.
+    bg.plot([165, 165], [278, 331], color="#b7b7b7", lw=8, zorder=1,
+            solid_capstyle="butt")
     bg.add_patch(Polygon([(155, 219), (222, 225), (203, 278), (136, 272)],
                          fill=False, ec=FRAME, lw=3.5, zorder=2))
     bg.add_patch(Rectangle((150, 331), 36, 22, fc="#414141", ec="black", lw=1))
     bg.add_patch(Rectangle((160, 316), 16, 15, fc="#414141", ec="black", lw=1))
     bg.text(144, 377, "Eye camera", fontsize=20, color=TEXT)
-    for yy, label, color, style in ((397, "Eye position", RED, (0, (3, 2))),
-                                     (425, "Hot mirror", FRAME, "-")):
+    for yy, label, color, style in ((395, "Eye position", RED, (0, (3, 2))),
+                                     (421, "Hot mirror", FRAME, "-")):
         bg.plot([22, 40], [yy, yy], color=color, lw=2.5, ls=style)
         bg.text(48, yy, label, fontsize=20, color=TEXT, va="center")
     mx, my, mw = MARMOSET_BOX
     mh = mw * marmoset_size()[1] / marmoset_size()[0]
-    bg.imshow(marmoset_interior(), extent=[mx, mx + mw, my + mh, my], zorder=5,
-              interpolation="bilinear", aspect="auto")
 
     # The eye image is a separate PDF layer placed after the vector marmoset,
     # so it can tuck over the lower-right silhouette without crossed strokes.
@@ -179,13 +199,13 @@ def fem_panel():
     for spine in dpi.spines.values():
         spine.set_linewidth(1.2)
     save(eye_fig, "panel_fem_eye")
-    note(22, 446, "Dual Purkinje high-resolution\neye tracker", size=20)
-    bg.text(22 + text_width("eye tracker", 20) + 4, 479, "[2–4]", fontsize=14,
+    note(22, 438, "Dual Purkinje high-resolution\neye tracker", size=20)
+    bg.text(22 + text_width("eye tracker", 20) + 4, 471, "[2–4]", fontsize=14,
             color=TEXT, va="bottom")
 
     # Enlarged stimulus views align with their corresponding raster groups.
     vx, vs = 400, 248
-    y_top, y_bot, ggap, gap = 186, 744, 22, 4
+    y_top, y_bot, ggap, gap = 186, 744, 34, 12
     group_h = (y_bot - y_top - ggap) / 2
     # Foveal RFs from every mapping session (Figure 1C outlines), with this
     # session's population RF and the example gaze shift drawn at the same scale.
@@ -205,9 +225,9 @@ def fem_panel():
     fov.plot([0, 1], [0, 0], color="black", lw=3, solid_capstyle="butt")
     fov.text(0.5, 0.05, "1°", ha="center", va="bottom", fontsize=20)
     # Gaze shift between the example groups, at the same scale.
-    fov.plot([0, shift], [0.5, 0.5], color=NAVY, lw=5, solid_capstyle="butt")
-    fov.text(shift + 0.05, 0.5, f"{shift:.2f}°\ngaze shift", va="center", fontsize=18,
-             color=NAVY, linespacing=1.05)
+    fov.plot([-0.75, -0.75 + shift], [0.62, 0.62], color=NAVY, lw=5, solid_capstyle="butt")
+    fov.text(-0.75 + shift + 0.05, 0.62, f"{shift:.2f}° gaze shift,\nsmaller than RF size",
+             va="center", fontsize=17, color=NAVY, linespacing=1.05)
     fov.set_xlim(-1.2, 1.2), fov.set_ylim(-1.2, 1.2), fov.set_aspect("equal")
     fov.set_xticks([]), fov.set_yticks([])
     for sp in fov.spines.values():
@@ -315,6 +335,12 @@ def fem_panel():
     by = y_bot + 14
     bg.plot([vx, vx + bar], [by] * 2, color="black", lw=4, solid_capstyle="butt")
     bg.text(vx + bar + 8, by, "0.5°", va="center", fontsize=19)
+    # Rasters are separate presentations of one image; rows are the same
+    # neurons in the same order on every trial.
+    bg.text(rx0 - 38, (y_top + y_bot) / 2, "Repeated presentations of the same image",
+            rotation=90, ha="center", va="center", fontsize=17, color=MUTED)
+    bg.text(rx1 + 32, y_top + group_h / 2, "same neurons, same order", rotation=90,
+            ha="center", va="center", fontsize=16, color=MUTED)
     n_pt = bh / (n_units + 1) * 100
     bg.plot([rx1 + 22] * 2, [y_bot, y_bot - n_pt], color="black", lw=2)
     bg.text(rx1 + 30, y_bot, "100 neurons", rotation=90, va="bottom", fontsize=18)

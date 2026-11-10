@@ -4,7 +4,7 @@
 #set text(font: "Arial", size: 21pt, fill: rgb("202632"), top-edge: "cap-height", bottom-edge: "baseline")
 #set par(leading: 8pt, spacing: 0pt)
 #let navy = rgb("193654")
-#let corrected = rgb("667480")
+#let corrected = rgb("D62839")   // headline corrected result
 #let copper = rgb("B8651B")
 #let muted = rgb("526474")
 #let matrix(name, label, color, weight: 2.5pt) = stack(dir: ttb, spacing: 0pt,
@@ -21,7 +21,7 @@
 #let summary(title, before, after, asset) = stack(dir: ttb, spacing: 0pt,
   block(width: 330pt, height: 36pt)[#align(center)[#text(size: 25pt, weight: "bold", fill: navy)[#title]]],
   block(width: 330pt, height: 44pt)[#align(center)[
-    #text(size: 26pt, weight: "bold", fill: navy)[#before]#h(18pt)#text(size: 26pt, fill: muted)[→]#h(18pt)#text(size: 26pt, weight: "bold", fill: corrected)[#after]
+    #text(size: 26pt, weight: "bold", fill: navy)[#before]#h(16pt)#text(size: 26pt, fill: muted)[→]#h(16pt)#text(size: 34pt, weight: "bold", fill: corrected)[#after]
   ]],
   block(width: 330pt, height: 40.37pt)[#align(center)[p ≤ 0.001]],
   move(dy: -10pt, image("assets/" + asset + ".pdf", width: 315pt, height: 515pt)),
@@ -55,11 +55,12 @@
   #place(top + left, dx: 100.76pt, dy: 16pt)[#block(width: 80pt)[#align(center)[0]]]
   #place(top + left, dx: 201.52pt, dy: 16pt)[#block(width: 160pt)[#align(center)[5.2 spikes²]]]
 ]
-#place(top + left, dx: 20.13pt, dy: 754.37pt)[
-  #text(fill: muted)[19 sessions; 25-ms bins. Points: mean ± SD. Gray bands: 95% shuffle null; violins: pairwise correlations.]
+// Shared statistical definitions sit beneath the summary plots they describe.
+#place(top + left, dx: 800.13pt, dy: 752.37pt)[
+  #text(size: 18pt, fill: muted)[Points: mean ± SD over 19 sessions (25-ms bins) · violins: pairwise correlations]
 ]
-#place(top + left, dx: 20.13pt, dy: 781.37pt)[
-  #text(fill: muted)[Corrected mean noise correlation: 95% CI −0.010 to 0.029. Both tests compare correction with shuffle.]
+#place(top + left, dx: 800.13pt, dy: 779.37pt)[
+  #text(size: 18pt, fill: muted)[Tests: correction vs shuffle (95% null) · corrected correlation 95% CI −0.010 to 0.029]
 ]
 
 #place(top + left, dx: 0.13pt, dy: 353.37pt)[#image("assets/residual_connector.svg", width: 700pt, height: 85pt)]

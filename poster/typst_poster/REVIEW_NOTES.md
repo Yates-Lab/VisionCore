@@ -12,6 +12,44 @@ Old → new: 1 and 3 retired, 2 → 2, 4 → 3, 5 → 4, 6 → 5, 7 → 6, 8 →
 
 ## Done (in the approved reference)
 
+- **Review-note pass (2026-11-10):**
+  - **Intro:** "…structured responses arising from the animal's active sampling of
+    the scene."
+  - **Panel 1:** stimulus warped onto the screen in perspective, centred, on its own
+    background gray; marmoset silhouette mask removed (mirror outline intact);
+    camera post ends at the mirror. Visible gutters between trials and a wider gap
+    between groups; "Repeated presentations of the same image" and "same neurons,
+    same order" (verified: identical unit index on every trial); "0.13° gaze shift,
+    smaller than RF size" on the RF plot.
+  - **Panel 2:** "RF projection axis" parallel to the dashed axis, leader removed;
+    fixation movement traces removed (dots only); sorted raster's right border
+    removed and ticks matched; ticks in both rasters sit on the 50-ms window
+    boundaries (verified against generate_fig1d.py: 21-ms onset, then 50-ms windows).
+  - **Panel 3:** "71%" and the histogram median marker in FEM blue (marker
+    enlarged); "Conditional rate variance σ²rate" on one line; more clearance
+    beside the decomposition y-label; histogram headed "FEM fraction of rate
+    variance" with IQR inside the plot.
+  - **Panel 4:** corrected result in crimson #D62839 (0.81 and 0.010 at 34 pt vs
+    navy 26 pt starting values; corrected markers, error bars, matrix outline and
+    label). Shuffle nulls: light fill, no outline, labelled directly; stronger
+    session traces and SD bars; shared definitions beneath the summary plots.
+    Red also denotes "Retinal only" in panel 6; accepted, as each panel labels its
+    conditions.
+  - **Panel 5:** "neurons" along its axis; "Variance captured = projected variance
+    / total variance"; direct labels for sessions, mean ± SD and shuffle-null
+    intervals; larger dots, mean markers and SD bars.
+  - **Panel 6:** "…predicts single-trial responses"; "append" beside its symbol;
+    "band: empirical median ±0.1."; baseline labelled "Stimulus-locked average
+    (PSTH)".
+  - **Panel 7:** row headings 22 pt above their cubes; "Unit-specific feature
+    weights"; "For a camera, motion means blur. For vision, it can mean detail."
+  - **Panel 8:** mechanism sentence with [5,6]; headings "Motion redistributes
+    retinal power", "Tuning engagement predicts sharpening", "Nonlinear stages
+    enhance sharpening"; "Example model-unit tuning" key; shared definitions noting
+    tests are vs stabilization, not between adjacent groups; closing takeaway
+    "Active sensing continues throughout fixation." below a rule.
+  - **Open:** panel 8 title; panel 3 shared-axis rate overlay (not yet mocked up).
+
 - **Panel 6 breathing room (2026-11-10):** the histogram heading stands above
   the median annotations, with its condition legend in the plot's blank upper
   left. The prediction strip uses three lines: its heading and the precise

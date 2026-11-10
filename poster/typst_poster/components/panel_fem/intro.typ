@@ -19,7 +19,7 @@
   #block(width: 1000pt)[
     Neurons respond differently across repeated presentations of the same stimulus.
     These #box[trial-to-trial] differences are often described as “noise,” but they can
-    include sensory effects of the animal’s own movements.
+    include structured responses arising from the animal’s active sampling of the scene.
   ]
   #v(30pt)
   #block[Even during fixation, small eye movements continually reshape visual input.]
