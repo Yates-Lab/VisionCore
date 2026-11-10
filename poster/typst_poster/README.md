@@ -58,6 +58,11 @@ The original repository-wide `.venv` is not required.
 ## Outputs
 
 - `output/poster_typst_full_60x36.pdf`: vector print master, 60 × 36 inches.
+- `output/poster_panels_actual_size.pdf`: nine-page PDF, intro followed by
+  panels 1–8, with bookmarks. Each page has its panel's original physical
+  dimensions; text and artwork are copied from the master PDF without scaling.
+  Page sizes vary. The PDF requests 100% zoom on opening; choose **Actual size /
+  100%** in the viewer or print dialog rather than **Fit** to retain that scale.
 - `output/poster_typst_full.png`: full 4320 × 2592 pixel preview (72 pixels per
   physical inch at poster size; use the PDF for printing).
 - `output/poster_typst_overview.png`: compact 1728 × 1037 preview.

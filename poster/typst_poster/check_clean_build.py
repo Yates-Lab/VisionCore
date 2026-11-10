@@ -76,7 +76,8 @@ def main():
         require(all((project / 'output' / name).is_file() for name in
                     ('raster_print_proof.pdf', 'panel1_print_300dpi.png', 'panel2_print_300dpi.png')),
                 'Print inspection outputs missing from clean build')
-        names = ['poster_typst_full_60x36.pdf', 'poster_typst_full.png', 'poster_typst_overview.png']
+        names = ['poster_typst_full_60x36.pdf', 'poster_typst_full.png',
+                 'poster_typst_overview.png', 'poster_panels_actual_size.pdf']
         first = {name: hashlib.sha256((project / 'output' / name).read_bytes()).hexdigest() for name in names}
         run([python, project / 'build.py'], temp, env=env)
         second = {name: hashlib.sha256((project / 'output' / name).read_bytes()).hexdigest() for name in names}

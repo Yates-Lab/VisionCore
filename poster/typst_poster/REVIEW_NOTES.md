@@ -12,7 +12,52 @@ Old → new: 1 and 3 retired, 2 → 2, 4 → 3, 5 → 4, 6 → 5, 7 → 6, 8 →
 
 ## Done (in the approved reference)
 
+- **Panel 6 breathing room (2026-11-10):** the histogram heading stands above
+  the median annotations, with its condition legend in the plot's blank upper
+  left. The prediction strip uses three lines: its heading and the precise
+  median fraction of conditional rate variance explained. Unit/session counts
+  move to the existing methods line above. Plot dimensions, marks, values,
+  medians and all other panels are unchanged. Pixel checks at 72 and 144 dpi
+  restrict differences to these annotations; the legend covers no data.
+
+- **Final clarity pass (2026-11-10):** retained the overall layout and intro.
+  Panel 6 distinguishes reproduction of FEM-related rate variability from
+  single-trial prediction performance, retaining the precise rate-variance
+  metric beneath the new strip heading. Histogram legend keys move 14 pt down
+  and median/band annotations 8 pt down; all plotted bins and median x-values
+  are unchanged. Panel 7 attaches “Example unit and fixation” directly to the
+  rate/SSI percentages. Panel 8 explicitly qualifies the result as model-based
+  and explains tuning engagement as motion-generated retinal power falling
+  within a unit's tuning, retaining within-unit percentiles. Panel 4's Poisson
+  label now sits beside y=1.0. Panel 2 specifies the 50-ms sorting windows and
+  notes the 21-ms initial onset segment: `paper/fig1/generate_fig1d.py` defines
+  12 and 5 bins respectively at 240 Hz. These are code/source and preservation
+  checks, not independent reproduction of the scientific analyses. Pixels
+  outside the intended annotation areas are identical at 72 and 144 dpi.
+
+- **Panel 1 spacing (2026-11-10):** setup notes use upright Arial at their
+  existing sizes. Gaze strips move down 6 pt; the 306 pt square RF plot moves
+  up 16 pt to accommodate a two-row legend within its width. The RF heading
+  wraps at the comma. The lower legend, takeaway and response annotations
+  share an 888 pt final baseline above the dataset strip. Wording, data and
+  plot dimensions are preserved; other regions are pixel-identical at 72 and
+  144 dpi.
+
+- **Heading consistency (2026-11-09):** all eight panel headings use 48 pt
+  Arial bold at x=59.75 pt, baseline=48.07 pt. Badges share a 44.26 pt diameter,
+  center (29.14, 36.34) pt, and white 2.5 pt outline; 29 pt Arial bold numbers
+  start at x=20.81 pt, baseline=45.82 pt. Panel 2's four plot headings now use
+  bold weight at their existing sizes and positions; the RF citation moves
+  right to retain clearance. Scientific wording and plot layouts are unchanged.
+
 - **Panel 1 review fixes (2026-11-09):**
+  - **Setup palette:** brain labels use the existing muted trial red; the hot
+    mirror and its key use a softer cyan. Eye-inset labels are white, with one
+    muted sand accent for outlines and arrows. Trial colors are unchanged.
+  - **Right-edge clearance:** moved the gaze traces, rasters, population-rate
+    plot and their scales 20 pt left as one group. Plot widths remain 332 pt;
+    heights, marks, data and wording are unchanged. This increases clearance
+    between the rotated scale labels and the panel border without shrinking plots.
   - **Gaze traces:** both strips share one angular scale, so the single 0.1° bar
     holds for both. Previously each strip scaled to its own range, and the vertical
     one was about 10% compressed.

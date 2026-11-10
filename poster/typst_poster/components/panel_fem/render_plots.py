@@ -33,7 +33,7 @@ plt.rcParams.update({"font.family": "Arial", "pdf.fonttype": 42, "svg.fonttype":
 
 NAVY, TEXT, MUTED, COPPER = "#193654", "#202632", "#526474", "#B8651B"
 RED, BLUE, RED_LIGHT, BLUE_LIGHT = "#c43c3c", "#3b6db7", "#df6556", "#6f95ee"
-FRAME, MIRROR, WINDOW = "#1aa7d8", "#f2a7a3", "#e9edf2"
+FRAME, MIRROR, WINDOW = "#5595aa", "#f2a7a3", "#e9edf2"
 PANEL_W, PANEL_H = 1183.79296875, 974.5703125
 # Align the body artwork's x=22 edge to panel 2's 90 pt plotting inset.
 CONTENT_DX = 68.0
@@ -111,8 +111,8 @@ def fem_panel():
 
     # Header, matching the other panels' badge and title geometry.
     bg.add_patch(Circle((29.14, 36.34), 22.13, fc=COPPER, ec="white", lw=2.5))
-    bg.text(29.14, 46.5, "1", ha="center", fontsize=29, weight="bold", color="white")
-    bg.text(59.74, 48.06, "Tiny gaze shifts reshape population responses",
+    bg.text(20.81, 45.82, "1", ha="left", fontsize=29, weight="bold", color="white")
+    bg.text(59.75, 48.07, "Tiny gaze shifts reshape population responses",
             fontsize=48, weight="bold", color=NAVY)
 
     # Body layer translates independently of the fixed title and badge.
@@ -126,9 +126,7 @@ def fem_panel():
     t_lo, t_hi = d["raster_ms"]
 
     def note(x, y, text, size=22, **kw):
-        # Arial Italic is not in the locked font set; Liberation Sans Italic is
-        # metrically identical and bundled under its open licence.
-        bg.text(x, y, text, family="Liberation Sans", style="italic", fontsize=size,
+        bg.text(x, y, text, fontsize=size,
                 color=TEXT, va="top", linespacing=1.15, **kw)
 
     # Groups top to bottom by mean gaze height, so the stack mirrors the eye.
@@ -168,20 +166,21 @@ def fem_panel():
     dpi = place(eye_fig, 110, 110, 0, 0, 110, 110)
     dpi.imshow(np.asarray(Image.open(HERE / "assets" / "dpi_eye.png")), cmap="gray",
                vmin=0, vmax=255)
-    dpi.add_patch(Circle((270, 262), 222, fill=False, ec="#c9e8a0", lw=2))
-    dpi.add_patch(Circle((382, 238), 30, fill=False, ec="#f2e27a", lw=1.5))
+    eye_accent = "#d4c487"  # One muted highlight on the grayscale eye image.
+    dpi.add_patch(Circle((270, 262), 222, fill=False, ec=eye_accent, lw=2))
+    dpi.add_patch(Circle((382, 238), 30, fill=False, ec=eye_accent, lw=1.5))
     for (tx, ty), (px, py), label in (((150, 170), (204, 278), "P4"),
                                       ((150, 405), (262, 330), "Pupil"),
                                       ((345, 170), (380, 212), "CR")):
-        dpi.annotate(label, (px, py), (tx, ty), color="#c9e8a0", fontsize=15,
-                     arrowprops=dict(arrowstyle="-|>", color="#d9483b", lw=1.4,
+        dpi.annotate(label, (px, py), (tx, ty), color="white", fontsize=15,
+                     arrowprops=dict(arrowstyle="-|>", color=eye_accent, lw=1.4,
                                      mutation_scale=9, shrinkB=2))
     dpi.set_xticks([]), dpi.set_yticks([])
     for spine in dpi.spines.values():
         spine.set_linewidth(1.2)
     save(eye_fig, "panel_fem_eye")
-    note(22, 456, "Dual Purkinje high-resolution\neye tracker", size=20)
-    bg.text(22 + text_width("eye tracker", 20) + 4, 489, "[2–4]", fontsize=14,
+    note(22, 446, "Dual Purkinje high-resolution\neye tracker", size=20)
+    bg.text(22 + text_width("eye tracker", 20) + 4, 479, "[2–4]", fontsize=14,
             color=TEXT, va="bottom")
 
     # Enlarged stimulus views align with their corresponding raster groups.
@@ -191,9 +190,9 @@ def fem_panel():
     # Foveal RFs from every mapping session (Figure 1C outlines), with this
     # session's population RF and the example gaze shift drawn at the same scale.
     allrf = np.load(HERE / "rf_all_sessions.npz")
-    bg.text(22, 550, "Foveal RFs, all mapping sessions", fontsize=22, weight="bold", color=NAVY,
+    bg.text(22, 534, "Foveal RFs,\nall mapping sessions", fontsize=22, weight="bold", color=NAVY,
             va="bottom")
-    fov = ax(22, 558, 328, 864)
+    fov = ax(22, 542, 328, 848)
     th = np.linspace(0, 2 * np.pi, 200)
     fov.plot(np.cos(th), np.sin(th), color="black", lw=1.6, ls=(0, (5, 3)))
     fov.axhline(0, color="#bbbbbb", lw=0.8, ls=":"), fov.axvline(0, color="#bbbbbb", lw=0.8, ls=":")
@@ -213,16 +212,19 @@ def fem_panel():
     fov.set_xticks([]), fov.set_yticks([])
     for sp in fov.spines.values():
         sp.set_linewidth(1.2)
-    lx, ly = 22, 874
+    # Two legend rows fit within the RF plot width; final baseline matches
+    # the takeaway and response annotations above the dataset strip.
     for i, (lab, col, lw, al) in enumerate((("Monkey A", "#59606a", 6, 0.6),
                                             ("Monkey L", "#2e8b57", 6, 0.6),
                                             ("this session", "black", 2.6, 1))):
-        x = lx + i * 120
-        bg.plot([x, x + 18], [ly + 10] * 2, color=col, lw=lw, alpha=al, solid_capstyle="butt")
-        bg.text(x + 24, ly + 10, lab, fontsize=20, color=TEXT, va="center")
+        x, baseline = ((22, 866), (180, 866), (22, 888))[i]
+        bg.plot([x, x + 18], [baseline - 6] * 2, color=col, lw=lw, alpha=al, solid_capstyle="butt")
+        bg.text(x + 24, baseline, lab, fontsize=20, color=TEXT)
 
     # ---- Gaze traces over the window ---------------------------------------------
-    rx0, rx1 = 728, 1060
+    # Inset the complete right-hand group to clear the panel border, retaining
+    # the 332 pt plot width and the existing gaps between plots and scale bars.
+    rx0, rx1 = 708, 1040
     tt = d["trace_t"]
     # One angular scale for both strips, so the single 0.1 deg bar holds for both;
     # each strip is centred on its own data.
@@ -230,7 +232,7 @@ def fem_panel():
              (np.concatenate([d["trace_hi"][..., c], d["trace_lo"][..., c]]) for c in (0, 1))]
     half_range = max(spans) / 2 + 0.02
     for k, (comp, name) in enumerate(((0, "horizontal"), (1, "vertical"))):
-        y0 = 72 + k * 50
+        y0 = 78 + k * 50
         a = ax(rx0, y0, rx1, y0 + 42)
         vals = np.concatenate([d["trace_hi"][..., comp], d["trace_lo"][..., comp]])
         mid = (np.nanmax(vals) + np.nanmin(vals)) / 2
@@ -329,14 +331,14 @@ def fem_panel():
     bg.text(rx1 + 30, py1, "20 sp/s", rotation=90, va="bottom", fontsize=18)
     ms_pt = (rx1 - rx0) / (t_hi - t_lo)
     bg.plot([rx0, rx0 + 50 * ms_pt], [py1 + 12] * 2, color="black", lw=4, solid_capstyle="butt")
-    bg.text(rx0, py1 + 20, "50 ms", va="top", fontsize=19)
-    bg.text(rx1, py1 + 20, f"{t_lo:.0f}–{t_hi:.0f} ms after fixation onset", va="top",
+    bg.text(rx0, 888, "50 ms", va="baseline", fontsize=19)
+    bg.text(rx1, 888, f"{t_lo:.0f}–{t_hi:.0f} ms after fixation onset", va="baseline",
             ha="right", fontsize=17, color=MUTED)
 
     # ---- Message, then the dataset ------------------------------------------------------
-    bg.text(400, 780, "Small changes in\nfixation drive large\nchanges in population\nresponse", fontsize=24, weight="semibold", color=NAVY, va="top",
+    bg.text(400, 795.77, "Small changes in\nfixation drive large\nchanges in population\nresponse", fontsize=24, weight="semibold", color=NAVY, va="top",
             linespacing=1.15)
-    fig.add_artist(ConnectionPatch((640, 816), (rx0 - 6, (py0 + py1) / 2), coordsA="data",
+    fig.add_artist(ConnectionPatch((640, 831.77), (rx0 - 6, (py0 + py1) / 2), coordsA="data",
                                    coordsB="data", axesA=bg, axesB=bg, color="#25327a", lw=2.4,
                                    arrowstyle="-|>", mutation_scale=20, shrinkA=2, shrinkB=2))
     bg.add_patch(FancyBboxPatch((20, 902), 1144 - CONTENT_DX, 64, boxstyle="round,pad=0,rounding_size=8",

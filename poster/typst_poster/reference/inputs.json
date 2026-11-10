@@ -5,13 +5,13 @@
   "assets/panel2.svg": "ec2815aa9eb5f3311d88abc6ab8402b0d6a7e7c05b0754a4460f6b186340ecb0",
   "assets/panel4.svg": "f928b551cc8e5e398f4bc248f4a139118689ae3cf315b89646b428a6c8733425",
   "assets/panel6.svg": "afb3eaad258d92d87c90f62340cbb45eb8ce8faa9f32d3fe26c8a91e3822a8d5",
-  "assets/panel7.svg": "0bfc01ec917d33fe6c1a1f048b72aae4761d29b673235c899905cb1d34d8755e",
+  "assets/panel7.svg": "11091dbf9224bdff9ac4f55e09bb0aaaf9e2a15df4e9de555303cb28609b0c92",
   "assets/panel8.svg": "98ee6bb0d2acf9e8630817327230412fa555c9e203773535d351affe0698bab2",
   "assets/panel9.svg": "3384d2b7f0424b04cec56018e0799e9d3a6b5d114f157affacd33d62b1bf9870",
   "components/panel5/assets/residual_connector.svg": "47874966126acb9c14b47d2ac5cf3d54ff7cc142676821d4447d64e3d45c5255",
-  "components/panel5/panel5.typ": "83e6e514da3918ed88be689874b97e92ac7a18198957241c104dbc714075e728",
+  "components/panel5/panel5.typ": "aff28d8c4b65ae1b4acb32dc68a1dc42d91ea53601abdad749d62b9476a80dbf",
   "components/panel5/plot_data.npz": "3ad173168b952d93934478525d01c51d6f42339427368d2d47267be228924b77",
-  "components/panel_fem/assets/brain_v1.svg": "f2008d29d1866d5a51bec7daec5dd1437f59630b9db837e27a6126128f5698d8",
+  "components/panel_fem/assets/brain_v1.svg": "19cb56bf1c4a5107a4f31c74a2b9d523804dd538b25731ff857813c185d469b9",
   "components/panel_fem/assets/dpi_eye.png": "bfd26e1861e6849c2b62a4effe3504566eb17bd917ebde466f1ab4c54d62e033",
   "components/panel_fem/assets/marmoset.svg": "21f7d6ccbc5954322195bd932d2218e84cd34f3258d12f82e1a6e4f2a702b36b",
   "components/panel_fem/intro.typ": "699ee1fe592288bda524d689a79ce86bbe57e02465c12f427a620ccbd44aa8bd",
@@ -19,6 +19,6 @@
   "components/panel_fem/plot_data.npz": "42ac1a1b3e7b27b52443cda1c8d076ea69030b48ecc71b744cc2b5b0d8c18332",
   "components/panel_fem/rf_all_sessions.npz": "0aac14419eac113a4960a7609eaed387f143be0b48d959e76cb0af693364d35c",
   "poster.typ": "b0e0e3a43eed97d0567cdda78a6b3eb1505f1216eab8e1d26536b533187b2127",
-  "poster_content.json": "d6e0ba4deb2eda8f053035431cd62d8e74a2986477708a821cb04643f861b4d5",
-  "reference/approved.pdf": "da600951b35958b39efe941f9807c0aead9ae684e532e704887b7be3ec3380d0"
+  "poster_content.json": "7007f30c4327950c17459590d909a14ebc51104a8d09005e10a035e23de356b6",
+  "reference/approved.pdf": "3a2a54a0d2d4d6f5788831e24a9633d57f8a05ddf478f008891a66b5a42abcfa"
 }

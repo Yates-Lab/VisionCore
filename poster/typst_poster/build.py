@@ -11,6 +11,36 @@ from fonts import HERE, checked_font_paths
 SOURCE_DATE_EPOCH = 1794009600
 
 
+def export_panel_deck(pdf, regions):
+    """Copy each panel to an equally sized page, preserving PDF-point scale."""
+    import fitz
+
+    panels = [r for r in regions if r['name'] == 'intro' or r['name'].startswith('panel')]
+    target = pdf.with_name('poster_panels_actual_size.pdf')
+    with fitz.open(pdf) as source, fitz.open() as deck:
+        bookmarks = []
+        panel_number = 0
+        for r in panels:
+            clip = fitz.Rect(r['x'], r['y'], r['x'] + r['width'], r['y'] + r['height'])
+            page = deck.new_page(width=clip.width, height=clip.height)
+            page.show_pdf_page(page.rect, source, 0, clip=clip)
+            if r['name'] == 'intro':
+                title = 'Intro'
+            else:
+                panel_number += 1
+                title = f'Panel {panel_number}'
+            bookmarks.append([1, title, len(deck)])
+        deck.set_toc(bookmarks)
+        deck.set_pagelayout('SinglePage')
+        # Request 100% on opening; viewers may override this preference.
+        deck.xref_set_key(deck.pdf_catalog(), 'OpenAction',
+                         f'[{deck.page_xref(0)} 0 R /XYZ null null 1]')
+        deck.set_metadata({'title': 'Poster panels — original physical scale',
+                           'creator': 'VisionCore poster build'})
+        deck.save(target, garbage=4, deflate=True, no_new_id=True)
+    return target
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--compare', action='store_true',
@@ -62,8 +92,10 @@ def main():
                 ref = Image.frombytes('RGB', (pix.width, pix.height), pix.samples)
             ref.save(out / 'approved_reference.png')
             ImageChops.difference(ref, image).save(out / 'difference.png')
+    deck = export_panel_deck(pdf, content['regions'])
     subprocess.run([sys.executable, str(HERE / 'audit_layout.py')], cwd=HERE, check=True)
     print(f'Built full poster with Typst {typst.__version__}: {pdf}')
+    print(f'Exported panels at original scale: {deck}')
 
 
 if __name__ == '__main__':

@@ -78,6 +78,23 @@ def main():
             require(png.size == (4320, 2592) and png.convert('RGB').tobytes() == pix.samples,
                     'Full PNG is missing, stale or differs from PDF')
         content = json.loads((HERE / 'poster_content.json').read_text())
+        panels = [r for r in content['regions']
+                  if r['name'] == 'intro' or r['name'].startswith('panel')]
+        with fitz.open(out / 'poster_panels_actual_size.pdf') as deck:
+            require(len(deck) == len(panels), 'Wrong panel-deck page count')
+            for page, r in zip(deck, panels):
+                require(abs(page.rect.width - r['width']) < .001 and
+                        abs(page.rect.height - r['height']) < .001,
+                        f"Panel deck resized {r['name']}")
+                clip = fitz.Rect(r['x'], r['y'], r['x'] + r['width'], r['y'] + r['height'])
+                original = current[0].get_text('words', clip=clip)
+                exported = page.get_text('words')
+                require([w[4] for w in original] == [w[4] for w in exported],
+                        f"Panel-deck wording differs: {r['name']}")
+                offset = np.array([r['x'], r['y'], r['x'], r['y']])
+                require(np.allclose(np.array([w[:4] for w in original]) - offset,
+                                    np.array([w[:4] for w in exported]), rtol=0, atol=.01),
+                        f"Panel-deck text scaled or moved: {r['name']}")
         with Image.open(out / 'poster_typst_full.png') as png:
             for r in content['regions']:
                 box = tuple(round(v) for v in (r['x'], r['y'], r['x'] + r['width'], r['y'] + r['height']))
@@ -88,6 +105,7 @@ def main():
     subprocess.run([sys.executable, str(HERE / 'audit_layout.py')], check=True)
     report = dict(page_size_pt=[4320, 2592], input_sha256_checks=len(inputs),
                   scientific_wording_exact=True, changed_pixels=differences,
+                  panel_deck_pages=len(panels), panel_deck_original_scale=True,
                   embedded_fonts=sorted(set(f[3] for f in fonts)),
                   cached_data_shapes=shapes, python=platform.python_version(), dependencies=versions,
                   scope='Approved assets plus saved panel-5 results; no analysis or model fitting is rerun.')

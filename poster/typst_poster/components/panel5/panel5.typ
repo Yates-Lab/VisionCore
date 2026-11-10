@@ -26,11 +26,15 @@
   block(width: 330pt, height: 40.37pt)[#align(center)[p ≤ 0.001]],
   move(dy: -10pt, image("assets/" + asset + ".pdf", width: 315pt, height: 515pt)),
 )
-#place(top + left, dx: 9pt, dy: 15pt)[
-  #grid(columns: (42pt, 1fr), column-gutter: 9pt, align: horizon,
-    circle(radius: 21pt, fill: copper, stroke: none)[#align(center + horizon)[#text(size: 29pt, weight: "bold", fill: white)[4]]],
-    text(size: 48pt, weight: "bold", fill: copper)[Correcting for gaze removes shared noise],
-  )
+// Shared panel-heading geometry: 44.26 pt badge, fixed text baselines.
+#place(top + left, dx: 7.01pt, dy: 14.21pt)[
+  #circle(radius: 22.13pt, fill: copper, stroke: (paint: white, thickness: 2.5pt))
+]
+#place(top + left, dx: 20.81pt, dy: 45.82pt)[
+  #text(size: 29pt, weight: "bold", fill: white, top-edge: 0pt, bottom-edge: 0pt)[4]
+]
+#place(top + left, dx: 59.75pt, dy: 48.07pt)[
+  #text(size: 48pt, weight: "bold", fill: copper, top-edge: 0pt, bottom-edge: 0pt)[Correcting for gaze removes shared noise]
 ]
 #place(top + left, dx: 30.13pt, dy: 109.37pt)[
   #stack(dir: ttb, spacing: 71pt,
