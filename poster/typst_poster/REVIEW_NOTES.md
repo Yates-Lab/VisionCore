@@ -144,15 +144,16 @@ Old → new: 1 and 3 retired, 2 → 2, 4 → 3, 5 → 4, 6 → 5, 7 → 6, 8 →
   histogram is 30 pt taller (460 pt) with its baseline fixed. A 22 pt-wide navy
   downward triangle replaces the thin median tick at the identical x coordinate.
   Histogram bin paths, counts, limits and scientific definitions are unchanged.
-- Intro: follows the slide deck's "two debates, then their connection" framing.
-  Fixational eye movements ("Feature or bug?") and shared cortical variability
-  ("Noise or signal?") have equal visual weight. A single vector connector
-  joins them above the shared question of how much apparent cortical noise
-  comes from the eye's own movements. The closing line asks whether that
-  activity improves visual information. The previous image/RF mechanism diagram
-  and Q1/Q2 navigation are removed from this panel. Citations [5,6] remain.
-  Title/body insets are 59.74/90 pt and the full 470 pt allocation is preserved.
-  All other panels, including panel 1, are unchanged in this pass.
+- **Intro (2026-11-09, for SfN):** "Fixational eye movements: noise, or sensing?"
+  A schematic eye with a zoomed fixation path (illustration) and one neuron's
+  responses to the same image on ten repeats (panel 1's most active unit) carry
+  "usually: motor / neural noise → here: how the eye senses / what the eye
+  delivers". Plain-language explanation with a thumbnail-at-arm's-length scale,
+  the question "Is what looks like noise … part of how we see?", "A fingertip,
+  not a camera?", and answer chips mapping onto panels 1–5, 6 and 7–8 (the last
+  stated as a model result). Chosen over several framings mocked up from the
+  preprint and the CMM slide deck; strikethroughs and data-heavy pictures were
+  tried and dropped, since panel 1 carries the fixation data.
 - Panel 2:
   - The "RF projection axis" leader is darker and thicker and ends on the axis.
   - The (0, 0) marker is a small plain black cross.
@@ -174,8 +175,8 @@ Old → new: 1 and 3 retired, 2 → 2, 4 → 3, 5 → 4, 6 → 5, 7 → 6, 8 →
    σ²_FEM, so it is not conditional on the stimulus. A short definition would help.
 5. **Panel 1 is one session.** Its "shift < RF size" example could be backed by a
    19-session summary comparing fixational gaze spread with RF diameter.
-6. **Intro is still being developed.** Keep its allocated space for the additional
-   content; do not shorten it to enlarge panel 1.
+6. **Intro wording** is pitched at a broad SfN audience. For a vision meeting the
+   chips and explanation could use the technical terms again.
 7. **Standalone R01 figure** (`generate_fem_overview.py`) shares panel 1's trials,
    RF placement and image, but keeps the original R01 layout.
 

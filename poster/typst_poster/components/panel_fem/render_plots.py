@@ -354,57 +354,48 @@ def fem_panel():
          "panel_width": W, "panel_height": H}) + "\n")
 
 
-def intro_schematic():
-    """One scene sampled at two gaze positions, at one consistent scale.
+def intro_art():
+    """Intro pictures: a schematic eye with a zoomed fixational path (illustration,
+    not data) and one neuron's responses to the same image on ten repeats (data,
+    from the panel-1 example). Text is composed natively in intro.typ."""
+    rng = np.random.default_rng(7)
+    walk = np.cumsum(rng.normal(0, 0.035, (160, 2)), 0)
+    walk[60:] += np.array([0.22, -0.12])                # two microsaccade-like jumps
+    walk[120:] += np.array([-0.18, 0.2])
+    walk -= walk.mean(0)
+    walk /= np.abs(walk).max()
 
-    Vector illustration only. Each retinal view samples the same extended
-    scene, centred on the corresponding screen-space RF. Its shape and size
-    are identical in the two retinal views; no experimental data are simulated.
-    """
-    W, H = 1060, 250
-    fig, bg = canvas(W, H)
-    bg.text(0, 15, "Same displayed image", va="center", fontsize=24,
-            weight="bold", color=NAVY)
-    bg.text(770, 15, "Different retinal input", ha="center", va="center",
-            fontsize=24, weight="bold", color=NAVY)
-    bg.text(1060, 15, "Schematic", ha="right", va="center", fontsize=17, color=MUTED)
-    # The same diagonal contour is drawn in all three axes, without alteration.
-    edge = np.array([[-.4, -.4], [.14, -.4], [.86, 1.4], [-.4, 1.4]])
-    positions = ((.38, .5), (.64, .5))
-    rf_radius = .30
+    w, h = 280, 148
+    fig, _ = canvas(w, h)
+    a = place(fig, w, h, 0, 0, w, h)
+    t = np.linspace(-1, 1, 200)
+    a.plot(-0.55 + 0.95 * t, 0.55 * (1 - t ** 2), color=TEXT, lw=3.4)
+    a.plot(-0.55 + 0.95 * t, -0.55 * (1 - t ** 2), color=TEXT, lw=3.4)
+    a.add_patch(Circle((-0.55, 0), 0.36, fc="#8fb3c9", ec=TEXT, lw=2.4))
+    a.add_patch(Circle((-0.55, 0), 0.16, fc=TEXT, ec="none"))
+    a.add_patch(Circle((-0.48, 0.07), 0.05, fc="white", ec="none"))
+    c = np.array([1.05, 0.0])
+    a.add_patch(Circle(tuple(c), 0.62, fc="white", ec=MUTED, lw=2.4, zorder=2))
+    for sgn in (1, -1):
+        a.plot([-0.2, c[0] - 0.55], [0.3 * sgn, 0.32 * sgn], color=MUTED, lw=1.6, ls=":")
+    a.plot(*(walk * 0.42 + c).T, color=COPPER, lw=2.4, zorder=3)
+    a.set_xlim(-1.6, 1.8), a.set_ylim(-0.9, 0.9), a.set_aspect("equal"), a.axis("off")
+    save(fig, "intro_eye")
 
-    def scene(x, limits):
-        a = place(fig, W, H, x, 48, x + 174, 222)
-        a.set_facecolor("#edf0f3")
-        a.add_patch(Polygon(edge, closed=True, fc="#87939d", ec="none"))
-        a.set_xlim(*limits[0]), a.set_ylim(*limits[1]), a.set_aspect("equal")
-        a.set_xticks([]), a.set_yticks([])
-        for spine in a.spines.values():
-            spine.set_color("#c5cdd4"), spine.set_linewidth(1)
-        return a
-
-    def rf(a, position, color):
-        a.add_patch(Circle(position, rf_radius, fill=False, ec="white", lw=6))
-        a.add_patch(Circle(position, rf_radius, fill=False, ec=color, lw=3))
-
-    displayed = scene(25, ((0, 1), (0, 1)))
-    for position, color in zip(positions, (BLUE, RED)):
-        rf(displayed, position, color)
-    bg.text(112, 239, "Receptive field", ha="center", va="center", fontsize=20, color=MUTED)
-    bg.text(355, 110, "Eye shifts", ha="center", va="center", fontsize=24, color=NAVY)
-    bg.annotate("", xy=(462, 139), xytext=(248, 139),
-                arrowprops=dict(arrowstyle="-|>", lw=2.8, color=NAVY, mutation_scale=22))
-    for x, position, color, label in zip((540, 825), positions, (BLUE, RED), ("Gaze A", "Gaze B")):
-        cx, cy = position
-        a = scene(x, ((cx - .5, cx + .5), (cy - .5, cy + .5)))
-        rf(a, position, color)
-        bg.text(x + 87, 239, label, ha="center", va="center", fontsize=21,
-                weight="bold", color=color)
-    save(fig, "intro_schematic")
+    w, h = 280, 136
+    fig, _ = canvas(w, h)
+    a = place(fig, w, h, 0, 0, w, h)
+    unit = int(np.bincount(d["spk_u"].astype(int)).argmax())   # most active unit
+    rows = 2 * int(d["n_per"])
+    for r in range(rows):
+        sel = (d["spk_k"] == r) & (d["spk_u"] == unit)
+        a.vlines(d["spk_t"][sel], rows - r - 0.38, rows - r + 0.38, color=NAVY, lw=2.4)
+    a.set_xlim(*d["raster_ms"]), a.set_ylim(0.4, rows + 0.6), a.axis("off")
+    save(fig, "intro_raster")
 
 
 if __name__ == "__main__":
     OUT.mkdir(exist_ok=True)
     fem_panel()
-    intro_schematic()
+    intro_art()
     print("Rendered panel_fem_plots.pdf and intro schematics; Typst composes panel_fem.pdf")
