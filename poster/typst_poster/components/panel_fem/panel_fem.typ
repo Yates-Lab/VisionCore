@@ -10,3 +10,7 @@
 #place(top + left, dx: box.brain_x * 1pt, dy: box.brain_y * 1pt)[
   #image("assets/brain_v1.svg", width: box.brain_width * 1pt)
 ]
+#place(top + left, dx: box.eye_x * 1pt, dy: box.eye_y * 1pt)[
+  #image("../../assets/panel_fem_eye.pdf", width: box.eye_size * 1pt,
+    height: box.eye_size * 1pt)
+]

@@ -1,4 +1,4 @@
-"""Render the poster's "gaze shifts within an RF" panel and the intro eye trace.
+"""Render the poster's "gaze shifts within an RF" panel and intro schematic.
 
 Reads the frozen ``plot_data.npz`` and ``rf_all_sessions.npz``, the DPI image,
 and vector marmoset artwork. Typst adds the vector marmoset and brain drawings.
@@ -35,6 +35,8 @@ NAVY, TEXT, MUTED, COPPER = "#193654", "#202632", "#526474", "#B8651B"
 RED, BLUE, RED_LIGHT, BLUE_LIGHT = "#c43c3c", "#3b6db7", "#df6556", "#6f95ee"
 FRAME, MIRROR, WINDOW = "#1aa7d8", "#f2a7a3", "#e9edf2"
 PANEL_W, PANEL_H = 1183.79296875, 974.5703125
+# Align the body artwork's x=22 edge to panel 2's 90 pt plotting inset.
+CONTENT_DX = 68.0
 OUT = POSTER / "assets"
 d = np.load(HERE / "plot_data.npz")
 
@@ -49,7 +51,7 @@ MARMOSET_SVG = HERE / "assets" / "marmoset.svg"
 # Marmoset placement in panel points (x0, y0, width). The vector drawing is laid
 # over the Matplotlib layer by panel_fem.typ; its eye sits where the rig's
 # camera lines end.
-MARMOSET_BOX = (216.8, 264.8, 150.0)
+MARMOSET_BOX = (210.0, 205.0, 155.0)
 
 
 def marmoset_size():
@@ -104,13 +106,18 @@ def save(fig, name):
 def fem_panel():
     W, H = PANEL_W, PANEL_H
     fig, bg = canvas(W, H)
-    ax = lambda *box: place(fig, W, H, *box)  # noqa: E731
+    ax = lambda x0, y0, x1, y1: place(fig, W, H, x0 + CONTENT_DX, y0,
+                                     x1 + CONTENT_DX, y1)  # noqa: E731
 
     # Header, matching the other panels' badge and title geometry.
     bg.add_patch(Circle((29.14, 36.34), 22.13, fc=COPPER, ec="white", lw=2.5))
     bg.text(29.14, 46.5, "1", ha="center", fontsize=29, weight="bold", color="white")
     bg.text(59.74, 48.06, "Tiny gaze shifts reshape population responses",
             fontsize=48, weight="bold", color=NAVY)
+
+    # Body layer translates independently of the fixed title and badge.
+    bg = fig.add_axes([CONTENT_DX / W, 0, 1, 1])
+    bg.set_xlim(0, W), bg.set_ylim(H, 0), bg.axis("off")
 
     image, half = d["image"], float(d["image_half_deg"])
     gaze_hi, gaze_lo, rf = d["gaze_hi"], d["gaze_lo"], d["rf"]
@@ -131,9 +138,34 @@ def fem_panel():
     if gaze_lo.mean(0)[1] > gaze_hi.mean(0)[1]:
         groups.reverse()
 
-    # ---- Left column: eye tracker, rig, RFs from all sessions -----------------
-    note(22, 74, "Laminar\nrecordings in\nfoveal V1")
-    dpi = ax(22, 448, 132, 558)
+    # ---- Compact apparatus: brain above the animal, eye inset beside it ------
+    note(22, 86, "Laminar\nrecordings in\nfoveal V1")
+    bg.add_patch(Polygon([(22, 186), (140, 192), (140, 327), (22, 356)],
+                         fc="#8c8c8c", ec="none"))
+    screen = ax(58, 217, 110, 269)
+    screen.imshow(image, cmap="gray", vmin=0, vmax=255)
+    screen.axis("off")
+    # Eye position and the hot mirror use separate, explicit visual keys.
+    bg.plot([84, 239], [241, 241], color=RED, lw=2.5, ls=(0, (3, 2)), zorder=6)
+    bg.plot([165, 165], [274, 331], color="#b7b7b7", lw=8, zorder=1)
+    bg.add_patch(Polygon([(155, 219), (222, 225), (203, 278), (136, 272)],
+                         fill=False, ec=FRAME, lw=3.5, zorder=2))
+    bg.add_patch(Rectangle((150, 331), 36, 22, fc="#414141", ec="black", lw=1))
+    bg.add_patch(Rectangle((160, 316), 16, 15, fc="#414141", ec="black", lw=1))
+    bg.text(144, 377, "Eye camera", fontsize=20, color=TEXT)
+    for yy, label, color, style in ((397, "Eye position", RED, (0, (3, 2))),
+                                     (425, "Hot mirror", FRAME, "-")):
+        bg.plot([22, 40], [yy, yy], color=color, lw=2.5, ls=style)
+        bg.text(48, yy, label, fontsize=20, color=TEXT, va="center")
+    mx, my, mw = MARMOSET_BOX
+    mh = mw * marmoset_size()[1] / marmoset_size()[0]
+    bg.imshow(marmoset_interior(), extent=[mx, mx + mw, my + mh, my], zorder=5,
+              interpolation="bilinear", aspect="auto")
+
+    # The eye image is a separate PDF layer placed after the vector marmoset,
+    # so it can tuck over the lower-right silhouette without crossed strokes.
+    eye_fig, _ = canvas(110, 110)
+    dpi = place(eye_fig, 110, 110, 0, 0, 110, 110)
     dpi.imshow(np.asarray(Image.open(HERE / "assets" / "dpi_eye.png")), cmap="gray",
                vmin=0, vmax=255)
     dpi.add_patch(Circle((270, 262), 222, fill=False, ec="#c9e8a0", lw=2))
@@ -144,29 +176,13 @@ def fem_panel():
         dpi.annotate(label, (px, py), (tx, ty), color="#c9e8a0", fontsize=15,
                      arrowprops=dict(arrowstyle="-|>", color="#d9483b", lw=1.4,
                                      mutation_scale=9, shrinkB=2))
-    dpi.axis("off")
-    note(148, 466, "Dual Purkinje\nhigh-resolution\neye tracker", size=20)
-    bg.text(148 + text_width("eye tracker", 20) + 4, 520, "[2–4]", fontsize=14, color=TEXT,
-            va="bottom")
-
-    rig = ax(16, 214, 376, 451)
-    rig.set_xlim(20, 400), rig.set_ylim(345, 95), rig.axis("off")
-    rig.add_patch(Polygon([(28, 168), (170, 132), (170, 262), (28, 296)], fc="#8c8c8c", ec="none"))
-    rig.imshow(image, cmap="gray", extent=[96, 140, 236, 192], zorder=2)
-    patch = (108, 204, 128, 224)
-    rig.add_patch(Rectangle(patch[:2], 20, 20, fill=False, ec=FRAME, lw=2.5, zorder=3))
-    for corner in ((patch[2], patch[1]), (patch[2], patch[3])):
-        rig.plot([corner[0], 262], [corner[1], 186], ls=(0, (4, 3)), color=FRAME, lw=2)
-    rig.plot([214, 238], [232, 194], color=MIRROR, lw=5, solid_capstyle="butt")
-    rig.text(150, 112, "hot mirror", fontsize=19, color=TEXT, ha="left", va="bottom")
-    rig.plot([196, 222], [116, 196], color=MIRROR, lw=1.4)
-    rig.add_patch(Rectangle((236, 110), 32, 26, color="#1a1a1a"))
-    rig.add_patch(Polygon([(242, 136), (262, 136), (257, 154), (247, 154)], color="#1a1a1a"))
-    rig.text(280, 112, "Eye camera", fontsize=19, color=TEXT, ha="left", va="bottom")
-    mx, my, mw = MARMOSET_BOX
-    mh = mw * marmoset_size()[1] / marmoset_size()[0]
-    bg.imshow(marmoset_interior(), extent=[mx, mx + mw, my + mh, my], zorder=5,
-              interpolation="bilinear", aspect="auto")
+    dpi.set_xticks([]), dpi.set_yticks([])
+    for spine in dpi.spines.values():
+        spine.set_linewidth(1.2)
+    save(eye_fig, "panel_fem_eye")
+    note(22, 456, "Dual Purkinje high-resolution\neye tracker", size=20)
+    bg.text(22 + text_width("eye tracker", 20) + 4, 489, "[2–4]", fontsize=14,
+            color=TEXT, va="bottom")
 
     # Enlarged stimulus views align with their corresponding raster groups.
     vx, vs = 400, 248
@@ -175,16 +191,16 @@ def fem_panel():
     # Foveal RFs from every mapping session (Figure 1C outlines), with this
     # session's population RF and the example gaze shift drawn at the same scale.
     allrf = np.load(HERE / "rf_all_sessions.npz")
-    bg.text(22, 580, "Foveal RFs, all sessions", fontsize=22, weight="bold", color=NAVY,
+    bg.text(22, 550, "Foveal RFs, all sessions", fontsize=22, weight="bold", color=NAVY,
             va="bottom")
-    fov = ax(22, 586, 300, 864)
+    fov = ax(22, 558, 328, 864)
     th = np.linspace(0, 2 * np.pi, 200)
     fov.plot(np.cos(th), np.sin(th), color="black", lw=1.6, ls=(0, (5, 3)))
     fov.axhline(0, color="#bbbbbb", lw=0.8, ls=":"), fov.axvline(0, color="#bbbbbb", lw=0.8, ls=":")
     for subj, col in (("Allen", "#59606a"), ("Logan", "#2e8b57")):
         pts, lens = allrf[f"{subj}_pts"], allrf[f"{subj}_len"]
         for seg in np.split(pts, np.cumsum(lens)[:-1]):
-            fov.plot(*np.vstack([seg, seg[:1]]).T, color=col, lw=0.5, alpha=0.06)
+            fov.plot(*np.vstack([seg, seg[:1]]).T, color=col, lw=0.5, alpha=0.10)
     fov.plot(*np.vstack([rf, rf[:1]]).T, color="black", lw=2.6,
              path_effects=[pe.Stroke(linewidth=5, foreground="white"), pe.Normal()])
     fov.plot([0, 1], [0, 0], color="black", lw=3, solid_capstyle="butt")
@@ -197,16 +213,16 @@ def fem_panel():
     fov.set_xticks([]), fov.set_yticks([])
     for sp in fov.spines.values():
         sp.set_linewidth(1.2)
-    lx, ly = 22, 866
+    lx, ly = 22, 874
     for i, (lab, col, lw, al) in enumerate((("Monkey A", "#59606a", 6, 0.6),
                                             ("Monkey L", "#2e8b57", 6, 0.6),
                                             ("this session", "black", 2.6, 1))):
-        x = lx + i * 116
+        x = lx + i * 120
         bg.plot([x, x + 18], [ly + 10] * 2, color=col, lw=lw, alpha=al, solid_capstyle="butt")
-        bg.text(x + 24, ly + 10, lab, fontsize=17, color=TEXT, va="center")
+        bg.text(x + 24, ly + 10, lab, fontsize=20, color=TEXT, va="center")
 
     # ---- Gaze traces over the window ---------------------------------------------
-    rx0, rx1 = 728, 1080
+    rx0, rx1 = 728, 1060
     tt = d["trace_t"]
     for k, (comp, name) in enumerate(((0, "horizontal"), (1, "vertical"))):
         y0 = 72 + k * 50
@@ -217,7 +233,7 @@ def fem_panel():
             for row in traces:
                 a.plot(tt, row[:, comp], color=col, lw=1.6, alpha=0.85)
         a.set_ylim(lo, hi), a.set_xlim(t_lo, t_hi), a.axis("off")
-        bg.text(rx0 - 10, y0 + 21, f"{name} gaze", ha="right", va="center", fontsize=18,
+        bg.text(rx0 - 10, y0 + 21, f"{name} gaze", ha="right", va="center", fontsize=21,
                 color=MUTED)
         if k == 0:
             bar = 0.1 / (hi - lo) * 42
@@ -247,18 +263,23 @@ def fem_panel():
         v.set_xticks([]), v.set_yticks([])
         for sp in v.spines.values():
             sp.set_color(col), sp.set_linewidth(4)
-        bg.text(vx, vy - 6, "higher gaze" if gi == 0 else "lower gaze", fontsize=19,
+        bg.text(vx, vy - 6, f"Trials {gi * n_per + 1}–{(gi + 1) * n_per}", fontsize=21,
                 weight="bold", color=col, va="bottom")
         y = gy
         for j in range(n_per):
+            # Keep the existing source-trial order, but number the displayed
+            # rows continuously from top to bottom across both groups.
             number = n_per - j
+            display_number = gi * n_per + j + 1
             r = ax(rx0, y, rx1, y + bh)
             sel = d["spk_k"] == offset + number - 1
-            r.scatter(d["spk_t"][sel], d["spk_u"][sel], s=7, marker="|", color="black",
-                      linewidths=0.9)
+            # 3 pt-tall vector ticks with 1.35 pt strokes retain their centers
+            # while giving the population pattern more contrast at a distance.
+            r.scatter(d["spk_t"][sel], d["spk_u"][sel], s=9, marker="|", color="black",
+                      linewidths=1.35)
             r.set_xlim(t_lo, t_hi), r.set_ylim(n_units, -1), r.axis("off")
-            bg.text(rx0 - 10, y + bh / 2, f"Trial {number}", ha="right", va="center",
-                    fontsize=19, color=col)
+            bg.text(rx0 - 10, y + bh / 2, str(display_number), ha="right", va="center",
+                    fontsize=21, color=col)
             y += bh + gap
         bg.add_patch(Rectangle((rx1 + 6, gy), 7, group_h, color=col, lw=0))
     # Scale: 0.5 deg bar under the lower view.
@@ -287,11 +308,12 @@ def fem_panel():
             ha="right", fontsize=17, color=MUTED)
 
     # ---- Message, then the dataset ------------------------------------------------------
-    note(400, 786, "Small changes in\nfixation drive large\nchanges in population\nresponse")
+    bg.text(400, 780, "Small changes in\nfixation drive large\nchanges in population\nresponse", fontsize=24, weight="semibold", color=NAVY, va="top",
+            linespacing=1.15)
     fig.add_artist(ConnectionPatch((640, 816), (rx0 - 6, (py0 + py1) / 2), coordsA="data",
                                    coordsB="data", axesA=bg, axesB=bg, color="#25327a", lw=2.4,
                                    arrowstyle="-|>", mutation_scale=20, shrinkA=2, shrinkB=2))
-    bg.add_patch(FancyBboxPatch((20, 902), 1144, 64, boxstyle="round,pad=0,rounding_size=8",
+    bg.add_patch(FancyBboxPatch((20, 902), 1144 - CONTENT_DX, 64, boxstyle="round,pad=0,rounding_size=8",
                                 fc="#f0f3f6", ec="none"))
     for i, (big, small) in enumerate((("2", "awake marmosets"), ("1,022", "foveal V1 units"),
                                       ("19", "recording sessions"),
@@ -300,43 +322,63 @@ def fem_panel():
         bg.text(40 + i * 286, 938, small, fontsize=17, color=MUTED, va="top")
     save(fig, "panel_fem_plots")   # composed with the vector marmoset by panel_fem.typ
     (HERE / "marmoset_box.json").write_text(json.dumps(
-        {"x": mx, "y": my, "width": mw, "brain_x": 176, "brain_y": 62, "brain_width": 210,
+        {"x": mx + CONTENT_DX, "y": my, "width": mw,
+         "brain_x": 170 + CONTENT_DX, "brain_y": 80, "brain_width": 200,
+         "eye_x": 257 + CONTENT_DX, "eye_y": 318, "eye_size": 110,
          "panel_width": W, "panel_height": H}) + "\n")
 
 
-def intro_trace():
-    """Gaze paths on every repeat of the same sequence, against a typical RF."""
-    W = H = 330
+def intro_schematic():
+    """One scene sampled at two gaze positions, at one consistent scale.
+
+    Vector illustration only. Each retinal view samples the same extended
+    scene, centred on the corresponding screen-space RF. Its shape and size
+    are identical in the two retinal views; no experimental data are simulated.
+    """
+    W, H = 1060, 250
     fig, bg = canvas(W, H)
-    k = np.exp(-0.5 * (np.arange(-6, 7) / 2.0) ** 2)
-    k /= k.sum()
+    bg.text(0, 15, "Same displayed image", va="center", fontsize=24,
+            weight="bold", color=NAVY)
+    bg.text(770, 15, "Different retinal input", ha="center", va="center",
+            fontsize=24, weight="bold", color=NAVY)
+    bg.text(1060, 15, "Schematic", ha="right", va="center", fontsize=17, color=MUTED)
+    # The same diagonal contour is drawn in all three axes, without alteration.
+    edge = np.array([[-.4, -.4], [.14, -.4], [.86, 1.4], [-.4, 1.4]])
+    positions = ((.38, .5), (.64, .5))
+    rf_radius = .30
 
-    def smooth(xy):
-        # Light Gaussian smoothing (sigma 2 samples = 8 ms) suppresses tracker noise.
-        pad = np.pad(xy, ((6, 6), (0, 0)), mode="edge")
-        return np.column_stack([np.convolve(pad[:, i], k, "valid") for i in (0, 1)])
+    def scene(x, limits):
+        a = place(fig, W, H, x, 48, x + 174, 222)
+        a.set_facecolor("#edf0f3")
+        a.add_patch(Polygon(edge, closed=True, fc="#87939d", ec="none"))
+        a.set_xlim(*limits[0]), a.set_ylim(*limits[1]), a.set_aspect("equal")
+        a.set_xticks([]), a.set_yticks([])
+        for spine in a.spines.values():
+            spine.set_color("#c5cdd4"), spine.set_linewidth(1)
+        return a
 
-    traces = [t[~np.isnan(t).any(1)] * 60 for t in d["intro_all_deg"]]      # arcmin
-    traces = [smooth(t) for t in traces if len(t) > 20]
-    centre = np.median(np.vstack(traces), axis=0)
-    rf_r = np.median(d["rf_diam_deg"]) * 60 / 2
-    lim = rf_r * 1.15
-    a = place(fig, W, H, 15, 15, 315, 315)
-    a.add_patch(Circle((0, 0), rf_r, fc="#eef1f5", ec=NAVY, lw=2.5, ls=(0, (6, 4))))
-    medians = np.array([np.median(t, axis=0) for t in traces]) - centre
-    a.scatter(*medians.T, s=40, color=COPPER, alpha=0.55, lw=0, zorder=2)
-    hi = smooth(d["intro_trace_deg"] * 60) - centre
-    a.plot(*hi.T, color=NAVY, lw=2.4, zorder=3)
-    a.plot(*hi[0], "o", color=NAVY, ms=7, zorder=3)
-    a.set_xlim(-lim, lim), a.set_ylim(-lim, lim), a.set_aspect("equal"), a.axis("off")
-    a.plot([-lim * 0.9, -lim * 0.9 + 6], [-lim * 0.92] * 2, color="black", lw=3,
-           solid_capstyle="butt")
-    a.text(-lim * 0.9 + 3, -lim * 0.86, "6′", ha="center", va="bottom", fontsize=19)
-    save(fig, "intro_trace")
+    def rf(a, position, color):
+        a.add_patch(Circle(position, rf_radius, fill=False, ec="white", lw=6))
+        a.add_patch(Circle(position, rf_radius, fill=False, ec=color, lw=3))
+
+    displayed = scene(25, ((0, 1), (0, 1)))
+    for position, color in zip(positions, (BLUE, RED)):
+        rf(displayed, position, color)
+    bg.text(112, 239, "Receptive field", ha="center", va="center", fontsize=20, color=MUTED)
+    bg.text(355, 110, "Eye shifts", ha="center", va="center", fontsize=24, color=NAVY)
+    bg.annotate("", xy=(462, 139), xytext=(248, 139),
+                arrowprops=dict(arrowstyle="-|>", lw=2.8, color=NAVY, mutation_scale=22))
+    for x, position, color, label in zip((540, 825), positions, (BLUE, RED), ("Gaze A", "Gaze B")):
+        cx, cy = position
+        a = scene(x, ((cx - .5, cx + .5), (cy - .5, cy + .5)))
+        rf(a, position, color)
+        bg.text(x + 87, 239, label, ha="center", va="center", fontsize=21,
+                weight="bold", color=color)
+    save(fig, "intro_schematic")
 
 
 if __name__ == "__main__":
     OUT.mkdir(exist_ok=True)
     fem_panel()
-    intro_trace()
-    print("Rendered panel_fem_plots.pdf and intro_trace.pdf; Typst composes panel_fem.pdf")
+    intro_schematic()
+    print("Rendered panel_fem_plots.pdf and intro schematics; Typst composes panel_fem.pdf")

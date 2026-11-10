@@ -3,7 +3,7 @@
   "assets/footer.svg": "61401141362b09197635e4ec543ef517dc21248b2f339bfad974ac0a44c5feb6",
   "assets/header.svg": "64b1cd54f53f55bf882f68784cc8dcec4d08395abd0b1f20314a24ef0ba92e3f",
   "assets/panel2.svg": "ec2815aa9eb5f3311d88abc6ab8402b0d6a7e7c05b0754a4460f6b186340ecb0",
-  "assets/panel4.svg": "452578c99e4cb9bf91cb47670407398220c479911c6cdec01a06651908f9de14",
+  "assets/panel4.svg": "f928b551cc8e5e398f4bc248f4a139118689ae3cf315b89646b428a6c8733425",
   "assets/panel6.svg": "afb3eaad258d92d87c90f62340cbb45eb8ce8faa9f32d3fe26c8a91e3822a8d5",
   "assets/panel7.svg": "0bfc01ec917d33fe6c1a1f048b72aae4761d29b673235c899905cb1d34d8755e",
   "assets/panel8.svg": "98ee6bb0d2acf9e8630817327230412fa555c9e203773535d351affe0698bab2",
@@ -14,11 +14,11 @@
   "components/panel_fem/assets/brain_v1.svg": "f2008d29d1866d5a51bec7daec5dd1437f59630b9db837e27a6126128f5698d8",
   "components/panel_fem/assets/dpi_eye.png": "bfd26e1861e6849c2b62a4effe3504566eb17bd917ebde466f1ab4c54d62e033",
   "components/panel_fem/assets/marmoset.svg": "21f7d6ccbc5954322195bd932d2218e84cd34f3258d12f82e1a6e4f2a702b36b",
-  "components/panel_fem/intro.typ": "477626310687a4520d5e43505a0a2a2110853f3e899b1a27dea6a9706ddcef3b",
-  "components/panel_fem/panel_fem.typ": "ada375c24bd9a6e65ac0fe89b958130547648b2e32caed48b9f2e92f9ebafe23",
+  "components/panel_fem/intro.typ": "28684e4e5de9a0b97ca781f267288edb72a70f324100fbd3be73d002a194da3b",
+  "components/panel_fem/panel_fem.typ": "e327fbc4b8c59996af2a1f88cfd38720c88798fce9bc1b91360515b5cdd9857e",
   "components/panel_fem/plot_data.npz": "42ac1a1b3e7b27b52443cda1c8d076ea69030b48ecc71b744cc2b5b0d8c18332",
   "components/panel_fem/rf_all_sessions.npz": "0aac14419eac113a4960a7609eaed387f143be0b48d959e76cb0af693364d35c",
   "poster.typ": "b0e0e3a43eed97d0567cdda78a6b3eb1505f1216eab8e1d26536b533187b2127",
-  "poster_content.json": "f0c5238b98b032611df343b25ca0189b8d0fd862ed003b41158700b95943bf22",
-  "reference/approved.pdf": "0a1672e1df0f3bca7101671e9dd34a1f523003208f1ef37f858ec8daba5fe603"
+  "poster_content.json": "d6e0ba4deb2eda8f053035431cd62d8e74a2986477708a821cb04643f861b4d5",
+  "reference/approved.pdf": "13a4e60a47442824eee7e3f272b5bdba94f2afa63801d99663c38fae95f624f1"
 }

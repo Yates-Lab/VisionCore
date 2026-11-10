@@ -12,6 +12,22 @@ Old → new: 1 and 3 retired, 2 → 2, 4 → 3, 5 → 4, 6 → 5, 7 → 6, 8 →
 
 ## Done (in the approved reference)
 
+- **Final reviewer fixes (authorized 2026-11-09):** panel 3 now shows Trial 1
+  above Trial 2 in both the eye-position and spike-rate examples. Each spike
+  trace and its label move together by the existing separation between the
+  zero-rate baselines; path coordinates, timing, amplitudes, scale bars and
+  highlighted time windows are preserved. Panel 6's title is now
+  "Gaze-dependent retinal input predicts single trials", retaining the paper's
+  small extraretinal contribution rather than categorically excluding it.
+
+- **Panel 1 raster legibility.** Spike ticks are now 3 pt tall with 1.35 pt
+  strokes (previously about 2.65 pt and 0.9 pt). All 4,465 spike centers and the
+  source-trial order are preserved. Display rows are numbered 1–10 downward,
+  with group headings "Trials 1–5" and "Trials 6–10". Panel 2's heavier raster
+  marks remain unchanged. `make_print_proof.py` exports 300 dpi panel previews
+  and actual-size vector PDF crops for a physical viewing-distance check;
+  screen inspection does not establish printed legibility.
+
 - Added superscript asterisks to Declan P. Rowley, Ryan A. Ressmeyer and
   Tejasvi Kothapalli, preserving affiliation numbers and centering the author
   line. "*Equal contribution" closes the last affiliation line, which stays
@@ -43,22 +59,35 @@ Old → new: 1 and 3 retired, 2 → 2, 4 → 3, 5 → 4, 6 → 5, 7 → 6, 8 →
   - The group with the higher mean vertical gaze is shown above the other group
     in both the poster and standalone R01 figure. A dashed outline shows the
     other group's RF position in each poster view.
-  - The left column contains the vector brain with V1/fovea labels and electrode,
-    the rig and vector marmoset, then a separate DPI eye-image row. The DPI image
-    is 110 pt square with separated Pupil/CR labels and its tracker note alongside.
+  - The setup follows the supplied compact illustration: the vector brain sits
+    above the marmoset, a cyan outlined hot mirror lies between the eye and screen,
+    and the camera sits below it. A red dashed eye-position line and cyan mirror
+    key explain the optical schematic. The 110 pt DPI inset tucks beside the
+    animal, with its labels on a separate PDF layer and the tracker note below.
   - Removed the dashed connectors from the screen to the enlarged stimulus view;
     the screen-to-eye lines within the rig remain.
   - The all-session RF plot shows both animals' mapping outlines, this session's
     population RF, and the example's 0.13° gaze shift at the same angular scale.
-    Its legend is below the plot. This is RF context, not an all-session analysis
+    Its plotting area is 306 pt square (previously 278 pt), with outline opacity
+    raised from 0.06 to 0.10. The 20 pt legend has more clearance below the frame.
+    This is RF context, not an all-session analysis
     of gaze spread versus RF diameter.
-  - The population-response takeaway sits beside the PSTHs. A bottom strip gives
-    the dataset statistics. The intro's space is unchanged.
+  - Trial and gaze labels are 21 pt. The population-response takeaway uses 24 pt
+    semibold navy beside the PSTHs. A bottom strip gives the dataset statistics.
+    The body is shifted 68 pt right so the setup and RF plot align with panel 2's
+    90 pt artwork inset; the title and badge stay fixed. Trace, raster and PSTH
+    widths are 332 pt (previously 352 pt) to keep the right-hand scale labels
+    inside the panel. Their heights, text sizes, data and stimulus-view dimensions
+    are unchanged, as is the intro's space.
   - Liberation Sans Italic 2.1.5 is bundled for the call-outs (metrically
     identical to Arial; same open licence as the other Liberation fonts).
   - Build, overlap/boundary audit, approved-reference validation and clean-clone
     repeat builds pass. The DPI repair preserves the supplied data and artwork;
     all existing fields in the example cache match the preceding committed cache.
+- **Panel 8 heatmap typography:** ticks and axis labels reduced from 23.52 to
+  21 pt and changed from black to the neighboring plots' dark gray. Text anchors
+  preserve tick alignment and centered axis labels. Wording and graphics are
+  unchanged.
 - **Panel 1 trials:** Figure 1F's grouping search on the 258–392 ms window, with
   cluster-centre distance capped at 0.06° (`SEGMENT_START`,
   `GROUP_CENTROID_DISTANCE` in `generate_fem_overview.py`). The first-ranked
@@ -75,10 +104,10 @@ Old → new: 1 and 3 retired, 2 → 2, 4 → 3, 5 → 4, 6 → 5, 7 → 6, 8 →
 - **Panel titles:** 48 pt, rewritten as claims.
   1. Tiny gaze shifts reshape population responses
   2. One neuron’s “noise” tracks the eye
-  3. Eye movements drive most rate variance (71%)
+  3. Eye movements drive most single-cell rate variance (71%)
   4. Correcting for gaze removes shared noise
   5. Eye-driven variability follows stimulus dimensions
-  6. The retinal image, not an eye signal, predicts single trials
+  6. Gaze-dependent retinal input predicts single trials
   7. In the model, eye motion sharpens spatial coding
   8. Sharpening grows with tuning and model depth
 
@@ -91,6 +120,26 @@ Old → new: 1 and 3 retired, 2 → 2, 4 → 3, 5 → 4, 6 → 5, 7 → 6, 8 →
 - Funding: added "NIH/NEI T32-EY007043 (T.K.)". "Fuster Endowment (A.C.H.)" was
   already credited. The manuscript acknowledgements have the Fuster Endowment
   line but not the T32.
+- Footer: "Acknowledgements" heads a line beginning "Additional preprint
+  coauthors:" for Dekel Galor, Ruei-Jr Wu and Michele Rucci, the authors in
+  `manuscript/main.tex` absent from the poster's header. Below it, the paper's
+  thank-you sentence credits Yonatan Abrham (Mitchell Lab) for collecting some
+  of the data. Funding remains in its existing block rather than being repeated.
+  Contact details and the existing author line are unchanged.
+- Panel 3 title specifies "single-cell rate variance" at the existing 48 pt size.
+- Panel 3's separate large "71%" is removed; the value stays in the title. The
+  histogram is 30 pt taller (460 pt) with its baseline fixed. A 22 pt-wide navy
+  downward triangle replaces the thin median tick at the identical x coordinate.
+  Histogram bin paths, counts, limits and scientific definitions are unchanged.
+- Intro: follows the slide deck's "two debates, then their connection" framing.
+  Fixational eye movements ("Feature or bug?") and shared cortical variability
+  ("Noise or signal?") have equal visual weight. A single vector connector
+  joins them above the shared question of how much apparent cortical noise
+  comes from the eye's own movements. The closing line asks whether that
+  activity improves visual information. The previous image/RF mechanism diagram
+  and Q1/Q2 navigation are removed from this panel. Citations [5,6] remain.
+  Title/body insets are 59.74/90 pt and the full 470 pt allocation is preserved.
+  All other panels, including panel 1, are unchanged in this pass.
 - Panel 2:
   - The "RF projection axis" leader is darker and thicker and ends on the axis.
   - The (0, 0) marker is a small plain black cross.
@@ -129,10 +178,8 @@ Old → new: 1 and 3 retired, 2 → 2, 4 → 3, 5 → 4, 6 → 5, 7 → 6, 8 →
 
 - Panels 4 and 7 have copper titles and the rest are navy. Confirm this is an
   intentional highlight.
-- P3: "Trial 1" is above "Trial 2" in the eye-position plot but below it in the
-  spike-rate plot.
-- P8 heatmap: larger tick font than its neighbours, "log ₂" has a stray space,
-  and the colorbar uses hyphen "-4" instead of a true minus.
+- P8 heatmap: "log ₂" has a stray space, and the colorbar uses hyphen "-4"
+  instead of a true minus.
 - P2: the grey time-window lines and the pink line in "Trial fixations" are unexplained.
 - P6: "append" label is crowded against the readout arrow.
 - QR code: not machine-checked here; scan it to confirm it opens the preprint.

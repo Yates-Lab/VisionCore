@@ -84,9 +84,11 @@ JSON, NPZ and reference PDF inputs despite the repository-wide extension rules.
 - `components/panel_fem/`: the intro and panel 1 ("Tiny gaze shifts reshape
   population responses"). `plot_data.npz` holds the frozen example data, including
   the per-trial gaze traces. `rf_all_sessions.npz` holds the Figure 1C RF outlines
-  for both animals. `render_plots.py` draws the plots, rig and intro gaze/RF
-  schematic; `intro.typ` composes the intro text. `panel_fem.typ` overlays the
+  for both animals. `render_plots.py` draws the panel-1 plots and rig;
+  `intro.typ` composes the two-debate intro with native text and a vector connector. `panel_fem.typ` overlays the
   vector `assets/marmoset.svg` and `assets/brain_v1.svg` on the Matplotlib layer.
+  A separately rendered `assets/panel_fem_eye.pdf` places the annotated eye inset
+  above the animal drawing, keeping the compact setup's overlapping layers clean.
   Both drawings come from the retired panel-1 artwork; the brain's V1 and fovea
   labels are outlines. `assets/dpi_eye.png` is the DPI eye image, with its labels
   drawn separately by Matplotlib. `export_data.py` documents provenance:
@@ -114,6 +116,15 @@ The old one-time migration/edit scripts and historical exports are not part of
 this build and must not be used to rebuild the current layout.
 
 ## Validation and a clean-checkout test
+
+For print inspection after building, run `uv run --frozen python make_print_proof.py`
+from this directory. It exports 300 dpi previews of panels 1 and 2 and
+`output/raster_print_proof.pdf`: four Letter-landscape crops at the poster's exact
+physical scale, preserving the source PDF graphics. Print at **100% / Actual size**
+and check the one-inch calibration line before assessing viewing distance.
+The full vector PDF remains the poster print master; the overview PNG is for screens.
+Panel 1 uses 3 pt-tall spike ticks with 1.35 pt strokes. Displayed trials run 1–10
+downward across the two groups; this numbering does not change source-trial order.
 
 `validate.py` checks source/data hashes, exact extracted text, all used fonts
 embedded, page dimensions, PNG/PDF agreement, panel crops, and **zero changed

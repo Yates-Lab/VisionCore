@@ -72,6 +72,10 @@ def main():
         run([python, project / 'setup_fonts.py', '--from-dir', HERE / '.fonts'], temp, env=env)
         run([python, project / 'build.py', '--compare'], temp, env=env)
         run([python, project / 'validate.py'], temp, env=env)
+        run([python, project / 'make_print_proof.py'], temp, env=env)
+        require(all((project / 'output' / name).is_file() for name in
+                    ('raster_print_proof.pdf', 'panel1_print_300dpi.png', 'panel2_print_300dpi.png')),
+                'Print inspection outputs missing from clean build')
         names = ['poster_typst_full_60x36.pdf', 'poster_typst_full.png', 'poster_typst_overview.png']
         first = {name: hashlib.sha256((project / 'output' / name).read_bytes()).hexdigest() for name in names}
         run([python, project / 'build.py'], temp, env=env)
@@ -80,7 +84,8 @@ def main():
         require(not run(['git', 'status', '--porcelain'], clone, capture_output=True, text=True).stdout,
                 'Build modified tracked files or created unignored output')
         report = dict(source_files=len(files), source_bytes=sum((repo / p).stat().st_size for p in files),
-                      clean_clone=True, fresh_locked_environment=True, missing_fonts_rejected=True,
+                      clean_clone=True, print_proof_generated=True,
+                      fresh_locked_environment=True, missing_fonts_rejected=True,
                       mismatched_fonts_rejected=True, repeat_build_bytes_identical=True,
                       sha256=second, validation=json.loads((project / 'output/validation.json').read_text()))
     (HERE / 'output').mkdir(exist_ok=True)

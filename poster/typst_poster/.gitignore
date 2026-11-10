@@ -9,6 +9,7 @@
 !/build.py
 !/validate.py
 !/audit_layout.py
+!/make_print_proof.py
 !/fonts.py
 !/setup_fonts.py
 !/check_clean_build.py
