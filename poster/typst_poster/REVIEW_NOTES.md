@@ -12,6 +12,59 @@ Old → new: 1 and 3 retired, 2 → 2, 4 → 3, 5 → 4, 6 → 5, 7 → 6, 8 →
 
 ## Done (in the approved reference)
 
+- **Panel 8 key clarity (2026-11-10):** restored "Example model-unit tuning"
+  above the colored contour descriptions, which move down one line. Moved
+  "725 model units" into the shared statistical key inside the middle plot.
+  Changed its heading to "Tuning engagement tracks sharpening" and retained
+  its horizontal center, avoiding an implication of held-out prediction.
+  Plot geometry, panel heights, data and other panels are unchanged; all other
+  regions are pixel-identical at 72/144 dpi. Build and validation pass.
+
+- **Panel 8 whitespace balance (2026-11-10):** aligned the colored contour
+  key to the heatmap's left edge (x = 107 pt); both lower explanatory blocks
+  now share baselines 578/600 pt. Lifted the right-aligned takeaway by 12 pt
+  to baseline 647, giving it a clearer bottom margin. Reviewed the full poster
+  and retained all panel heights: panel 8 is already the shortest right-column
+  panel, and the remaining space supports its concluding role. No changes to
+  text, font sizes, data, plots or other regions; pixel comparison at 72/144 dpi
+  confirms the other regions are unchanged. Build and validation pass.
+
+- **Panel 8 compact definition (2026-11-10):** moved "725 model units"
+  inside the right-hand plot, aligned beneath its condition label. Rewrapped
+  the unchanged tuning-engagement definition onto two lines at 19 pt by
+  extending the first line rightward. The lower-right takeaway stays fixed.
+  Other regions are pixel-identical at 72/144 dpi; data and plot geometry are
+  unchanged. Build, layout audit and full validation pass.
+
+- **Panel 8 audience-level cleanup (2026-11-10):** at the author's request,
+  removed the significance-test statement (quintiles/stages versus zero,
+  Holm-adjusted p < 0.05) and the adjacent-group comparison caveat; the poster
+  does not introduce those testing groups or show significance symbols here.
+  Retained 725 model units, the key for plotted distributions and uncertainty,
+  the tuning-engagement definition, model framing and displayed conditions.
+  Right-aligned "Active sensing continues throughout fixation." with a 40-pt
+  right margin at the same bottom baseline and font size. This supersedes the
+  retained-testing-note decisions in the earlier entries below. Data and
+  plot geometry are unchanged; other regions are pixel-identical at 72/144 dpi.
+
+- **Panel 8 footer hierarchy (2026-11-10):** removed "Example model-unit
+  tuning" and raised the two colored contour-key labels into its space.
+  The former three-line footer is separated by purpose: a gray/purple key
+  inside the middle plot, the tuning-engagement definition beneath its axis,
+  and sample size plus statistical qualifications beneath the right plot.
+  The supporting text stays at 19 pt. Median/IQR, 5th–95th whiskers, 95%
+  bootstrap CI, 725 model units, within-unit percentiles, Holm-adjusted
+  p < 0.05 and the absence of adjacent-group comparisons are all retained.
+  Data and plot geometry are unchanged; all other regions are pixel-identical
+  at 72/144 dpi. Build, layout audit and full validation pass.
+
+- **Panel 8 heading spacing (2026-11-10):** all three plot headings move
+  down 18 pt together, from baseline 123 to 141 pt, closing the space vacated
+  by the former subtitles. Plot positions, labels, qualifiers and data are
+  unchanged. Visual inspection retained the requested 18-pt adjustment.
+  Every other region is pixel-identical at 72 and 144 dpi; the rebuilt poster
+  and actual-size panel deck pass validation against the refreshed reference.
+
 - **Final vertical-label spacing (2026-11-10):** panel 8's colorbar label moves
   13 pt toward its bar, away from the middle plot's SSI label. Panel 2's two
   "Trials" labels move 9 pt toward their raster axes, increasing separation
