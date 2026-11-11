@@ -12,6 +12,37 @@ Old → new: 1 and 3 retired, 2 → 2, 4 → 3, 5 → 4, 6 → 5, 7 → 6, 8 →
 
 ## Done (in the approved reference)
 
+- **Final vertical-label spacing (2026-11-10):** panel 8's colorbar label moves
+  13 pt toward its bar, away from the middle plot's SSI label. Panel 2's two
+  "Trials" labels move 9 pt toward their raster axes, increasing separation
+  from the colorbar description while keeping the two rasters consistent.
+  Plots, data and qualifiers are unchanged. A one-line Poisson annotation
+  crowded the session traces, so the existing two-line label is retained.
+  Every region except panels 2 and 8 is pixel-identical at 72 and 144 dpi;
+  the rebuilt poster and actual-size deck pass validation against the updated
+  reference.
+
+- **Subtitle cleanup (2026-11-10):** panel 2 replaces its projection heading
+  and color-explanation footer with a direct colorbar label, "Eye position along
+  RF axis (°)"; the 21-ms onset note is retained. Panel 6 combines "Rank-1 unit
+  readout" and labels the spatial and feature factors separately. Panel 8 puts
+  the microsaccade/drift ratio definition on the colorbar and the measured-motion
+  comparison and high-engagement selection inside their respective plots.
+  The source Figure 4 caption confirms the heatmap is a log2 microsaccade/drift
+  power ratio. All statistical notes, metric definitions, model qualifications,
+  data and graphical assets are retained. Every other region is pixel-identical
+  to the pre-cleanup build at both 72 and 144 dpi. Layout audit and full validation
+  pass against the refreshed reference; the actual-size panel deck is rebuilt.
+
+- **Actual-size review fixes (2026-11-10):** panel 4's corrected-correlation
+  confidence interval gets its own footer line, retaining all statistics at
+  18 pt and clearing the right edge. Poisson = 1 is a two-line annotation in
+  the clear area to the right of the session trajectories, still adjacent to
+  the reference at 1.0. Panel 5's upper significance stars move down 6 pt;
+  its subtitle, brackets and plots remain fixed. No data or scientific
+  qualifiers changed, and panel 8's footer remains intact. All regions
+  outside panels 4 and 5 are pixel-identical at 72 and 144 dpi.
+
 - **Small final review pass (2026-11-10):** panel 1's repeated-image explanation
   is horizontal ("Same image, repeated trials"); the raster/image groups move
   down 8 pt to give it room, retaining their sizes, trial gutters and spike marks.

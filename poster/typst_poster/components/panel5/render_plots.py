@@ -68,9 +68,9 @@ for name,draw in [('fano',plot_fano_population),('noise',plot_nc_violin)]:
  ticks=np.arange(.4,1.81,.2) if name=='fano' else np.arange(-.2,.31,.1)
  ax.set_yticks(ticks,[f'{v:.1f}' if abs(v)>1e-8 else '0.0' for v in ticks])
  if name=='fano':
-  ax.annotate('Poisson = 1', xy=(.98, 1.0), xycoords=ax.get_yaxis_transform(),
+  ax.annotate('Poisson\n= 1', xy=(.90, 1.0), xycoords=ax.get_yaxis_transform(),
               xytext=(0, 6), textcoords='offset points', fontsize=21,
-              color='#656b73', ha='right', va='bottom')
+              color='#656b73', ha='center', va='bottom', linespacing=1.0)
  audit[name]={'xlim':list(ax.get_xlim()),'ylim':list(ax.get_ylim()),'axis_width_pt':230,'axis_height_pt':455,'plot_canvas_pt':[315,515],'n_session_lines':19 if name=='fano' else None}
  save(fig,name)
 (HERE/'plot_layout.json').write_text(json.dumps(audit,indent=2));print(json.dumps(audit,indent=2))

@@ -56,11 +56,16 @@
   #place(top + left, dx: 201.52pt, dy: 16pt)[#block(width: 160pt)[#align(center)[5.2 spikes²]]]
 ]
 // Shared statistical definitions sit beneath the summary plots they describe.
-#place(top + left, dx: 800.13pt, dy: 752.37pt)[
+// The confidence interval gets its own line to retain the right margin.
+#place(top + left, dx: 800.13pt, dy: 738.37pt)[
   #text(size: 18pt, fill: muted)[Points: mean ± SD over 19 sessions (25-ms bins) · violins: pairwise correlations]
 ]
-#place(top + left, dx: 800.13pt, dy: 779.37pt)[
-  #text(size: 18pt, fill: muted)[Tests: correction vs shuffle (95% null) · corrected correlation 95% CI −0.010 to 0.029]
+#place(top + left, dx: 800.13pt, dy: 759.37pt)[
+  #text(size: 18pt, fill: muted)[Tests: correction vs shuffle (95% null)]
+]
+
+#place(top + left, dx: 800.13pt, dy: 780.37pt)[
+  #text(size: 18pt, fill: muted)[Corrected correlation 95% CI −0.010 to 0.029]
 ]
 
 #place(top + left, dx: 0.13pt, dy: 353.37pt)[#image("assets/residual_connector.svg", width: 700pt, height: 85pt)]

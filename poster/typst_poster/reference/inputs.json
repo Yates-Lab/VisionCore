@@ -11,8 +11,9 @@
   "components/panel3/provenance.json": "a863a899a7d9a51ced1fc65b9161725c90a8c99a206a36fa3f2596b4fd184d81",
   "components/panel3/trial_data.npz": "1febd70fc31335681b3207518a5b07971053add9bf2a28021e5d8958a672f9cc",
   "components/panel5/assets/residual_connector.svg": "47874966126acb9c14b47d2ac5cf3d54ff7cc142676821d4447d64e3d45c5255",
-  "components/panel5/panel5.typ": "0232df2c6ad8974658d570c9b7035b66cd700aec806d1e6394d93f67c0a103a9",
+  "components/panel5/panel5.typ": "53b9f57c6961e90e70628ae906724a03235917f6cca273f205c19cc72fa1adca",
   "components/panel5/plot_data.npz": "3ad173168b952d93934478525d01c51d6f42339427368d2d47267be228924b77",
+  "components/panel5/render_plots.py": "8bf80a62ad1a8f674154b6a987b2c37819d93bd3f78713d3a98174cb90740377",
   "components/panel_fem/assets/brain_v1.svg": "19cb56bf1c4a5107a4f31c74a2b9d523804dd538b25731ff857813c185d469b9",
   "components/panel_fem/assets/dpi_eye.png": "bfd26e1861e6849c2b62a4effe3504566eb17bd917ebde466f1ab4c54d62e033",
   "components/panel_fem/assets/marmoset.svg": "21f7d6ccbc5954322195bd932d2218e84cd34f3258d12f82e1a6e4f2a702b36b",
@@ -22,6 +23,6 @@
   "components/panel_fem/render_plots.py": "2aaeb7a31f7190f02b86465c151a756681637296b1dc5a159b5cba0ae8376cd7",
   "components/panel_fem/rf_all_sessions.npz": "0aac14419eac113a4960a7609eaed387f143be0b48d959e76cb0af693364d35c",
   "poster.typ": "b0e0e3a43eed97d0567cdda78a6b3eb1505f1216eab8e1d26536b533187b2127",
-  "poster_content.json": "87ee7a137d5e4d72d83c3b724e983c07370e857cead148c81f611c178d28aa8b",
-  "reference/approved.pdf": "cbaff3fa7b0ab1cf86dbd932ecac296b3c4d705c56313440e939f8ed2791b60c"
+  "poster_content.json": "3279f725becaa8454d9b2192f30f66228e71d93c1e081052c6cf39ee5bba4d94",
+  "reference/approved.pdf": "e1dd95d021198274a1248bfbdeb3b55003f6a28b05dc512e4e09252715957b72"
 }

@@ -605,7 +605,7 @@
         {
           "id": "panel2_text_023",
           "text": "Trials",
-          "x": 438,
+          "x": 447,
           "baseline": 256.48438,
           "size": 21.9975,
           "font": "Arial",
@@ -638,7 +638,7 @@
         {
           "id": "panel2_text_026",
           "text": "Trials",
-          "x": 438,
+          "x": 447,
           "baseline": 531.48425,
           "size": 21.9975,
           "font": "Arial",
@@ -725,14 +725,14 @@
         },
         {
           "id": "panel2_text_034",
-          "text": "Projection",
-          "x": 296.3,
-          "baseline": 390,
-          "size": 21.0,
+          "text": "Eye position along RF axis (°)",
+          "x": 413,
+          "baseline": 627,
+          "size": 19,
           "font": "Arial",
           "weight": "regular",
-          "color": "#526474",
-          "angle": 0.0
+          "color": "#303b45",
+          "angle": -90
         },
         {
           "id": "panel2_text_035",
@@ -747,7 +747,7 @@
         },
         {
           "id": "panel2_text_036",
-          "text": "Colors: eye position projected onto the RF axis.",
+          "text": "",
           "x": 19.99219,
           "baseline": 651.99609,
           "size": 21.0,
@@ -1974,7 +1974,7 @@
           "id": "panel6_text_030",
           "text": "***",
           "x": 274.65247,
-          "baseline": 145.97512,
+          "baseline": 151.97512,
           "size": 21.0,
           "font": "Arial",
           "weight": "regular",
@@ -2381,8 +2381,8 @@
         },
         {
           "id": "panel7_text_024",
-          "text": "Unit readout",
-          "x": 827.950927734375,
+          "text": "Rank-1 unit readout",
+          "x": 816,
           "baseline": 119.6,
           "size": 23.0,
           "font": "DejaVu Sans",
@@ -2392,7 +2392,7 @@
         },
         {
           "id": "panel7_text_025",
-          "text": "rank 1",
+          "text": "",
           "x": 863.304443359375,
           "baseline": 142.6,
           "size": 23.0,
@@ -2403,13 +2403,24 @@
         },
         {
           "id": "panel7_text_026",
-          "text": "spatial \u00d7 feature",
-          "x": 827,
-          "baseline": 221,
-          "size": 21.0,
+          "text": "spatial",
+          "x": 846,
+          "baseline": 226,
+          "size": 19,
           "font": "DejaVu Sans",
           "weight": "regular",
-          "color": "#526474",
+          "color": "#303b45",
+          "angle": 0.0
+        },
+        {
+          "id": "panel7_readout_feature",
+          "text": "feature",
+          "x": 899,
+          "baseline": 250,
+          "size": 19,
+          "font": "DejaVu Sans",
+          "weight": "regular",
+          "color": "#303b45",
           "angle": 0.0
         },
         {
@@ -3606,14 +3617,14 @@
         },
         {
           "id": "panel9_text_005",
-          "text": "Microsaccades / drift",
-          "x": 168.71484,
-          "baseline": 148.99219,
-          "size": 21.0,
+          "text": "",
+          "x": 503,
+          "baseline": 426,
+          "size": 19,
           "font": "Arial",
           "weight": "regular",
           "color": "#303b45",
-          "angle": 0.0
+          "angle": -90
         },
         {
           "id": "panel9_text_006",
@@ -3629,8 +3640,8 @@
         {
           "id": "panel9_text_007",
           "text": "Measured motion \u2212 stabilized",
-          "x": 651.12891,
-          "baseline": 148.99219,
+          "x": 625,
+          "baseline": 199,
           "size": 21.0,
           "font": "Arial",
           "weight": "regular",
@@ -3651,8 +3662,8 @@
         {
           "id": "panel9_text_009",
           "text": "High-engagement movies",
-          "x": 1187.34375,
-          "baseline": 148.99219,
+          "x": 1143,
+          "baseline": 199,
           "size": 21.0,
           "font": "Arial",
           "weight": "regular",
@@ -4079,10 +4090,10 @@
         },
         {
           "id": "panel9_text_051",
-          "text": "log",
-          "x": 489.99219,
-          "baseline": 434.031441,
-          "size": 21.0,
+          "text": "log₂ power ratio (microsaccades / drift)",
+          "x": 477,
+          "baseline": 497,
+          "size": 19,
           "font": "Arial",
           "weight": "regular",
           "color": "#303b45",
@@ -4090,7 +4101,7 @@
         },
         {
           "id": "panel9_text_052",
-          "text": "\u2082",
+          "text": "",
           "x": 489.99219,
           "baseline": 401.80393300000003,
           "size": 21.0,
@@ -4101,7 +4112,7 @@
         },
         {
           "id": "panel9_text_053",
-          "text": " power ratio",
+          "text": "",
           "x": 489.99219,
           "baseline": 394.56364799999994,
           "size": 21.0,
