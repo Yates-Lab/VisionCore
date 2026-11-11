@@ -12,6 +12,91 @@ Old → new: 1 and 3 retired, 2 → 2, 4 → 3, 5 → 4, 6 → 5, 7 → 6, 8 →
 
 ## Done (in the approved reference)
 
+- **Panel 7 final response nudge (2026-11-11):** moved the two spatial
+  response maps, internal scale bars, summaries, heading and shared colorbar
+  with its ticks/label 11 pt left together (3 pt, then another 8 pt). Everything else remains fixed;
+  numerical data, image payloads and scale geometry are unchanged. Build and
+  validation pass; full poster and original-scale panel deck refreshed.
+
+- **Panel 7 difference-map emphasis (2026-11-11):** enlarged the normalized
+  difference map from 219.00375 to 300 pt per side (about 37%), retaining its
+  vertical center and original data. Compacted the shared response colorbar
+  by moving the bar/ticks 6 pt left and its normalization label 22 pt left;
+  response-map sizes stay fixed. The enlarged map has a recalculated 0.5°
+  bar (46.728972 pt), with its color key and example summary centered below.
+  Image payloads, original data paths, numerical values and other panels are
+  unchanged. Other regions remain pixel-identical at 72/144 dpi. Full build,
+  layout audit and validation pass; panel deck refreshed.
+
+- **Panel 7 spatial-response labeling (2026-11-11):** moved both response
+  maps left 28 pt and centered their title and summaries over/under the new
+  positions. Added internal white 0.5° scale bars, each 36.677201 pt long for
+  the 235.467633-pt-wide maps and existing 3.21° extent. Rate summaries now
+  use spk/s (matching panel 3) and bits/spk. Moved the shared colorbar left
+  66 pt and labeled it "× spatial mean"; removed the redundant normalization
+  subtitle and placed Spatial response closer to the maps. Map size, imagery,
+  numerical values and data paths are unchanged. Other regions are pixel-
+  identical at 72/144 dpi. Build and validation pass; panel deck refreshed.
+
+- **Panel 7 cube inset (2026-11-11):** moved both movie cubes and their
+  captions 12 pt right to separate the artwork's left edge from the aligned
+  title, subtitle and condition headings. The headings, arrows and downstream
+  schematic stay fixed. Data and all other panels are unchanged; other regions
+  are pixel-identical at 72/144 dpi. Build and validation pass.
+
+- **Panel 7 subtitle wording (2026-11-11):** changed "For vision, it can
+  mean detail." to "For vision, it means detail." at the author's request.
+  The copper "detail" follows the shorter phrase without an extra gap.
+  All other text and artwork remain unchanged; build and validation pass.
+
+- **Panel 7 analogy under title (2026-11-11):** moved the camera/vision
+  analogy from the upper-right corner to one line beneath the panel title,
+  starting at x = 59.75 pt and baseline 88 pt. Kept its 22-pt type and bold
+  copper emphasis on "blur" and "detail". Only the four analogy text runs
+  changed; all artwork, other labels, data and panels remain fixed.
+  Build, overlap audit and full validation pass; panel deck refreshed.
+
+- **Panel 7 schematic lift (2026-11-11):** moved both schematic pathways
+  to the left of Spatial response up 14 pt, including the movie cubes,
+  condition labels, captions, fitted weights, nonlinearities and connecting
+  arrows. The response maps, difference-map group and panel title stay fixed.
+  Artwork sizes, data and all other panels are unchanged; the other regions
+  remain pixel-identical at 72/144 dpi. Build and validation pass.
+
+- **Stabilized-cube caption correction (2026-11-11):** replaced the repeated
+  "250 ms retinal history" caption beneath the stabilized cube with "Fixed
+  retinal image" to communicate the manipulation directly. The measured-motion
+  cube retains its temporal-history label. This supersedes the matching-caption
+  wording below; positions, artwork and all other content are unchanged.
+
+- **Panel 7 matching histories and whitespace (2026-11-11):** added the
+  same 18-pt "250 ms retinal history" caption beneath the stabilized cube,
+  consistent with the matched 250-ms movies and histories described in
+  `manuscript/main.tex` (Figure 4 methods). Condition labels align with the
+  cubes. Both model pathways and their response maps move up 12 pt, retaining
+  all sizes and relative connections; the difference-map group moves down
+  36 pt, including its scale bar, colorbar and example qualification. Its SSI
+  definition now aligns with the lower response-map summary. Checked panel 7
+  alone and in the full poster; panel heights are unchanged. Embedded images,
+  paths, scale-bar geometry and saved data are unchanged. Other regions are
+  pixel-identical at 72/144 dpi; build and validation pass, including the
+  refreshed original-scale panel deck.
+
+- **Stimulus sizing and direct map scale (2026-11-11):** panel 1's two
+  stimulus/RF views shrink from 248 to 223.2 pt per side (10%), retaining their
+  centers and original field of view. Their 0.5° scale bar shortens in proportion
+  and follows the lower image; the gaze label is inset to clear its smaller
+  frame without reducing type size. Panel 2's title now reads "One neuron’s
+  variability tracks the eye". Panel 7 places "250 ms retinal history" at
+  18 pt beneath the measured-motion cube. A 0.5° vector scale bar replaces the
+  written response-map dimensions: length 34.112734 pt, calculated from the
+  difference map's 219.00375-pt displayed width and existing 3.21° field of view.
+  Its colorbar, ticks and example qualification move down 20 pt to make room;
+  the SSI definition moves up into the vacated extent-label space. All saved
+  data, embedded map images and existing SVG data paths are unchanged. Regions
+  outside panels 1, 2 and 7 are pixel-identical at 72/144 dpi. Full build, layout
+  audit and validation pass; the original-scale panel deck is refreshed.
+
 - **Panel 8 key clarity (2026-11-10):** restored "Example model-unit tuning"
   above the colored contour descriptions, which move down one line. Moved
   "725 model units" into the shared statistical key inside the middle plot.

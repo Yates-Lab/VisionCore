@@ -204,7 +204,9 @@ def fem_panel():
             color=TEXT, va="bottom")
 
     # Enlarged stimulus views align with their corresponding raster groups.
-    vx, vs = 400, 248
+    # Shrink both stimulus/RF views by 10%, preserving their shared center.
+    vs = 248 * 0.9
+    vx = 400 + (248 - vs) / 2
     y_top, y_bot, ggap, gap = 194, 752, 34, 12
     group_h = (y_bot - y_top - ggap) / 2
     # Foveal RFs from every mapping session (Figure 1C outlines), with this
@@ -303,7 +305,10 @@ def fem_panel():
             lab = dict(fontsize=18, color="white", weight="bold", zorder=7,
                        path_effects=lab_fx)
             g_mid = gaze.mean(0)
-            v.text(g_mid[0], gaze[:, 1].max() + 0.035, f"gaze,\n{n_per} trials",
+            # Keep the label inside the smaller view, without reducing its type.
+            label_margin = (text_width(f"{n_per} trials", 18, bold=True) / 2 + 6) * (2 * view) / vs
+            label_x = min(g_mid[0], cx + view - label_margin)
+            v.text(label_x, gaze[:, 1].max() + 0.035, f"gaze,\n{n_per} trials",
                    ha="center", va="bottom", linespacing=1.0, **lab)
             top = here[np.argmax(here[:, 1])]
             v.text(top[0], top[1] + 0.02, "RF", ha="center", va="bottom", **lab)
@@ -332,7 +337,7 @@ def fem_panel():
         bg.add_patch(Rectangle((rx1 + 6, gy), 7, group_h, color=col, lw=0))
     # Scale: 0.5 deg bar under the lower view.
     bar = 0.5 * vs / (2 * view)
-    by = y_bot + 14
+    by = y_bot - (group_h - vs) / 2 + 20
     bg.plot([vx, vx + bar], [by] * 2, color="black", lw=4, solid_capstyle="butt")
     bg.text(vx + bar + 8, by, "0.5°", va="center", fontsize=19)
     # Rasters are separate presentations of one image; rows are the same
