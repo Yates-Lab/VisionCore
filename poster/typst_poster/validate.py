@@ -51,6 +51,8 @@ def main():
         shapes = {k: list(data[k].shape) for k in data.files}
         require(all(np.isfinite(data[k]).all() for k in data.files), 'Nonfinite cached data')
 
+    subprocess.run([sys.executable, str(HERE / 'components/panel3/check_data.py')], check=True)
+
     out = HERE / 'output'
     with fitz.open(HERE / 'reference/approved.pdf') as reference, \
             fitz.open(out / 'poster_typst_full_60x36.pdf') as current:
@@ -108,7 +110,7 @@ def main():
                   panel_deck_pages=len(panels), panel_deck_original_scale=True,
                   embedded_fonts=sorted(set(f[3] for f in fonts)),
                   cached_data_shapes=shapes, python=platform.python_version(), dependencies=versions,
-                  scope='Approved assets plus saved panel-5 results; no analysis or model fitting is rerun.')
+                  scope='Approved assets plus saved panel-3 trials and panel-5 results; no model fitting is rerun.')
     (out / 'validation.json').write_text(json.dumps(report, indent=2) + '\n')
     print('PASS: approved data, wording, embedded fonts, PNGs and layout; zero changed pixels at 72 and 144 dpi')
 

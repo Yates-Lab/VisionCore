@@ -1,0 +1,51 @@
+{
+  "session": "Allen_2022-04-08",
+  "figure": "Preprint Figure 2A",
+  "plotting_script": "paper/fig2/generate_panel_example.py",
+  "plotting_script_sha256": "f4c78686d08fe32e0f09303def03a15d8b3f9910cf645a30b9134f021b59be66",
+  "dataset": "processed/Allen_2022-04-08/datasets/fixrsvp.dset",
+  "dataset_sha256": "bab68ef13df864f46eec6b36bd762ffc7b24d0b35b9e455e60718791a7009223",
+  "trial_indices": [
+    35,
+    41
+  ],
+  "source_trial_ids": [
+    109.0,
+    118.0
+  ],
+  "neuron_index": 134,
+  "source_cid": 145,
+  "eye_axis": 0,
+  "dt_seconds": 0.008333333333333333,
+  "rate_bin_factor": 3,
+  "window_bins_120hz": [
+    [
+      21,
+      27
+    ],
+    [
+      48,
+      54
+    ]
+  ],
+  "alignment_metadata": {
+    "n_trials_total": 133,
+    "n_trials_good": 79,
+    "n_neurons_total": 137,
+    "n_neurons_used": 133
+  },
+  "alignment": {
+    "valid_time_bins": 120,
+    "min_fix_dur": 20,
+    "min_total_spikes": 0,
+    "fixation_radius": 1.0,
+    "fixation_center": "origin"
+  },
+  "input_hashes": {
+    "experiments/dataset_configs/multi_basic_120_long.yaml": "e906b79f5b0e5db306f4419cbc2e0ccb4b0657a1e13f4350f40c4cb8763f3d7b",
+    "experiments/dataset_configs/sessions/Allen_2022-04-08.yaml": "2916e0a6795ef3e004893a1655f565213393cac50335c833c7b7f1c5a1c9420b",
+    "models/data/loading.py": "93db8f539c03c445ca1e5f7de13d55f0c0d47c3106d4ab40ad7f83a1308c411e",
+    "VisionCore/covariance.py": "d41bd48b349fe79e5a5385a601468a9d1871703ef6c2ec92b4dc2c3e87453878"
+  },
+  "export_sha256": "1febd70fc31335681b3207518a5b07971053add9bf2a28021e5d8958a672f9cc"
+}

@@ -12,6 +12,63 @@ Old → new: 1 and 3 retired, 2 → 2, 4 → 3, 5 → 4, 6 → 5, 7 → 6, 8 →
 
 ## Done (in the approved reference)
 
+- **Small final review pass (2026-11-10):** panel 1's repeated-image explanation
+  is horizontal ("Same image, repeated trials"); the raster/image groups move
+  down 8 pt to give it room, retaining their sizes, trial gutters and spike marks.
+  Panel 2's "Projection axis" sits closer to the RF edge. In panel 3, the
+  stimulus-variability text moves 9 pt away from its arrow and the conditional
+  rate-variance label gains 6 pt clearance. Panel 7 specifies "Response maps"
+  for the spatial extent. Panel 8's mechanism sentence and headings gain a few
+  points of separation; its closing takeaway grows from 24 to 32 pt and the
+  separator rule is removed. All scientific qualifiers, including the explicit
+  absence of adjacent-group comparisons, are retained. No plot was shrunk.
+  Panel 5 and every region outside panels 1, 2, 3, 7 and 8 are pixel-identical
+  at 72/144 dpi. Saved numerical inputs are unchanged.
+
+- **Panel 3 Count-label spacing (2026-11-10):** reduced example, decomposition
+  and histogram widths by 18, 16 and 18 pt respectively (about 5% each). Restored
+  Count as a vertical y-axis label beside the histogram ticks. Plot heights,
+  data, timing, subheading alignment and bottom baselines remain unchanged;
+  horizontal tick positions, scale bars and leaders follow the resized axes.
+  Other panels remain pixel-identical at 72 and 144 dpi.
+
+- **Panel 3 redistribution (2026-11-10):** histogram shifted 24 pt left and
+  shortened 13% with its baseline fixed. IQR/n now sits above the axes beneath
+  the unchanged heading; Count is horizontal just above the y-axis. The
+  decomposition keeps its dimensions and shifts 32 pt right, with its right
+  label 14 pt closer to the arrow. Example traces gain 28 pt of width. The eye
+  plot loses 18 pt of empty lower margin (all samples remain visible); the rate
+  plot gains those 18 pt, with its 200 spk/s bar scaled consistently. All three
+  subheadings remain aligned. Original observations, window means, timing and
+  wording are preserved. Other panels are pixel-identical at 72 and 144 dpi.
+
+- **Panel 3 final balance (2026-11-10):** widened the example eye/rate plots
+  24 pt into the left whitespace, with their right edges and vertical geometry
+  fixed. Trial labels, tick positions, callouts and headings follow the wider
+  time axis. Decomposition and histogram are unchanged. All plot paths retain
+  their original observations; zero changed pixels outside panel 3 at 72/144 dpi.
+
+- **Panel 3 spacing follow-up (2026-11-10):** moved the example-trial y-axis
+  labels 34 pt right. Extended the decomposition plot 24 pt upward, holding its
+  x-axis baseline fixed; ticks and annotations follow the same vertical mapping,
+  and axis titles are recentered. No data, wording or other panel changed.
+  Layout audit passes; other panels remain pixel-identical at 72 and 144 dpi.
+
+- **Panel 3 shared-axis example (2026-11-10):** replaces the stacked rates with
+  an unshifted overlay on one zero baseline. Trial 1 is navy underneath the
+  thinner dashed purple Trial 2; eye traces use matching identities. Both
+  original highlighted windows and all observations are preserved. Δrate
+  labels use the same typography and angled leaders as Δeye, with units inline
+  and no extra caption. Original spike counts give 11 vs 1 spikes in 175–225 ms
+  (220 vs 20 spk/s; absolute difference 200 spk/s) and 15 vs 16 spikes in
+  400–450 ms (300 vs 320 spk/s; absolute difference 20 spk/s). Definitions and
+  provenance are saved with the original trial slice in `components/panel3/`.
+  All three x-axis labels retain their aligned baselines and original bottom
+  margin; removing the temporary caption does not move or shrink the plots.
+  Initial integration matched the accepted mockup pixel-for-pixel, with zero changed
+  pixels outside panel 3 at 72/144 dpi. Updated-reference validation and the
+  offline clean-clone build pass; repeated exports are byte-identical.
+
 - **Review-note pass (2026-11-10):**
   - **Intro:** "…structured responses arising from the animal's active sampling of
     the scene."

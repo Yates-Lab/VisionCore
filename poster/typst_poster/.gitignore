@@ -53,3 +53,10 @@
 !/fonts/manifest.json
 !/reference/inputs.json
 !/reference/approved.pdf
+
+!/components/panel3/
+/components/panel3/*
+!/components/panel3/trial_data.npz
+!/components/panel3/provenance.json
+!/components/panel3/export_data.py
+!/components/panel3/check_data.py

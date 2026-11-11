@@ -1,4 +1,3 @@
-<?xml version='1.0' encoding='UTF-8'?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1479.73828125pt" height="699.80859375pt" viewBox="1229.87109375 307.4296875 1479.73828125 699.80859375"><defs><clipPath id="clippath-273">
       <rect x="1869.1" y="443.92" width="313.48" height="456.04" fill="none" />
     </clipPath>
@@ -172,21 +171,21 @@
       </g>
       <g id="_05_Panel_4_Titles_and_captions" data-name="05_Panel_4_Titles_and_captions">
         </g>
-    <g id="p4_a0_axes_1" data-name="p4 a0 axes 1" transform="translate(0 900) scale(1 0.942817049640414) translate(0 -900)">
+    <g id="p4_a0_axes_1" data-name="p4 a0 axes 1" transform="translate(1359.21 0) scale(0.9507496990259385 1) translate(-1359.21 0) translate(1359.21 0) scale(1.082967879578049 1) translate(-1359.21 0) translate(1696.69 0) scale(1.0765599081281103 1) translate(-1696.69 0) translate(0 900) scale(1 0.942817049640414) translate(0 -900)">
               <g id="p4_a0_patch_2" data-name="p4 a0 patch 2">
-                <path d="M1383.21,653.11h313.48v-209.19h-313.48V653.11Z" fill="none" />
+                <path d="M1383.21,634.01827907h313.48v-190.09827907h-313.48V634.01827907Z" fill="none" />
               </g>
               <g id="p4_a0_patch_3" data-name="p4 a0 patch 3">
                 <g clip-path="url(#clippath-262)">
-                  <path d="M1475.31,653.11h26.31v-209.19h-26.31V653.11Z" fill="#d9d9d9" stroke="#d9d9d9" stroke-miterlimit="7.23" stroke-width="1.81" />
+                  <path d="M1475.31,634.01827907h26.31v-190.09827907h-26.31V634.01827907Z" fill="#d9d9d9" stroke="#d9d9d9" stroke-miterlimit="7.23" stroke-width="1.81" />
                 </g>
               </g>
               <g id="p4_a0_patch_4" data-name="p4 a0 patch 4">
                 <g clip-path="url(#clippath-263)">
-                  <path d="M1593.72,653.11h26.31v-209.19h-26.31V653.11Z" fill="#d9d9d9" stroke="#d9d9d9" stroke-miterlimit="7.23" stroke-width="1.81" />
+                  <path d="M1593.72,634.01827907h26.31v-190.09827907h-26.31V634.01827907Z" fill="#d9d9d9" stroke="#d9d9d9" stroke-miterlimit="7.23" stroke-width="1.81" />
                 </g>
               </g>
-              <g id="p4_a0_matplotlib.axis_1" data-name="p4 a0 matplotlib.axis 1">
+              <g id="p4_a0_matplotlib.axis_1" data-name="p4 a0 matplotlib.axis 1" transform="translate(0 -19.091720930232558) ">
                 <g id="p4_a0_xtick_1" data-name="p4 a0 xtick 1">
                   <g id="p4_a0_line2d_1" data-name="p4 a0 line2d 1">
                     <path id="p4_a0_mf4d7dff502" data-name="p4 a0 mf4d7dff502" d="M1383.21,653.11v6.33" stroke="#000" stroke-linejoin="round" stroke-width="1.45" />
@@ -205,22 +204,22 @@
               </g>
               <g id="p4_a0_line2d_4" data-name="p4 a0 line2d 4">
                 <g clip-path="url(#clippath-264)">
-                  <path d="M1383.21,536.46l4.39-1.12,4.39,2.47,4.38,1.61,4.39-.48,4.38,2.43,4.39.81,4.38.04,4.39,5.45,4.38-95.2,4.39,4.16,4.38,9.1,4.39,1.09,4.39.23,4.38-5.05,4.39,5.73,4.38-5.24,4.39-2.83,4.38.58,4.39,2.7,4.38-2.84,4.39-2.13,4.39,4.39,4.38-4.95,4.39-2.87,4.38,5.73,4.39-3.41,4.38,1.81,4.39-3.46,4.38,3.07,4.39.21,4.39-.44,4.38-.89,4.39,1.22,4.38,1.4,4.39-1.85,4.38,1.34,4.39-3.04,4.38,3.35,4.39.44,4.38.86,4.39-.95,4.39-1.27,4.38,2.61,4.39-1.39,4.38,3.83,4.39-3.05,4.38-2.55,4.39-.75,4.38,2.97,4.39-1.15,4.39-3.4,4.38-3.14,4.39,8.95,4.38-4.72,4.39,3.69,4.38-1.16,4.39-.05,4.38,3.96,4.39-4.83,4.39-1.41,4.38,2.93,4.39-1.19,4.38-1.61,4.39.97,4.38,1.3,4.39-2.91,4.38,4.52,4.39-4.93,4.38,3.97,4.39.95,4.39,1.35" fill="none" stroke="#000" stroke-linecap="square" stroke-linejoin="round" stroke-width="3.25" />
+                  <path d="M1383.21,536.46l4.39-1.12,4.39,2.47,4.38,1.61,4.39-.48,4.38,2.43,4.39.81,4.38.04,4.39,5.45,4.38-95.2,4.39,4.16,4.38,9.1,4.39,1.09,4.39.23,4.38-5.05,4.39,5.73,4.38-5.24,4.39-2.83,4.38.58,4.39,2.7,4.38-2.84,4.39-2.13,4.39,4.39,4.38-4.95,4.39-2.87,4.38,5.73,4.39-3.41,4.38,1.81,4.39-3.46,4.38,3.07,4.39.21,4.39-.44,4.38-.89,4.39,1.22,4.38,1.4,4.39-1.85,4.38,1.34,4.39-3.04,4.38,3.35,4.39.44,4.38.86,4.39-.95,4.39-1.27,4.38,2.61,4.39-1.39,4.38,3.83,4.39-3.05,4.38-2.55,4.39-.75,4.38,2.97,4.39-1.15,4.39-3.4,4.38-3.14,4.39,8.95,4.38-4.72,4.39,3.69,4.38-1.16,4.39-.05,4.38,3.96,4.39-4.83,4.39-1.41,4.38,2.93,4.39-1.19,4.38-1.61,4.39.97,4.38,1.3,4.39-2.91,4.38,4.52,4.39-4.93,4.38,3.97,4.39.95,4.39,1.35" fill="none" stroke="#193654" stroke-linecap="square" stroke-linejoin="round" stroke-width="3.25" />
                 </g>
               </g>
               <g id="p4_a0_line2d_5" data-name="p4 a0 line2d 5">
                 <g clip-path="url(#clippath-265)">
-                  <path d="M1383.21,603.1l4.39,1.39,4.39-2.49,4.38-.3,4.39,2.17,4.38-3.09,4.39,2.79,4.38,3.06,4.39.04,4.38-2.3,4.39.75,4.38-3.03,4.39,3.79,4.39-3.15,4.38.22,4.39-.95,4.38,6.92,4.39-1.59,4.38-5.09,4.39-.73,4.38.3,4.39.61,4.39,3.61,4.38-5.65,4.39,4.86,4.38-5.21,4.39.06,4.38-2.13,4.39-.18,4.38,1.49,4.39-1.37,4.39,2.63,4.38-2.68,4.39,25.56,4.38-157.17,4.39-1.81,4.38,17.9,4.39-3.34,4.38.57,4.39-1.26,4.38-1.02,4.39.97,4.39.14,4.38-1.8,4.39,2.56,4.38.62,4.39-1.61,4.38.58,4.39,3.11,4.38-1.36h4.39s4.39,3.36,4.39,3.36l4.38-7.09,4.39,7.02,4.38-3.01,4.39,1.98,4.38-.69,4.39,1.23,4.38-2.04,4.39-.42,4.39-.07,4.38.44,4.39,3.54,4.38-2.44,4.39-.54,4.38,6.43,4.39-2.54,4.38,3.2,4.39-6.64,4.38,5.8,4.39-1.99,4.39.32" fill="none" stroke="#000" stroke-linecap="square" stroke-linejoin="round" stroke-width="3.25" />
+                  <path d="M1383.21,603.1l4.39,1.39,4.39-2.49,4.38-.3,4.39,2.17,4.38-3.09,4.39,2.79,4.38,3.06,4.39.04,4.38-2.3,4.39.75,4.38-3.03,4.39,3.79,4.39-3.15,4.38.22,4.39-.95,4.38,6.92,4.39-1.59,4.38-5.09,4.39-.73,4.38.3,4.39.61,4.39,3.61,4.38-5.65,4.39,4.86,4.38-5.21,4.39.06,4.38-2.13,4.39-.18,4.38,1.49,4.39-1.37,4.39,2.63,4.38-2.68,4.39,25.56,4.38-157.17,4.39-1.81,4.38,17.9,4.39-3.34,4.38.57,4.39-1.26,4.38-1.02,4.39.97,4.39.14,4.38-1.8,4.39,2.56,4.38.62,4.39-1.61,4.38.58,4.39,3.11,4.38-1.36h4.39s4.39,3.36,4.39,3.36l4.38-7.09,4.39,7.02,4.38-3.01,4.39,1.98,4.38-.69,4.39,1.23,4.38-2.04,4.39-.42,4.39-.07,4.38.44,4.39,3.54,4.38-2.44,4.39-.54,4.38,6.43,4.39-2.54,4.38,3.2,4.39-6.64,4.38,5.8,4.39-1.99,4.39.32" fill="none" stroke="#8064A2" stroke-linecap="square" stroke-linejoin="round" stroke-width="3.25" stroke-dasharray="18 9" />
                 </g>
               </g>
-              <g id="p4_a0_line2d_6" data-name="p4 a0 line2d 6">
+              <g id="p4_a0_line2d_6" data-name="p4 a0 line2d 6" transform="translate(0 -19.091720930232558) ">
                 <path d="M1700.9,641.65v-45.83" fill="none" stroke="#000" stroke-linecap="square" stroke-linejoin="round" stroke-width="3.62" />
               </g>
-              <g id="p4_a0_patch_5" data-name="p4 a0 patch 5">
+              <g id="p4_a0_patch_5" data-name="p4 a0 patch 5" transform="translate(0 -19.091720930232558) ">
                 <path d="M1383.21,653.11h313.48" fill="none" stroke="#000" stroke-linecap="square" stroke-miterlimit="7.23" stroke-width="1.45" />
               </g>
               </g>
-            <g id="p4_a0_axes_2" data-name="p4 a0 axes 2" transform="translate(0 900) scale(1 0.942817049640414) translate(0 -900)">
+            <g id="p4_a0_axes_2" data-name="p4 a0 axes 2" transform="translate(1359.21 0) scale(0.9507496990259385 1) translate(-1359.21 0) translate(0 899.9622873180144) scale(1 1.0912649788719946) translate(0 -899.9622873180144) translate(1359.21 0) scale(1.082967879578049 1) translate(-1359.21 0) translate(1696.69 0) scale(1.0765599081281103 1) translate(-1696.69 0) translate(0 900) scale(1 0.942817049640414) translate(0 -900)">
               <g id="p4_a0_patch_8" data-name="p4 a0 patch 8">
                 <path d="M1383.21,899.96h313.48v-209.19h-313.48V899.96Z" fill="none" />
               </g>
@@ -239,7 +238,7 @@
                   <path d="M1383.21,890.45h313.48" fill="none" stroke="#b2b2b2" stroke-linecap="square" stroke-linejoin="round" stroke-width=".9" />
                 </g>
               </g>
-              <g id="p4_a0_line2d_9" data-name="p4 a0 line2d 9">
+              <g id="p4_a0_line2d_9" data-name="p4 a0 line2d 9" display="none">
                 <g clip-path="url(#clippath-270)">
                   <path d="M1383.21,779.88h313.48" fill="none" stroke="#b2b2b2" stroke-linecap="square" stroke-linejoin="round" stroke-width=".9" />
                 </g>
@@ -261,24 +260,24 @@
                   </g>
                 </g>
               </g>
-              <g id="p4_a0_line2d_13" data-name="p4 a0 line2d 13">
-                <g clip-path="url(#clippath-271)">
-                  <path transform="translate(0 110.57000000)" d="M1389.79,735.66h6.58v8.84h13.16v26.54h13.15v-8.85h13.16v-17.69h13.16v26.54h13.15v-17.69h13.16v26.53h13.16v-8.84h13.15v8.84h39.47v-8.84h13.16v-8.85h26.31v-35.38h13.16v-26.54h13.16v17.69h13.15v26.54h13.16v-26.54h13.16v8.85h13.15v17.69h32.89" fill="none" stroke="#000" stroke-linecap="square" stroke-linejoin="round" stroke-width="3.25" />
-                </g>
-              </g>
               <g id="p4_a0_line2d_14" data-name="p4 a0 line2d 14">
                 <g clip-path="url(#clippath-272)">
-                  <path transform="translate(0 -110.57000000)" d="M1389.79,881.6h6.58v-8.84h26.31v8.84h26.32v-35.38h13.15v26.54h13.16v-26.54h13.16v-8.84h13.15v17.69h13.16v-26.54h26.31v-26.54h13.16v70.77h13.16v17.69h13.15v-17.69h13.16v-53.07h13.16v8.84h13.15v53.07h13.16v-26.53h13.16v-26.54h13.15v17.69h13.16v17.69h19.73" fill="none" stroke="#000" stroke-linecap="square" stroke-linejoin="round" stroke-width="3.25" />
+                  <path d="M1389.79000000,872.75000000 L1396.37000000,872.75000000 L1396.37000000,855.07000000 L1422.68000000,855.07000000 L1422.68000000,872.75000000 L1449.00000000,872.75000000 L1449.00000000,801.99000000 L1462.15000000,801.99000000 L1462.15000000,855.07000000 L1475.31000000,855.07000000 L1475.31000000,801.99000000 L1488.47000000,801.99000000 L1488.47000000,784.31000000 L1501.62000000,784.31000000 L1501.62000000,819.69000000 L1514.78000000,819.69000000 L1514.78000000,766.61000000 L1541.09000000,766.61000000 L1541.09000000,713.53000000 L1554.25000000,713.53000000 L1554.25000000,855.07000000 L1567.41000000,855.07000000 L1567.41000000,890.45000000 L1580.56000000,890.45000000 L1580.56000000,855.07000000 L1593.72000000,855.07000000 L1593.72000000,748.93000000 L1606.88000000,748.93000000 L1606.88000000,766.61000000 L1620.03000000,766.61000000 L1620.03000000,872.75000000 L1633.19000000,872.75000000 L1633.19000000,819.69000000 L1646.35000000,819.69000000 L1646.35000000,766.61000000 L1659.50000000,766.61000000 L1659.50000000,801.99000000 L1672.66000000,801.99000000 L1672.66000000,837.37000000 L1692.39000000,837.37000000" fill="none" stroke="#193654" stroke-linecap="square" stroke-linejoin="round" stroke-width="3.75" />
+                </g>
+              </g>
+              <g id="p4_a0_line2d_13" data-name="p4 a0 line2d 13">
+                <g clip-path="url(#clippath-271)">
+                  <path d="M1389.79000000,802.01000000 L1396.37000000,802.01000000 L1396.37000000,819.69000000 L1409.53000000,819.69000000 L1409.53000000,872.77000000 L1422.68000000,872.77000000 L1422.68000000,855.07000000 L1435.84000000,855.07000000 L1435.84000000,819.69000000 L1449.00000000,819.69000000 L1449.00000000,872.77000000 L1462.15000000,872.77000000 L1462.15000000,837.39000000 L1475.31000000,837.39000000 L1475.31000000,890.45000000 L1488.47000000,890.45000000 L1488.47000000,872.77000000 L1501.62000000,872.77000000 L1501.62000000,890.45000000 L1541.09000000,890.45000000 L1541.09000000,872.77000000 L1554.25000000,872.77000000 L1554.25000000,855.07000000 L1580.56000000,855.07000000 L1580.56000000,784.31000000 L1593.72000000,784.31000000 L1593.72000000,731.23000000 L1606.88000000,731.23000000 L1606.88000000,766.61000000 L1620.03000000,766.61000000 L1620.03000000,819.69000000 L1633.19000000,819.69000000 L1633.19000000,766.61000000 L1646.35000000,766.61000000 L1646.35000000,784.31000000 L1659.50000000,784.31000000 L1659.50000000,819.69000000 L1692.39000000,819.69000000" fill="none" stroke="#8064A2" stroke-linecap="square" stroke-linejoin="round" stroke-width="2.5" stroke-dasharray="18 9" />
                 </g>
               </g>
               <g id="p4_a0_line2d_15" data-name="p4 a0 line2d 15">
-                <path d="M1700.9,890.45v-44.23" fill="none" stroke="#000" stroke-linecap="square" stroke-linejoin="round" stroke-width="3.62" />
+                <path d="M1700.9,890.45v-88.46" fill="none" stroke="#000" stroke-linecap="square" stroke-linejoin="round" stroke-width="3.62" />
               </g>
               <g id="p4_a0_patch_11" data-name="p4 a0 patch 11">
                 <path d="M1383.21,899.96h313.48" fill="none" stroke="#000" stroke-linecap="square" stroke-miterlimit="7.23" stroke-width="1.45" />
               </g>
             </g>
-            <g id="p4_a0_axes_3" data-name="p4 a0 axes 3" transform="translate(-50 900) scale(1 0.942817049640414) translate(0 -900)">
+            <g id="p4_a0_axes_3" data-name="p4 a0 axes 3" transform="translate(1851.1 0) scale(0.9489600612479265 1) translate(-1851.1 0) translate(32 0) translate(0 899.9622873180144) scale(1 1.0558188490197717) translate(0 -899.9622873180144) translate(-50 900) scale(1 0.942817049640414) translate(0 -900)">
               <g id="p4_a0_patch_12" data-name="p4 a0 patch 12">
                 <path d="M1869.1,899.96h313.48v-456.04h-313.48V899.96Z" fill="none" />
               </g>
@@ -422,7 +421,7 @@
                 <path d="M1897.42,792.63l3.61-7.23,3.62,7.23" fill="none" stroke="#667480" stroke-linecap="round" stroke-linejoin="round" stroke-width="3.62" />
               </g>
             </g>
-          <g id="p4_a1_axes_1" data-name="p4 a1 axes 1" transform="translate(0 900) scale(1 1.069767441860465) translate(0 -900) translate(0 900) scale(1 1.1301513877207736) translate(0 -896.5)">
+          <g id="p4_a1_axes_1" data-name="p4 a1 axes 1" transform="translate(2647.13 0) scale(0.9485890551810807 1) translate(-2647.13 0) translate(-24 900.0) scale(1 0.87) translate(0 -900.0) translate(0 900) scale(1 1.069767441860465) translate(0 -900) translate(0 900) scale(1 1.1301513877207736) translate(0 -896.5)">
               <g id="p4_a1_patch_2" data-name="p4 a1 patch 2">
                 <path d="M2321.01,896.5h350.12v-380.48h-350.12V896.5Z" fill="none" />
               </g>
@@ -697,4 +696,4 @@
                 <path d="M2321.01,896.5h350.12" fill="none" stroke="#000" stroke-linecap="square" stroke-miterlimit="7.84" stroke-width="1.57" />
               </g>
               </g>
-          <path d="M1470,455 L1488.47,463 L1488.47,470" fill="none" stroke="#D55E00" stroke-width="1.6" /><path d="M1650,455 L1606.88,463 L1606.88,470" fill="none" stroke="#0072B2" stroke-width="1.6" /><path d="M2155,516.0660410454307V784.7406156814594 M2150,525.0660410454307L2155,516.0660410454307L2160,525.0660410454307 M2150,775.7406156814594L2155,784.7406156814594L2160,775.7406156814594" fill="none" stroke="#193654" stroke-width="2.5" stroke-linejoin="round" /><line x1="2132.58" x2="2162" y1="516.0660410454307" y2="516.0660410454307" stroke="#193654" stroke-width="1.2" stroke-dasharray="4 3" /><line x1="2132.58" x2="2162" y1="784.7406156814594" y2="784.7406156814594" stroke="#193654" stroke-width="1.2" /><path id="p4_histogram_median" d="M2547.15,428 L2577.15,428 L2562.15,449 Z" fill="#0072B2" stroke="#ffffff" stroke-width="1.6" stroke-linejoin="round" /></g></svg>
+          <path d="M1470,455 L1488.47,463 L1488.47,470" fill="none" stroke="#D55E00" stroke-width="1.6" transform="translate(1359.21 0) scale(0.9507496990259385 1) translate(-1359.21 0) translate(1359.21 0) scale(1.082967879578049 1) translate(-1359.21 0) translate(1696.69 0) scale(1.0765599081281103 1) translate(-1696.69 0) " /><path d="M1650,455 L1606.88,463 L1606.88,470" fill="none" stroke="#0072B2" stroke-width="1.6" transform="translate(1359.21 0) scale(0.9507496990259385 1) translate(-1359.21 0) translate(1359.21 0) scale(1.082967879578049 1) translate(-1359.21 0) translate(1696.69 0) scale(1.0765599081281103 1) translate(-1696.69 0) " /><path d="M2155,516.0660410454307V784.7406156814594 M2150,525.0660410454307L2155,516.0660410454307L2160,525.0660410454307 M2150,775.7406156814594L2155,784.7406156814594L2160,775.7406156814594" fill="none" stroke="#193654" stroke-width="2.5" stroke-linejoin="round" transform="translate(1851.1 0) scale(0.9489600612479265 1) translate(-1851.1 0) translate(32 0) translate(0 899.9622873180144) scale(1 1.0558188490197717) translate(0 -899.9622873180144) " /><line x1="2132.58" x2="2162" y1="516.0660410454307" y2="516.0660410454307" stroke="#193654" stroke-width="1.2" stroke-dasharray="4 3" transform="translate(1851.1 0) scale(0.9489600612479265 1) translate(-1851.1 0) translate(32 0) translate(0 899.9622873180144) scale(1 1.0558188490197717) translate(0 -899.9622873180144) " /><line x1="2132.58" x2="2162" y1="784.7406156814594" y2="784.7406156814594" stroke="#193654" stroke-width="1.2" transform="translate(1851.1 0) scale(0.9489600612479265 1) translate(-1851.1 0) translate(32 0) translate(0 899.9622873180144) scale(1 1.0558188490197717) translate(0 -899.9622873180144) " /><path id="p4_histogram_median" d="M2547.15,428 L2577.15,428 L2562.15,449 Z" fill="#0072B2" stroke="#ffffff" stroke-width="1.6" stroke-linejoin="round" transform="translate(2647.13 0) scale(0.9485890551810807 1) translate(-2647.13 0) translate(-24 900.0) scale(1 0.87) translate(0 -900.0) " /></g><path d="M1470,455 L1488.47,463 L1488.47,470" fill="none" stroke="#D55E00" stroke-width="1.6" id="delta_rate_divergent_leader" transform="translate(1359.21 0) scale(0.9507496990259385 1) translate(-1359.21 0) translate(0 -18.0) translate(1359.21 0) scale(1.082967879578049 1) translate(-1359.21 0) translate(1696.69 0) scale(1.0765599081281103 1) translate(-1696.69 0) translate(0 241.43747)" /><path d="M1650,455 L1606.88,463 L1606.88,470" fill="none" stroke="#0072B2" stroke-width="1.6" id="delta_rate_matched_leader" transform="translate(1359.21 0) scale(0.9507496990259385 1) translate(-1359.21 0) translate(0 -18.0) translate(1359.21 0) scale(1.082967879578049 1) translate(-1359.21 0) translate(1696.69 0) scale(1.0765599081281103 1) translate(-1696.69 0) translate(0 241.43747)" /></svg>

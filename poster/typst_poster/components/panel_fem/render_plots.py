@@ -205,7 +205,7 @@ def fem_panel():
 
     # Enlarged stimulus views align with their corresponding raster groups.
     vx, vs = 400, 248
-    y_top, y_bot, ggap, gap = 186, 744, 34, 12
+    y_top, y_bot, ggap, gap = 194, 752, 34, 12
     group_h = (y_bot - y_top - ggap) / 2
     # Foveal RFs from every mapping session (Figure 1C outlines), with this
     # session's population RF and the example gaze shift drawn at the same scale.
@@ -337,8 +337,8 @@ def fem_panel():
     bg.text(vx + bar + 8, by, "0.5°", va="center", fontsize=19)
     # Rasters are separate presentations of one image; rows are the same
     # neurons in the same order on every trial.
-    bg.text(rx0 - 38, (y_top + y_bot) / 2, "Repeated presentations of the same image",
-            rotation=90, ha="center", va="center", fontsize=17, color=MUTED)
+    bg.text(rx0, y_top - 6, "Same image, repeated trials",
+            ha="left", va="bottom", fontsize=17, color=MUTED)
     bg.text(rx1 + 32, y_top + group_h / 2, "same neurons, same order", rotation=90,
             ha="center", va="center", fontsize=16, color=MUTED)
     n_pt = bh / (n_units + 1) * 100

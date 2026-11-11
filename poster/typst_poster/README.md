@@ -102,6 +102,16 @@ JSON, NPZ and reference PDF inputs despite the repository-wide extension rules.
   environment, and is never run by the build. Its `--all-session-rfs` option
   exports the all-session RF cache from `paper/fig1/generate_fig1c.py` and the
   session STA caches. Ordinary builds need neither those caches nor raw data.
+- `components/panel3/trial_data.npz`: original Figure 2A spike counts and eye
+  positions for the shared-axis example in printed panel 3 (`assets/panel4.svg`).
+  Session Allen_2022-04-08, aligned trial indices 35/41 (source IDs 109/118),
+  analysis unit index 134 (source cell ID 145). `provenance.json` records source
+  hashes, sampling and alignment. `export_data.py` reads the preprint plotting
+  script's trial settings and accepts the original `fixrsvp.dset` as an explicit
+  input; it requires the analysis environment and is not run by ordinary builds.
+  `check_data.py`, run by validation, verifies both traces against the saved
+  observations and calculates each Δrate as the absolute difference in mean
+  rate across the shaded 50-ms window. No source-data mount is needed to build.
 - `components/panel5/plot_data.npz`: unchanged matrix, Fano and correlation data
   used to regenerate panel 5. `render_plots.py` renders the plots at their approved
   physical sizes; `panel5.typ` composes the panel with native text.
@@ -111,7 +121,7 @@ JSON, NPZ and reference PDF inputs despite the repository-wide extension rules.
   the plotting operations are preserved. This isolates the build from future
   manuscript-helper changes and avoids importing the analysis dependency tree.
 - `reference/approved.pdf`: the currently approved full poster, last updated
-  for the 2026-11-09 review edits and column-1 redesign (see `REVIEW_NOTES.md`). `reference/inputs.json`
+  for the 2026-11-10 local readability pass (see `REVIEW_NOTES.md`). `reference/inputs.json`
   records the corresponding hashes of the scientific/layout sources, saved data
   and reference PDF.
 
